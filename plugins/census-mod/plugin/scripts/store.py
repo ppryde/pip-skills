@@ -742,9 +742,9 @@ def _acquire_limits_lock(lock: Path) -> str:
             try:
                 if time.time() - lock.stat().st_mtime > _LOCK_STALE_SECONDS:
                     _take_over_stale_lock(lock)
-                    continue
             except OSError:
-                continue   # it vanished between the two calls: the next pass takes it
+                pass   # it vanished, or cannot be statted: either way the next pass looks again
+            # every retry goes through the deadline and a short sleep, whatever happened above
             if time.monotonic() >= deadline:
                 return LOCK_BUSY
             time.sleep(0.005)
@@ -773,6 +773,38 @@ def _keeps(after: dict[str, Any], body: dict[str, Any]) -> bool:
     return True
 
 
+def _pending_files() -> list[Path]:
+    """Readings queued by merges that had to skip (see ``_merge_limits_file``): one file per skipping writer, named
+    ``<limits file>.pending.<pid>-<ns>`` so queueing needs no lock, and never ``*.json`` so no listing takes one for an account."""
+    path = limits_path()
+    try:
+        return sorted(p for p in path.parent.iterdir() if p.name.startswith(f"{path.name}.pending.") and not p.name.endswith(".tmp"))
+    except OSError:
+        return []
+
+
+def _queue_reading(incoming: dict[str, Any]) -> None:
+    path = limits_path()
+    try:
+        _atomic_write(path.with_name(f"{path.name}.pending.{os.getpid()}-{time.monotonic_ns()}"), incoming)
+    except OSError:
+        pass   # best effort: the status line never fails on this
+
+
+def _with_pending(incoming: dict[str, Any], files: list[Path]) -> dict[str, Any]:
+    """``incoming`` plus every queued reading, window by window, the fresher of each pair (forward-only)."""
+    merged = dict(incoming)
+    for file in files:
+        data = _read_json(file) or {}
+        for key, window in data.items():
+            if key in _LIMITS_RESERVED or not _is_window(window, key):
+                continue
+            current = merged.get(key)
+            if not isinstance(current, dict) or _window_is_fresher(window, current):
+                merged[key] = window
+    return merged
+
+
 def _merge_limits_file(incoming: dict[str, Any], now: float) -> None:
     """Forward-only merge into the calling account's limits file.
 
@@ -787,19 +819,27 @@ def _merge_limits_file(incoming: dict[str, Any], now: float) -> None:
     lock = path.with_name(path.name + ".lock")
     state = _acquire_limits_lock(lock)
     if state == LOCK_BUSY:
-        return   # a live writer is mid-merge: do not write around it; the next ingest merges this reading
+        # a live writer is mid-merge: do not write around it. Queue the reading in a file of its own; whichever
+        # merge next gets the lock folds it in, even if that ingest carries no rate_limits at all.
+        if incoming:
+            _queue_reading(incoming)
+        return
     held = state == LOCK_HELD
+    queued = _pending_files()
+    incoming = _with_pending(incoming, queued)
     try:
         for _ in range(_MERGE_ATTEMPTS):
             current = _read_json(path) or {}
             body = _merged_limits_body(current, incoming, now)
             if json.dumps(body, sort_keys=True) == json.dumps(current, sort_keys=True):
-                return
+                break
             if (_read_json(path) or {}) != current:
                 continue   # it changed since we read it: merge onto the new contents instead
             _atomic_write(path, body)
             if held or _keeps(_read_json(path) or {}, body):
-                return
+                break
+        for file in queued:   # folded in (or already covered): only now, after a write that did not raise
+            _unlink(file)
     finally:
         if held:
             _release_limits_lock(lock)
@@ -1004,8 +1044,8 @@ def _ingest(raw: str, now: float) -> None:
     entry["org"] = info["org"]
     _atomic_write(path, entry)
     incoming = _live_limits(payload.get("rate_limits"), now, verbatim=True)
-    if incoming:
-        _merge_limits_file(incoming, now)
+    if incoming or _pending_files():   # an earlier merge's skipped reading is delivered by whichever ingest comes next
+        _merge_limits_file(incoming or {}, now)
     _sweep(now)
 
 

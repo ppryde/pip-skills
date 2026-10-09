@@ -1,11 +1,14 @@
 """census-mod's pyrun.sh picks python3, python or py -3, and never leaks a failed attempt into the output."""
 import os
+import shutil
 import stat
 import subprocess
 from pathlib import Path
 
 import pytest
 
+POSIX_SH = shutil.which("sh")
+needs_sh = pytest.mark.skipif(POSIX_SH is None, reason="needs a POSIX sh (native Windows without Git Bash has none)")
 SH = Path(__file__).resolve().parents[2] / "plugins" / "census-mod" / "plugin" / "bin" / "pyrun.sh"
 
 
@@ -28,29 +31,37 @@ def _run(tmp_path, stubs: dict[str, str]):
     script = tmp_path / "hello.py"
     script.write_text("")
     return subprocess.run(
-        ["/bin/sh", str(SH), str(script), "--x"], env={"PATH": str(bin_dir)}, capture_output=True, text=True,
+        [POSIX_SH, str(SH), str(script), "--x"], env={"PATH": str(bin_dir)}, capture_output=True, text=True,
     )
 
 
-WORKS = 'case "$1" in -c) exit 0;; esac\necho "ran $0 $2"\n'
+def works(name: str) -> str:
+    """A launcher that passes the `-c` probe and then says which one it is."""
+    return f'case "$1" in -c) exit 0;; esac\necho "ran {name}"\n'
+
+
 BROKEN = "exit 9\n"
 
 
+@needs_sh
 def test_python3_first(tmp_path):
-    r = _run(tmp_path, {"python3": WORKS, "python": WORKS})
-    assert r.returncode == 0 and r.stdout.startswith("ran") and r.stderr == ""
+    r = _run(tmp_path, {"python3": works("python3"), "python": works("python")})
+    assert r.returncode == 0 and r.stdout.strip() == "ran python3" and r.stderr == ""
 
 
+@needs_sh
 def test_a_python3_that_fails_is_skipped_silently(tmp_path):
-    r = _run(tmp_path, {"python3": BROKEN, "python": WORKS})
-    assert r.returncode == 0 and "ran" in r.stdout and r.stderr == ""
+    r = _run(tmp_path, {"python3": BROKEN, "python": works("python")})
+    assert r.returncode == 0 and r.stdout.strip() == "ran python" and r.stderr == ""
 
 
+@needs_sh
 def test_only_the_windows_launcher(tmp_path):
     r = _run(tmp_path, {"py": 'case "$2" in -c) exit 0;; esac\necho "py $1"\n'})
-    assert r.returncode == 0 and r.stdout.strip() == "py -3" and r.stderr == ""
+    assert r.returncode == 0 and r.stdout.strip() == "py -3" and r.stderr == ""   # the py stub's own output: it ran, with -3
 
 
+@needs_sh
 def test_none_found_says_so_once_on_stderr(tmp_path):
     r = _run(tmp_path, {})
     assert r.returncode == 127 and r.stdout == "" and r.stderr.count("no Python found") == 1
