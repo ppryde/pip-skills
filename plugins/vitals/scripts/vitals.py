@@ -91,7 +91,7 @@ class Vitals:
     session_name: str | None = None
     stale: bool = False
     idle: bool = False
-    age: float | None = None  # seconds since census last saw the status line render
+    age: float | None = None  # seconds since census last recorded this session (status-line render or mod event)
     borrowed: bool = False  # reading is another session's (worktree fallback)
     has_reading: bool = False
     model: str | None = None
@@ -215,7 +215,13 @@ def apply_census(v: Vitals, entry: dict[str, Any]) -> None:
     updated = _num(entry.get("updated_at"))
     if updated is not None:
         v.age = max(0.0, v.now - updated)
-    v.stale = bool(entry.get("stale")) or (v.age is not None and v.age > STALE_SECONDS)
+    # census judges liveness itself (by process for a census-mod session, which does not
+    # write on a timer); only an entry with no verdict falls back to the age rule
+    verdict = entry.get("stale")
+    if isinstance(verdict, bool):
+        v.stale = verdict
+    else:
+        v.stale = v.age is not None and v.age > STALE_SECONDS
     v.idle = bool(entry.get("idle"))
     owner = payload.get("session_id")
     if v.session_id and isinstance(owner, str) and owner != v.session_id:
@@ -703,7 +709,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"(vitals could not read this session: {type(exc).__name__}: {exc})")
         return 0
     if not vitals.has_reading:
-        print("(no census reading yet — the status line feeds it)")
+        print("(no census reading yet — census's status-line hook or the census-mod mod feeds it)")
     print(reading)
     return 0
 
