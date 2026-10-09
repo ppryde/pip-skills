@@ -33,8 +33,8 @@ test('/census-setup is a registered command that asks, in order: record, band, l
   const r = await setupRun($, w)
 
   expect(r.text).toContain('questions follow')
-  expect(headers(w)).toEqual(['📝 Record', '🎛️ Band', '📐 Layout', '🔀 PR'])
-  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, preset: 'two', pr: true, offered: true })
+  expect(headers(w)).toEqual(['📝 Record', '🎛️ Band', '📍 Where', '📐 Layout', '🔀 PR'])
+  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'above', preset: 'two', pr: true, offered: true })
   expect(w.toasts.at(-1)).toBe('🧭 census-mod is set up')
   expect(w.logs.join('\n')).toContain('undo any time: /census-setup off')
   expect(w.logs.at(-1)).toBe('📊 /census:vitals shows this session on your phone')
@@ -47,6 +47,7 @@ test('the exact questions', async ($, on) => {
   expect(w.asks).toEqual([
     { header: '📝 Record', question: "Record this account's sessions into the census store?", options: ['Yes — the real census store (Recommended)', 'Shadow — a separate store, to compare first', 'No — do not record'] },
     { header: '🎛️ Band', question: 'Draw the status line in the band above the prompt?', options: ['Yes (Recommended)', 'No'] },
+    { header: '📍 Where', question: 'Where should the status line go?', options: ['Above the input (the band)', "Below the input (under Claude Code's hint line) (Recommended)"] },
     { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Your two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git'] },
     { header: '🔀 PR', question: "Show the branch's open PR (number, review state) using gh? No means gh is never called.", options: ['Yes (Recommended)', "No — never call gh"] },
   ])
@@ -133,7 +134,7 @@ test('CENSUS_STATUSLINE_SEGMENTS outranks a stored layout', async ($, on) => {
   await w.clock.advance(0)
   const ui = await $.ui.mount(BAND())
 
-  expect(await bandLines(ui)).toEqual(['🦾 Opus 5.5'])
+  expect(await bandLines(ui)).toEqual(['✻ Opus 5.5'])
   await ui.unmount()
 })
 
@@ -380,7 +381,7 @@ test('the first session after install is offered setup, once', async ($, on) => 
     question: 'census-mod is installed. Set it up now? It takes a few questions: whether to record sessions into census, whether to draw the status-line band, and which layout.',
     options: ['Set it up now (Recommended)', 'Not now — use the defaults'],
   })
-  expect(headers(w)).toEqual(['🧭 Setup', '📝 Record', '🎛️ Band', '📐 Layout', '🔀 PR'])
+  expect(headers(w)).toEqual(['🧭 Setup', '📝 Record', '🎛️ Band', '📍 Where', '📐 Layout', '🔀 PR'])
   expect(saved(w).offered).toBe(true)
 })
 
@@ -528,4 +529,21 @@ test('the vitals line appears only when this census build ships vitals', async (
 
   expect(w.logs.join('\n')).not.toContain('/census:vitals')
   expect(w.logs.at(-1)).toContain('undo any time')
+})
+
+test('"Below" is stored, and the summary says so', async ($, on) => {
+  const w = world(on)
+  w.answer.value = q => (q.header === '📍 Where' ? pick(w, 'Below')(q) : q.options[0] ?? null)
+  await setupRun($, w)
+
+  expect(saved(w)).toMatchObject({ placement: 'below' })
+  expect(w.logs.join('\n')).toContain('band: on, below the input')
+})
+
+test('with the band off the placement is not asked', async ($, on) => {
+  const w = world(on)
+  w.answer.value = q => (q.header === '🎛️ Band' ? 'No' : q.options[0] ?? null)
+  await setupRun($, w)
+
+  expect(headers(w)).not.toContain('📍 Where')
 })

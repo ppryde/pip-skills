@@ -10,9 +10,9 @@ import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
 import type { Event } from '../core/payload'
 import { TITLE_ARGV, TITLE_TAIL_CMD, findProc, lastTitle } from '../core/registry'
 import { TONE_COLOR, draw, fit } from '../core/render'
-import { BACKUP_FILE, backupBlocks, L, MIN_CENSUS, NO_DETECTION, PRESETS, Q, SETUP_KEY, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
+import { BACKUP_FILE, backupBlocks, placementFrom, L, MIN_CENSUS, NO_DETECTION, PRESETS, Q, SETUP_KEY, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
 import type { Detection, Effective, Saved } from '../core/setup'
-import type { RenderEnv, RenderInput } from '../core/render'
+import type { Line, RenderEnv, RenderInput } from '../core/render'
 import type { Counters, RateLimit, Snap } from '../core/types'
 
 // The effectful shell: the ONLY file that touches `$`. Decisions live in ../core.
@@ -21,7 +21,7 @@ import type { Counters, RateLimit, Snap } from '../core/types'
 // session.start (which re-fires on a reload) rebuilds them. Nothing is kept in $.state, so a /clear
 // has nothing to wipe and classic.SessionStart(clear) simply binds the new session.
 
-type Env = CensusEnv & RenderEnv & { USERPROFILE?: string }
+type Env = CensusEnv & RenderEnv & { USERPROFILE?: string; CENSUS_MOD_PLACEMENT?: string }
 
 let env: Env = {} // what the mod runs on: the environment, then the answers laid over it
 let rawEnv: Env = {} // the environment alone: it outranks an answer
@@ -67,6 +67,7 @@ async function loadEnv($: EngineInterface): Promise<Env> {
     HOME: await $.env.get('HOME'),
     USERPROFILE: await $.env.get('USERPROFILE'),
     CENSUS_STATUSLINE_SEGMENTS: await $.env.get('CENSUS_STATUSLINE_SEGMENTS'),
+    CENSUS_MOD_PLACEMENT: await $.env.get('CENSUS_MOD_PLACEMENT'),
     CENSUS_STATUSLINE_MASCOT: await $.env.get('CENSUS_STATUSLINE_MASCOT'),
     CLAUDE_COST_BUDGET: await $.env.get('CLAUDE_COST_BUDGET'),
     CLAUDE_PROFILE: await $.env.get('CLAUDE_PROFILE'),
@@ -640,6 +641,11 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   if (typeof band !== 'object') return stop(band)
   const drawOn = is(band.a, L.drawYes)
   await saveAnswer($, { draw: drawOn })
+  if (drawOn) {
+    const where = await askOne($, run, Q.where())
+    if (typeof where !== 'object') return stop(where)
+    await saveAnswer($, { placement: placementFrom(where.a) ?? 'above' })
+  }
   let removed: string | undefined
   if (recordMode === 'yes' && d.ingestBlock) {
     const a = await askOne($, run, Q.writers(drawOn, d.otherWriter))
@@ -679,7 +685,7 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   const hasVitals = d.cliPath ? await $.fs.exists(d.cliPath.replace(/[^/\\]*$/, 'vitals.py')).catch(() => false) : false
   say($, '🧭 census-mod is set up', [
     `recording: ${recordMode === 'yes' ? 'the real census store' : recordMode === 'shadow' ? `shadow store ${eff.shadowDir ?? ''}` : 'off'}`,
-    `band: ${drawOn ? `on, ${PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
+    `band: ${drawOn ? `on, ${eff.placement === 'below' ? 'below the input' : 'above the input'}, ${PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
     `PR segment (gh): ${saved.pr === false ? 'off, gh is never called' : 'on'}`,
     ...(removed ? [`your status line was removed from settings.json; it is backed up in ${removed}`] : []),
     'undo any time: /census-setup off (it restores a removed status line exactly), or /census-setup to answer again',
@@ -704,6 +710,44 @@ function offerOnce($: EngineInterface) {
     if (saved.offered || setupRun || !id || snap?.sessionId !== id) return
     startSetup($, 'offer')
   })
+}
+
+const DEFAULT_COLUMNS = 100
+
+/** The status line as runs, from the live snapshot: the same lines whichever site draws them. */
+async function statusLines($: EngineInterface): Promise<Line[]> {
+  if (!snap) return []
+  const now = (await nowMs($)) / 1000
+  const c = snap.counters
+  const expires = expiresAtMs(c, snap.ttl)
+  const input: RenderInput = {
+    now,
+    ctxPct: snap.ctxPct,
+    cache: { hitRatio: c.lastRatio, requests: c.requests, warm: isWarm(c, snap.ttl, now * 1000), expiresAt: expires === null ? null : expires / 1000, misses: 0 },
+    limits: rateLimitsOf(snap.rateLimits),
+    costUsd: snap.costUsd,
+    durationMs: snap.startedAt === null ? null : now * 1000 - snap.startedAt,
+    modelName: snap.model?.display_name ?? null,
+    git: snap.git,
+    pr: snap.pr,
+    cwd: snap.worktreePath ?? snap.cwd,
+    env,
+  }
+  return draw(input)
+}
+
+/** One <Box> row per line, a <Text> per coloured run. */
+function statusRows($: EngineInterface, e: Parameters<typeof $.ui.resolve>[0], lines: Line[]) {
+  const { Box, Text } = $.ui.resolve(e)
+  return lines.map((line, i) => (
+    <Box key={`census-${i}`}>
+      {line.map((run, j) => (
+        <Text key={`r${j}`} color={run.tone ? TONE_COLOR[run.tone] : undefined} wrap="truncate-end">
+          {run.t}
+        </Text>
+      ))}
+    </Box>
+  ))
 }
 
 /** Our work after `next`: whatever it throws must not cost the other mods their result. */
@@ -895,40 +939,35 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // Above the input: the band. Ours first, whatever other mods draw beneath it after.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const inner = await next(e)
-    if (e.props.hasSurvey || !interactive || !snap || !eff.draw) return inner
-    const { Box, Text } = $.ui.resolve(e)
-    const now = (await nowMs($)) / 1000
-    const c = snap.counters
-    const expires = expiresAtMs(c, snap.ttl)
-    const input: RenderInput = {
-      now,
-      ctxPct: snap.ctxPct,
-      cache: { hitRatio: c.lastRatio, requests: c.requests, warm: isWarm(c, snap.ttl, now * 1000), expiresAt: expires === null ? null : expires / 1000, misses: 0 },
-      limits: rateLimitsOf(snap.rateLimits),
-      costUsd: snap.costUsd,
-      durationMs: snap.startedAt === null ? null : now * 1000 - snap.startedAt,
-      modelName: snap.model?.display_name ?? null,
-      git: snap.git,
-      pr: snap.pr,
-      cwd: snap.worktreePath ?? snap.cwd,
-      env,
-    }
-    const lines = draw(input).slice(0, Math.max(0, e.props.maxRows)).map(l => fit(l, e.props.bodyColumns))
+    if (e.props.hasSurvey || !interactive || !snap || !eff.draw || eff.placement !== 'above') return inner
+    const lines = (await statusLines($)).slice(0, Math.max(0, e.props.maxRows)).map(l => fit(l, e.props.bodyColumns))
     if (lines.length === 0) return inner
+    const { Box } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
-        {lines.map((line, i) => (
-          <Box key={`census-${i}`}>
-            {line.map((run, j) => (
-              <Text key={`r${j}`} color={run.tone ? TONE_COLOR[run.tone] : undefined} wrap="truncate-end">
-                {run.t}
-              </Text>
-            ))}
-          </Box>
-        ))}
+        {statusRows($, e, lines)}
         {inner}
+      </Box>
+    )
+  })
+
+  // Below the input: under Claude Code's own hint line. The engine always draws its permission pill and hint
+  // first and a tree cannot go above them, so the engine's line (`inner`) leads and our rows follow on their own
+  // lines; a tree without `inner` would put row one on the pill's line. Drawn while typing and while working too.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const inner = await next(e)
+    if (!interactive || !snap || !eff.draw || eff.placement !== 'below') return inner
+    const columns = e.viewport?.columns ?? DEFAULT_COLUMNS
+    const lines = (await statusLines($)).map(l => fit(l, columns))
+    if (lines.length === 0) return inner
+    const { Box } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        {inner}
+        {statusRows($, e, lines)}
       </Box>
     )
   })

@@ -173,7 +173,7 @@ def test_real_process_end_to_end(tmp_path):
     )
     assert done.returncode == 0 and not done.stderr
     text = ANSI.sub("", done.stdout.decode("utf-8"))
-    assert text.startswith("🧠") and "🦾 Opus 5.5" in text
+    assert text.startswith("🧠") and "✻ Opus 5.5" in text
     assert (tmp_path / "store" / "sessions" / "s1.json").exists()
     assert (tmp_path / "side" / "s1.json").exists()
 

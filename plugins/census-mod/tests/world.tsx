@@ -155,6 +155,8 @@ export const turn = (usage?: { input_tokens: number; output_tokens: number; cach
 export const USAGE = { input_tokens: 2, output_tokens: 100, cache_read_input_tokens: 90, cache_creation_input_tokens: 8 }
 export const classicStart = (source: 'startup' | 'resume' | 'clear' | 'compact' | 'fork', session_id = 's1') =>
   ({ session_id, transcript_path: `/cfg/projects/-repo/${session_id}.jsonl`, cwd: '/repo', hook_event_name: 'SessionStart' as const, source }) as never
+export const HINT = (props: Record<string, unknown> = {}, viewport?: { columns: number; rows: number }) =>
+  ({ plugin: 'census-mod', surface: 'terminal' as const, component: 'PromptHint' as const, props: { isDraft: false, isWorking: false, hint: '? for shortcuts', ...props } as never, ...(viewport ? { viewport } : {}) }) as never
 export const BAND = (props: Record<string, unknown> = {}) =>
   ({ plugin: 'census-mod', surface: 'terminal' as const, component: 'AbovePrompt' as const, props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, ...props } as never })
 

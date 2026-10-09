@@ -197,7 +197,7 @@ class TestCost:
 class TestLine2:
     def test_model_branch_dir_changes_in_order(self):
         l2 = lines(p=payload(workspace={"current_dir": "/a/b"}))[1]
-        assert l2 == "🦾 Opus 5.5 │ 🌿 feat/x │ 📁 /a/b │ ✏️ 3  ⬆️ 1"
+        assert l2 == "✻ Opus 5.5 │ 🌿 feat/x │ 📁 /a/b │ ✏️ 3  ⬆️ 1"
 
     def test_dir_is_last_three_components_with_ellipsis(self):
         assert "📁 …/pip/repos/pip-skills" in lines()[1]
@@ -225,22 +225,51 @@ class TestLine2:
 
 
 class TestMascot:
-    def test_work_by_default(self):
-        assert lines()[1].startswith("🦾 ")
+    def test_default_is_the_asterisk_whatever_the_account(self):
+        assert lines()[1].startswith("✻ ")
+        assert lines(env={"CLAUDE_CONFIG_DIR": "/h/.claude-personal"})[1].startswith("✻ ")
+        assert lines(env={"CLAUDE_PROFILE": "personal"})[1].startswith("✻ ")
 
-    def test_personal_by_config_dir(self):
-        assert lines(env={"CLAUDE_CONFIG_DIR": "/h/.claude-personal"})[1].startswith("🎮 ")
+    def test_default_is_claudes_orange_in_truecolor(self):
+        out = draw(env={"CENSUS_STATUSLINE_COLOR": "always"}).split("\n")[1]
+        assert out.startswith("\x1b[38;2;217;119;87m✻\x1b[0m ")
 
-    def test_other_config_dir_is_work(self):
-        assert lines(env={"CLAUDE_CONFIG_DIR": "/h/.claude"})[1].startswith("🦾 ")
-
-    @pytest.mark.parametrize("profile,mascot", [("personal", "🎮"), ("home", "🎮"), ("p", "🎮"), ("acme", "🦾")])
-    def test_profile_wins_over_config_dir(self, profile, mascot):
-        env = {"CLAUDE_PROFILE": profile, "CLAUDE_CONFIG_DIR": "/h/.claude-personal" if mascot == "🦾" else "/h/.claude"}
-        assert lines(env=env)[1].startswith(mascot + " ")
+    def test_no_colour_is_the_plain_glyph(self):
+        assert lines()[1].startswith("✻ Opus") and "\x1b" not in draw()
 
     def test_override(self):
         assert lines(env={"CENSUS_STATUSLINE_MASCOT": "🐙"})[1].startswith("🐙 ")
+
+    def test_an_override_is_not_recoloured(self):
+        out = draw(env={"CENSUS_STATUSLINE_COLOR": "always", "CENSUS_STATUSLINE_MASCOT": "🐙"}).split("\n")[1]
+        assert out.startswith("🐙 ") and "217;119;87" not in out.split("Opus")[0]
+
+
+class TestPrSegment:
+    PR = {"number": 12, "review_state": "approved"}
+
+    def test_in_the_default_layout_at_the_end_of_line_two(self):
+        assert lines(p=payload(pr=self.PR))[1].endswith("✏️ 3  ⬆️ 1 │ 🔀 #12 approved")
+
+    def test_hidden_without_a_pr(self):
+        assert "🔀" not in draw()
+        assert "🔀" not in draw(p=payload(pr={}))
+        assert "🔀" not in draw(p=payload(pr={"number": 0}))
+        assert "🔀" not in draw(p=payload(pr="x"))
+
+    def test_no_review_state_is_just_the_number(self):
+        assert lines(p=payload(pr={"number": 7}))[1].endswith("🔀 #7")
+
+    @pytest.mark.parametrize("state,code", [("approved", "32"), ("pending", "33"), ("changes_requested", "31")])
+    def test_review_state_colours(self, state, code):
+        out = draw(p=payload(pr={"number": 7, "review_state": state}), env={"CENSUS_STATUSLINE_COLOR": "always"})
+        assert f"\x1b[{code}m{state}" in out
+
+    def test_a_layout_can_leave_it_out(self):
+        assert "🔀" not in draw(p=payload(pr=self.PR), env={"CENSUS_STATUSLINE_SEGMENTS": "model,git"})
+
+    def test_a_layout_can_place_it_anywhere(self):
+        assert draw(p=payload(pr=self.PR), env={"CENSUS_STATUSLINE_SEGMENTS": "pr/model"}).split("\n")[0] == "🔀 #12 approved"
 
 
 class TestSegments:
@@ -254,11 +283,11 @@ class TestSegments:
 
     def test_unknown_names_ignored(self):
         out = draw(env={"CENSUS_STATUSLINE_SEGMENTS": "bogus, model ,nope"})
-        assert out == "🦾 Opus 5.5"
+        assert out == "✻ Opus 5.5"
 
     def test_empty_line_dropped(self):
         out = draw(env={"CENSUS_STATUSLINE_SEGMENTS": "cache/model"})
-        assert out == "🦾 Opus 5.5"
+        assert out == "✻ Opus 5.5"
 
     def test_blank_setting_means_default(self):
         assert len(lines(env={"CENSUS_STATUSLINE_SEGMENTS": "  "})) == 2
@@ -300,7 +329,7 @@ class TestSample:
         lim = {"five_hour": {"used_percentage": 23.0, "resets_at": NOW + 2 * 3600 + 600}}
         l1, l2 = lines(p=p, limits=lim)
         assert l1 == "🧠 ••••ᗧ••••• 42% │ 🎯 93% ⟳ 50m │ ⏳ ••ᗧ••••••• 23% ⟳ 2h10m │ 💸 ••ᗧ$$$$$$$ $3.10 │ 🐌 $1.55/hr"
-        assert l2 == "🦾 Opus 5.5 │ 🌿 feat/x │ 📁 …/pip/repos/pip-skills │ ✏️ 3  ⬆️ 1"
+        assert l2 == "✻ Opus 5.5 │ 🌿 feat/x │ 📁 …/pip/repos/pip-skills │ ✏️ 3  ⬆️ 1"
 
 
 class TestFallback:

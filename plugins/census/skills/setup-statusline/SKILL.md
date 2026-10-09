@@ -35,9 +35,10 @@ form); write the whole thing out each time.
 
 3. **Choose segments.** Ask which segments they want and in what order. The
    names are `context`, `cache`, `limits`, `cost`, `model`, `git`, `dir`,
-   `changes`. A `/` starts a new line. The default is
-   `context,cache,limits,cost/model,git,dir,changes`. `git` is the branch;
-   `changes` is the uncommitted and unpushed counts. Re-run the preview with
+   `changes`, `pr`. A `/` starts a new line. The default is
+   `context,cache,limits,cost/model,git,dir,changes,pr`. `git` is the branch;
+   `changes` is the uncommitted and unpushed counts; `pr` is the branch's open
+   PR and its review state (from the payload, hidden without one). Re-run the preview with
    `CENSUS_STATUSLINE_SEGMENTS="<list>" CENSUS statusline --preview` until
    they are happy. Keeping the default is fine: then pass no `--segments`.
 
@@ -61,7 +62,7 @@ Set in `settings.json` under `env`, all optional:
 - `CENSUS_STATUSLINE_COLOR`: `auto` (default), `always`, `never` (`NO_COLOR` is honoured).
 - `CENSUS_STATUSLINE_GIT_TTL`: seconds git state is cached (default 15, `0` disables).
 - `CLAUDE_COST_BUDGET`: the dollar amount the cost bar fills toward (default 20).
-- `CENSUS_STATUSLINE_MASCOT`: the emoji before the model name.
+- `CENSUS_STATUSLINE_MASCOT`: the glyph before the model name (default a ✻ in Claude's orange).
 - `AGENT_UI_STATUSLINE_CACHE`: a directory that also receives each raw payload.
 
 ## Undo

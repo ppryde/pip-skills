@@ -3,12 +3,14 @@ import { DEFAULT_SEGMENTS } from './render'
 
 export type RecordMode = 'yes' | 'shadow' | 'no'
 export type Preset = 'two' | 'compact' | 'minimal'
+export type Placement = 'above' | 'below'
 
 /** What the person answered, in $.store. Absent = not answered; the defaults below apply. */
 export type Saved = {
   offered?: boolean
   record?: RecordMode
   draw?: boolean
+  placement?: Placement
   preset?: Preset
   pr?: boolean
   answeredAt?: number
@@ -106,8 +108,8 @@ export function writerActive(entries: { updatedAt: number; hasCensusMod: boolean
 
 // ---- settings: env > $.store > defaults ----------------------------------------------------------
 
-export type SetupEnv = { CENSUS_MOD_STORE?: string; CENSUS_STATUSLINE_SEGMENTS?: string; HOME?: string }
-export type Effective = { record: RecordMode; shadowDir: string | null; draw: boolean; segments: string | undefined; pr: boolean }
+export type SetupEnv = { CENSUS_MOD_STORE?: string; CENSUS_STATUSLINE_SEGMENTS?: string; CENSUS_MOD_PLACEMENT?: string; HOME?: string }
+export type Effective = { record: RecordMode; shadowDir: string | null; draw: boolean; placement: Placement; segments: string | undefined; pr: boolean }
 
 /**
  * Before any answer: record to the real store ONLY if this account's status line does not carry the
@@ -129,6 +131,8 @@ export function effective(saved: Saved, env: SetupEnv, det: Detection, configRoo
     record,
     shadowDir,
     draw: saved.draw ?? true,
+    // An install that never answered stays where it was (above); the question recommends below for new ones.
+    placement: ((p: string | undefined): Placement | null => (p === 'above' || p === 'below' ? p : null))(env.CENSUS_MOD_PLACEMENT?.trim().toLowerCase()) ?? saved.placement ?? 'above',
     segments: envSegments || (saved.preset ? PRESETS[saved.preset] : undefined),
     pr: saved.pr ?? true,
   }
@@ -147,6 +151,8 @@ export const L = {
   recYes: 'Yes — the real census store',
   recShadow: 'Shadow — a separate store, to compare first',
   recNo: 'No — do not record',
+  whereAbove: 'Above the input (the band)',
+  whereBelow: "Below the input (under Claude Code's hint line)",
   drawYes: 'Yes',
   drawNo: 'No',
   wRemove: "Remove this account's status line (the band replaces it)",
@@ -184,6 +190,11 @@ export const Q = {
     question: 'Draw the status line in the band above the prompt?',
     options: [rec(L.drawYes, true), L.drawNo],
   }),
+  where: (): Question => ({
+    header: '📍 Where',
+    question: 'Where should the status line go?',
+    options: [L.whereAbove, rec(L.whereBelow, true)],
+  }),
   writers: (draw: boolean, otherWriter: boolean): Question => ({
     header: '⚠️ Writers',
     question: `This account's status line also records into the census store${otherWriter ? ' (and it has written in the last few minutes)' : ''}. Two writers on one store muddle idle and liveness. What now?`,
@@ -208,6 +219,11 @@ export function recordFrom(answer: string): RecordMode | null {
   if (is(answer, L.recYes)) return 'yes'
   if (is(answer, L.recShadow)) return 'shadow'
   if (is(answer, L.recNo)) return 'no'
+  return null
+}
+export function placementFrom(answer: string): Placement | null {
+  if (is(answer, L.whereAbove)) return 'above'
+  if (is(answer, L.whereBelow)) return 'below'
   return null
 }
 export function presetFrom(answer: string): Preset | null {

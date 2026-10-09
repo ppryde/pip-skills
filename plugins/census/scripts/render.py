@@ -25,7 +25,7 @@ SEGMENTS_ENV = "CENSUS_STATUSLINE_SEGMENTS"
 COLOR_ENV = "CENSUS_STATUSLINE_COLOR"
 MASCOT_ENV = "CENSUS_STATUSLINE_MASCOT"
 BUDGET_ENV = "CLAUDE_COST_BUDGET"
-DEFAULT_SEGMENTS = "context,cache,limits,cost/model,git,dir,changes"
+DEFAULT_SEGMENTS = "context,cache,limits,cost/model,git,dir,changes,pr"
 DEFAULT_BUDGET = 20.0
 BAR_WIDTH = 10
 
@@ -40,6 +40,7 @@ _CODES = {
     "white": "97",  # bright white: the track ahead of Pac-Man
     "red": "31",
     "orange": "38;5;208",
+    "claude": "38;2;217;119;87",  # #D97757, the asterisk's own orange (truecolor)
 }
 
 # A canned payload for `census statusline --preview`.
@@ -280,11 +281,12 @@ def detect_account(env: Mapping[str, str]) -> str:
     return "work"
 
 
+DEFAULT_MASCOT = "✻"
+
+
 def mascot(env: Mapping[str, str]) -> str:
-    override = env.get(MASCOT_ENV)
-    if override:
-        return override
-    return "🎮" if detect_account(env) == "personal" else "🦾"
+    """The glyph before the model name: ``CENSUS_STATUSLINE_MASCOT`` (any string), else ✻."""
+    return env.get(MASCOT_ENV) or DEFAULT_MASCOT
 
 
 def _model(payload: Mapping[str, Any]) -> str:
@@ -293,7 +295,9 @@ def _model(payload: Mapping[str, Any]) -> str:
 
 
 def seg_model(c: Ctx) -> list[str]:
-    return [f"{mascot(c.env)} {c.pal.paint('cyan', _model(c.payload))}"]
+    custom = c.env.get(MASCOT_ENV)
+    glyph = custom if custom else c.pal.paint("claude", DEFAULT_MASCOT)  # an override is drawn as given
+    return [f"{glyph} {c.pal.paint('cyan', _model(c.payload))}"]
 
 
 def seg_git(c: Ctx) -> list[str]:
@@ -318,6 +322,22 @@ def seg_changes(c: Ctx) -> list[str]:
     return [seg]
 
 
+_REVIEW_TONE = {"approved": "green", "pending": "yellow", "changes_requested": "red"}
+
+
+def seg_pr(c: Ctx) -> list[str]:
+    """The branch's open PR from the payload (never a ``gh`` call): ``🔀 #12 approved``. Hidden without one."""
+    pr = _section(c.payload, "pr")
+    number = pr.get("number")
+    if isinstance(number, bool) or not isinstance(number, int) or number <= 0:
+        return []
+    seg = f"🔀 #{number}"
+    state = pr.get("review_state")
+    if isinstance(state, str) and state:
+        seg += " " + c.pal.paint(_REVIEW_TONE.get(state, "grey"), state)
+    return [seg]
+
+
 SEGMENTS: dict[str, Callable[[Ctx], list[str]]] = {
     "context": seg_context,
     "cache": seg_cache,
@@ -327,6 +347,7 @@ SEGMENTS: dict[str, Callable[[Ctx], list[str]]] = {
     "git": seg_git,
     "dir": seg_dir,
     "changes": seg_changes,
+    "pr": seg_pr,
 }
 
 

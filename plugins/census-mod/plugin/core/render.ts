@@ -2,7 +2,7 @@
 // syntax). A line is a list of runs; the shell turns runs into <Text>, tests read them as text.
 import type { GitState, Pr } from './types'
 
-export type Tone = 'grey' | 'cyan' | 'green' | 'yellow' | 'magenta' | 'pac' | 'white' | 'red' | 'orange'
+export type Tone = 'grey' | 'cyan' | 'green' | 'yellow' | 'magenta' | 'pac' | 'white' | 'red' | 'orange' | 'claude'
 export type Run = { t: string; tone?: Tone }
 export type Line = Run[]
 
@@ -10,6 +10,7 @@ export type Line = Run[]
 export const TONE_COLOR: Record<Tone, string> = {
   grey: 'gray', cyan: 'cyan', green: 'green', yellow: 'yellow', magenta: 'magenta',
   pac: 'yellowBright', white: 'whiteBright', red: 'red', orange: '#ff8700',
+  claude: '#D97757', // the asterisk's own orange (proven live as a raw hex Text colour)
 }
 
 export type RenderEnv = {
@@ -34,7 +35,7 @@ export type RenderInput = {
   env: RenderEnv
 }
 
-export const DEFAULT_SEGMENTS = 'context,cache,limits,cost/model,git,dir,changes'
+export const DEFAULT_SEGMENTS = 'context,cache,limits,cost/model,git,dir,changes,pr'
 export const DEFAULT_BUDGET = 20
 export const BAR_WIDTH = 10
 
@@ -134,16 +135,19 @@ export function detectAccount(env: RenderEnv): 'personal' | 'work' {
   return 'work'
 }
 
-export const mascot = (env: RenderEnv): string => env.CENSUS_STATUSLINE_MASCOT || (detectAccount(env) === 'personal' ? '🎮' : '🦾')
+export const DEFAULT_MASCOT = '✻'
+export const mascot = (env: RenderEnv): string => env.CENSUS_STATUSLINE_MASCOT || DEFAULT_MASCOT
 
 function segModel(i: RenderInput): Line[] {
-  return [[{ t: `${mascot(i.env)} ` }, { t: i.modelName || 'Claude', tone: 'cyan' }]]
+  const custom = i.env.CENSUS_STATUSLINE_MASCOT
+  // The default is a coloured run of its own; an override is drawn as given.
+  const glyph: Run = custom ? { t: `${custom} ` } : { t: DEFAULT_MASCOT, tone: 'claude' }
+  return [[glyph, ...(custom ? [] : [sp]), { t: i.modelName || 'Claude', tone: 'cyan' }]]
 }
 
 function segGit(i: RenderInput): Line[] {
   if (!i.git?.branch) return []
-  const pr = i.pr ? ` · PR #${i.pr.number}` : ''
-  return [[{ t: `🌿 ${i.git.branch}${pr}`, tone: 'green' }]]
+  return [[{ t: `🌿 ${i.git.branch}`, tone: 'green' }]]
 }
 
 function segDir(i: RenderInput): Line[] {
@@ -159,8 +163,18 @@ function segChanges(i: RenderInput): Line[] {
   return [line]
 }
 
+const REVIEW_TONE: Record<string, Tone> = { approved: 'green', pending: 'yellow', changes_requested: 'red' }
+
+/** The branch's open PR (from the mod's gh cache): `🔀 #12 approved`, the state coloured; hidden without one. */
+function segPr(i: RenderInput): Line[] {
+  if (!i.pr || !(i.pr.number > 0)) return []
+  const line: Line = [{ t: `🔀 #${i.pr.number}` }]
+  if (i.pr.reviewState) line.push(sp, { t: i.pr.reviewState, tone: REVIEW_TONE[i.pr.reviewState] ?? 'grey' })
+  return [line]
+}
+
 export const SEGMENTS: Record<string, (i: RenderInput) => Line[]> = {
-  context: segContext, cache: segCache, limits: segLimits, cost: segCost, model: segModel, git: segGit, dir: segDir, changes: segChanges,
+  context: segContext, cache: segCache, limits: segLimits, cost: segCost, model: segModel, git: segGit, dir: segDir, changes: segChanges, pr: segPr,
 }
 
 /** The configured segments as lines of names; `/` starts a new line, unknown names are dropped. */
