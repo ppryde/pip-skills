@@ -148,14 +148,14 @@ export const L = {
   offerLater: 'Not now — use the defaults',
   oldNo: "Don't record",
   oldYes: 'Record anyway',
+  recReplace: 'Replace my status line — census-mod records and draws it',
   recYes: 'Yes — the real census store',
   recShadow: 'Shadow — a separate store, to compare first',
   recNo: 'No — do not record',
-  whereAbove: 'Above the input (the band)',
-  whereBelow: "Below the input (under Claude Code's hint line)",
-  drawYes: 'Yes',
-  drawNo: 'No',
-  wRemove: "Remove this account's status line (the band replaces it)",
+  drawBelow: "Yes — below the input, under Claude Code's hint line",
+  drawAbove: 'Yes — above the input, in the band',
+  drawNo: 'No — record only, draw nothing',
+  wRemove: "Remove this account's status line (census-mod draws it instead)",
   wKeep: "Keep my status line; census-mod won't record",
   wBoth: 'Keep both (not recommended)',
   presetTwo: 'Your two lines',
@@ -170,7 +170,7 @@ const rec = (s: string, on: boolean) => (on ? `${s}${REC}` : s)
 export const Q = {
   offer: (): Question => ({
     header: '🧭 Setup',
-    question: 'census-mod is installed. Set it up now? It takes a few questions: whether to record sessions into census, whether to draw the status-line band, and which layout.',
+    question: 'census-mod is installed. Set it up now? It takes a few questions: whether to record sessions into census, whether and where to draw the status line, and which layout.',
     options: [rec(L.offerYes, true), L.offerLater],
   }),
   old: (version: string): Question => ({
@@ -181,19 +181,21 @@ export const Q = {
   record: (det: Detection): Question => ({
     header: '📝 Record',
     question: det.ingestBlock
-      ? "Record this account's sessions into census? Your status line already records into the real store, so Shadow (a separate store) is the safe way to compare."
+      ? "Your status line already records this account's sessions into census. Replace it with census-mod (it records and draws the line; your status line is backed up), compare first in a separate store, or keep recording with your status line?"
       : "Record this account's sessions into the census store?",
-    options: [rec(L.recYes, !det.ingestBlock), rec(L.recShadow, det.ingestBlock), L.recNo],
+    options: det.ingestBlock
+      ? [rec(L.recReplace, true), L.recShadow, L.recYes, L.recNo]
+      : [rec(L.recYes, true), L.recShadow, L.recNo],
+  }),
+  place: (): Question => ({
+    header: '🎛️ Draw',
+    question: 'Where should census-mod draw your status line?',
+    options: [rec(L.drawBelow, true), L.drawAbove],
   }),
   draw: (): Question => ({
-    header: '🎛️ Band',
-    question: 'Draw the status line in the band above the prompt?',
-    options: [rec(L.drawYes, true), L.drawNo],
-  }),
-  where: (): Question => ({
-    header: '📍 Where',
-    question: 'Where should the status line go?',
-    options: [L.whereAbove, rec(L.whereBelow, true)],
+    header: '🎛️ Draw',
+    question: 'Should census-mod draw your status line, and where?',
+    options: [rec(L.drawBelow, true), L.drawAbove, L.drawNo],
   }),
   writers: (draw: boolean, otherWriter: boolean): Question => ({
     header: '⚠️ Writers',
@@ -216,14 +218,17 @@ const strip = (label: string): string => label.replace(REC, '')
 export const is = (answer: string, label: string): boolean => strip(answer) === label || strip(answer).trim() === label
 
 export function recordFrom(answer: string): RecordMode | null {
-  if (is(answer, L.recYes)) return 'yes'
+  if (is(answer, L.recYes) || is(answer, L.recReplace)) return 'yes'
   if (is(answer, L.recShadow)) return 'shadow'
   if (is(answer, L.recNo)) return 'no'
   return null
 }
+/** The record answer that also hands the status line over to census-mod. */
+export const replaceFrom = (answer: string): boolean => is(answer, L.recReplace)
+/** The draw answer as a placement; null means "don't draw". */
 export function placementFrom(answer: string): Placement | null {
-  if (is(answer, L.whereAbove)) return 'above'
-  if (is(answer, L.whereBelow)) return 'below'
+  if (is(answer, L.drawAbove)) return 'above'
+  if (is(answer, L.drawBelow)) return 'below'
   return null
 }
 export function presetFrom(answer: string): Preset | null {

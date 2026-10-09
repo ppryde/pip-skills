@@ -30,11 +30,16 @@ account's `settings.json` `statusLine`, whether its script carries census's inge
 (or the command is `census ingest` / `census statusline`), and whether another writer wrote
 into the store in the last few minutes. Then:
 
-1. **Record**: the real store, a shadow store (`<config dir>/census-shadow`), or no.
-2. **Band**: draw the status line, or not. If yes, **where**: above the input (the band) or below it,
-   under Claude Code's hint line (recommended for a new install; see "The band").
-3. **Two writers**, only when recording to the real store while this account's status line
-   also records: remove this account's `statusLine` (offered only with the band on; it is
+1. **Record**: the real store, a shadow store (`<config dir>/census-shadow`), or no. When this
+   account's status line already feeds census, the first (recommended) answer is **Replace my
+   status line**: census-mod records and draws it, setup asks only where to draw, then removes
+   the status line as in step 3 without asking again. A status line that does not feed census
+   is never offered for replacement and never touched.
+2. **Draw**: one question, "Should census-mod draw your status line, and where?": below the
+   input, under Claude Code's hint line (recommended; see "The band"), above it in the band,
+   or not at all.
+3. **Two writers**, only when recording to the real store (without Replace) while this
+   account's status line also records: remove this account's `statusLine` (offered only when drawing; it is
    backed up exactly to `<census dir>/census-mod.statusline.json` and `settings.json` is
    rewritten atomically with every other key kept; invalid JSON is never edited), keep the
    status line and not record, or keep both. The shared status-line script and the census

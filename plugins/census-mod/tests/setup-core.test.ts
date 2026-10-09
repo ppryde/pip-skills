@@ -77,11 +77,12 @@ test('census versions compare numerically; 0.5.0 is the floor', async () => {
 
 // ---- the questions -----------------------------------------------------------------------------------
 
-test('the record question recommends Shadow when the status line already records, else Yes', async () => {
-  expect(Q.record(NO_DETECTION).options[0]).toContain('(Recommended)')
-  expect(Q.record(NO_DETECTION).options[1]).not.toContain('(Recommended)')
-  expect(Q.record(WITH_BLOCK).options[1]).toContain('(Recommended)')
-  expect(Q.record(WITH_BLOCK).options[0]).not.toContain('(Recommended)')
+test('the record question recommends Replace when the status line already feeds census, else Yes', async () => {
+  expect(Q.record(NO_DETECTION).options[0]).toBe('Yes — the real census store (Recommended)')
+  expect(Q.record(NO_DETECTION).options.join('|')).not.toContain('Replace')
+  expect(Q.record(WITH_BLOCK).options[0]).toBe('Replace my status line — census-mod records and draws it (Recommended)')
+  expect(Q.record(WITH_BLOCK).options.slice(1).join('|')).not.toContain('(Recommended)')
+  expect(Q.record(WITH_BLOCK).options.map(recordFrom)).toEqual(['yes', 'shadow', 'yes', 'no'])
 })
 
 test('answers map back to values, recommendation marker or not', async () => {
@@ -177,12 +178,12 @@ test('placement: the environment, then the answer, then above (an existing insta
   expect(effective({ placement: 'below' }, { CENSUS_MOD_PLACEMENT: 'sideways' }, NO_DETECTION, CFG).placement).toBe('below') // not a placement: ignored
 })
 
-test('the placement question recommends below for a new install and maps back to a value', async () => {
-  expect(Q.where()).toEqual({
-    header: '📍 Where',
-    question: 'Where should the status line go?',
-    options: ['Above the input (the band)', "Below the input (under Claude Code's hint line) (Recommended)"],
+test('one draw question: below (recommended), above, or not at all, mapped back to a placement', async () => {
+  expect(Q.draw()).toEqual({
+    header: '🎛️ Draw',
+    question: 'Should census-mod draw your status line, and where?',
+    options: ["Yes — below the input, under Claude Code's hint line (Recommended)", 'Yes — above the input, in the band', 'No — record only, draw nothing'],
   })
-  expect(Q.where().options.map(placementFrom)).toEqual(['above', 'below'])
+  expect(Q.draw().options.map(placementFrom)).toEqual(['below', 'above', null])
   expect(placementFrom('nope')).toBeNull()
 })
