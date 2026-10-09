@@ -23,6 +23,9 @@ Never build a command from shell variables in braces or with default values
 (a dollar sign, a brace and a colon-dash fallback): Claude Code stops to ask about
 "a variable in braces" even for a read-only check. Every path you need (the config
 dir, the census dir, `settings.json`) comes from `CENSUS where` below.
+To act on another account than the one you are running in, add
+`--config-dir <dir>` to `where`, `install` and `uninstall`; a dry run's first line
+says which account it touches.
 
 ## Steps
 

@@ -120,3 +120,57 @@ class TestCommand:
         before = sorted(str(p) for p in tmp_path.rglob("*"))
         cli.main(["where"])
         assert sorted(str(p) for p in tmp_path.rglob("*")) == before
+
+
+class TestConfigDirFlag:
+    """--config-dir DIR overrides CLAUDE_CONFIG_DIR for that run only, on install, uninstall and where."""
+
+    def other(self, tmp_path):
+        path = tmp_path / ".claude-other"
+        path.mkdir()
+        (path / "settings.json").write_text(json.dumps({"statusLine": {"type": "command", "command": "mine.sh"}}))
+        return path
+
+    def test_where_reports_the_dir_it_was_given(self, cfg, tmp_path, capsys):
+        other = self.other(tmp_path)
+        assert cli.main(["where", "--config-dir", str(other)]) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["config_dir"] == str(other) and out["status_line"] == "mine.sh"
+        assert out["census_dir"] == str(other / "census")
+
+    def test_the_environment_is_restored_afterwards(self, cfg, tmp_path):
+        cli.main(["where", "--config-dir", str(self.other(tmp_path))])
+        assert os.environ["CLAUDE_CONFIG_DIR"] == str(cfg)
+
+    def test_unset_environment_stays_unset(self, cfg, tmp_path, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+        cli.main(["where", "--config-dir", str(self.other(tmp_path))])
+        assert "CLAUDE_CONFIG_DIR" not in os.environ
+
+    def test_install_dry_run_names_the_account_on_its_first_line(self, cfg, tmp_path, capsys):
+        other = self.other(tmp_path)
+        shim = tmp_path / "bin" / "census"
+        assert cli.main(["install", "--statusline", "--replace", "--shim", str(shim), "--config-dir", str(other)]) == 0
+        first = capsys.readouterr().out.splitlines()[0]
+        assert first == f"config dir: {other}"
+        assert json.loads((other / "settings.json").read_text())["statusLine"]["command"] == "mine.sh"  # a dry run changes nothing
+
+    def test_install_applies_to_the_given_dir_not_the_environments(self, cfg, tmp_path):
+        other = self.other(tmp_path)
+        shim = tmp_path / "bin" / "census"
+        assert cli.main(["install", "--statusline", "--replace", "--yes", "--shim", str(shim), "--config-dir", str(other)]) == 0
+        assert "census" in json.loads((other / "settings.json").read_text())["statusLine"]["command"]
+        assert not (cfg / "settings.json").exists()
+        assert (other / "census" / "statusline.previous.json").exists()
+
+    def test_uninstall_dry_run_names_the_account_too(self, cfg, tmp_path, capsys):
+        other = self.other(tmp_path)
+        assert cli.main(["uninstall", "--shim", str(tmp_path / "bin" / "census"), "--config-dir", str(other)]) == 0
+        assert capsys.readouterr().out.splitlines()[0] == f"config dir: {other}"
+
+    def test_without_the_flag_nothing_changes_for_existing_callers(self, cfg, tmp_path, capsys):
+        assert cli.main(["uninstall", "--shim", str(tmp_path / "bin" / "census")]) == 0
+        assert capsys.readouterr().out.splitlines()[0] == f"config dir: {cfg}"  # a dry run always says which account
+
+    def test_the_flag_is_not_offered_elsewhere(self, cfg, capsys):
+        assert cli.main(["read", "--config-dir", "/x"]) == 1
