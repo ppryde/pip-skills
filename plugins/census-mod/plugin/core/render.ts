@@ -108,7 +108,9 @@ function segLimits(i: RenderInput): Line[] {
 }
 
 function budget(env: RenderEnv): number {
-  const v = Number.parseFloat(env.CLAUDE_COST_BUDGET ?? '')
+  // The whole value or nothing: "5oops" is not a $5 budget.
+  const t = (env.CLAUDE_COST_BUDGET ?? '').trim()
+  const v = /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : Number.NaN
   return Number.isFinite(v) ? v : DEFAULT_BUDGET
 }
 
@@ -164,7 +166,7 @@ export const SEGMENTS: Record<string, (i: RenderInput) => Line[]> = {
 /** The configured segments as lines of names; `/` starts a new line, unknown names are dropped. */
 export function layout(spec: string | undefined): string[][] {
   const text = spec?.trim() || DEFAULT_SEGMENTS
-  return text.split('/').map(line => line.split(',').map(s => s.trim()).filter(n => n in SEGMENTS))
+  return text.split('/').map(line => line.split(',').map(s => s.trim()).filter(n => Object.hasOwn(SEGMENTS, n)))
 }
 
 const SEPARATOR: Run = { t: ' │ ', tone: 'grey' }
@@ -173,7 +175,7 @@ const SEPARATOR: Run = { t: ' │ ', tone: 'grey' }
 export function draw(i: RenderInput): Line[] {
   const lines: Line[] = []
   for (const names of layout(i.env.CENSUS_STATUSLINE_SEGMENTS)) {
-    const parts = names.flatMap(n => SEGMENTS[n]?.(i) ?? [])
+    const parts = names.flatMap(n => (Object.hasOwn(SEGMENTS, n) ? SEGMENTS[n]?.(i) : undefined) ?? [])
     if (parts.length) lines.push(parts.flatMap((p, k) => (k === 0 ? p : [SEPARATOR, ...p])))
   }
   return lines
@@ -184,8 +186,14 @@ export const plain = (line: Line): string => line.map(r => r.t).join('')
 /** Terminal columns a string takes: wide emoji and CJK count 2, a variation selector widens its base. */
 export function displayWidth(text: string): number {
   let w = 0
+  let joined = false // after a zero-width joiner the next emoji is part of the same grapheme
   for (const ch of text) {
     const cp = ch.codePointAt(0) ?? 0
+    if (joined) {
+      joined = false
+      if (cp >= 0x1f000 || WIDE_BMP.has(cp) || cp === 0x2640 || cp === 0x2642 || cp === 0x2695 || cp === 0x2764) continue
+    }
+    if (cp === 0x200d) joined = true
     if (cp === 0xfe0f) w += 1
     else if (cp === 0x200d || (cp >= 0x300 && cp <= 0x36f)) w += 0
     else if (cp >= 0x1f000 || (cp >= 0x2e80 && cp <= 0xa4cf) || (cp >= 0xac00 && cp <= 0xd7a3) || (cp >= 0xff00 && cp <= 0xff60) || WIDE_BMP.has(cp)) w += 2

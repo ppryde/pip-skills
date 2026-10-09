@@ -139,3 +139,24 @@ test('an existing backup blocks a removal only when it holds a different status 
   expect(backupBlocks('not json', mk('b'))).toBe(false) // nothing worth keeping
   expect(backupBlocks('{}', mk('b'))).toBe(false)
 })
+
+// ---- review round: Windows and odd input ------------------------------------------------------------
+
+test('on Windows census installs its launcher: python "<census dir>\\launcher.py" statusline is census recording', async () => {
+  expect(commandIsCensus('python "C:\\Users\\u\\.claude\\census\\launcher.py" statusline')).toBe(true)
+  expect(commandIsCensus('python C:\\Users\\u\\.claude\\census\\launcher.py ingest')).toBe(true)
+  expect(commandIsCensus('C:\\bin\\census.exe ingest')).toBe(true)
+  expect(commandIsCensus('python C:\\x\\other.py statusline')).toBe(false)
+})
+
+test('scripts a Windows command runs: drive and UNC paths, quoted with spaces, ~\\ and %USERPROFILE%', async () => {
+  expect(scriptCandidates('powershell -File "C:\\Users\\u\\my line.ps1"', 'C:\\Users\\u')).toEqual(['C:\\Users\\u\\my line.ps1'])
+  expect(scriptCandidates('bash ~\\.claude\\line.sh', 'C:\\Users\\u')).toEqual(['C:\\Users\\u\\.claude\\line.sh'])
+  expect(scriptCandidates('"%USERPROFILE%\\line.cmd"', 'C:\\Users\\u')).toEqual(['C:\\Users\\u\\line.cmd'])
+  expect(scriptCandidates('sh \\\\server\\share\\line.sh', undefined)).toEqual(['\\\\server\\share\\line.sh'])
+  expect(scriptCandidates("sh '/opt/my dir/line.sh' --x", undefined)).toEqual(['/opt/my dir/line.sh'])
+})
+
+test('a backup that is a JSON scalar, array or null is no backup: restore says so instead of throwing', async () => {
+  for (const junk of ['42', '"x"', 'null', '[1]', 'true']) expect(restoreStatusLine('{}', junk)).toEqual({ done: 'kept', why: 'no-backup' })
+})

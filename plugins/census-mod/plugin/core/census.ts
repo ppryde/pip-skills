@@ -6,17 +6,19 @@ export type CensusEnv = {
   HOME?: string
 }
 
-const trim = (p: string): string => (p.length > 1 ? p.replace(/\/+$/, '') : p)
+const trim = (p: string): string => (p.length > 1 ? p.replace(/\/+$/, '') || '/' : p)
+/** Census reads a store ending `.json` as that FILE: its census dir is the parent (store.census_dir). */
+const asDir = (p: string): string => (p.endsWith('.json') ? trim(p.slice(0, p.lastIndexOf('/')) || '/') : p)
 const expand = (p: string, home?: string): string => (home && (p === '~' || p.startsWith('~/')) ? home.replace(/\/+$/, '') + p.slice(1) : p)
 
 /** Shadow mode: the dir the mod records to instead of census's own, when set. */
 export function shadowDir(env: CensusEnv): string | null {
-  return env.CENSUS_MOD_STORE ? trim(expand(env.CENSUS_MOD_STORE, env.HOME)) : null
+  return env.CENSUS_MOD_STORE ? asDir(trim(expand(env.CENSUS_MOD_STORE, env.HOME))) : null
 }
 
 /** The census dir readers use: `CENSUS_STORE`, else `<config dir>/census`. */
 export function censusDir(env: CensusEnv): string | null {
-  if (env.CENSUS_STORE) return trim(expand(env.CENSUS_STORE, env.HOME))
+  if (env.CENSUS_STORE) return asDir(trim(expand(env.CENSUS_STORE, env.HOME)))
   const root = env.CLAUDE_CONFIG_DIR ? trim(env.CLAUDE_CONFIG_DIR) : env.HOME ? `${trim(env.HOME)}/.claude` : null
   return root ? `${root}/census` : null
 }
@@ -27,7 +29,7 @@ export function censusDir(env: CensusEnv): string | null {
  */
 export function pointerFiles(env: CensusEnv): string[] {
   const dirs = [shadowDir(env), censusDir(env)].filter((d): d is string => d !== null)
-  return [...new Set(dirs)].map(d => `${d}/cli.path`)
+  return [...new Set(dirs)].map(d => (d === '/' ? '/cli.path' : `${d}/cli.path`))
 }
 
 /** Run a `.py` under python3, anything else as the executable itself. */

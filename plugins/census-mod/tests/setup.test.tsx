@@ -29,7 +29,7 @@ const doubleWriter = (w: World) => {
 }
 
 test('/census-setup is a registered command that asks, in order: record, band, layout, PR', async ($, on) => {
-  const w = world(on)
+  const w = world(on, { files: { '/plugins/census/scripts/vitals.py': '' } })
   const r = await setupRun($, w)
 
   expect(r.text).toContain('questions follow')
@@ -520,4 +520,12 @@ test('a dismissed /census-setup counts as offered: the next session does not off
   for (let i = 0; i < 6; i++) await w.clock.advance(0)
 
   expect(saved(w).offered).toBe(true)
+})
+
+test('the vitals line appears only when this census build ships vitals', async ($, on) => {
+  const w = world(on)
+  await setupRun($, w)
+
+  expect(w.logs.join('\n')).not.toContain('/census:vitals')
+  expect(w.logs.at(-1)).toContain('undo any time')
 })

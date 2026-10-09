@@ -24,7 +24,7 @@ def cfg(tmp_path, monkeypatch):
 @pytest.fixture
 def alive(monkeypatch):
     """Fake os.kill: pids in `dead` raise ESRCH, `denied` raise EPERM, the rest succeed."""
-    state = {"dead": set(), "denied": set(), "calls": []}
+    state = {"dead": set(), "denied": set(), "forbidden": set(), "calls": []}
 
     def fake(pid, sig):
         state["calls"].append((pid, sig))
@@ -32,6 +32,8 @@ def alive(monkeypatch):
             raise ProcessLookupError(errno.ESRCH, "no such process")
         if pid in state["denied"]:
             raise PermissionError(errno.EPERM, "not permitted")
+        if pid in state["forbidden"]:  # also a PermissionError, but EACCES is not "it exists"
+            raise PermissionError(errno.EACCES, "access denied")
 
     monkeypatch.setattr(st.os, "kill", fake)
     return state
@@ -97,6 +99,11 @@ class TestWithCensusMod:
         registry(cfg, 4242)
         alive["denied"].add(4242)
         assert stale(entry(NOW - 3600, mod())) is False
+
+    def test_eacces_is_a_permission_error_but_not_eperm_so_the_process_is_gone(self, cfg, alive):
+        registry(cfg, 4242)
+        alive["forbidden"].add(4242)
+        assert stale(entry(NOW - 3600, mod())) is True
 
     def test_missing_registry_file_means_gone(self, cfg, alive):
         assert stale(entry(NOW, mod())) is True

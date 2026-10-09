@@ -82,8 +82,8 @@ is not a safe filename (`[A-Za-z0-9._-]+`, up to 128 chars) is refused.
 Pruning is write-side: each ingest deletes session files whose `updated_at` is more than 24 h older
 than that ingest; reads never delete.
 
-`census read` prints the v1 view (`{version: 1, limits, sessions}`) with one additive key per session, `stale`
-(see Liveness); every other key is unchanged.
+`census read` prints the v1 view (`{version: 1, limits, sessions}`) with two additive keys per session, `stale`
+(see Liveness) and `git` (see the Git block section); every other key is unchanged.
 
 - Rate limits are per account, so they live in their own `limits/<account key>.json`. Not last-write-wins:
   usage only rises until a window resets, so a later `resets_at` wins outright (new window)
@@ -193,7 +193,7 @@ does not write on a timer, so it is judged by its process instead, however old `
 `<config dir>` is the account's `CLAUDE_CONFIG_DIR` (else `~/.claude`). The check is same-machine only. A `census_mod` block with no `pid` yet
 (the mod could not find its registry entry) is live unless `ended`. Entries without a `census_mod` block keep the 90 s rule, `idle` (10 min without activity) is unchanged, and a reader never
 raises: an entry it cannot judge is stale. `census read` carries `stale` on every session entry (the full view's `sessions.<sid>` and the `--session` /
-`--worktree` forms), computed by this rule: an additive key, every other key unchanged. Readers should prefer it
+`--worktree` forms), computed by this rule: an additive key (with `git`, the only two), every other key unchanged. Readers should prefer it
 over their own `updated_at` arithmetic.
 
 ## Upgrading from v1

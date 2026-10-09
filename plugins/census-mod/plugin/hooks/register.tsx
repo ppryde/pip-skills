@@ -8,7 +8,7 @@ import { COALESCE_MS as GIT_COALESCE_MS, GIT_DIR_ARGV, GIT_STATUS_ARGV, parseSta
 import { configRoot, transcriptPathFor } from '../core/name'
 import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
 import type { Event } from '../core/payload'
-import { TITLE_ARGV, findProc, lastTitle } from '../core/registry'
+import { TITLE_ARGV, TITLE_TAIL_CMD, findProc, lastTitle } from '../core/registry'
 import { TONE_COLOR, draw, fit } from '../core/render'
 import { BACKUP_FILE, backupBlocks, L, MIN_CENSUS, NO_DETECTION, PRESETS, Q, SETUP_KEY, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
 import type { Detection, Effective, Saved } from '../core/setup'
@@ -29,9 +29,13 @@ let saved: Saved = {}
 let det: Detection = NO_DETECTION
 let eff: Effective = effective({}, {}, NO_DETECTION, null)
 let setupRun: object | null = null
+const titleScanned = new WeakMap<Snap, string>() // snapshot -> the transcript path whose whole file was scanned
+let offerTimer: Timer | null = null
 let interactive: boolean | null = null
 let snap: Snap | null = null
 let hydrating: Promise<void> | null = null
+let gitReady: Promise<void> | null = null // the first `git status` of the bound session, so the first write carries it
+let gitReadyDone: (() => void) | null = null
 const ended = new Set<string>()
 let lastActiveAt: number | null = null
 let limitsKey = ''
@@ -119,24 +123,30 @@ async function locateProc($: EngineInterface) {
   }
 }
 
-async function readName($: EngineInterface) {
-  if (!snap?.transcriptPath) return
+/**
+ * The session's title from its transcript. Whole file once (at bind); after that only the tail, where a later
+ * /rename lands, so a long session is not re-read end to end on every turn. Applied to `s`, the snapshot the
+ * read was asked for, never to whatever the module holds by the time the read returns.
+ */
+async function readName($: EngineInterface, s: Snap | null = snap, whole = false) {
+  if (!s?.transcriptPath) return
   try {
-    const r = await $.process.run(TITLE_ARGV(snap.transcriptPath))
-    if (r.exitCode === 0) snap.sessionName = lastTitle(r.stdout) ?? snap.sessionName
+    const argv = whole ? TITLE_ARGV(s.transcriptPath) : ['sh', '-c', TITLE_TAIL_CMD, 'sh', s.transcriptPath]
+    const r = await $.process.run(argv)
+    if (r.exitCode === 0) s.sessionName = lastTitle(r.stdout) ?? s.sessionName
   } catch {
     // keep the last name
   }
 }
 
-async function readTtl($: EngineInterface) {
-  if (!snap?.transcriptPath) return
+async function readTtl($: EngineInterface, s: Snap | null = snap) {
+  if (!s?.transcriptPath) return
   try {
-    const r = await $.process.run(['sh', '-c', TAIL_CMD, 'sh', snap.transcriptPath])
+    const r = await $.process.run(['sh', '-c', TAIL_CMD, 'sh', s.transcriptPath])
     const found = r.exitCode === 0 ? ttlFromWrites(parseWrites(r.stdout)) : null
     if (found) {
-      snap.ttl = found
-      snap.counters = withTtl(snap.counters, found)
+      s.ttl = found
+      s.counters = withTtl(s.counters, found)
     }
   } catch {
     // keep the last known (default 5m)
@@ -150,8 +160,8 @@ async function loadCounters($: EngineInterface, id: string): Promise<Counters> {
   return stored && typeof stored.requests === 'number' ? { ...EMPTY_COUNTERS, ...stored } : EMPTY_COUNTERS
 }
 
-async function saveCounters($: EngineInterface) {
-  if (snap) await $.store.set(counterKey(snap.sessionId), snap.counters).catch(() => undefined)
+async function saveCounters($: EngineInterface, s: Snap | null = snap) {
+  if (s) await $.store.set(counterKey(s.sessionId), s.counters).catch(() => undefined)
 }
 
 async function pruneCounters($: EngineInterface, keep: string, now: number) {
@@ -236,6 +246,8 @@ async function flush($: EngineInterface) {
   if (!event || !snap) return
   lastIngestAt = await nowMs($)
   await hydrating
+  // The first write waits (briefly) for the first git status, or census_mod.git would be null until the next one.
+  if (gitReady) await Promise.race([gitReady, new Promise<void>(done => $.clock.after(3000, done))])
   await refreshEngine($)
   await locateProc($)
   await ingest($, event)
@@ -258,6 +270,9 @@ async function runGit($: EngineInterface) {
   lastGitAt = await nowMs($)
   const cwd = snap.cwd
   const r = await $.process.run(GIT_STATUS_ARGV, { cwd }).catch(() => undefined)
+  const first = gitReadyDone
+  gitReadyDone = null
+  first?.()
   if (!snap || snap.cwd !== cwd) return
   const before = snap.git
   snap.git = r && r.exitCode === 0 ? parseStatus(r.stdout) : null
@@ -265,7 +280,7 @@ async function runGit($: EngineInterface) {
     snap.pr = null
     // The first sight of a branch is not a change of it.
     if (before !== null) record($, 'branch')
-    scheduleGh($, 'branch')
+    scheduleGh($, before === null ? 'start' : 'branch')
   }
   repaint($)
 }
@@ -277,6 +292,7 @@ function scheduleGh($: EngineInterface, why: Why) {
 
 async function refreshGh($: EngineInterface, why: Why) {
   if (!eff.pr) return // answered No: gh is never called
+  await hydrating // the worktree path gh runs in is read there
   if (!snap?.git?.branch || snap.git.detached) return
   const key = ghKey(snap.worktreePath ?? snap.cwd, snap.git.branch)
   const branch = snap.git.branch
@@ -311,8 +327,8 @@ async function readGitDir($: EngineInterface, cwd: string) {
 // ---- lifecycle -----------------------------------------------------------------------------
 
 function cancelTimers() {
-  for (const t of [ingestTimer, coldTimer, tickTimer, gitTimer]) t?.cancel()
-  ingestTimer = coldTimer = tickTimer = gitTimer = null
+  for (const t of [ingestTimer, coldTimer, tickTimer, gitTimer, offerTimer]) t?.cancel()
+  ingestTimer = coldTimer = tickTimer = gitTimer = offerTimer = null
 }
 
 function armCold($: EngineInterface) {
@@ -351,7 +367,9 @@ function hydrate($: EngineInterface, known?: { exitCode: number; stdout: string 
         if (!snap) return
         const gitDir = known ?? (await readGitDir($, snap.cwd))
         if (snap) snap.worktreePath = worktreeOf(gitDir)
-        await readName($)
+        const scanned = snap ? titleScanned.get(snap) : undefined
+        if (snap) titleScanned.set(snap, snap.transcriptPath ?? '')
+        await readName($, snap, scanned !== snap?.transcriptPath)
         repaint($)
         offerOnce($)
       })()
@@ -376,6 +394,7 @@ async function bind($: EngineInterface, id: string, cwd: string, transcript: str
     const old = snap
     snap = fresh(id, cwd)
     limitsKey = ''
+    lastGitAt = null // a new session's first git status is not held back by the old one's
     if (old && event !== 'session.start') {
       closeOld($, old, event.replace('session.', ''))
       setupRun = null // an open setup dialog belongs to the session that is gone
@@ -392,6 +411,7 @@ async function bind($: EngineInterface, id: string, cwd: string, transcript: str
   await locateProc($)
   hydrate($, gitDir)
   armTimers($)
+  if (!same || !gitReady) gitReady = new Promise<void>(done => { gitReadyDone = done })
   scheduleGit($)
   record($, event)
   void pruneCounters($, id, await nowMs($))
@@ -655,13 +675,14 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   await saveAnswer($, { pr: is(pr.a, L.prYes), answeredAt: await nowMs($), offered: true })
   if (setupRun !== run) return
   setupRun = null
+  const hasVitals = d.cliPath ? await $.fs.exists(d.cliPath.replace(/[^/\\]*$/, 'vitals.py')).catch(() => false) : false
   say($, '🧭 census-mod is set up', [
     `recording: ${recordMode === 'yes' ? 'the real census store' : recordMode === 'shadow' ? `shadow store ${eff.shadowDir ?? ''}` : 'off'}`,
     `band: ${drawOn ? `on, ${PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
     `PR segment (gh): ${saved.pr === false ? 'off, gh is never called' : 'on'}`,
     ...(removed ? [`your status line was removed from settings.json; it is backed up in ${removed}`] : []),
     'undo any time: /census-setup off (it restores a removed status line exactly), or /census-setup to answer again',
-    '📊 /census:vitals shows this session on your phone',
+    ...(hasVitals ? ['📊 /census:vitals shows this session on your phone'] : []),
   ])
 }
 
@@ -674,9 +695,12 @@ function startSetup($: EngineInterface, mode: 'full' | 'offer') {
 
 /** The first session after install: say so once, ever. An answer or a dismissal both count. */
 function offerOnce($: EngineInterface) {
-  if (saved.offered || setupRun || !interactive) return
-  $.clock.after(3000, () => {
-    if (saved.offered || setupRun) return
+  if (saved.offered || setupRun || !interactive || offerTimer) return
+  const id = snap?.sessionId
+  offerTimer = $.clock.after(3000, () => {
+    offerTimer = null
+    // A quick exit (or a /clear) in between: there is no session left to ask in.
+    if (saved.offered || setupRun || !id || snap?.sessionId !== id) return
     startSetup($, 'offer')
   })
 }
@@ -736,12 +760,15 @@ export const register: Register = on => {
       lastActiveAt = now
       snap.counters = addTurn(snap.counters, usage, now)
       await saveCounters($)
-      // The reads below shell out: off the turn's path.
+      // The reads below shell out: off the turn's path. They belong to THIS session's snapshot: a /clear
+      // that rebinds meanwhile must not get this transcript's ttl or title, nor a turn.complete write.
+      const mine = snap
       $.clock.after(0, () => {
         void (async () => {
-          await readTtl($)
-          await readName($)
-          await saveCounters($)
+          await readTtl($, mine)
+          await readName($, mine)
+          await saveCounters($, mine)
+          if (snap !== mine) return
           armCold($)
           repaint($)
           record($, 'turn.complete')

@@ -2,8 +2,10 @@ import { expect, test } from 'claude-code/testing'
 import { EMPTY_COUNTERS, TAIL_CMD, addTurn, compacted, expiresAtMs, isWarm, parseWrites, ratio, sessionRatio, ttlFromWrites, withTtl } from '../plugin/core/cache'
 import { COALESCE_MS, ancestors, compareVersions, delayFor, endTimeoutMs, findSibling, highestVersion, ingestArgv, ingestEnv, pointerFiles } from '../plugin/core/census'
 import { GIT_DIR_ARGV, GIT_STATUS_ARGV, parseStatus, touchesGit, watchPaths, worktreeOf } from '../plugin/core/git'
-import { BACKOFF_MS, ghArgv, parsePrList, shouldRefresh, touchesPr } from '../plugin/core/gh'
+import { BACKOFF_MS, ghKey, ghArgv, parsePrList, shouldRefresh, touchesPr } from '../plugin/core/gh'
 import { findProc, lastTitle } from '../plugin/core/registry'
+import { configRoot, transcriptPathFor, trimSlashes } from '../plugin/core/name'
+import { censusDir } from '../plugin/core/census'
 
 const T0 = 1_791_000_000_000
 const USAGE = { input_tokens: 2, output_tokens: 100, cache_read_input_tokens: 90, cache_creation_input_tokens: 8 }
@@ -199,4 +201,40 @@ test('a version dir with no CLI in it, or only orphans, is nothing', async () =>
   const fs = fsOf([`${base}/0.1.0/.orphaned_at`, `${base}/0.1.0/scripts/cli.py`], { [base]: ['0.1.0', '0.2.0'] })
 
   expect(await findSibling(fs, '/cache/pip-skills/census-mod/0.1.0')).toBeNull()
+})
+
+// ---- review round: edge cases -------------------------------------------------------------------
+
+test('a CENSUS_STORE ending .json is a file in census\'s eyes: the pointer lives in its parent', async () => {
+  expect(censusDir({ CENSUS_STORE: '/store/status.json', CLAUDE_CONFIG_DIR: '/cfg' })).toBe('/store')
+  expect(pointerFiles({ CENSUS_STORE: '/store/status.json' })).toEqual(['/store/cli.path'])
+  expect(pointerFiles({ CENSUS_MOD_STORE: '/shadow/x.json', CLAUDE_CONFIG_DIR: '/cfg' })).toEqual(['/shadow/cli.path', '/cfg/census/cli.path'])
+  expect(pointerFiles({ CENSUS_STORE: '/status.json' })).toEqual(['/cli.path'])
+})
+
+test('a config dir of "/" stays "/" instead of becoming the empty string', async () => {
+  expect(trimSlashes('/')).toBe('/')
+  expect(trimSlashes('///')).toBe('/')
+  expect(trimSlashes('/a/b//')).toBe('/a/b')
+  expect(configRoot({ CLAUDE_CONFIG_DIR: '/' })).toBe('/')
+  expect(transcriptPathFor('/', '/repo', 's1')).toBe('/projects/-repo/s1.jsonl')
+})
+
+test('gh cache keys cannot collide: a "|" in a path or branch is just a character', async () => {
+  expect(ghKey('/a|b', 'c')).not.toBe(ghKey('/a', 'b|c'))
+  expect(ghKey('/repo', 'main')).toBe('gh:["/repo","main"]')
+})
+
+test('a fresh cached PR stands at a bound session\'s start; a stale or missing one is asked again', async () => {
+  const now = T0 + 5 * 60_000
+  expect(shouldRefresh('start', { at: T0, pr: null }, now, null)).toBe(false)
+  expect(shouldRefresh('start', { at: T0 - 11 * 60_000, pr: null }, now, null)).toBe(true)
+  expect(shouldRefresh('start', undefined, now, null)).toBe(true)
+  expect(shouldRefresh('start', { at: T0 - 11 * 60_000, pr: null, failedAt: now - 1 }, now, null)).toBe(false) // the backoff holds
+})
+
+test('registry entries that are not objects are skipped, not fatal', async () => {
+  const files = [{ text: 'null' }, { text: '42' }, { text: '[1,2]' }, { text: '"x"' }, { text: JSON.stringify({ pid: 9, sessionId: 's1', procStart: 'p' }) }]
+
+  expect(findProc(files, 's1')).toEqual({ pid: 9, procStart: 'p' })
 })
