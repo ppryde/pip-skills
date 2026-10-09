@@ -411,7 +411,7 @@ test('a pane registered in another account is labelled so, not left as a startup
   const rows = strayRows(PANES, REGISTERED, { elsewhere: new Map([[777, 'work']]), agentsView: new Set<number>() })
   const work = rows.find(r => r.pid === 777)!
 
-  expect(work.note).toBe('running in another account (work) — set ROSTER_CONFIG_DIRS to list it')
+  expect(work.note).toBe('running in another account (work) — run /roster setup to list it')
   expect(work.waitingFor).toBeUndefined()
   expect(work.status).not.toBe('waiting')
   expect(isStray(work)).toBe(true)   // no kill is ever offered for it

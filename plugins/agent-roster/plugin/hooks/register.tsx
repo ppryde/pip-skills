@@ -400,7 +400,8 @@ export function newestPerPid<T extends { row: SessionRow }>(found: T[]): T[] {
 
 async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings: string[] }> {
   const dirs = resolveConfigDirs(
-    (await $.env.get('ROSTER_CONFIG_DIRS')) || undefined,
+    // ROSTER_CONFIG_DIRS outranks what `/roster setup` saved.
+    (await $.env.get('ROSTER_CONFIG_DIRS'))?.trim() || joinDirs(await storedDirs($)) || undefined,
     (await $.env.get('HOME')) ?? '',
     await configDirOf($),
   )
@@ -510,7 +511,7 @@ export function isStray(r: SessionRow): boolean {
 }
 
 const AGENTS_VIEW = 'agents view'
-const inAnotherAccount = (tag: string) => `running in another account (${tag}) — set ROSTER_CONFIG_DIRS to list it`
+const inAnotherAccount = (tag: string) => `running in another account (${tag}) — run /roster setup to list it`
 
 /** `claude agents`, the agents view, by its args. */
 export const isAgentsViewArgs = (args: string): boolean => /^\S+\s+agents(\s|$)/.test(args)
@@ -717,6 +718,7 @@ async function rescan($: EngineInterface) {
   const selfId = await $.session.id()
   await update($, sessions, () => ({ rows, checkedAt: Date.now(), selfId, warnings }))
   await showWaiting($, rows.filter(r => r.status === 'waiting').length)
+  await maybeOfferSetup($, rows)
 }
 
 // How many sessions wait on the person, as last drawn: the band is redrawn when this changes, and only then.
@@ -1113,9 +1115,164 @@ async function offerHelper($: EngineInterface) {
 }
 
 const USAGE =
-  'Usage: /roster, /roster open <tmux-name|pid>, /roster kill <tmux-name|pid>, or /roster setup-vscode'
+  'Usage: /roster, /roster open <tmux-name|pid>, /roster kill <tmux-name|pid>, /roster setup, or /roster setup-vscode'
 
 const STATUS_COLOR: Record<string, string> = { waiting: 'red', busy: 'green' }
+
+// --- /roster setup: which other Claude accounts to show -------------------------------------------------
+
+const DIRS_KEY = 'roster:configDirs'
+const OFFERED_KEY = 'roster:setupOffered'
+const SETUP_HEADER = '👥 Accounts'
+const PICK_QUESTION =
+  'Show sessions from these other Claude accounts in the roster too? Pick any, or type other config dirs under Other (comma-separated paths).'
+const NONE_NO = 'No, just this account'
+const NONE_OTHER = 'Type a config dir under Other'
+const MAX_OPTIONS = 4
+let setupRunning = false
+let setupQueued = false   // a /roster setup waits for its timer
+
+export type Account = { dir: string; tag: string; live: number }
+
+/** `~/…` for a path under HOME, else the path. */
+export function tildePath(dir: string, home: string): string {
+  return home && (dir === home || dir.startsWith(`${home}/`)) ? `~${dir.slice(home.length)}` : dir
+}
+
+/** The option label for an account. It never holds a comma: the answer joins labels with commas. */
+export const accountLabel = (a: Account, home: string): string => `${a.tag} — ${a.live} live (${tildePath(a.dir, home)})`
+
+/** The separator-joined `ROSTER_CONFIG_DIRS` spelling of a dir list: `;` when any entry is a Windows path. */
+export function joinDirs(dirs: readonly string[]): string {
+  return dirs.join(dirs.some(d => /^[A-Za-z]:[\\/]|^\\\\/.test(d)) ? ';' : ':')
+}
+
+export type SetupQuestion = { header: string; question: string; options: string[]; multiSelect?: true }
+
+/** The one question: the found accounts (the top four by live sessions) multi-select, or the none-found pair. */
+export function setupQuestion(found: readonly Account[], current: readonly string[], home: string): SetupQuestion {
+  const now = current.length ? ` Showing now: ${current.map(configDirTag).join(', ')}.` : ''
+  const usable = [...found].filter(a => !a.tag.includes(',') && !a.dir.includes(',')).sort((a, b) => b.live - a.live || a.tag.localeCompare(b.tag))
+  if (usable.length === 0) {
+    return { header: SETUP_HEADER, question: `No other accounts found.${now} Add a config dir?`, options: [NONE_NO, NONE_OTHER] }
+  }
+  const shown = usable.slice(0, MAX_OPTIONS)
+  const more = usable.slice(MAX_OPTIONS)
+  const extra = more.length ? ` ${more.length} more found (${more.map(a => a.tag).join(', ')}): type their paths under Other.` : ''
+
+  return {
+    header: SETUP_HEADER,
+    question: `${PICK_QUESTION}${extra}${now}`,
+    options: shown.map(a => accountLabel(a, home)),
+    multiSelect: true,
+  }
+}
+
+/** Split an answer: the option labels it carries (matched exactly), and the free text left over. */
+export function splitAnswer(answer: string, labels: readonly string[]): { chosen: string[]; typed: string[] } {
+  const whole = answer.trim()
+  if (labels.includes(whole)) return { chosen: [whole], typed: [] }   // a label may hold a comma (the none-found pair)
+  const chosen: string[] = []
+  const typed: string[] = []
+  for (const part of whole.split(',').map(p => p.trim()).filter(Boolean)) (labels.includes(part) ? chosen : typed).push(part)
+
+  return { chosen, typed }
+}
+
+async function storedDirs($: EngineInterface): Promise<string[]> {
+  const value = await $.store.get(DIRS_KEY).catch(() => undefined)
+
+  return Array.isArray(value) ? value.filter((d): d is string => typeof d === 'string' && d !== '') : []
+}
+
+/** Live Claude sessions per dir: its registry's pids still running Claude (one batched ps for all dirs). */
+async function liveCounts($: EngineInterface, dirs: readonly string[]): Promise<Map<string, number>> {
+  const pidsOf = new Map<string, number[]>()
+  for (const dir of dirs) {
+    const entries = await $.fs.list(`${dir}/sessions`).catch(() => [])
+    pidsOf.set(dir, entries.flatMap(e => (/^\d+\.json$/.test(e.name) ? [Number.parseInt(e.name, 10)] : [])))
+  }
+  const alive = await liveClaudePids($, [...new Set([...pidsOf.values()].flat())]).catch(() => new Set<number>())
+
+  return new Map([...pidsOf].map(([dir, pids]) => [dir, pids.filter(p => alive.has(p)).length]))
+}
+
+/** The other `.claude*` dirs under HOME that hold a `sessions/` folder, with their live counts; the own dir is left out. */
+async function discoverAccounts($: EngineInterface, home: string, own: string): Promise<Account[]> {
+  if (!home) return []
+  const names = (await $.fs.list(home).catch(() => [])).map(e => e.name)
+  const candidates: string[] = []
+  for (const dir of otherClaudeDirs(home, names, [own])) {
+    if (await $.fs.exists(`${dir}/sessions`).catch(() => false)) candidates.push(dir)
+  }
+  const counts = await liveCounts($, candidates)
+
+  return candidates.map(dir => ({ dir, tag: configDirTag(dir), live: counts.get(dir) ?? 0 }))
+}
+
+/** Text the person typed under Other: each existing dir holding `sessions/` is kept, every other one is reported. */
+async function resolveTyped($: EngineInterface, typed: readonly string[], home: string): Promise<{ dirs: string[]; rejected: string[] }> {
+  const dirs: string[] = []
+  const rejected: string[] = []
+  for (const text of typed) {
+    const dir = resolved(/^~([\\/]|$)/.test(text) ? home + text.slice(1) : text)
+    const absolute = dir.startsWith('/') || /^[A-Za-z]:[\\/]/.test(dir) || dir.startsWith('\\\\')
+    if (!absolute) rejected.push(`${text} (not an absolute path)`)
+    else if (!(await $.fs.exists(dir).catch(() => false))) rejected.push(`${text} (no such folder)`)
+    else if (!(await $.fs.exists(`${dir}/sessions`).catch(() => false))) rejected.push(`${text} (no sessions/ folder)`)
+    else dirs.push(dir)
+  }
+
+  return { dirs, rejected }
+}
+
+async function say($: EngineInterface, text: string) {
+  await Promise.all([$.ui.toast(text), $.ui.log(text)]).catch(() => undefined)
+}
+
+/** Ask which other accounts to show, save the answer in this account's store, and say what the roster now shows. */
+async function runSetup($: EngineInterface): Promise<void> {
+  if (setupRunning) return
+  setupRunning = true
+  try {
+    // Asked once, whatever the answer: the automatic offer never comes back after this.
+    await $.store.set(OFFERED_KEY, true).catch(() => undefined)
+    const home = (await $.env.get('HOME')) ?? ''
+    const own = await configDirOf($)
+    const current = await storedDirs($)
+    const found = await discoverAccounts($, home, own)
+    const q = setupQuestion(found, current, home)
+    let answer: string
+    try {
+      answer = String(await $.ui.ask(q.question, { header: q.header, options: q.options, ...(q.multiSelect ? { multiSelect: true as const } : {}) }))
+    } catch {
+      await say($, '👥 Roster setup dismissed — nothing changed. Run /roster setup to answer later.')
+      return
+    }
+    const { chosen, typed } = splitAnswer(answer, q.options)
+    const byLabel = new Map(found.map(a => [accountLabel(a, home), a.dir]))
+    const picked = chosen.flatMap(label => (byLabel.has(label) ? [byLabel.get(label)!] : []))
+    const extra = await resolveTyped($, typed, home)
+    const dirs = [...new Map([...picked, ...extra.dirs].filter(d => resolved(d) !== resolved(own)).map(d => [resolved(d), d])).values()]
+    await $.store.set(DIRS_KEY, dirs)
+    const counts = await liveCounts($, dirs)
+    const live = [...counts.values()].reduce((a, b) => a + b, 0)
+    const shows = dirs.length ? `this account + ${dirs.map(configDirTag).join(', ')} (${live} live ${live === 1 ? 'session' : 'sessions'})` : 'this account only'
+    const overridden = (await $.env.get('ROSTER_CONFIG_DIRS'))?.trim() ? ' ROSTER_CONFIG_DIRS is set and overrides this list; unset it to use it.' : ''
+    const rejected = extra.rejected.length ? ` Not added: ${extra.rejected.join('; ')}.` : ''
+    await say($, `👥 Roster now shows: ${shows}.${rejected}${overridden}`)
+    await refresh($).catch(() => undefined)
+  } finally {
+    setupRunning = false
+  }
+}
+
+/** The first time the roster meets a pane of another account it cannot list yet, offer setup once. */
+async function maybeOfferSetup($: EngineInterface, rows: readonly SessionRow[]) {
+  if (setupRunning || !rows.some(r => r.note?.startsWith('running in another account'))) return
+  if ((await $.store.get(OFFERED_KEY).catch(() => undefined)) || (await $.env.get('ROSTER_CONFIG_DIRS'))?.trim()) return
+  void runSetup($).catch(() => undefined)
+}
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -1143,6 +1300,17 @@ export const register: Register = on => {
     const args = e.args.trim()
     const failed = (err: unknown) => `Could not ${args.split(' ')[0]}: ${String(err)}`
     if (args === 'setup-vscode') return { text: await installHelper($).catch(failed) }
+    if (args === 'setup') {
+      if (setupRunning || setupQueued) return { text: 'Roster setup is already open.' }
+      // After the command has replied: the dialog follows it rather than holding it open.
+      setupQueued = true
+      $.clock.after(0, () => {
+        setupQueued = false
+        void runSetup($).catch(() => undefined)
+      })
+
+      return { text: 'Roster setup: the question follows.' }
+    }
     if (args) {
       const [, verb, target] = /^(kill|open)\s+(\S+)$/.exec(args) ?? []
       if (!verb || !target) return { text: USAGE }

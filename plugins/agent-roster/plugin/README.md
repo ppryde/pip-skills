@@ -100,10 +100,24 @@ with the one the command or pane runs in (by pane or by name), when no tmux
 server shows its pid, or when it runs outside tmux. The session the command or
 pane runs in is always refused.
 
-## Several accounts: `ROSTER_CONFIG_DIRS`
+## Several accounts: `/roster setup`
 
-By default the roster reads one config dir. To see every account's sessions in
-one pane, list the config dirs, separated by `:`, in `ROSTER_CONFIG_DIRS`, and
+By default the roster reads one config dir. **`/roster setup`** picks the others with one question
+(header `👥 Accounts`): it looks in `$HOME` for `.claude*` dirs that hold a `sessions/` folder, counts each
+one's live sessions, and asks
+
+> Show sessions from these other Claude accounts in the roster too? Pick any, or type other config dirs under Other (comma-separated paths).
+
+as a multi-select with one option per account, `<tag> — <N> live (<~/path>)`, the busiest first and at most four
+(more are named in the question; type their paths under Other). Paths typed under Other are kept only if they
+exist and hold `sessions/`; each one that is not is named in the confirmation, never dropped silently. If no other
+account is found the question is "No other accounts found. Add a config dir?" with **No, just this account**
+or a path typed under Other. The answer is saved in this account's `$.store` (`roster:configDirs`) and a toast
+and log line say `Roster now shows: this account + work, personal (N live sessions).` Re-run `/roster setup` to
+change it; the current choices are listed in the question. The first time the roster meets a pane of another
+account it cannot list yet, it offers this once, and never again whatever the answer.
+
+`ROSTER_CONFIG_DIRS` still outranks what setup saved (setup says so when it is set). To set it yourself, list the config dirs, separated by `:`, in `ROSTER_CONFIG_DIRS`, and
 set it in each account's `settings.json` `env`:
 
 ```json
@@ -146,7 +160,7 @@ the following, which the sweep checks first (one batched `ps -ax -o pid=,ppid=,e
 then one read per candidate and other `$HOME/.claude*` dir), and which are listed as
 quiet idle rows with a note, never a kill button and never counted as needing you:
 
-- **`running in another account (<tag>) — set ROSTER_CONFIG_DIRS to list it`**: the
+- **`running in another account (<tag>) — run /roster setup to list it`**: the
   Claude process has a registry file in another `$HOME/.claude*/sessions/` dir that this
   mod is not reading, so it is a working session of another account, not a stray. A pane
   whose pid is a shell above Claude is resolved to the Claude under it first, and a
@@ -154,7 +168,7 @@ quiet idle rows with a note, never a kill button and never counted as needing yo
   session's leftover file does not label whatever reused its pid). A record with no
   `startedAt`, or a process whose age `ps` did not give, cannot be checked, so it is not
   tagged: that pane stays a startup prompt.
-  List the dir in `ROSTER_CONFIG_DIRS` and it becomes an ordinary row. A dir already
+  List the dir (`/roster setup`, or `ROSTER_CONFIG_DIRS`) and it becomes an ordinary row. A dir already
   listed is never reported this way.
 - **`agents view`**: the pane runs `claude agents`, which never registers.
 
