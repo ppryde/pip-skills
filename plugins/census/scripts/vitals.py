@@ -28,6 +28,7 @@ import contextlib
 import json
 import math
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -42,7 +43,7 @@ from typing import Any
 if __package__ in (None, ""):  # run as a script: put the plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import gitcache
+from scripts import gitcache, store
 
 STALE_SECONDS = 90  # census: not rendered for 90s (idle without refreshInterval, or closed)
 MAX_RESET_SECONDS = 10 * 86400  # census's own ceiling: further out is a corrupt/ms value
@@ -194,12 +195,8 @@ def census_cli() -> Path | None:
         return _runnable(override)
     if (own := _runnable(str(Path(__file__).resolve().with_name("cli.py")))) is not None:
         return own
-    store = os.environ.get("CENSUS_STORE")
-    if store:
-        folder = Path(store)
-    else:
-        config = os.environ.get("CLAUDE_CONFIG_DIR")
-        folder = (Path(config) if config else Path.home() / ".claude") / "census"
+    # census's own rule for where cli.path lives (a CENSUS_STORE ending .json is the legacy file: its parent holds it)
+    folder = store.census_dir()
     try:
         recorded = _runnable((folder / "cli.path").read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
@@ -210,19 +207,27 @@ def census_cli() -> Path | None:
     return _runnable(found) if found else None
 
 
+def _one_arg(text: str) -> str:
+    """``text`` as exactly one argv element: quoted for a shell, then split back, so it is provably a single
+    token (list-form argv never reaches a shell anyway)."""
+    (token,) = shlex.split(shlex.quote(text))
+    return token
+
+
 def _census_read(args: list[str]) -> dict[str, Any] | None:
     cli = census_cli()
     if cli is None:
         return None
+    program, extra = _one_arg(str(cli)), [_one_arg(a) for a in args]
     try:
         if cli.suffix == ".py":
             done = subprocess.run(
-                [sys.executable, str(cli), "read", *args],
+                [sys.executable, program, "read", *extra],
                 capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False,
             )
         else:
             done = subprocess.run(
-                [str(cli), "read", *args],
+                [program, "read", *extra],
                 capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False,
             )
     except (OSError, subprocess.SubprocessError):
@@ -356,7 +361,7 @@ def _is_prompt(rec: dict[str, Any], content: Any) -> bool:
     if rec.get("isMeta") or rec.get("isCompactSummary"):
         return False
     if isinstance(content, str):
-        return not content.startswith("<")
+        return not content.startswith(("<", "[Request interrupted"))
     if isinstance(content, list):
         texts = [b.get("text") for b in content if isinstance(b, dict) and b.get("type") == "text"]
         return any(
@@ -747,6 +752,22 @@ def resolve_style(words: list[str]) -> str:
     return "compact"
 
 
+def _emit(text: str) -> None:
+    """One line to stdout as UTF-8 bytes whatever the console's encoding says (every renderer prints emoji and box
+    glyphs; a legacy Windows code page would raise on them). Same as ``cli._emit``."""
+    data = (text + "\n").encode("utf-8")
+    try:
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is not None:
+            sys.stdout.flush()
+            buffer.write(data)
+            buffer.flush()
+            return
+    except (OSError, ValueError):
+        pass
+    sys.stdout.write(data.decode("utf-8", "replace") + "\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vitals", description=__doc__.splitlines()[0])
     parser.add_argument("words", nargs="*", help="style name or alias (from /census:vitals arguments)")
@@ -760,11 +781,11 @@ def main(argv: list[str] | None = None) -> int:
         vitals = gather(session, args.cwd)
         reading = RENDERERS[style](vitals)
     except Exception as exc:  # noqa: BLE001 -- last line of defence: never dump a traceback
-        print(f"(vitals could not read this session: {type(exc).__name__}: {exc})")
+        _emit(f"(vitals could not read this session: {type(exc).__name__}: {exc})")
         return 0
     if not vitals.has_reading:
-        print("(no census reading yet — census's status-line hook or the census-mod mod feeds it)")
-    print(reading)
+        _emit("(no census reading yet — census's status-line hook or the census-mod mod feeds it)")
+    _emit(reading)
     return 0
 
 

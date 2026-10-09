@@ -48,3 +48,29 @@ def test_it_recommends_census_mod_first_when_that_is_installed():
     text = SKILL.read_text()
     assert "/census-setup" in text and "census_mod" in text
     assert text.index("/census-setup") < text.index("2. **Preview.**")
+
+
+COMMANDS = SKILL.parents[2] / "commands"
+VITALS_FILES = [COMMANDS / "vitals.md", *sorted((SKILL.parents[1]).glob("vitals-*/SKILL.md"))]
+
+
+def test_there_are_the_command_and_three_vitals_skills():
+    assert len(VITALS_FILES) == 4 and all(f.is_file() for f in VITALS_FILES)
+
+
+def test_no_shell_line_in_the_vitals_command_or_skills_splices_arguments():
+    """Claude Code substitutes $ARGUMENTS as TEXT before the shell sees the line, so quoting does not protect it."""
+    for f in VITALS_FILES:
+        for line in f.read_text().splitlines():
+            if line.startswith("!") or line.lstrip().startswith(("python3 ", "python ")):
+                assert "$ARGUMENTS" not in line, f"{f.name}: {line}"
+                assert "ARGUMENTS" not in line, f"{f.name}: {line}"
+
+
+def test_the_command_runs_the_default_readout_and_lets_the_model_pick_a_style_from_a_fixed_list():
+    text = " ".join((COMMANDS / "vitals.md").read_text().split())
+    bang = [l for l in (COMMANDS / "vitals.md").read_text().splitlines() if l.startswith("!")]
+    assert len(bang) == 1 and "--session" in bang[0] and "--style" not in bang[0]
+    for style in ("lean", "detailed", "playful"):
+        assert style in text
+    assert "never pasting the user's own text" in text  # the user's words never reach a command
