@@ -754,7 +754,7 @@ class TestDefaultStyle:
     def test_set_default_saves_and_the_next_run_uses_it_with_no_marker(self, census_home, tmp_path, capsys):
         code, out = run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))
         assert code == 0 and "detailed" in out
-        assert json.loads((census_home / "vitals.json").read_text()) == {"default_style": "detailed"}
+        assert json.loads((census_home / "vitals.json").read_text()) == {st.account_info()["key"]: {"default_style": "detailed"}}
         code, out = run(capsys, "--cwd", str(tmp_path))
         assert "SESSION VITALS" in out and MARKER not in out
 
@@ -764,7 +764,7 @@ class TestDefaultStyle:
     ])
     def test_set_default_takes_names_and_aliases(self, census_home, tmp_path, capsys, given, saved):
         assert run(capsys, "--set-default", given, "--cwd", str(tmp_path))[0] == 0
-        assert json.loads((census_home / "vitals.json").read_text())["default_style"] == saved
+        assert json.loads((census_home / "vitals.json").read_text())[st.account_info()["key"]]["default_style"] == saved
 
     @pytest.mark.parametrize("bad", ["playful", "drama", "witchfinder", "", "rm -rf /", "lean; ls", "$(id)", "fancy", "lean detailed"])
     def test_anything_else_is_an_error_and_nothing_is_written(self, census_home, tmp_path, capsys, bad):
@@ -792,7 +792,7 @@ class TestDefaultStyle:
 
     def test_a_default_of_playful_from_the_old_branch_reads_as_unset(self, census_home, tmp_path, capsys):
         census_home.mkdir(parents=True)
-        (census_home / "vitals.json").write_text('{"default_style": "playful"}')
+        (census_home / "vitals.json").write_text(json.dumps({st.account_info()["key"]: {"default_style": "playful"}}))
         assert vitals.read_default() is None
         assert MARKER in run(capsys, "--cwd", str(tmp_path))[1]
 
@@ -814,8 +814,10 @@ class TestDefaultStyle:
         for name in ("a", "b"):
             monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / name))
             run(capsys, "--set-default", "detailed" if name == "a" else "lean", "--cwd", str(tmp_path))
-        assert json.loads((tmp_path / "a" / "census" / "vitals.json").read_text())["default_style"] == "detailed"
-        assert json.loads((tmp_path / "b" / "census" / "vitals.json").read_text())["default_style"] == "compact"
+        for name, style in (("a", "detailed"), ("b", "compact")):
+            monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / name))
+            st.reset_account_cache()
+            assert json.loads((tmp_path / name / "census" / "vitals.json").read_text())[st.account_info()["key"]]["default_style"] == style
 
     def test_a_dotjson_census_store_keeps_it_beside_the_file(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "legacy" / "status.json"))
@@ -827,3 +829,72 @@ class TestDefaultStyle:
         (tmp_path / "cfg" / "census").write_text("a file where the directory should be")
         code, out = run(capsys, "--set-default", "lean", "--cwd", str(tmp_path))
         assert code == 1 and "could not save" in out
+
+
+# ----------------------------------------------- one preference per ACCOUNT, even in a shared store
+
+
+class TestSharedStore:
+    """Accounts that share CENSUS_STORE share the file, not the choice: it is keyed by the account key."""
+
+    @pytest.fixture
+    def two_accounts(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "shared"))
+        homes = {}
+        for name, uuid in (("work", "11111111-1111-4111-8111-111111111111"), ("personal", "22222222-2222-4222-8222-222222222222")):
+            cfg = tmp_path / name
+            cfg.mkdir()
+            (cfg / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": uuid}}))
+            homes[name] = (cfg, uuid)
+
+        def become(name):
+            monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(homes[name][0]))
+            st.reset_account_cache()
+            return homes[name][1]
+
+        return become
+
+    def test_one_accounts_choice_does_not_change_the_others(self, two_accounts, tmp_path, capsys):
+        two_accounts("work")
+        run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))
+        two_accounts("personal")
+        assert vitals.read_default() is None  # personal has chosen nothing
+        run(capsys, "--set-default", "lean", "--cwd", str(tmp_path))
+        two_accounts("work")
+        assert vitals.read_default() == "detailed"
+        two_accounts("personal")
+        assert vitals.read_default() == "compact"
+
+    def test_the_file_holds_both_keyed_by_account(self, two_accounts, tmp_path, capsys):
+        work = two_accounts("work")
+        run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))
+        personal = two_accounts("personal")
+        run(capsys, "--set-default", "lean", "--cwd", str(tmp_path))
+        data = json.loads((tmp_path / "shared" / "vitals.json").read_text())
+        assert data == {work: {"default_style": "detailed"}, personal: {"default_style": "compact"}}
+
+    def test_the_old_single_key_shape_is_ignored_and_dropped_on_the_next_write(self, two_accounts, tmp_path, capsys):
+        two_accounts("work")
+        (tmp_path / "shared").mkdir()
+        (tmp_path / "shared" / "vitals.json").write_text('{"default_style": "detailed"}')
+        assert vitals.read_default() is None
+        run(capsys, "--set-default", "lean", "--cwd", str(tmp_path))
+        assert "default_style" not in json.loads((tmp_path / "shared" / "vitals.json").read_text())
+
+    @pytest.mark.parametrize("junk", ["[]", "42", '{"x": 5}', '{"a": {"default_style": 3}}'])
+    def test_other_odd_content_is_replaced_not_crashed_on(self, two_accounts, tmp_path, capsys, junk):
+        key = two_accounts("work")
+        (tmp_path / "shared").mkdir()
+        (tmp_path / "shared" / "vitals.json").write_text(junk)
+        assert vitals.read_default() is None
+        assert run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))[0] == 0
+        assert vitals.read_default() == "detailed"
+        assert key in json.loads((tmp_path / "shared" / "vitals.json").read_text())
+
+
+def test_the_no_buffer_stdout_fallback_adds_no_second_newline(monkeypatch):
+    out = io.StringIO()  # no .buffer, like a redirected or captured stream
+    monkeypatch.setattr(sys, "stdout", out)
+    vitals._emit("one line ✻")
+    vitals._emit("two")
+    assert out.getvalue() == "one line ✻\ntwo\n"

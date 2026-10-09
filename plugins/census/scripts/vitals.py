@@ -651,28 +651,47 @@ NO_DEFAULT_MARKER = "(vitals: no default style chosen yet)"
 
 
 def pref_path() -> Path:
-    """Per account: beside the sessions, in the census dir (census's own rule, so a ``.json`` store works too)."""
+    """Beside the sessions, in the census dir (census's own rule, so a ``.json`` store works too). Accounts that
+    share a ``CENSUS_STORE`` share the file; the choice inside it is keyed by account."""
     return store.census_dir() / PREF_FILE
 
 
-def read_default() -> str | None:
-    """The saved default style, or None when there is none or the file is unreadable or odd. Never raises."""
+def _account_key() -> str:
+    return str(store.account_info()["key"])
+
+
+def _read_prefs() -> dict[str, Any]:
+    """The whole file as ``{account key: {"default_style": ...}}``; anything else (missing, corrupt, the old single-key
+    shape, a list) is an empty dict. Never raises."""
     try:
         data = json.loads(pref_path().read_text(encoding="utf-8"))
     except (OSError, ValueError, UnicodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(k, str) and k != "default_style" and isinstance(v, dict)}
+
+
+def read_default() -> str | None:
+    """This account's saved default style, or None when there is none or the file is unreadable or odd."""
+    try:
+        style = _read_prefs().get(_account_key(), {}).get("default_style")
+    except Exception:  # noqa: BLE001 - a preference never takes the readout down
         return None
-    style = data.get("default_style") if isinstance(data, dict) else None
     return style if isinstance(style, str) and style in STYLES else None
 
 
 def write_default(style: str) -> None:
-    """Save ``style`` atomically (same-directory temp file, then replace). Raises OSError."""
+    """Save ``style`` for this account atomically (same-directory temp file, then replace), keeping every other
+    account's choice. Raises OSError."""
     path = pref_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    prefs = _read_prefs()
+    prefs[_account_key()] = {"default_style": style}
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{PREF_FILE}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump({"default_style": style}, handle)
+            json.dump(prefs, handle)
         os.replace(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):
@@ -693,7 +712,7 @@ def _emit(text: str) -> None:
             return
     except (OSError, ValueError):
         pass
-    sys.stdout.write(data.decode("utf-8", "replace") + "\n")
+    sys.stdout.write(data.decode("utf-8", "replace"))  # ``data`` already ends with its newline
 
 
 def main(argv: list[str] | None = None) -> int:

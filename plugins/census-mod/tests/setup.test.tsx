@@ -661,3 +661,50 @@ test('CENSUS_MOD_STORE still forces shadow even where Shadow was never offered',
   expect(w.asks.find(a => a.header === '📝 Record')?.options.join('|')).not.toContain('Shadow')
   expect(w.logs.join('\n')).toContain('recording: shadow store /cfg/census-x')
 })
+
+// ---- a census found on PATH or via CENSUS_CLI: ask it, do not guess a path ----------------------------------------
+
+test('a launcher on PATH is asked `where`: vitals true shows the line', async ($, on) => {
+  const w = world(on)
+  w.files.delete('/cfg/census/cli.path')
+  w.which.value = '/usr/local/bin/census'
+  w.where.stdout = JSON.stringify({ vitals: true })
+  await setupRun($, w)
+
+  expect(w.where.calls).toContainEqual(['/usr/local/bin/census', 'where'])
+  expect(w.logs.join('\n')).toContain('/census:vitals shows this session')
+})
+
+async function launcherWithoutVitals($: Engine, on: On, reply: { stdout: string; exitCode: number }) {
+  const w = world(on, { files: { '/usr/local/bin/vitals.py': '' } }) // a stray file beside it proves nothing
+  w.files.delete('/cfg/census/cli.path')
+  w.which.value = '/usr/local/bin/census'
+  Object.assign(w.where, reply)
+  await setupRun($, w)
+  expect(w.logs.join('\n')).not.toContain('/census:vitals')
+}
+
+test('...vitals false leaves the line out, whatever sits beside the launcher', async ($, on) => {
+  await launcherWithoutVitals($, on, { stdout: '{"vitals": false}', exitCode: 0 })
+})
+
+test('...and an older census with no `where` does too', async ($, on) => {
+  await launcherWithoutVitals($, on, { stdout: '', exitCode: 2 })
+})
+
+test('a CENSUS_CLI executable is asked too', async ($, on) => {
+  const w = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u', CENSUS_CLI: '/opt/bin/census' }, files: { '/opt/bin/census': '' } })
+  w.files.delete('/cfg/census/cli.path')
+  w.where.stdout = JSON.stringify({ vitals: true })
+  await setupRun($, w)
+
+  expect(w.where.calls).toContainEqual(['/opt/bin/census', 'where'])
+})
+
+test('a Python CLI is not asked: vitals.py beside it decides', async ($, on) => {
+  const w = world(on, { files: { '/plugins/census/scripts/vitals.py': '' } })
+  await setupRun($, w)
+
+  expect(w.where.calls).toEqual([])
+  expect(w.logs.join('\n')).toContain('/census:vitals shows this session')
+})

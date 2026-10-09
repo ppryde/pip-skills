@@ -85,6 +85,8 @@ def report() -> dict[str, Any]:
         "settings_valid": valid,
         "status_line": command if isinstance(command, str) else None,
         "plugin_root": str(Path(__file__).resolve().parents[1]),
+        # whether THIS census ships /census:vitals: asked of the census a caller found, not guessed from a path
+        "vitals": (Path(__file__).resolve().parent / "vitals.py").is_file(),
         "census_installs": _installs(cache, "census", "scripts/cli.py"),
         "enabled_census": {k: v for k, v in enabled.items() if isinstance(k, str) and k.startswith("census@")},
         "census_mod": {

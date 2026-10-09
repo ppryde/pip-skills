@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import {
-  NO_DETECTION, PRESETS, placementFrom, Q, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
+  NO_DETECTION, PRESETS, vitalsFromWhere, isPythonCli, placementFrom, Q, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
   backupBlocks, removeStatusLine, restoreStatusLine, scriptCandidates, statusLineCommand, writerActive, writersFrom,
 } from '../plugin/core/setup'
 
@@ -242,4 +242,15 @@ test('while CENSUS_MOD_STORE forces shadow, Replace is not offered and the quest
 test('CENSUS_MOD_STORE changes nothing for the shapes that never offered Replace', async () => {
   expect(Q.record(NO_DETECTION, true)).toEqual(Q.record(NO_DETECTION))
   expect(Q.record(OTHER, true)).toEqual(Q.record(OTHER))
+})
+
+test('`census where` output says whether vitals ships; anything else is no', async () => {
+  expect(vitalsFromWhere('{"vitals": true, "config_dir": "/x"}')).toBe(true)
+  expect(vitalsFromWhere('{"vitals": false}')).toBe(false)
+  for (const junk of ['', 'not json', '{}', '{"vitals": "yes"}', '[]', 'null']) expect(vitalsFromWhere(junk)).toBe(false)
+})
+
+test('only a Python CLI has its scripts beside it', async () => {
+  expect(isPythonCli('/p/census/scripts/cli.py')).toBe(true)
+  expect(isPythonCli('/usr/local/bin/census')).toBe(false)
 })
