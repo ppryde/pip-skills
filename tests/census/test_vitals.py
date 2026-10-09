@@ -3,13 +3,15 @@ import json
 import os
 import subprocess
 import sys
+import time
 import unicodedata
 from collections import Counter
 from pathlib import Path
 
 import pytest
 
-from scripts import vitals
+from scripts import cli, vitals
+from scripts import store as st
 from scripts.vitals import Vitals, Window
 
 PLUGIN = Path(__file__).resolve().parents[2] / "plugins" / "census"
@@ -21,7 +23,8 @@ HOUR = 3600
 @pytest.fixture(autouse=True)
 def _vitals_env(tmp_path, monkeypatch):
     """Every source vitals consults is pinned inside tmp_path; census is a fake that is not there."""
-    monkeypatch.setenv("CENSUS_CLI", str(tmp_path / "no-census.py"))
+    monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "census"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
     monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
 
 
@@ -389,16 +392,93 @@ def test_every_style_survives_empty_vitals(style):
     assert out  # no source at all still renders something, never raises
 
 
-def test_compact_is_lean_and_complete():
-    out = vitals.render_compact(full_vitals())
-    lines = out.splitlines()
-    assert len(lines) <= 7
-    assert "ctx 9%" in lines[0] and "88k/1M" in lines[0]
-    assert "Opus 5.5 · high · $0.90" in out
-    assert "feat/x · PR #102 open" in out
-    assert "2 dirty · ↑1" in out and "new" not in out and "↓" not in out
-    assert "5h 3%" in out and "7d 22%" in out
-    assert "18 tools · 2 agents" in out
+def lean(**over):
+    """The full fixture with a PR whose state census records (`approved`), and whatever `over` changes."""
+    v = full_vitals()
+    v.pr_state = "approved"
+    for key, value in over.items():
+        setattr(v, key, value)
+    return v
+
+
+def test_lean_is_three_lines_with_full_data():
+    assert vitals.render_compact(lean()) == "\n".join([
+        "⚡ 9% ▰▱▱▱▱▱ 88k/1M · Opus 5.5 · $0.90",
+        "🌿 feat/x · 🔀 #102 ✓ approved · ✏️ 2 ⬆️ 1",
+        "⏳ 5h 3% ⟳4h · 7d 22% ⟳5d",
+    ])
+
+
+def test_lean_without_a_pr_has_no_pr_part():
+    out = vitals.render_compact(lean(pr_number=None, pr_state=None))
+    assert out.splitlines()[1] == "🌿 feat/x · ✏️ 2 ⬆️ 1"
+
+
+def test_lean_pr_states_are_marked():
+    marks = {"approved": "✓ approved", "pending": "… pending", "changes_requested": "✗ changes"}
+    for state, mark in marks.items():
+        assert f"🔀 #102 {mark}" in vitals.render_compact(lean(pr_state=state))
+    assert vitals.render_compact(lean(pr_state="open")).splitlines()[1] == "🌿 feat/x · 🔀 #102 · ✏️ 2 ⬆️ 1"
+
+
+def test_lean_shows_ahead_only_above_zero():
+    assert vitals.render_compact(lean(ahead=0)).splitlines()[1].endswith("✏️ 2")
+    assert vitals.render_compact(lean(ahead=None)).splitlines()[1].endswith("✏️ 2")
+
+
+def test_lean_without_limits_has_no_limits_line():
+    assert vitals.render_compact(lean(windows=[])).splitlines() == [
+        "⚡ 9% ▰▱▱▱▱▱ 88k/1M · Opus 5.5 · $0.90",
+        "🌿 feat/x · 🔀 #102 ✓ approved · ✏️ 2 ⬆️ 1",
+    ]
+
+
+def test_lean_shows_only_the_windows_present():
+    out = vitals.render_compact(lean(windows=[Window("seven_day", 22, NOW + 5 * 86400)]))
+    assert out.splitlines()[2] == "⏳ 7d 22% ⟳5d"
+
+
+def test_lean_adds_a_fourth_line_only_when_the_reading_may_not_be_live():
+    v = Vitals(now=NOW)
+    vitals.apply_census(v, entry(updated_at=NOW - 300, stale=True))
+    lines = vitals.render_compact(v).splitlines()
+    assert lines[-1] == "⚠️ reading is 5m old" and len(lines) == 4
+    assert len(vitals.render_compact(lean()).splitlines()) == 3
+
+
+def test_lean_drops_effort_duration_tools_and_agents():
+    out = vitals.render_compact(lean())
+    assert "high" not in out and "tools" not in out and "agent" not in out and "⏱" not in out
+
+
+def test_lean_with_nothing_known_is_one_line():
+    assert vitals.render_compact(Vitals(now=NOW)) == "⚡ ?% ▱▱▱▱▱▱"
+
+
+def test_lean_a_very_long_branch_and_model_are_clipped_not_wrapped():
+    out = vitals.render_compact(lean(
+        branch="feat/census-v2-account-keyed-limits-and-more",
+        model="Claude Opus 5.5 with an extremely long display name", cost_usd=1234.56, ctx_tokens=888_000,
+    ))
+    assert out.splitlines() == [
+        "⚡ 9% ▰▱▱▱▱▱ · Claude Opus 5.5 with an extr…",  # the cost, then the token counts, went first
+        "🌿 feat/census-v2-acc… · 🔀 #102 ✓ approved · ✏️ 2 ⬆️ 1".replace(" ✓ approved", ""),
+        "⏳ 5h 3% ⟳4h · 7d 22% ⟳5d",
+    ]
+    assert max(width(line) for line in out.splitlines()) <= 44
+
+
+def test_lean_drops_the_cost_first_then_the_token_counts_before_clipping_the_model():
+    first = lambda **kw: vitals.render_compact(lean(ctx_tokens=88_000, **kw)).splitlines()[0]  # noqa: E731
+    assert first(model="Opus 5.5") == "⚡ 9% ▰▱▱▱▱▱ 88k/1M · Opus 5.5 · $0.90"
+    assert first(model="Claude Opus 5.5 ext") == "⚡ 9% ▰▱▱▱▱▱ 88k/1M · Claude Opus 5.5 ext"  # the cost went
+    assert first(model="Claude Opus 5.5 extended ed") == "⚡ 9% ▰▱▱▱▱▱ · Claude Opus 5.5 extended ed"  # then the tokens
+    assert first(model="Claude Opus 5.5 extended edition x").endswith("extended edi…")  # only then is the model clipped
+
+
+def test_lean_the_state_word_goes_before_the_branch_is_cut():
+    out = vitals.render_compact(lean(pr_state="changes_requested", dirty=12345, ahead=123))
+    assert out.splitlines()[1] == "🌿 feat/x · 🔀 #102 · ✏️ 12345 ⬆️ 123"
 
 
 def test_detailed_shows_pace_and_breakdown():
@@ -410,23 +490,6 @@ def test_detailed_shows_pace_and_breakdown():
     assert "2 subagents spawned" in out
     # 22% after 2 of 7 days -> 77% at reset
     assert "pace → 77% at reset (within)" in out
-
-
-def test_playful_verdict_follows_thresholds():
-    v = full_vitals()
-    assert "The soul is clean" in vitals.render_playful(v)
-    v.ctx_pct = 85
-    assert "Found wanting" in vitals.render_playful(v)
-    assert "signs are hidden" in vitals.render_playful(Vitals(now=NOW))
-
-
-def test_stale_reading_shows_age_without_hiding_the_verdict():
-    v = Vitals(now=NOW)
-    vitals.apply_census(v, entry(updated_at=NOW - 300, stale=True))
-    v.ctx_pct = 85
-    assert "reading is 5m old" in vitals.render_compact(v)
-    playful = vitals.render_playful(v)
-    assert "Found wanting" in playful and "reading is 5m old" in playful
 
 
 def test_sibling_sessions_reading_is_flagged_as_borrowed():
@@ -475,7 +538,7 @@ def test_mcp_tool_names_shortened():
     assert vitals.tool_label("mcp__x__an_extremely_long_tool_name") == "an_extremely_…"
 
 
-def test_compact_shows_only_known_windows():
+def test_lean_shows_only_known_windows():
     v = full_vitals()
     v.windows = [Window("seven_day_opus", 50, NOW + HOUR)]
     assert "⏳" not in vitals.render_compact(v)
@@ -522,7 +585,9 @@ def test_bar_clamps():
     [
         ([], "compact"),
         (["detailed"], "detailed"),
-        (["drama"], "playful"),
+        (["drama"], "compact"),  # playful is gone: not a style any more
+        (["brief"], "compact"),
+        (["full"], "detailed"),
         (["Trend"], "detailed"),
         (["nonsense"], "compact"),
         (["please detailed"], "detailed"),
@@ -540,175 +605,78 @@ def test_unexpanded_session_is_unknown(raw):
 # --------------------------------------------------------------- end to end
 
 
-@pytest.fixture
-def fake_census(tmp_path, monkeypatch):
-    """A census CLI that answers --session sess-1 and --worktree, logging calls."""
-    log = tmp_path / "calls.log"
-    data = tmp_path / "entry.json"
-    data.write_text(json.dumps(entry(updated_at=9e12)))
-    script = tmp_path / "fake_census.py"
-    script.write_text(
-        "import sys, pathlib\n"
-        f"pathlib.Path({str(log)!r}).open('a').write(' '.join(sys.argv[1:]) + '\\n')\n"
-        "if sys.argv[2] == '--session' and sys.argv[3] != 'sess-1':\n"
-        "    print('{}'); sys.exit(0)\n"
-        f"print(pathlib.Path({str(data)!r}).read_text())\n"
-    )
-    monkeypatch.setenv("CENSUS_CLI", str(script))
-    return log
+def ingest(session="sess-1", cwd=None, **over):
+    """Record a session into the (tmp) census store, as the status line or the mod would."""
+    payload = entry()["payload"] | {"session_id": session, **({"cwd": str(cwd)} if cwd else {})} | over
+    st.ingest(json.dumps(payload), now=time.time())
 
 
-def test_gather_prefers_own_session(fake_census, tmp_path):
+def test_gather_prefers_own_session(tmp_path):
+    ingest("sess-1", tmp_path, model={"display_name": "Mine"})
+    ingest("sess-2", tmp_path, model={"display_name": "Sibling"})
     v = vitals.gather("sess-1", str(tmp_path))
-    assert v.model == "Opus 5.5"
-    assert fake_census.read_text().splitlines() == ["read --session sess-1"]
+    assert v.model == "Mine" and not v.borrowed
 
 
-def test_gather_falls_back_to_worktree(fake_census, tmp_path):
+def test_gather_falls_back_to_the_worktrees_freshest_session(tmp_path):
+    ingest("sess-2", tmp_path, model={"display_name": "Sibling"})
     v = vitals.gather("other", str(tmp_path))
-    assert v.model == "Opus 5.5"
-    assert fake_census.read_text().splitlines()[1].startswith("read --worktree ")
+    assert v.model == "Sibling" and v.borrowed
+
+
+def test_with_no_session_id_the_worktrees_freshest_is_used(tmp_path):
+    ingest("sess-2", tmp_path)
+    assert vitals.gather(None, str(tmp_path)).has_reading
+
+
+def test_nothing_recorded_is_no_reading(tmp_path):
+    assert vitals.gather("sess-1", str(tmp_path)).has_reading is False
+
+
+def test_the_entry_is_exactly_what_census_read_prints(tmp_path, capsys):
+    """Vitals reads census in-process; the shape must be byte-identical to `census read`."""
+    ingest("sess-1", tmp_path)
+    assert cli.main(["read", "--session", "sess-1"]) == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert vitals.census_entry("sess-1", str(tmp_path)) == printed
+    assert cli.main(["read", "--worktree", os.path.realpath(tmp_path)]) == 0
+    assert vitals.census_entry("nobody", str(tmp_path)) == json.loads(capsys.readouterr().out)
+
+
+def test_vitals_runs_no_census_subprocess_at_all(tmp_path, monkeypatch):
+    """The only subprocess left is the fixed-argv git fallback; census itself is never shelled out to."""
+    ingest("sess-1", tmp_path)
+    seen = []
+    monkeypatch.setattr(vitals.subprocess, "run", lambda cmd, **kw: seen.append(cmd) or (_ for _ in ()).throw(OSError()))
+    vitals.gather("sess-1", str(tmp_path))
+    assert all(cmd[0] == "git" for cmd in seen)
+    src = Path(vitals.__file__).read_text()
+    for gone in ("CENSUS_CLI", "cli.path", "_runnable", "_one_arg", "shlex", "census_cli"):
+        assert gone not in src
+
+
+def test_census_store_is_honoured(tmp_path, monkeypatch):
+    elsewhere = tmp_path / "elsewhere"
+    monkeypatch.setenv("CENSUS_STORE", str(elsewhere))
+    ingest("sess-1", tmp_path)
+    assert (elsewhere / "sessions" / "sess-1.json").exists()
+    assert vitals.gather("sess-1", str(tmp_path)).has_reading
 
 
 def test_no_census_still_prints(tmp_path, capsys):
     assert vitals.main(["--cwd", str(tmp_path)]) == 0
     out = capsys.readouterr().out
-    assert "no census reading yet" in out and "ctx ?%" in out
+    assert "no census reading yet" in out and "⚡ ?%" in out
 
 
-def test_cli_runs_as_script(fake_census, tmp_path):
+def test_cli_runs_as_script(tmp_path):
+    ingest("sess-1", tmp_path)
+    env = {**os.environ, "CENSUS_STORE": str(tmp_path / "census"), "CLAUDE_CONFIG_DIR": str(tmp_path / "cfg")}
     result = subprocess.run(
-        [
-            sys.executable,
-            vitals.__file__,
-            "playful",
-            "--session",
-            "sess-1",
-            "--cwd",
-            str(tmp_path),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
+        [sys.executable, vitals.__file__, "detailed", "--session", "sess-1", "--cwd", str(tmp_path)],
+        capture_output=True, text=True, check=True, env=env,
     )
-    assert "THE SANCTUM'S VITAL SIGNS" in result.stdout
-
-
-# ----------------------------------------------- resolving census (the real one)
-
-
-@pytest.fixture
-def real_census_env(tmp_path, monkeypatch):
-    """The environment census itself reads, pinned inside tmp_path; no CENSUS_CLI override,
-    no PATH, and no sibling cli.py (vitals pretends to live elsewhere)."""
-    monkeypatch.delenv("CENSUS_CLI", raising=False)
-    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
-    monkeypatch.setattr(vitals, "__file__", str(tmp_path / "elsewhere" / "vitals.py"))
-    return dict(os.environ)
-
-
-def test_its_own_plugin_cli_is_used_first(tmp_path, monkeypatch):
-    monkeypatch.delenv("CENSUS_CLI", raising=False)
-    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
-    assert vitals.census_cli() == CENSUS_CLI
-
-
-def test_census_cli_env_is_authoritative_over_the_sibling(tmp_path, monkeypatch):
-    other = tmp_path / "other.py"
-    other.write_text("")
-    monkeypatch.setenv("CENSUS_CLI", str(other))
-    assert vitals.census_cli() == other
-    monkeypatch.setenv("CENSUS_CLI", str(tmp_path / "gone.py"))
-    assert vitals.census_cli() is None  # refused, not skipped past to the sibling
-
-
-def test_cli_path_pointer_in_a_census_store_dir_is_followed(tmp_path, monkeypatch, real_census_env):
-    store = tmp_path / "census"
-    store.mkdir()
-    (store / "cli.path").write_text(str(CENSUS_CLI))
-    monkeypatch.setenv("CENSUS_STORE", str(store))
-    assert vitals.census_cli() == CENSUS_CLI
-
-
-def test_a_dotjson_store_is_read_as_census_reads_it_its_parent_holds_cli_path(tmp_path, monkeypatch, real_census_env):
-    """Vitals ships inside census, and census's own rule (store.census_dir) is that a CENSUS_STORE ending .json is
-    the legacy FILE, whose parent is the census dir: that is where `census install` publishes cli.path."""
-    (tmp_path / "pointer-parent").mkdir()
-    (tmp_path / "pointer-parent" / "cli.path").write_text(str(CENSUS_CLI))
-    monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "pointer-parent" / "status.json"))
-    assert vitals.census_cli() == CENSUS_CLI
-
-
-def test_gather_reads_a_session_recorded_by_the_real_census(tmp_path, monkeypatch):
-    store = tmp_path / "census"
-    monkeypatch.setenv("CENSUS_STORE", str(store))
-    monkeypatch.delenv("CENSUS_CLI", raising=False)
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
-    payload = entry()["payload"] | {"cwd": str(tmp_path), "session_id": "sess-1"}
-    ingest = subprocess.run(
-        [sys.executable, str(CENSUS_CLI), "ingest"], input=json.dumps(payload),
-        capture_output=True, text=True, env=dict(os.environ), check=False,
-    )
-    assert ingest.returncode == 0, ingest.stderr
-    v = vitals.gather("sess-1", str(tmp_path))
-    assert v.has_reading and v.model == "Opus 5.5"
-    assert v.dirty == 0 and v.branch is None  # not a repo: the block's null-safe values
-
-
-def test_a_census_override_is_one_path_never_a_command_line(monkeypatch):
-    monkeypatch.setenv("CENSUS_CLI", f"{sys.executable} -c 'print(1)'")
-    assert vitals.census_cli() is None
-
-
-@pytest.mark.parametrize("bad", ["relative/cli.py", "cli.py"])
-def test_a_relative_census_path_is_refused(bad, monkeypatch):
-    monkeypatch.setenv("CENSUS_CLI", bad)
-    assert vitals.census_cli() is None
-
-
-def test_a_directory_or_a_plain_data_file_is_not_a_census_cli(tmp_path, monkeypatch):
-    data = tmp_path / "notes.txt"
-    data.write_text("hi")
-    for target in (tmp_path, data):
-        monkeypatch.setenv("CENSUS_CLI", str(target))
-        assert vitals.census_cli() is None
-
-
-def test_a_python_script_and_an_executable_are_both_accepted(tmp_path, monkeypatch):
-    script = tmp_path / "cli.py"
-    script.write_text("")
-    program = tmp_path / "census"
-    program.write_text("#!/bin/sh\n")
-    program.chmod(0o755)
-    monkeypatch.setenv("CENSUS_CLI", str(script))
-    assert vitals.census_cli() == script
-    monkeypatch.setenv("CENSUS_CLI", str(program))
-    assert vitals.census_cli() == program
-
-
-def test_a_pointer_to_a_missing_or_relative_file_is_ignored(tmp_path, monkeypatch, real_census_env):
-    store = tmp_path / "census"
-    store.mkdir()
-    monkeypatch.setenv("CENSUS_STORE", str(store))
-    for recorded in ("gone/cli.py", str(tmp_path / "gone" / "cli.py")):
-        (store / "cli.path").write_text(recorded)
-        assert vitals.census_cli() is None
-
-
-def test_each_call_site_builds_its_own_argv(tmp_path, monkeypatch):
-    seen = []
-    monkeypatch.setattr(vitals.subprocess, "run", lambda cmd, **kw: seen.append(cmd) or (_ for _ in ()).throw(OSError()))
-    script = tmp_path / "cli.py"
-    script.write_text("")
-    program = tmp_path / "census"
-    program.write_text("#!/bin/sh\n")
-    program.chmod(0o755)
-    monkeypatch.setenv("CENSUS_CLI", str(script))
-    vitals.census_entry("s 1", "/repo")
-    monkeypatch.setenv("CENSUS_CLI", str(program))
-    vitals.census_entry("s 1", "/repo")
-    assert seen[0] == [sys.executable, str(script), "read", "--session", "s 1"]
-    assert seen[2] == [str(program), "read", "--session", "s 1"]
+    assert "SESSION VITALS" in result.stdout
 
 
 def test_git_is_asked_not_to_take_optional_locks(monkeypatch):
@@ -736,7 +704,7 @@ def test_output_is_utf8_bytes_even_on_a_legacy_windows_stdout(tmp_path, monkeypa
     assert vitals.main(["--cwd", str(tmp_path)]) == 0
 
     out = raw.getvalue().decode("utf-8")
-    assert "no census reading yet" in out and "ctx" in out
+    assert "no census reading yet" in out and "⚡" in out
     assert any(ord(ch) > 0x2000 for ch in out)  # glyphs a cp1252 console cannot encode were written
 
 
@@ -754,17 +722,6 @@ def test_an_interruption_marker_is_not_a_prompt_in_either_form(content):
     assert vitals._is_prompt({}, content) is False
     assert vitals._is_prompt({}, [{"type": "text", "text": content}]) is False
     assert vitals._is_prompt({}, "a real prompt") is True
-
-
-def test_the_census_argv_is_single_tokens_whatever_the_session_id_holds(monkeypatch, tmp_path):
-    seen = []
-    monkeypatch.setattr(vitals, "census_cli", lambda: CENSUS_CLI)
-    monkeypatch.setattr(vitals.subprocess, "run", lambda cmd, **kw: seen.append(cmd) or (_ for _ in ()).throw(OSError()))
-
-    vitals._census_read(["--session", "x; rm -rf / $(id) 'q' \"r\""])
-
-    assert seen[0][-3:] == ["read", "--session", "x; rm -rf / $(id) 'q' \"r\""]
-    assert vitals._one_arg("a b; c") == "a b; c" and vitals._one_arg("") == ""
 
 
 # ------------------------------------------------------------------------ the default style
@@ -792,37 +749,37 @@ class TestDefaultStyle:
         assert code == 0
         assert out.rstrip("\n").splitlines()[-1] == MARKER
         assert out.count(MARKER) == 1
-        assert "ctx ?%" in out  # the lean (compact) readout
+        assert "⚡ ?%" in out  # the lean readout
 
     def test_set_default_saves_and_the_next_run_uses_it_with_no_marker(self, census_home, tmp_path, capsys):
-        code, out = run(capsys, "--set-default", "playful", "--cwd", str(tmp_path))
-        assert code == 0 and "playful" in out
-        assert json.loads((census_home / "vitals.json").read_text()) == {"default_style": "playful"}
+        code, out = run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))
+        assert code == 0 and "detailed" in out
+        assert json.loads((census_home / "vitals.json").read_text()) == {"default_style": "detailed"}
         code, out = run(capsys, "--cwd", str(tmp_path))
-        assert "THE SANCTUM'S VITAL SIGNS" in out and MARKER not in out
+        assert "SESSION VITALS" in out and MARKER not in out
 
     @pytest.mark.parametrize("given,saved", [
         ("lean", "compact"), ("brief", "compact"), ("compact", "compact"), ("full", "detailed"), ("trend", "detailed"),
-        ("detailed", "detailed"), ("drama", "playful"), ("witchfinder", "playful"), ("PLAYFUL", "playful"),
+        ("detailed", "detailed"), ("DETAILED", "detailed"), (" Lean ", "compact"),
     ])
     def test_set_default_takes_names_and_aliases(self, census_home, tmp_path, capsys, given, saved):
         assert run(capsys, "--set-default", given, "--cwd", str(tmp_path))[0] == 0
         assert json.loads((census_home / "vitals.json").read_text())["default_style"] == saved
 
-    @pytest.mark.parametrize("bad", ["", "rm -rf /", "lean; ls", "$(id)", "fancy", "lean detailed"])
+    @pytest.mark.parametrize("bad", ["playful", "drama", "witchfinder", "", "rm -rf /", "lean; ls", "$(id)", "fancy", "lean detailed"])
     def test_anything_else_is_an_error_and_nothing_is_written(self, census_home, tmp_path, capsys, bad):
         assert run(capsys, "--set-default", bad, "--cwd", str(tmp_path))[0] == 2
         assert not (census_home / "vitals.json").exists()
 
     def test_an_explicit_style_wins_and_shows_no_marker(self, census_home, tmp_path, capsys):
-        run(capsys, "--set-default", "playful", "--cwd", str(tmp_path))
-        _, out = run(capsys, "detailed", "--cwd", str(tmp_path))
-        assert "THE SANCTUM'S" not in out and MARKER not in out
+        run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))
+        _, out = run(capsys, "lean", "--cwd", str(tmp_path))
+        assert "SESSION VITALS" not in out and MARKER not in out
         _, out = run(capsys, "--style", "compact", "--cwd", str(tmp_path))
-        assert "ctx ?%" in out and MARKER not in out
+        assert "⚡ ?%" in out and MARKER not in out
 
     def test_an_explicit_style_before_any_default_does_not_nag(self, census_home, tmp_path, capsys):
-        _, out = run(capsys, "playful", "--cwd", str(tmp_path))
+        _, out = run(capsys, "detailed", "--cwd", str(tmp_path))
         assert MARKER not in out
 
     @pytest.mark.parametrize("content", ["{ nope", "[]", "42", '{"default_style": "fancy"}', '{"default_style": 7}', "{}", ""])
@@ -832,6 +789,19 @@ class TestDefaultStyle:
         assert vitals.read_default() is None
         _, out = run(capsys, "--cwd", str(tmp_path))
         assert MARKER in out
+
+    def test_a_default_of_playful_from_the_old_branch_reads_as_unset(self, census_home, tmp_path, capsys):
+        census_home.mkdir(parents=True)
+        (census_home / "vitals.json").write_text('{"default_style": "playful"}')
+        assert vitals.read_default() is None
+        assert MARKER in run(capsys, "--cwd", str(tmp_path))[1]
+
+    def test_playful_is_not_a_style_any_more(self, tmp_path, capsys):
+        assert "playful" not in vitals.STYLES and "playful" not in vitals.ALIASES.values()
+        with pytest.raises(SystemExit):
+            vitals.main(["--style", "playful", "--cwd", str(tmp_path)])
+        _, out = run(capsys, "playful", "--cwd", str(tmp_path))  # a word that names no style: the default (lean)
+        assert "⚡" in out and "SESSION VITALS" not in out
 
     def test_setting_it_again_replaces_it_atomically(self, census_home, tmp_path, capsys):
         run(capsys, "--set-default", "lean", "--cwd", str(tmp_path))
@@ -843,8 +813,8 @@ class TestDefaultStyle:
         monkeypatch.delenv("CENSUS_STORE", raising=False)
         for name in ("a", "b"):
             monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / name))
-            run(capsys, "--set-default", "playful" if name == "a" else "lean", "--cwd", str(tmp_path))
-        assert json.loads((tmp_path / "a" / "census" / "vitals.json").read_text())["default_style"] == "playful"
+            run(capsys, "--set-default", "detailed" if name == "a" else "lean", "--cwd", str(tmp_path))
+        assert json.loads((tmp_path / "a" / "census" / "vitals.json").read_text())["default_style"] == "detailed"
         assert json.loads((tmp_path / "b" / "census" / "vitals.json").read_text())["default_style"] == "compact"
 
     def test_a_dotjson_census_store_keeps_it_beside_the_file(self, tmp_path, monkeypatch, capsys):

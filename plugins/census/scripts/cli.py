@@ -104,14 +104,7 @@ def _statusline(args: argparse.Namespace) -> int:
 
 
 def cmd_read(args: argparse.Namespace) -> int:
-    if args.limits:
-        out: object = st.all_limits() if args.all else st.limits()
-    elif args.session:
-        out = st.for_session(args.session)
-    elif args.worktree:
-        out = st.latest_for_worktree(args.worktree)
-    else:
-        out = st.read_all()
+    out = st.read_view(session=args.session, worktree=args.worktree, limits_only=args.limits, every_account=args.all)
     print(json.dumps(out if out is not None else {}))
     return 0
 

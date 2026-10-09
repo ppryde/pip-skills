@@ -1,13 +1,13 @@
 ---
 name: vitals-lean
-description: Show this session's vital signs in up to seven lean lines — context gauge, model, cost, branch/PR, rate-limit windows, time and tool count (a stale reading adds a freshness line). Phone-sized. Use when the user runs /census:vitals-lean or asks for a quick status check.
+description: Show this session's vital signs in three lean lines — context gauge, model and cost; branch, PR and uncommitted work; rate-limit windows (a fourth line only when the reading may not be live). Phone-sized. Use when the user runs /census:vitals-lean or asks for a quick status check.
 disable-model-invocation: true
 allowed-tools: Bash(python3:*)
 ---
 
 # /census:vitals-lean
 
-Up to seven lines, emoji gauges, nothing wasted. The one to glance at from a phone.
+Three lines, emoji gauges, nothing wasted. The one to glance at from a phone.
 
 ## Reading
 
