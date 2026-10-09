@@ -196,8 +196,7 @@ def census_cli() -> Path | None:
         return own
     store = os.environ.get("CENSUS_STORE")
     if store:
-        # A v1-era value names the status.json file; census reads its parent as the folder.
-        folder = Path(store).parent if store.endswith(".json") else Path(store)
+        folder = Path(store)
     else:
         config = os.environ.get("CLAUDE_CONFIG_DIR")
         folder = (Path(config) if config else Path.home() / ".claude") / "census"
@@ -750,7 +749,7 @@ def resolve_style(words: list[str]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vitals", description=__doc__.splitlines()[0])
-    parser.add_argument("words", nargs="*", help="style name or alias (from /vitals arguments)")
+    parser.add_argument("words", nargs="*", help="style name or alias (from /census:vitals arguments)")
     parser.add_argument("--style", choices=STYLES)
     parser.add_argument("--session", help="session id (default: freshest for the worktree)")
     parser.add_argument("--cwd", default=os.getcwd())
