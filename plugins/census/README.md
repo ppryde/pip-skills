@@ -84,8 +84,10 @@ Readers use `CENSUS_CLI`, else `cli.path`, else `census` on `PATH`.
 **Windows-safe, no global lock.** Each session writes only its own file (temp file plus `os.replace`), so
 sessions never contend. Only each account's limits file is shared, and its merge only ever moves forward. That merge
 runs under a short per-file `O_EXCL` lock (`limits/<key>.json.lock`): waited for at most a quarter second, a crashed
-holder's lock taken over after 5 s by an atomic rename. A writer that waits out a live holder **skips** its merge instead
-of writing from a stale snapshot, and the session's next ingest carries the reading. Only where no lock file can be made
+holder's lock taken over after 5 s by an atomic rename. A writer that waits out a live holder does not write around it: it **queues** its reading in a file of its own,
+`limits/<key>.json.pending.<pid>-<ns>` (no lock needed to queue), and whichever ingest next takes the lock folds every
+queued reading in, window by window and forward-only, then deletes the files. That ingest need not carry `rate_limits`
+itself: any ingest with a queue waiting runs the merge. A queued file whose merge fails to write stays for the next try. Only where no lock file can be made
 at all does a merge go on unlocked; it then re-reads just before writing and checks afterwards that its figures survived
 (redoing the merge up to four times), which narrows the race but cannot close it: that path is best effort. A session id that
 is not a safe filename (`[A-Za-z0-9._-]+`, up to 128 chars) is refused.

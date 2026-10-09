@@ -167,7 +167,7 @@ class TestWaitingOutAHolder:
         monkeypatch.setattr(st, "_atomic_write", lambda p, d: (writes.append(p), real(p, d))[1])
         st._merge_limits_file({"five_hour": {"used_percentage": 99, "resets_at": NOW + 3600}}, NOW)
 
-        assert writes == []
+        assert all(".pending." in str(p) for p in writes)   # the limits file itself is never touched
         assert five_hour() == 60
         assert lock.exists()   # not ours: left alone
 
@@ -206,3 +206,102 @@ class TestAtomicTakeover:
         lock.write_text("")                  # ...and creates its own
         st._take_over_stale_lock(lock)       # waiter B acts on its earlier look
         assert lock.exists()
+
+
+class TestNeverSpins:
+    def test_a_stale_lock_whose_rename_always_fails_still_ends_at_the_deadline(self, tmp_path, monkeypatch):
+        lock = tmp_path / "x.json.lock"
+        lock.write_text("")
+        os.utime(lock, (1, 1))   # stale
+        monkeypatch.setattr(st.os, "rename", lambda *a, **k: (_ for _ in ()).throw(PermissionError("denied")))
+        monkeypatch.setattr(st, "_LOCK_WAIT_SECONDS", 0.1)
+        started = time.monotonic()
+        assert st._acquire_limits_lock(lock) == st.LOCK_BUSY
+        assert time.monotonic() - started < 2
+
+    def test_a_lock_that_cannot_be_statted_still_ends_at_the_deadline(self, tmp_path, monkeypatch):
+        lock = tmp_path / "x.json.lock"
+        lock.write_text("")
+        real_stat = Path.stat
+
+        def stat(self, *a, **k):
+            if self == lock:
+                raise PermissionError("denied")
+            return real_stat(self, *a, **k)
+
+        monkeypatch.setattr(Path, "stat", stat)
+        monkeypatch.setattr(st, "_LOCK_WAIT_SECONDS", 0.1)
+        started = time.monotonic()
+        assert st._acquire_limits_lock(lock) == st.LOCK_BUSY
+        assert time.monotonic() - started < 2
+
+
+class TestASkippedReadingIsNotLost:
+    """A merge that waited out a live holder queues its windows in its own pending file; the next successful
+    merge folds them in (forward-only), even when that next ingest carries no rate_limits at all."""
+
+    @pytest.fixture(autouse=True)
+    def _store(self, store_file, monkeypatch):
+        monkeypatch.setattr(st, "_LOCK_WAIT_SECONDS", 0.02)
+        return store_file
+
+    def _hold(self):
+        lock = st.limits_path().with_name(st.limits_path().name + ".lock")
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("")
+        return lock
+
+    def _pending(self):
+        return sorted(st.limits_dir().glob("*.pending.*"))
+
+    def test_a_skipped_reading_is_queued_not_dropped(self):
+        st.ingest(payload("a", 40), now=NOW)
+        lock = self._hold()
+        st.ingest(payload("b", 70), now=NOW)
+        assert five_hour() == 40 and len(self._pending()) == 1
+        lock.unlink()
+
+    def test_a_later_ingest_with_no_rate_limits_drains_the_queue(self):
+        st.ingest(payload("a", 40), now=NOW)
+        lock = self._hold()
+        st.ingest(payload("b", 70), now=NOW)
+        lock.unlink()
+        st.ingest(json.dumps({"session_id": "b", "cwd": "/wt/b"}), now=NOW)   # no rate_limits field at all
+        assert five_hour() == 70 and self._pending() == []
+
+    def test_queued_readings_merge_forward_only(self):
+        st.ingest(payload("a", 80), now=NOW)
+        lock = self._hold()
+        st.ingest(payload("b", 30), now=NOW)   # lower than what is stored
+        st.ingest(payload("c", 90), now=NOW)
+        lock.unlink()
+        st.ingest(json.dumps({"session_id": "d", "cwd": "/wt/d"}), now=NOW)
+        assert five_hour() == 90 and self._pending() == []
+
+    def test_a_queued_old_window_does_not_beat_a_newer_one(self):
+        st.ingest(payload("a", 10, NOW + 7 * 3600), now=NOW)   # a newer window is stored
+        lock = self._hold()
+        st.ingest(payload("b", 95, NOW + 3600), now=NOW)       # an older window, queued
+        lock.unlink()
+        st.ingest(json.dumps({"session_id": "d", "cwd": "/wt/d"}), now=NOW)
+        assert five_hour() == 10
+
+    def test_a_failed_write_keeps_the_queue_for_next_time(self, monkeypatch):
+        st.ingest(payload("a", 40), now=NOW)
+        lock = self._hold()
+        st.ingest(payload("b", 70), now=NOW)
+        lock.unlink()
+        real = st._atomic_write
+        monkeypatch.setattr(st, "_atomic_write", lambda p, d: (_ for _ in ()).throw(OSError("disk full")))
+        st.ingest(json.dumps({"session_id": "d", "cwd": "/wt/d"}), now=NOW)
+        assert len(self._pending()) == 1
+        monkeypatch.setattr(st, "_atomic_write", real)
+        st.ingest(json.dumps({"session_id": "d", "cwd": "/wt/d"}), now=NOW)
+        assert five_hour() == 70 and self._pending() == []
+
+    def test_pending_files_are_not_accounts_in_the_all_accounts_listing(self):
+        st.ingest(payload("a", 40), now=NOW)
+        lock = self._hold()
+        st.ingest(payload("b", 70), now=NOW)
+        assert set(st.all_limits(now=NOW)) == {st.limits_path().stem}
+        lock.unlink()
