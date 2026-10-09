@@ -36,7 +36,8 @@ export function parsePrList(stdout: string): Pr | null | undefined {
   return pr
 }
 
-export type Why = 'branch' | 'push' | 'age'
+/** `start`: the first sight of a branch by a bound session (a start, a /clear, a restart): a fresh cached answer stands. */
+export type Why = 'branch' | 'push' | 'age' | 'start'
 
 /** A Bash command that can have opened, updated or closed a PR. */
 export const touchesPr = (command: string): boolean => command.includes('git push') || command.includes('gh pr')
@@ -45,7 +46,9 @@ export function shouldRefresh(why: Why, entry: GhEntry | undefined, now: number,
   if (entry?.failedAt !== undefined && now < entry.failedAt + BACKOFF_MS) return false
   if (entry === undefined) return true
   if (why === 'branch' || why === 'push') return true
+  if (why === 'start') return now - entry.at > MAX_AGE_MS
   return now - entry.at > MAX_AGE_MS && lastActiveAt !== null && now - lastActiveAt < ACTIVE_MS
 }
 
-export const ghKey = (root: string, branch: string): string => `gh:${root}|${branch}`
+/** JSON-encoded pair: any root/branch (a `|` in either included) maps to its own key. */
+export const ghKey = (root: string, branch: string): string => `gh:${JSON.stringify([root, branch])}`

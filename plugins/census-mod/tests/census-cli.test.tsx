@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { CLI, START, world } from './world'
+import { BAND, CLI, START, bandLines, turn, USAGE, world } from './world'
 
 const SEC = 1000
 const MIN = 60 * SEC
@@ -91,6 +91,11 @@ test('no census anywhere: nothing is recorded, one line says so, the band still 
 
   expect(w.ingests).toHaveLength(0)
   expect(w.logs.filter(l => l.includes('census not found — install the census plugin'))).toHaveLength(1)
+  const ui = await $.ui.mount(BAND())
+  const lines = await bandLines(ui)
+  expect(lines).toHaveLength(2) // still drawn
+  expect(lines[0]).toContain('🧠')
+  await ui.unmount()
 })
 
 test('shadow mode: CENSUS_MOD_STORE is the child\'s CENSUS_STORE, and its own pointer is read first', async ($, on) => {
@@ -121,7 +126,11 @@ test('a CLI that is not found is looked for again a minute later, not on every w
   await w.clock.advance(0)
   const looks = () => w.runs.filter(r => r.argv[2]?.includes('command -v census')).length
   expect(looks()).toBe(1)
-  await w.clock.advance(30 * SEC)
+  await w.clock.advance(15 * SEC)
+  for (let i = 0; i < 3; i++) { // writes inside the minute do not look again
+    await $.turn.complete(turn(USAGE))
+    await w.clock.advance(5 * SEC)
+  }
   expect(looks()).toBe(1)
 
   await w.clock.advance(31 * SEC)

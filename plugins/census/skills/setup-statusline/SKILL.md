@@ -21,10 +21,12 @@ form); write the whole thing out each time.
 
 ## Steps
 
-1. **Two censuses.** If another census is installed (for example
-   `census@wf-claude-market`), tell the person to disable it first: both write the
-   same launcher, `~/.local/bin/census`, and install refuses a launcher it does
-   not own. Do not continue until they have.
+1. **Two censuses.** The same plugin is published twice, as `census@pip-skills`
+   and `census@wf-claude-market`. If both are installed, tell the person to
+   disable the one this skill is not part of (the other marketplace's, not the
+   copy you are running): both write the same launcher, `~/.local/bin/census`,
+   and install refuses a launcher it does not own. Do not continue until they
+   have.
 
 2. **Preview.** Run `CENSUS statusline --preview` and show the output. It draws
    a canned payload plus the live census store (their real rate limits). It does

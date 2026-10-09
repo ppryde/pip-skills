@@ -256,10 +256,10 @@ test('a process the registry does not know yet is looked for on every later writ
   await $.turn.complete(turn(USAGE))
   await w.clock.advance(2 * SEC)
   expect(w.ingests.at(-1)?.payload.census_mod).toMatchObject({ pid: 22695, proc_start: 'Sun Oct  4 22:57:51 2026' })
-  const reads = w.runs.length
+  const lists = w.registryLists.count
   await $.turn.complete(turn(USAGE))
   await w.clock.advance(2 * SEC)
-  expect(w.runs.length).toBeGreaterThanOrEqual(reads) // and once found it is not looked for again
+  expect(w.registryLists.count).toBe(lists) // and once found it is not looked for again
 })
 
 test('a /clear, resume or fork writes the old session\'s end itself, once, even if session.end never came', async ($, on) => {
@@ -302,4 +302,92 @@ test('the git dir and the session name are read off the start hooks\' path, then
   await w.clock.advance(0)
   expect(w.ingests).toHaveLength(1)
   expect(w.ingests[0]?.payload).toMatchObject({ session_name: 'named', worktree: { path: '/wt' } })
+})
+
+test('the first write waits for the first git status, so census_mod.git is not null until the next write', async ($, on) => {
+  const w = world(on)
+  let release: () => void = () => undefined
+  w.gitGate.value = new Promise<void>(res => { release = res })
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await w.clock.advance(0)
+  expect(w.ingests).toHaveLength(0) // held for git
+
+  release()
+  for (let i = 0; i < 4; i++) await w.clock.advance(0)
+  expect(w.ingests).toHaveLength(1)
+  expect(w.ingests[0]?.payload.census_mod).toMatchObject({ git: { branch: 'main', uncommitted: 1, ahead: 1, has_upstream: true, detached: false } })
+})
+
+test('...but only for a moment: a git that never answers does not hold the first write for ever', async ($, on) => {
+  const w = world(on)
+  w.gitGate.value = new Promise<void>(() => undefined)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await w.clock.advance(3 * SEC + 100)
+
+  expect(w.ingests).toHaveLength(1)
+  expect(w.ingests[0]?.payload.census_mod).toMatchObject({ git: null })
+})
+
+test('a turn\'s deferred transcript reads belong to that session: a /clear in between gets nothing from them', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/cfg/projects/-repo/s1.jsonl', '{"type":"custom-title","customTitle":"old name","sessionId":"s1"}\n')
+  await $.session.start(START)
+  await $.classic.SessionStart(classicStart('startup'))
+  await w.clock.advance(0)
+  await $.turn.complete(turn(USAGE)) // its reads are queued, not yet run
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart(classicStart('clear', 's2'))
+  for (let i = 0; i < 3; i++) await w.clock.advance(0)
+  await w.clock.advance(3 * SEC)
+
+  const mine = w.ingests.filter(i => i.payload.session_id === 's2')
+  expect(mine.length).toBeGreaterThan(0)
+  expect(mine.some(i => i.payload.census_mod.event === 'turn.complete')).toBe(false)
+  expect(mine.every(i => i.payload.session_name === undefined)).toBe(true)
+})
+
+test('the title is read whole once, then only from the transcript tail each turn', async ($, on) => {
+  const w = world(on)
+  const path = '/cfg/projects/-repo/s1.jsonl'
+  await $.session.start(START)
+  await $.classic.SessionStart(classicStart('startup'))
+  await w.clock.advance(0)
+  const wholeReads = () => w.runs.filter(r => r.argv[0] === 'grep' && r.argv.includes(path)).length
+  expect(wholeReads()).toBe(1)
+
+  w.titles.set(path, '{"type":"custom-title","customTitle":"renamed later","sessionId":"s1"}\n')
+  for (let i = 0; i < 3; i++) {
+    await $.turn.complete(turn(USAGE))
+    await w.clock.advance(2 * SEC)
+  }
+  expect(wholeReads()).toBe(1) // never again
+  expect(w.runs.filter(r => r.argv[2]?.includes('custom-title')).length).toBeGreaterThanOrEqual(3)
+  expect(w.ingests.at(-1)?.payload.session_name).toBe('renamed later')
+})
+
+test('the offer does not open a dialog after the session ended within its 3 seconds', async ($, on) => {
+  const w = world(on)
+  w.store.delete('census-mod:setup')
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: {} as never })
+  await w.clock.advance(5 * SEC)
+  for (let i = 0; i < 6; i++) await w.clock.advance(0)
+
+  expect(w.asks).toHaveLength(0)
+})
+
+test('a /clear within those 3 seconds moves the offer to the new session: asked once, there', async ($, on) => {
+  const w = world(on)
+  w.store.delete('census-mod:setup')
+  await $.session.start(START)
+  await w.clock.advance(0)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart(classicStart('clear', 's2'))
+  await w.clock.advance(5 * SEC)
+  for (let i = 0; i < 6; i++) await w.clock.advance(0)
+
+  expect(w.asks.filter(a => a.header === '🧭 Setup')).toHaveLength(1)
 })

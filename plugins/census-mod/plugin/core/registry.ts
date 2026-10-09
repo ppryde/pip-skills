@@ -13,6 +13,7 @@ export function findProc(files: { text: string }[], sessionId: string): Proc | n
     } catch {
       continue
     }
+    if (!d || typeof d !== 'object' || Array.isArray(d)) continue // null, a scalar or an array is no registry entry
     const r = d as { pid?: unknown; sessionId?: unknown; procStart?: unknown; version?: unknown }
     if (r.sessionId !== sessionId || typeof r.pid !== 'number' || r.pid <= 1 || typeof r.procStart !== 'string') continue
     return { pid: r.pid, procStart: r.procStart, ...(typeof r.version === 'string' ? { version: r.version } : {}) }
@@ -34,4 +35,7 @@ export function lastTitle(stdout: string): string | null {
   return null
 }
 
+/** The whole transcript, once per bound session. */
 export const TITLE_ARGV = (path: string): string[] => ['grep', '-h', '-F', '"type":"custom-title"', path]
+/** After each turn: only the tail, where a later /rename lands, so a long session is not re-read whole every turn. */
+export const TITLE_TAIL_CMD = 'tail -c 262144 "$1" | grep -F \'"type":"custom-title"\''

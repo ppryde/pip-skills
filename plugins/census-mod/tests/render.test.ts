@@ -96,3 +96,23 @@ test('emoji and CJK count two columns, a variation selector widens its base', as
   expect(displayWidth('日本')).toBe(4)
   expect(displayWidth('ᗧ•⟳')).toBe(3)
 })
+
+test('CLAUDE_COST_BUDGET must parse whole: "5oops" is the default budget, not $5', async () => {
+  const cost = (budget: string) => text({ ...FULL, costUsd: 10, env: { ...FULL.env, CLAUDE_COST_BUDGET: budget }, ...{} }).split('\n')[0]
+  expect(cost('5oops')).toBe(cost('20'))
+  expect(cost('5')).not.toBe(cost('20'))
+  expect(cost(' 5 ')).toBe(cost('5'))
+  expect(cost('')).toBe(cost('20'))
+})
+
+test('segment names are looked up as own properties: __proto__, constructor and toString are dropped, never called', async () => {
+  expect(layout('__proto__,constructor,toString,context')).toEqual([['context']])
+  expect(() => draw({ ...FULL, env: { CENSUS_STATUSLINE_SEGMENTS: '__proto__,hasOwnProperty,model' } })).not.toThrow()
+})
+
+test('a joined emoji (a ZWJ sequence) is one glyph wide, not one per part', async () => {
+  expect(displayWidth('👩‍💻')).toBe(2)
+  expect(displayWidth('👨‍👩‍👧')).toBe(2)
+  expect(displayWidth('a👩‍💻b')).toBe(4)
+  expect(displayWidth('❤️')).toBe(2)
+})

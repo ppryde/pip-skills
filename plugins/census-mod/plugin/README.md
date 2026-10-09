@@ -15,8 +15,10 @@ steady-state cost is about zero.
   Code's registry file `<config dir>/sessions/<pid>.json` is missing or has a different
   `procStart` string; see the census README, "Liveness".) `pid` and `proc_start` come from
   that same registry, matched by session id; if the entry cannot be found when a write is
-  made they are left out for that write (and looked for again on the next ones), and census
-  falls back to its 90 s rule for that write.
+  made they are left out for that write (and looked for again on the next ones). A
+  `census_mod` block with no `pid` is "unknown" to census 0.5.0, which treats it as live unless
+  `ended` is set (it does not apply the 90 s rule), so a session whose registry entry never
+  turns up can stay non-stale after it died until its entry is pruned (24 h).
 
 ## Setup
 
@@ -52,11 +54,13 @@ the real store **only if** this account's status line does not carry the census 
 first-session offer keeps those defaults and is never repeated.
 
 It needs the **census plugin** (any version at or above 0.5.0, for the process-liveness
-reader) for the CLI. Without it the band still draws, nothing is recorded, and one line
-says so: "census not found — install the census plugin".
+reader) for the CLI. Recording stops only when no CLI is discoverable (see the discovery order
+below: `cli.path`, `CENSUS_CLI`, a sibling install, `census` on PATH); then the band still
+draws, nothing is recorded, and one line says so: "census not found — install the census plugin".
 
-census-mod **replaces census's status-line hook**: run one or the other on a store, never
-both at once (shadow mode, below, is the one exception, because it records elsewhere).
+census-mod **replaces census's status-line hook**: run one or the other on a store. Running
+both is discouraged, not forbidden (`/census-setup` offers "keep both"): two writers on one
+store muddle liveness and idle detection. Shadow mode, below, records elsewhere and is fine.
 
 ## Install
 
@@ -68,7 +72,7 @@ session. Run it beside your status line first (shadow mode, below).
 
 | Event | Why |
 |---|---|
-| `session.start`; classic `SessionStart`, every source (`startup`, `resume`, `clear`, `fork`) | register the session; a `/clear`, resume or fork is a new session id and a new entry |
+| `session.start`; classic `SessionStart` for `startup`, `resume`, `clear` and `fork` (`compact` only refreshes the transcript path; the cache goes cold on `PostCompact`) | register the session; a `/clear`, resume or fork is a new session id and a new entry |
 | `turn.complete`, main thread only, with usage | cost, context, cache counters moved |
 | `session.measure`, when a rate-limit window's percentage or reset changed | limits for the dashboard |
 | `PostModelSwitch`, `CwdChanged`, branch change, PR change | the fields readers show changed |

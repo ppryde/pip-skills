@@ -25,7 +25,7 @@ test('the payload is the status-line shape census reads, with a census_mod block
     session_id: 's1',
     transcript_path: '/cfg/projects/-repo/s1.jsonl',
     cwd: '/repo',
-    workspace: { current_dir: '/repo', project_dir: '/repo' },
+    workspace: { current_dir: '/repo' }, // no project_dir: the mod knows the cwd, not a project root
     model: { id: 'claude-opus-5-5', display_name: 'Opus 5.5' },
     context_window: { used_percentage: 9, context_window_size: 1_000_000, total_input_tokens: 100, total_output_tokens: 100 },
     cost: { total_cost_usd: 0.9, total_duration_ms: 600_000 },

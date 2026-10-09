@@ -26,6 +26,8 @@ export type World = {
   /** A census plugin beside this one, answered for WHATEVER folder the plugin sits in (the kit stages it in a temp dir). */
   sibling: { layout: 'repo' | 'cache' | null; versions: Record<string, { orphaned?: boolean; cli?: boolean }> }
   toasts: string[]
+  gitGate: { value: Promise<void> | null } // while set, `git status` waits on it
+  registryLists: { count: number }        // reads of the session registry directory
   links: Map<string, string>            // symlink path -> target
   mvFails: { value: boolean }           // makes `mv` exit 1
   cps: string[][]                       // argv of every `cp`
@@ -53,7 +55,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     git: { status: '# branch.oid abc1234def\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +1 -0\n1 .M N... 100644 100644 100644 a b f.ts\n', dir: '/repo/.git\n/repo\n', exitCode: 0 },
     gh: { stdout: '[]', exitCode: 0, throws: false },
     titles: new Map(), tail: { value: '"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":100}\n' },
-    which: { value: '' }, logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, sibling: { layout: null, versions: {} },
+    which: { value: '' }, logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, sibling: { layout: null, versions: {} },
   }
   w.files.set(`${REGISTRY}/22695.json`, JSON.stringify({ pid: 22695, sessionId: 's1', procStart: 'Sun Oct  4 22:57:51 2026', version: '2.1.289' }))
   const real = (p: string): string => w.links.get(p) ?? p
@@ -79,21 +81,23 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     if (w.sibling.layout === 'cache' && /\/census$/.test(path) && !path.startsWith('/cfg')) {
       return { value: Object.keys(w.sibling.versions).map(name => ({ name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false })) as never }
     }
+    if (path === REGISTRY) w.registryLists.count++
     const names = w.dirs.get(path)
     return names ? { value: names.map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) as never } : { deny: 'ENOENT' }
   })
-  on('process.run', (_$, e) => {
+  on('process.run', async (_$, e) => {
     const init = (e as unknown as { init?: { cwd?: string; stdin?: string; env?: Record<string, string>; timeoutMs?: number } }).init ?? {}
     const run: Run = { argv: [...e.argv], cwd: init.cwd, stdin: init.stdin, env: init.env, timeoutMs: init.timeoutMs }
     w.runs.push(run)
     const [cmd, ...args] = e.argv
-    if (cmd === 'git' && args.includes('status')) return { value: done(w.git.exitCode, w.git.status) }
+    if (cmd === 'git' && args.includes('status')) { await w.gitGate.value; return { value: done(w.git.exitCode, w.git.status) } }
     if (cmd === 'git' && args.includes('rev-parse')) return { value: done(w.git.exitCode, w.git.dir) }
     if (cmd === 'gh') {
       if (w.gh.throws) throw new Error('spawn gh ENOENT')
       return { value: done(w.gh.exitCode, w.gh.stdout) }
     }
     if (cmd === 'grep') return { value: w.titles.has(e.argv[e.argv.length - 1] ?? '') ? done(0, w.titles.get(e.argv[e.argv.length - 1] ?? '')) : done(1) }
+    if (cmd === 'sh' && e.argv[2]?.includes('custom-title')) { const t = w.titles.get(e.argv[4] ?? ''); return { value: t ? done(0, t) : done(1) } }
     if (cmd === 'sh' && e.argv[2]?.includes('cache_creation')) return { value: done(0, w.tail.value) }
     if (cmd === 'sh' && e.argv[2]?.includes('command -v census')) return { value: w.which.value ? done(0, `${w.which.value}\n`) : done(1) }
     if (cmd === 'cp') { w.cps.push([...e.argv]); const [, , from, to] = e.argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.set(to ?? '', t); return { value: done(0) } }

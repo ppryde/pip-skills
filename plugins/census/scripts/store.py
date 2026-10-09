@@ -29,6 +29,7 @@ most one refresh of a lower figure. ``read_all`` assembles the v1 view
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import math
@@ -935,10 +936,11 @@ def _process_gone(mod: dict[str, Any], config: Path | None) -> bool:
         return True
     try:
         os.kill(pid, 0)
-    except PermissionError:  # EPERM: it exists, it is just not ours
-        pass
-    except OSError:
-        return True
+    except OSError as exc:
+        # Only EPERM means "it exists, it is just not ours". EACCES (also a PermissionError), ESRCH and
+        # anything else leave no process we can vouch for: gone.
+        if exc.errno != errno.EPERM:
+            return True
     recorded = mod.get("proc_start")
     return not isinstance(recorded, str) or _registry_proc_start(pid, config) != recorded
 

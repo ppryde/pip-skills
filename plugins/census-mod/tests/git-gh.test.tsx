@@ -169,11 +169,39 @@ test('a stale PR answer is refreshed on the clock tick, but only while the sessi
   expect(ghRuns(w)).toHaveLength(base + 1)
 })
 
-test('the PR is cached per repo and branch in $.store, so a restart does not re-ask it for nothing', async ($, on) => {
+test('in a linked worktree gh runs in the worktree, not the session\'s cwd', async ($, on) => {
+  const w = world(on)
+  w.git.dir = '/repo/.git/worktrees/w\n/wt\n'
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await w.clock.advance(2 * SEC)
+
+  expect(ghRuns(w)).toHaveLength(1)
+  expect(ghRuns(w)[0]?.cwd).toBe('/wt')
+})
+
+test('the PR is cached per repo and branch in $.store, and a fresh bind of the same branch does not re-ask', async ($, on) => {
   const w = world(on)
   w.gh.stdout = PR
   await $.session.start(START)
   await w.clock.advance(2 * SEC)
+  expect(ghRuns(w)).toHaveLength(1)
+  expect([...w.store.keys()]).toContain('gh:["/repo","main"]')
 
-  expect([...w.store.keys()].some(k => k.startsWith('gh:/repo|main'))).toBe(true)
+  w.sessionId.value = 's2' // a /clear: a new bind, same repo and branch
+  await $.classic.SessionStart(classicStart('clear', 's2'))
+  await w.clock.advance(5 * SEC)
+  await w.clock.advance(2 * SEC)
+
+  expect(ghRuns(w)).toHaveLength(1) // the cached answer stood
+  expect(w.ingests.filter(i => i.payload.session_id === 's2').at(-1)?.payload.pr).toMatchObject({ number: 102 })
+})
+
+test('a restart with a stale cached answer asks again', async ($, on) => {
+  const w = world(on)
+  w.store.set('gh:["/repo","main"]', { at: 1_791_000_000_000 - 11 * MIN, pr: null })
+  await $.session.start(START)
+  await w.clock.advance(2 * SEC)
+
+  expect(ghRuns(w)).toHaveLength(1)
 })

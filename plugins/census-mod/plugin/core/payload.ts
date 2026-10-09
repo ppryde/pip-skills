@@ -46,7 +46,8 @@ export function buildPayload(s: Snap, now: number, event: Event, ended?: string)
   const p: Record<string, unknown> = { session_id: s.sessionId }
   if (s.transcriptPath) p.transcript_path = s.transcriptPath
   p.cwd = s.cwd
-  p.workspace = { current_dir: s.cwd, project_dir: s.cwd }
+  // No project_dir: the mod tracks the current directory, not a project root, and would go stale after a cd.
+  p.workspace = { current_dir: s.cwd }
   if (s.worktreePath) p.worktree = { path: s.worktreePath }
   if (s.model) p.model = s.model
   p.context_window = {

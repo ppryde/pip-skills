@@ -60,17 +60,24 @@ export function atLeast(version: string, min: string): boolean {
 export const INGEST_MARKER = '# --- census: record status-line payload'
 export const hasIngestBlock = (text: string): boolean => text.includes(INGEST_MARKER)
 /** A command that is itself census recording: `census ingest` or `census statusline`. */
-export const commandIsCensus = (command: string): boolean => /(^|[\s/'"])census\s+(ingest|statusline)\b/.test(command)
+export const commandIsCensus = (command: string): boolean =>
+  /(^|[\s/\\'"])census(\.exe)?\s+(ingest|statusline)\b/.test(command) ||
+  // Windows: `census install` points the status line at its launcher, `python "<census dir>\launcher.py" statusline`.
+  /launcher\.py['"]?\s+(ingest|statusline)\b/.test(command)
 
-/** The files a status-line command runs, as absolute paths: `bash ~/.claude/line.sh`, `"$HOME/x.sh" --flag`, `/abs/x`. */
+/**
+ * The files a status-line command runs, as absolute paths: `bash ~/.claude/line.sh`, `"$HOME/x.sh" --flag`,
+ * `/abs/x`, and on Windows `powershell -File "C:\Users\u\my line.ps1"` (quoted, with spaces and backslashes).
+ */
 export function scriptCandidates(command: string, home: string | undefined): string[] {
   const out: string[] = []
-  for (const raw of command.split(/\s+/)) {
-    const t = raw.replace(/^['"]+|['"]+$/g, '')
+  const root = home?.replace(/[\\/]+$/, '')
+  for (const m of command.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) {
+    const t = m[1] ?? m[2] ?? m[3] ?? ''
     let p = t
-    if (home && (t === '~' || t.startsWith('~/'))) p = home.replace(/\/+$/, '') + t.slice(1)
-    else if (home && (t.startsWith('$HOME/') || t.startsWith('${HOME}/'))) p = home.replace(/\/+$/, '') + t.slice(t.indexOf('/'))
-    if (p.startsWith('/') && !out.includes(p)) out.push(p)
+    if (root && (t === '~' || /^~[\\/]/.test(t))) p = root + t.slice(1)
+    else if (root && /^(\$HOME|\$\{HOME\}|%USERPROFILE%)[\\/]/.test(t)) p = root + t.slice(t.search(/[\\/]/))
+    if ((p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\')) && !out.includes(p)) out.push(p)
   }
   return out
 }
@@ -246,7 +253,9 @@ const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.str
 export function restoreStatusLine(text: string, backupText: string | null): Restoration {
   let backup: { statusLine?: unknown } | null = null
   try {
-    backup = backupText === null ? null : (JSON.parse(backupText) as { statusLine?: unknown })
+    const parsed: unknown = backupText === null ? null : JSON.parse(backupText)
+    // A scalar, an array or null is not a backup: nothing to put back.
+    backup = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as { statusLine?: unknown }) : null
   } catch {
     backup = null
   }

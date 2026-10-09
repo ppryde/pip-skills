@@ -11,6 +11,8 @@ from scripts import gitcache as gc
 from scripts import store as st
 
 FIELDS = {"branch", "uncommitted", "ahead", "has_upstream", "detached"}
+# What the git cache says about the clean `repo` fixture: the whole block a fallback must produce.
+CACHE_BLOCK = {"branch": "main", "uncommitted": 0, "ahead": 0, "has_upstream": False, "detached": False}
 
 
 def git(repo, *args):
@@ -98,7 +100,9 @@ class TestFromTheCache:
 
     def test_no_cwd_is_a_null_safe_block(self, store_file):
         st.ingest(json.dumps({"session_id": "s1"}), now=1.0)
-        assert set(st.for_session("s1", now=1.0)["git"]) == FIELDS
+        assert st.for_session("s1", now=1.0)["git"] == {
+            "branch": None, "uncommitted": 0, "ahead": 0, "has_upstream": False, "detached": False,
+        }
 
 
 class TestFromTheMod:
@@ -121,17 +125,17 @@ class TestFromTheMod:
     ])
     def test_an_invalid_field_falls_back_to_the_cache(self, repo, store_file, bad):
         entry = ingest("s1", repo, census_mod={"git": mod_git(**bad)})
-        assert entry["git"]["branch"] == "main"
+        assert entry["git"] == CACHE_BLOCK
 
     @pytest.mark.parametrize("missing", sorted(FIELDS))
     def test_a_missing_field_falls_back_to_the_cache(self, repo, store_file, missing):
         block = mod_git()
         del block[missing]
-        assert ingest("s1", repo, census_mod={"git": block})["git"]["branch"] == "main"
+        assert ingest("s1", repo, census_mod={"git": block})["git"] == CACHE_BLOCK
 
     @pytest.mark.parametrize("junk", ["x", [1], None, 5])
     def test_a_git_that_is_not_an_object_falls_back(self, repo, store_file, junk):
-        assert ingest("s1", repo, census_mod={"git": junk})["git"]["branch"] == "main"
+        assert ingest("s1", repo, census_mod={"git": junk})["git"] == CACHE_BLOCK
 
     def test_a_null_branch_is_valid(self, repo, store_file):
         assert ingest("s1", repo, census_mod={"git": mod_git(branch=None)})["git"]["branch"] is None
