@@ -292,3 +292,95 @@ test('a session file that lists but cannot be read is a warning for its dir', as
   expect(text).not.toContain('cc-other')
   expect(text.split('\n').at(-1)).toMatch(/^! could not read personal: .*EACCES/)
 })
+
+
+// The tmux sweep: a pane with no entry in the dir this session reads.
+function otherAccountsWorld(on: On, listed = '') {
+  const registries: Record<string, Record<string, object>> = {
+    '/home/.claude/sessions': { '101.json': { pid: 101, sessionId: 'a', cwd: '/r/mine', tmux: 'cc-own-1:@0.%0', status: 'busy', updatedAt: 0 } },
+    '/home/.claude-work/sessions': { '777.json': { pid: 777, sessionId: 'w', cwd: '/r/work', tmux: 'cc-work-1:@1.%1', status: 'busy', updatedAt: 0 } },
+  }
+  const calls: string[][] = []
+  const recent = Math.floor(Date.now() / 1000) - 60
+  const panes = [
+    `cc-own-1\t101\t2.1.289\t/r/mine\t${recent}`,
+    `cc-work-1\t777\t2.1.289\t/r/work\t${recent}`,
+    `cc-agents\t800\t2.1.289\t/r/x\t${recent}`,
+    `cc-new-1\t900\t2.1.289\t/r/new\t${recent}`,
+  ].join('\n')
+  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home' : e.name === 'ROSTER_CONFIG_DIRS' ? listed || undefined : undefined }))
+  on('session.id', () => ({ value: 'self' }))
+  on('fs.list', ($, e) => {
+    const names = e.path === '/home' ? ['.claude', '.claude-work', '.config', 'docs'] : Object.keys(registries[e.path.replace(/\/sessions$/, '') + '/sessions'] ?? {})
+    if (e.path === '/home' || registries[e.path]) {
+      return { value: (e.path === '/home' ? names : Object.keys(registries[e.path]!)).map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) }
+    }
+    return { value: [] }
+  })
+  on('fs.read', ($, e) => {
+    const at = e.path.lastIndexOf('/')
+    return { value: JSON.stringify(registries[e.path.slice(0, at)]?.[e.path.slice(at + 1)]) }
+  })
+  on('fs.exists', ($, e) => {
+    const at = e.path.lastIndexOf('/')
+    return { value: Boolean(registries[e.path.slice(0, at)]?.[e.path.slice(at + 1)]) || e.path in registries }
+  })
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('process.run', ($, e) => {
+    calls.push([...e.argv])
+    const [bin, ...rest] = e.argv
+    let stdout = ''
+    if (bin === 'id') stdout = '501\n'
+    else if (bin === 'tmux' && rest.includes('list-panes') && rest.includes('-a')) stdout = panes
+    else if (bin === 'ps' && rest[1] === 'pid=,comm=') stdout = '101 /bin/claude\n777 /bin/claude\n'
+    else if (bin === 'ps' && rest[1] === 'pid=,args=') stdout = '777 /v/2.1.289\n800 /v/2.1.289 agents\n900 /v/2.1.289\n'
+    return { value: { exitCode: bin === 'git' ? 1 : 0, stdout, stderr: '' } as never }
+  })
+  return calls
+}
+
+test('a pane registered in another account is labelled, the agents view is labelled, only the rest is a startup prompt', async ($, on) => {
+  otherAccountsWorld(on)
+  const text = await bridgeText($)
+
+  expect(text).toContain('running in another account (work) — set ROSTER_CONFIG_DIRS to list it')
+  expect(text).toMatch(/cc-agents.*agents view/)
+  expect(text).toMatch(/cc-new-1.*at a startup prompt/)
+  expect(text.match(/at a startup prompt/g)).toHaveLength(1)
+  expect(text).toMatch(/^1 need you/)
+})
+
+test('a dir already in ROSTER_CONFIG_DIRS is an ordinary row, with no other-account label', async ($, on) => {
+  otherAccountsWorld(on, '~/.claude-work')
+  const text = await bridgeText($)
+
+  expect(text).not.toContain('another account')
+  expect(text).toContain('cc-work-1')
+})
+
+test('the sweep asks ps once for all candidate pids, and only for unregistered panes', async ($, on) => {
+  const calls = otherAccountsWorld(on)
+  await bridgeText($)
+  const argsCalls = calls.filter(c => c[0] === 'ps' && c[2] === 'pid=,args=' || c.join(' ').includes('pid=,args='))
+
+  expect(argsCalls).toHaveLength(1)
+  expect(argsCalls[0]!.join(' ')).toContain('777,800,900')
+})
+
+test('no kill is offered for an other-account or agents-view pane', async ($, on) => {
+  otherAccountsWorld(on)
+  const ui = await mountPane($)
+
+  expect(await ui.find({ type: 'Text', text: /running in another account \(work\)/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /agents view/ })).toBeDefined()
+  expect(await ui.find({ key: 'kill-777' })).toBeUndefined()
+  expect(await ui.find({ key: 'kill-800' })).toBeUndefined()
+  expect(await ui.find({ key: 'kill-101' })).toBeDefined()
+  for (const [target, why] of [['cc-agents', 'agents view'], ['cc-work-1', 'another account (work)']] as const) {
+    const reply = await $.command.run({ command: 'roster', args: `kill ${target}`, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    expect(JSON.stringify(reply)).toContain(why)
+    expect(JSON.stringify(reply)).toContain('Refused')
+  }
+  await ui.unmount()
+})
