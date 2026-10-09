@@ -10,7 +10,7 @@ import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
 import type { Event } from '../core/payload'
 import { TITLE_ARGV, TITLE_TAIL_CMD, findProc, lastTitle } from '../core/registry'
 import { TONE_COLOR, draw, fit } from '../core/render'
-import { BACKUP_FILE, backupBlocks, placementFrom, L, MIN_CENSUS, NO_DETECTION, PRESETS, Q, SETUP_KEY, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
+import { BACKUP_FILE, backupBlocks, placementFrom, replaceFrom, L, MIN_CENSUS, NO_DETECTION, PRESETS, Q, SETUP_KEY, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
 import type { Detection, Effective, Saved } from '../core/setup'
 import type { Line, RenderEnv, RenderInput } from '../core/render'
 import type { Counters, RateLimit, Snap } from '../core/types'
@@ -631,26 +631,29 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
       await saveAnswer($, { record: recordMode })
     }
   }
+  let replace = false
   if (recordMode === null) {
     const a = await askOne($, run, Q.record(d))
     if (typeof a !== 'object') return stop(a)
     recordMode = recordFrom(a.a) ?? 'no'
+    replace = replaceFrom(a.a)
     await saveAnswer($, { record: recordMode })
   }
-  const band = await askOne($, run, Q.draw())
+  // Replacing the status line means census-mod must draw: only ask where.
+  const band = await askOne($, run, replace ? Q.place() : Q.draw())
   if (typeof band !== 'object') return stop(band)
-  const drawOn = is(band.a, L.drawYes)
-  await saveAnswer($, { draw: drawOn })
-  if (drawOn) {
-    const where = await askOne($, run, Q.where())
-    if (typeof where !== 'object') return stop(where)
-    await saveAnswer($, { placement: placementFrom(where.a) ?? 'above' })
-  }
+  const placement = placementFrom(band.a)
+  const drawOn = placement !== null
+  await saveAnswer($, placement ? { draw: true, placement } : { draw: false })
   let removed: string | undefined
   if (recordMode === 'yes' && d.ingestBlock) {
-    const a = await askOne($, run, Q.writers(drawOn, d.otherWriter))
-    if (typeof a !== 'object') return stop(a)
-    const choice = writersFrom(a.a)
+    let choice: ReturnType<typeof writersFrom>
+    if (replace && drawOn) choice = 'remove'
+    else {
+      const a = await askOne($, run, Q.writers(drawOn, d.otherWriter))
+      if (typeof a !== 'object') return stop(a)
+      choice = writersFrom(a.a)
+    }
     if (choice === 'remove') {
       const r = await removeOwnStatusLine($)
       if (r.done) {

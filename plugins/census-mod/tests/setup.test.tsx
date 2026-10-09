@@ -28,13 +28,13 @@ const doubleWriter = (w: World) => {
   w.files.set(SCRIPT, MARKED)
 }
 
-test('/census-setup is a registered command that asks, in order: record, band, layout, PR', async ($, on) => {
+test('/census-setup is a registered command that asks, in order: record, draw (and where), layout, PR', async ($, on) => {
   const w = world(on, { files: { '/plugins/census/scripts/vitals.py': '' } })
   const r = await setupRun($, w)
 
   expect(r.text).toContain('questions follow')
-  expect(headers(w)).toEqual(['📝 Record', '🎛️ Band', '📍 Where', '📐 Layout', '🔀 PR'])
-  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'above', preset: 'two', pr: true, offered: true })
+  expect(headers(w)).toEqual(['📝 Record', '🎛️ Draw', '📐 Layout', '🔀 PR'])
+  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below', preset: 'two', pr: true, offered: true })
   expect(w.toasts.at(-1)).toBe('🧭 census-mod is set up')
   expect(w.logs.join('\n')).toContain('undo any time: /census-setup off')
   expect(w.logs.at(-1)).toBe('📊 /census:vitals shows this session on your phone')
@@ -46,8 +46,7 @@ test('the exact questions', async ($, on) => {
 
   expect(w.asks).toEqual([
     { header: '📝 Record', question: "Record this account's sessions into the census store?", options: ['Yes — the real census store (Recommended)', 'Shadow — a separate store, to compare first', 'No — do not record'] },
-    { header: '🎛️ Band', question: 'Draw the status line in the band above the prompt?', options: ['Yes (Recommended)', 'No'] },
-    { header: '📍 Where', question: 'Where should the status line go?', options: ['Above the input (the band)', "Below the input (under Claude Code's hint line) (Recommended)"] },
+    { header: '🎛️ Draw', question: 'Should census-mod draw your status line, and where?', options: ["Yes — below the input, under Claude Code's hint line (Recommended)", 'Yes — above the input, in the band', 'No — record only, draw nothing'] },
     { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Your two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git'] },
     { header: '🔀 PR', question: "Show the branch's open PR (number, review state) using gh? No means gh is never called.", options: ['Yes (Recommended)', "No — never call gh"] },
   ])
@@ -88,7 +87,7 @@ test('Shadow records into <config dir>/census-shadow through the child CENSUS_ST
 
 test('record No with the band on keeps drawing and stops recording', async ($, on) => {
   const w = world(on)
-  w.answer.value = q => (q.header === '📝 Record' ? pick(w, 'No')(q) : q.options[0] ?? null)
+  w.answer.value = q => (q.header === '📝 Record' ? pick(w, 'No')(q) : q.header === '🎛️ Draw' ? pick(w, 'Yes — above')(q) : q.options[0] ?? null)
   await setupRun($, w)
   const before = w.ingests.length
   await $.turn.complete(turn(USAGE))
@@ -102,10 +101,10 @@ test('record No with the band on keeps drawing and stops recording', async ($, o
 
 test('record No and band No is "off": no questions after, nothing recorded, nothing drawn', async ($, on) => {
   const w = world(on)
-  w.answer.value = q => (q.header === '📝 Record' ? pick(w, 'No')(q) : q.header === '🎛️ Band' ? 'No' : q.options[0] ?? null)
+  w.answer.value = q => (q.header === '📝 Record' ? pick(w, 'No')(q) : q.header === '🎛️ Draw' ? 'No — record only, draw nothing' : q.options[0] ?? null)
   await setupRun($, w)
 
-  expect(headers(w)).toEqual(['📝 Record', '🎛️ Band'])
+  expect(headers(w)).toEqual(['📝 Record', '🎛️ Draw'])
   expect(saved(w)).toMatchObject({ record: 'no', draw: false })
   expect(w.toasts.at(-1)).toBe('🧭 census-mod is off')
   const n = w.ingests.length
@@ -119,7 +118,7 @@ test('record No and band No is "off": no questions after, nothing recorded, noth
 
 test('a layout preset is stored and drawn', async ($, on) => {
   const w = world(on)
-  w.answer.value = q => (q.header === '📐 Layout' ? pick(w, 'Minimal')(q) : q.options[0] ?? null)
+  w.answer.value = q => (q.header === '📐 Layout' ? pick(w, 'Minimal')(q) : q.header === '🎛️ Draw' ? pick(w, 'Yes — above')(q) : q.options[0] ?? null)
   await setupRun($, w)
   const ui = await $.ui.mount(BAND())
 
@@ -174,6 +173,7 @@ test('...nor when recording to a shadow store, which is not the line\'s store', 
 test('the census command itself counts as the ingest block', async ($, on) => {
   const w = world(on)
   w.files.set(SETTINGS, settings({ statusLine: { type: 'command', command: 'census statusline' } }))
+  w.answer.value = q => (q.header === '📝 Record' ? pick(w, 'Yes — the real')(q) : q.options[0] ?? null)
   await setupRun($, w)
 
   expect(headers(w)).toContain('⚠️ Writers')
@@ -182,19 +182,20 @@ test('the census command itself counts as the ingest block', async ($, on) => {
 test('the double-writer question', async ($, on) => {
   const w = world(on)
   doubleWriter(w)
+  w.answer.value = q => (q.header === '📝 Record' ? pick(w, 'Yes — the real')(q) : q.options[0] ?? null)
   await setupRun($, w)
 
   expect(w.asks.find(a => a.header === '⚠️ Writers')).toEqual({
     header: '⚠️ Writers',
     question: "This account's status line also records into the census store. Two writers on one store muddle idle and liveness. What now?",
-    options: ["Remove this account's status line (the band replaces it) (Recommended)", "Keep my status line; census-mod won't record", 'Keep both (not recommended)'],
+    options: ["Remove this account's status line (census-mod draws it instead) (Recommended)", "Keep my status line; census-mod won't record", 'Keep both (not recommended)'],
   })
 })
 
 test('without the band there is nothing to replace the status line: removal is not offered', async ($, on) => {
   const w = world(on)
   doubleWriter(w)
-  w.answer.value = q => (q.header === '🎛️ Band' ? 'No' : q.options[0] ?? null)
+  w.answer.value = q => (q.header === '🎛️ Draw' ? 'No — record only, draw nothing' : q.options[0] ?? null)
   await setupRun($, w)
 
   expect(w.asks.find(a => a.header === '⚠️ Writers')?.options).toEqual(["Keep my status line; census-mod won't record (Recommended)", 'Keep both (not recommended)'])
@@ -217,7 +218,7 @@ test('Remove: statusLine backed up exactly, settings.json rewritten atomically w
 test('Keep my status line: census-mod will not record, and settings.json is untouched', async ($, on) => {
   const w = world(on)
   doubleWriter(w)
-  w.answer.value = q => (q.header === '⚠️ Writers' ? pick(w, 'Keep my')(q) : q.options[0] ?? null)
+  w.answer.value = q => (q.header === '⚠️ Writers' ? pick(w, 'Keep my')(q) : q.header === '📝 Record' ? pick(w, 'Yes — the real')(q) : q.options[0] ?? null)
   await setupRun($, w)
 
   expect(saved(w)).toMatchObject({ record: 'no' })
@@ -232,7 +233,7 @@ test('Keep my status line: census-mod will not record, and settings.json is unto
 test('Keep both: allowed, recorded as asked, nothing touched', async ($, on) => {
   const w = world(on)
   doubleWriter(w)
-  w.answer.value = q => (q.header === '⚠️ Writers' ? pick(w, 'Keep both')(q) : q.options[0] ?? null)
+  w.answer.value = q => (q.header === '⚠️ Writers' ? pick(w, 'Keep both')(q) : q.header === '📝 Record' ? pick(w, 'Yes — the real')(q) : q.options[0] ?? null)
   await setupRun($, w)
 
   expect(saved(w)).toMatchObject({ record: 'yes' })
@@ -244,6 +245,7 @@ test('settings.json that is not valid JSON is never edited: the status line stay
   doubleWriter(w)
   w.answer.value = q => {
     if (q.header === '⚠️ Writers') w.files.set(SETTINGS, '{ "statusLine": ') // it went bad after it was read
+    if (q.header === '📝 Record') return pick(w, 'Yes — the real')(q)
     return q.options[0] ?? null
   }
   await setupRun($, w)
@@ -252,6 +254,31 @@ test('settings.json that is not valid JSON is never edited: the status line stay
   expect(w.files.has(BACKUP)).toBe(false)
   expect(saved(w)).toMatchObject({ record: 'no' })
   expect(w.logs.join('\n')).toContain('is not valid JSON, so I left your status line alone')
+})
+
+test('Replace (the recommended answer when the status line feeds census): asks only where, then removes it with no writers question', async ($, on) => {
+  const w = world(on)
+  doubleWriter(w)
+  await setupRun($, w)
+
+  const record = w.asks.find(a => a.header === '📝 Record')
+  expect(record?.options[0]).toBe('Replace my status line — census-mod records and draws it (Recommended)')
+  expect(w.asks.find(a => a.header === '🎛️ Draw')?.options).toEqual(["Yes — below the input, under Claude Code's hint line (Recommended)", 'Yes — above the input, in the band'])
+  expect(headers(w)).not.toContain('⚠️ Writers')
+  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below' })
+  expect(w.files.has(BACKUP)).toBe(true)
+  expect(JSON.parse(w.files.get(SETTINGS) ?? '{}')).not.toHaveProperty('statusLine')
+})
+
+test('a status line that does not feed census is never offered for replacement and never touched', async ($, on) => {
+  const w = world(on)
+  const own = settings({ statusLine: { type: 'command', command: 'bash ~/my-own-line.sh' } })
+  w.files.set(SETTINGS, own)
+  await setupRun($, w)
+
+  expect(w.asks.find(a => a.header === '📝 Record')?.options.join('|')).not.toContain('Replace')
+  expect(headers(w)).not.toContain('⚠️ Writers')
+  expect(w.files.get(SETTINGS)).toBe(own)
 })
 
 // ---- off ------------------------------------------------------------------------------------------------------------
@@ -378,10 +405,10 @@ test('the first session after install is offered setup, once', async ($, on) => 
 
   expect(w.asks[0]).toEqual({
     header: '🧭 Setup',
-    question: 'census-mod is installed. Set it up now? It takes a few questions: whether to record sessions into census, whether to draw the status-line band, and which layout.',
+    question: 'census-mod is installed. Set it up now? It takes a few questions: whether to record sessions into census, whether and where to draw the status line, and which layout.',
     options: ['Set it up now (Recommended)', 'Not now — use the defaults'],
   })
-  expect(headers(w)).toEqual(['🧭 Setup', '📝 Record', '🎛️ Band', '📍 Where', '📐 Layout', '🔀 PR'])
+  expect(headers(w)).toEqual(['🧭 Setup', '📝 Record', '🎛️ Draw', '📐 Layout', '🔀 PR'])
   expect(saved(w).offered).toBe(true)
 })
 
@@ -533,17 +560,26 @@ test('the vitals line appears only when this census build ships vitals', async (
 
 test('"Below" is stored, and the summary says so', async ($, on) => {
   const w = world(on)
-  w.answer.value = q => (q.header === '📍 Where' ? pick(w, 'Below')(q) : q.options[0] ?? null)
+  w.answer.value = q => (q.header === '🎛️ Draw' ? pick(w, 'Yes — below')(q) : q.options[0] ?? null)
   await setupRun($, w)
 
   expect(saved(w)).toMatchObject({ placement: 'below' })
   expect(w.logs.join('\n')).toContain('band: on, below the input')
 })
 
-test('with the band off the placement is not asked', async ($, on) => {
+test('"No" to drawing stores draw off and no placement', async ($, on) => {
   const w = world(on)
-  w.answer.value = q => (q.header === '🎛️ Band' ? 'No' : q.options[0] ?? null)
+  w.answer.value = q => (q.header === '🎛️ Draw' ? 'No — record only, draw nothing' : q.options[0] ?? null)
   await setupRun($, w)
 
-  expect(headers(w)).not.toContain('📍 Where')
+  expect(saved(w)).toMatchObject({ draw: false })
+  expect(saved(w)).not.toHaveProperty('placement')
+})
+
+test('"Above" is stored as the band', async ($, on) => {
+  const w = world(on)
+  w.answer.value = q => (q.header === '🎛️ Draw' ? pick(w, 'Yes — above')(q) : q.options[0] ?? null)
+  await setupRun($, w)
+
+  expect(saved(w)).toMatchObject({ draw: true, placement: 'above' })
 })
