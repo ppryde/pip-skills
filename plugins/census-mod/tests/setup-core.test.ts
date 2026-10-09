@@ -79,6 +79,8 @@ test('census versions compare numerically; 0.5.0 is the floor', async () => {
 
 const YES = 'Yes — record into census (dashboards, vitals and liveness use it)'
 const NO = "No — don't record (dashboards and vitals won't see this account)"
+const NO_FED = 'No — leave recording to my status line (it keeps feeding census)'
+const NO_OTHER = "No — don't record (whatever else writes keeps feeding census)"
 const SHADOW = "Shadow — record into a separate store to compare; dashboards won't see it"
 const REPLACE = 'Replace my status line — census-mod records and draws it'
 const OTHER = { ...NO_DETECTION, otherWriter: true }
@@ -86,7 +88,7 @@ const OTHER = { ...NO_DETECTION, otherWriter: true }
 test('with no existing writer the record question is just Yes (recommended) or No', async () => {
   expect(Q.record(NO_DETECTION)).toEqual({
     header: '📝 Record',
-    question: "Record this account's sessions into census? That's what the overseer dashboard, /census:vitals and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.",
+    question: "Record this account's sessions into census? That's what the overseer dashboard and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.",
     options: [`${YES} (Recommended)`, NO],
   })
 })
@@ -94,7 +96,7 @@ test('with no existing writer the record question is just Yes (recommended) or N
 test('where the status line already feeds census: Replace (recommended), Shadow, Yes, No', async () => {
   const q = Q.record(WITH_BLOCK)
 
-  expect(q.options).toEqual([`${REPLACE} (Recommended)`, SHADOW, YES, NO])
+  expect(q.options).toEqual([`${REPLACE} (Recommended)`, SHADOW, YES, NO_FED])
   expect(q.question).toContain('Your status line already records this account')
   expect(q.options.map(recordFrom)).toEqual(['yes', 'shadow', 'yes', 'no'])
 })
@@ -102,7 +104,7 @@ test('where the status line already feeds census: Replace (recommended), Shadow,
 test('another writer alone brings Shadow (recommended) but not Replace', async () => {
   const q = Q.record(OTHER)
 
-  expect(q.options).toEqual([`${SHADOW} (Recommended)`, YES, NO])
+  expect(q.options).toEqual([`${SHADOW} (Recommended)`, YES, NO_OTHER])
   expect(q.question).toContain('into census in the last few minutes')
 })
 
@@ -207,4 +209,37 @@ test('one draw question: below (recommended), above, or not at all, mapped back 
   })
   expect(Q.draw().options.map(placementFrom)).toEqual(['below', 'above', null])
   expect(placementFrom('nope')).toBeNull()
+})
+
+// ---- review (wf #16): honest copy per shape ---------------------------------------------------------------
+
+test('/census:vitals is named only when this census ships it', async () => {
+  const withVitals = { ...NO_DETECTION, hasVitals: true }
+  expect(Q.record(withVitals).question).toContain('/census:vitals')
+  expect(Q.record(NO_DETECTION).question).not.toContain('/census:vitals')
+  for (const det of [{ ...WITH_BLOCK, hasVitals: false }, { ...OTHER, hasVitals: false }]) expect(Q.record(det).question).not.toContain('/census:vitals')
+  expect(Q.record({ ...WITH_BLOCK, hasVitals: true }).question).toContain('/census:vitals')
+})
+
+test('the No that leaves a recording status line active does not say the dashboards see nothing', async () => {
+  for (const det of [WITH_BLOCK, OTHER]) {
+    const no = Q.record(det).options.find(o => recordFrom(o) === 'no')!
+    expect(no).not.toMatch(/won't see/)
+    expect(no).toMatch(/keeps? feeding census|keeps feeding/)
+  }
+  expect(Q.record(NO_DETECTION).options.at(-1)).toBe(NO) // nothing records: the plain No stands
+})
+
+test('while CENSUS_MOD_STORE forces shadow, Replace is not offered and the question says why', async () => {
+  const q = Q.record(WITH_BLOCK, true)
+
+  expect(q.options.some(o => o.startsWith('Replace'))).toBe(false)
+  expect(q.options.map(recordFrom)).toEqual(['shadow', 'yes', 'no'])
+  expect(q.question).toContain('CENSUS_MOD_STORE')
+  expect(q.question).toContain('stays as that store')
+})
+
+test('CENSUS_MOD_STORE changes nothing for the shapes that never offered Replace', async () => {
+  expect(Q.record(NO_DETECTION, true)).toEqual(Q.record(NO_DETECTION))
+  expect(Q.record(OTHER, true)).toEqual(Q.record(OTHER))
 })
