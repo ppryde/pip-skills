@@ -29,6 +29,16 @@ def test_no_command_it_teaches_needs_a_braced_shell_variable():
     assert "${" not in text and ":-" not in text
 
 
+def test_the_rule_names_its_one_exception():
+    text = " ".join(SKILL.read_text().split())
+    assert "except `${CLAUDE_PLUGIN_ROOT}`" in text and "Claude Code substitutes" in text
+
+
+def test_a_preview_for_another_account_passes_config_dir():
+    text = SKILL.read_text()
+    assert "CENSUS statusline --preview --config-dir <dir>" in text
+
+
 def test_it_resolves_paths_with_census_where():
     text = SKILL.read_text()
     assert "CENSUS where" in text
@@ -37,4 +47,4 @@ def test_it_resolves_paths_with_census_where():
 def test_it_recommends_census_mod_first_when_that_is_installed():
     text = SKILL.read_text()
     assert "/census-setup" in text and "census_mod" in text
-    assert text.index("/census-setup") < text.index("--preview")
+    assert text.index("/census-setup") < text.index("2. **Preview.**")

@@ -19,6 +19,11 @@ import {
   sorted,
   strayRows,
   agentsViewPidsIn,
+  claudePidFor,
+  isAgentsViewArgs,
+  parseEtime,
+  procsIn,
+  startMatches,
   otherClaudeDirs,
   summary,
   tabMarks,
@@ -462,4 +467,60 @@ test('the registry tmux field is <session>:@W.%P and only the session part is th
 test('another-account dirs are the HOME dirs starting .claude, minus those already listed', async () => {
   const names = ['.claude', '.claude-work', '.claude-personal', '.config', 'claude', '.claudeX']
   expect(otherClaudeDirs('/home', names, ['/home/.claude', '/home/.claude-personal/'])).toEqual(['/home/.claude-work', '/home/.claudeX'])
+})
+
+// ---- the sweep resolves the Claude process under a shell, and checks a registry file against the live one ----
+
+const PS = [
+  '  100     1     05:00 -zsh',
+  '  950   100     03:00 -zsh',
+  '  951   950     03:00 /v/2.1.289',
+  '  960   100  1-02:03:04 zsh',
+  '  961   960  1-02:03:04 sh -c wrapper',
+  '  962   961  1-02:03:04 /bin/claude --resume',
+  '  970   100     00:30 /v/2.1.289 agents',
+  '  980   100     00:10 vim notes.md',
+  '',
+].join('\n')
+
+test('ps rows become pid -> parent, elapsed time and args', async () => {
+  const procs = procsIn(PS)
+
+  expect(procs.get(951)).toEqual({ ppid: 950, etimeMs: 180_000, args: '/v/2.1.289' })
+  expect(procs.get(960)?.etimeMs).toBe(((24 + 2) * 3600 + 3 * 60 + 4) * 1000)
+  expect(procs.get(962)?.args).toBe('/bin/claude --resume')
+  expect(procs.size).toBe(8)
+})
+
+test('etime is [[dd-]hh:]mm:ss, or nothing', async () => {
+  expect(parseEtime('00:05')).toBe(5000)
+  expect(parseEtime('01:02:03')).toBe(3_723_000)
+  expect(parseEtime('2-00:00:01')).toBe(172_801_000)
+  expect(parseEtime('nope')).toBeNull()
+})
+
+test('a pane pid that is a shell resolves to the Claude process under it, however deep; Claude itself resolves to itself', async () => {
+  const procs = procsIn(PS)
+
+  expect(claudePidFor(procs, 950)).toBe(951)
+  expect(claudePidFor(procs, 960)).toBe(962) // through a wrapper
+  expect(claudePidFor(procs, 970)).toBe(970)
+  expect(claudePidFor(procs, 980)).toBe(980) // no Claude below it: unchanged
+  expect(claudePidFor(procs, 12345)).toBe(12345) // not in ps at all
+})
+
+test('the agents view is `claude agents`, found in the args', async () => {
+  expect(isAgentsViewArgs('/v/2.1.289 agents')).toBe(true)
+  expect(isAgentsViewArgs('/v/2.1.289 agents --x')).toBe(true)
+  expect(isAgentsViewArgs('/v/2.1.289')).toBe(false)
+  expect(isAgentsViewArgs('/v/2.1.289 --resume agents')).toBe(false)
+})
+
+test('a registry record belongs to a live process only if their start times agree (a reused pid does not)', async () => {
+  const now = 1_791_000_000_000
+  expect(startMatches(now - 3_600_000, 3_600_000, now)).toBe(true)
+  expect(startMatches(now - 3_600_000 + 90_000, 3_600_000, now)).toBe(true) // inside the tolerance
+  expect(startMatches(now - 5 * 86_400_000, 30_000, now)).toBe(false) // a days-old record, a half-minute-old process
+  expect(startMatches(undefined, 30_000, now)).toBe(true) // nothing to compare: not disproved
+  expect(startMatches(now, null, now)).toBe(true)
 })

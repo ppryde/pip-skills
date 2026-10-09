@@ -149,9 +149,9 @@ export const L = {
   oldNo: "Don't record",
   oldYes: 'Record anyway',
   recReplace: 'Replace my status line — census-mod records and draws it',
-  recYes: 'Yes — the real census store',
-  recShadow: 'Shadow — a separate store, to compare first',
-  recNo: 'No — do not record',
+  recYes: 'Yes — record into census (dashboards, vitals and liveness use it)',
+  recShadow: "Shadow — record into a separate store to compare; dashboards won't see it",
+  recNo: "No — don't record (dashboards and vitals won't see this account)",
   drawBelow: "Yes — below the input, under Claude Code's hint line",
   drawAbove: 'Yes — above the input, in the band',
   drawNo: 'No — record only, draw nothing',
@@ -178,15 +178,33 @@ export const Q = {
     question: `The census plugin here is ${version}; census-mod needs ${MIN_CENSUS} or newer to tell a live session from a gone one. Record anyway?`,
     options: [rec(L.oldNo, true), L.oldYes],
   }),
-  record: (det: Detection): Question => ({
-    header: '📝 Record',
-    question: det.ingestBlock
-      ? "Your status line already records this account's sessions into census. Replace it with census-mod (it records and draws the line; your status line is backed up), compare first in a separate store, or keep recording with your status line?"
-      : "Record this account's sessions into the census store?",
-    options: det.ingestBlock
-      ? [rec(L.recReplace, true), L.recShadow, L.recYes, L.recNo]
-      : [rec(L.recYes, true), L.recShadow, L.recNo],
-  }),
+  /**
+   * Almost nobody else records into census, so the common path is Yes or No. Shadow (a separate store to compare
+   * in) and Replace (swap a status line that feeds census for census-mod) are offered only where something already
+   * records into the real store.
+   */
+  record: (det: Detection): Question => {
+    const OVERSEER = 'the overseer dashboard, /census:vitals and liveness'
+    if (det.ingestBlock) {
+      return {
+        header: '📝 Record',
+        question: `Your status line already records this account's sessions into census — the store ${OVERSEER} read. Replace it with census-mod (records and draws the line; yours is backed up), compare first, or leave recording to your status line?`,
+        options: [rec(L.recReplace, true), L.recShadow, L.recYes, L.recNo],
+      }
+    }
+    if (det.otherWriter) {
+      return {
+        header: '📝 Record',
+        question: `Something has been recording this account's sessions into census in the last few minutes — the store ${OVERSEER} read. Two writers on one store muddle liveness: compare first in a separate store, or record anyway?`,
+        options: [rec(L.recShadow, true), L.recYes, L.recNo],
+      }
+    }
+    return {
+      header: '📝 Record',
+      question: "Record this account's sessions into census? That's what the overseer dashboard, /census:vitals and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.",
+      options: [rec(L.recYes, true), L.recNo],
+    }
+  },
   place: (): Question => ({
     header: '🎛️ Draw',
     question: 'Where should census-mod draw your status line?',

@@ -45,7 +45,7 @@ test('the exact questions', async ($, on) => {
   await setupRun($, w)
 
   expect(w.asks).toEqual([
-    { header: '📝 Record', question: "Record this account's sessions into the census store?", options: ['Yes — the real census store (Recommended)', 'Shadow — a separate store, to compare first', 'No — do not record'] },
+    { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard, /census:vitals and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards, vitals and liveness use it) (Recommended)', "No — don't record (dashboards and vitals won't see this account)"] },
     { header: '🎛️ Draw', question: 'Should census-mod draw your status line, and where?', options: ["Yes — below the input, under Claude Code's hint line (Recommended)", 'Yes — above the input, in the band', 'No — record only, draw nothing'] },
     { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Your two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git'] },
     { header: '🔀 PR', question: "Show the branch's open PR (number, review state) using gh? No means gh is never called.", options: ['Yes (Recommended)', "No — never call gh"] },
@@ -74,8 +74,9 @@ test('another writer is reported when a status line wrote into the store a momen
 
 // ---- the paths ----------------------------------------------------------------------------------------------
 
-test('Shadow records into <config dir>/census-shadow through the child CENSUS_STORE', async ($, on) => {
+test('Shadow records into <config dir>/census-shadow through the child CENSUS_STORE, and the summary says what that means', async ($, on) => {
   const w = world(on)
+  doubleWriter(w) // Shadow is only offered where something already records into census
   w.answer.value = q => (q.header === '📝 Record' ? pick(w, 'Shadow')(q) : q.options[0] ?? null)
   await setupRun($, w)
   await $.turn.complete(turn(USAGE))
@@ -83,6 +84,7 @@ test('Shadow records into <config dir>/census-shadow through the child CENSUS_ST
 
   expect(saved(w)).toMatchObject({ record: 'shadow' })
   expect(w.ingests.at(-1)?.env).toEqual({ CENSUS_STORE: '/cfg/census-shadow' })
+  expect(w.logs.join('\n')).toContain("recording: shadow store /cfg/census-shadow — the dashboards and vitals do not read it; run /census-setup and answer Yes to record into census itself")
 })
 
 test('record No with the band on keeps drawing and stops recording', async ($, on) => {
@@ -173,7 +175,7 @@ test('...nor when recording to a shadow store, which is not the line\'s store', 
 test('the census command itself counts as the ingest block', async ($, on) => {
   const w = world(on)
   w.files.set(SETTINGS, settings({ statusLine: { type: 'command', command: 'census statusline' } }))
-  w.answer.value = q => (q.header === '📝 Record' ? pick(w, 'Yes — the real')(q) : q.options[0] ?? null)
+  w.answer.value = q => (q.header === '📝 Record' ? pick(w, 'Yes — record into census')(q) : q.options[0] ?? null)
   await setupRun($, w)
 
   expect(headers(w)).toContain('⚠️ Writers')
@@ -182,7 +184,7 @@ test('the census command itself counts as the ingest block', async ($, on) => {
 test('the double-writer question', async ($, on) => {
   const w = world(on)
   doubleWriter(w)
-  w.answer.value = q => (q.header === '📝 Record' ? pick(w, 'Yes — the real')(q) : q.options[0] ?? null)
+  w.answer.value = q => (q.header === '📝 Record' ? pick(w, 'Yes — record into census')(q) : q.options[0] ?? null)
   await setupRun($, w)
 
   expect(w.asks.find(a => a.header === '⚠️ Writers')).toEqual({
@@ -218,7 +220,7 @@ test('Remove: statusLine backed up exactly, settings.json rewritten atomically w
 test('Keep my status line: census-mod will not record, and settings.json is untouched', async ($, on) => {
   const w = world(on)
   doubleWriter(w)
-  w.answer.value = q => (q.header === '⚠️ Writers' ? pick(w, 'Keep my')(q) : q.header === '📝 Record' ? pick(w, 'Yes — the real')(q) : q.options[0] ?? null)
+  w.answer.value = q => (q.header === '⚠️ Writers' ? pick(w, 'Keep my')(q) : q.header === '📝 Record' ? pick(w, 'Yes — record into census')(q) : q.options[0] ?? null)
   await setupRun($, w)
 
   expect(saved(w)).toMatchObject({ record: 'no' })
@@ -233,7 +235,7 @@ test('Keep my status line: census-mod will not record, and settings.json is unto
 test('Keep both: allowed, recorded as asked, nothing touched', async ($, on) => {
   const w = world(on)
   doubleWriter(w)
-  w.answer.value = q => (q.header === '⚠️ Writers' ? pick(w, 'Keep both')(q) : q.header === '📝 Record' ? pick(w, 'Yes — the real')(q) : q.options[0] ?? null)
+  w.answer.value = q => (q.header === '⚠️ Writers' ? pick(w, 'Keep both')(q) : q.header === '📝 Record' ? pick(w, 'Yes — record into census')(q) : q.options[0] ?? null)
   await setupRun($, w)
 
   expect(saved(w)).toMatchObject({ record: 'yes' })
@@ -245,7 +247,7 @@ test('settings.json that is not valid JSON is never edited: the status line stay
   doubleWriter(w)
   w.answer.value = q => {
     if (q.header === '⚠️ Writers') w.files.set(SETTINGS, '{ "statusLine": ') // it went bad after it was read
-    if (q.header === '📝 Record') return pick(w, 'Yes — the real')(q)
+    if (q.header === '📝 Record') return pick(w, 'Yes — record into census')(q)
     return q.options[0] ?? null
   }
   await setupRun($, w)
@@ -268,6 +270,19 @@ test('Replace (the recommended answer when the status line feeds census): asks o
   expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below' })
   expect(w.files.has(BACKUP)).toBe(true)
   expect(JSON.parse(w.files.get(SETTINGS) ?? '{}')).not.toHaveProperty('statusLine')
+})
+
+test('with CENSUS_MOD_STORE in effect (records to a shadow store) the status line is never removed: the real store still needs it', async ($, on) => {
+  const w = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u', CENSUS_MOD_STORE: '/cfg/census-x' } })
+  doubleWriter(w)
+  await setupRun($, w) // the first answers: Replace, then draw below
+
+  expect(w.files.get(SETTINGS)).toBe(settings())
+  expect(w.files.has(BACKUP)).toBe(false)
+  expect(w.files.get(SCRIPT)).toBe(MARKED)
+  expect(headers(w)).not.toContain('⚠️ Writers')
+  expect(w.logs.join('\n')).toContain('your status line was kept: CENSUS_MOD_STORE makes census-mod record to a shadow store')
+  expect(w.logs.join('\n')).toContain('recording: shadow store /cfg/census-x')
 })
 
 test('a status line that does not feed census is never offered for replacement and never touched', async ($, on) => {
@@ -582,4 +597,49 @@ test('"Above" is stored as the band', async ($, on) => {
   await setupRun($, w)
 
   expect(saved(w)).toMatchObject({ draw: true, placement: 'above' })
+})
+
+test('with nothing recording into census yet there is no Shadow and no Replace: just Yes or No', async ($, on) => {
+  const w = world(on)
+  await setupRun($, w)
+  const options = w.asks.find(a => a.header === '📝 Record')?.options ?? []
+
+  expect(options).toEqual(['Yes — record into census (dashboards, vitals and liveness use it) (Recommended)', "No — don't record (dashboards and vitals won't see this account)"])
+})
+
+test('where the status line already feeds census: Replace first, then Shadow, Yes, No, with the long question', async ($, on) => {
+  const w = world(on)
+  doubleWriter(w)
+  await setupRun($, w)
+
+  expect(w.asks.find(a => a.header === '📝 Record')).toEqual({
+    header: '📝 Record',
+    question: "Your status line already records this account's sessions into census — the store the overseer dashboard, /census:vitals and liveness read. Replace it with census-mod (records and draws the line; yours is backed up), compare first, or leave recording to your status line?",
+    options: [
+      'Replace my status line — census-mod records and draws it (Recommended)',
+      "Shadow — record into a separate store to compare; dashboards won't see it",
+      'Yes — record into census (dashboards, vitals and liveness use it)',
+      "No — don't record (dashboards and vitals won't see this account)",
+    ],
+  })
+})
+
+test('another writer active in the last few minutes (but not this status line) also brings Shadow, without Replace', async ($, on) => {
+  const w = world(on)
+  w.dirs.set('/cfg/census/sessions', ['a.json'])
+  w.files.set('/cfg/census/sessions/a.json', JSON.stringify({ updated_at: 1_791_000_000 - 30, payload: {} }))
+  await setupRun($, w)
+  const record = w.asks.find(a => a.header === '📝 Record')
+
+  expect(record?.options.map(o => o.split(' —')[0])).toEqual(['Shadow', 'Yes', 'No'])
+  expect(record?.options[0]).toContain('(Recommended)')
+  expect(record?.question).toContain('into census in the last few minutes')
+})
+
+test('CENSUS_MOD_STORE still forces shadow even where Shadow was never offered', async ($, on) => {
+  const w = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u', CENSUS_MOD_STORE: '/cfg/census-x' } })
+  await setupRun($, w)
+
+  expect(w.asks.find(a => a.header === '📝 Record')?.options.join('|')).not.toContain('Shadow')
+  expect(w.logs.join('\n')).toContain('recording: shadow store /cfg/census-x')
 })

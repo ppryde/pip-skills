@@ -174,3 +174,26 @@ class TestConfigDirFlag:
 
     def test_the_flag_is_not_offered_elsewhere(self, cfg, capsys):
         assert cli.main(["read", "--config-dir", "/x"]) == 1
+
+
+class TestReviewRound:
+    def test_settings_that_are_not_utf8_are_invalid_not_a_crash(self, cfg):
+        (cfg / "settings.json").write_bytes(b'{"statusLine": "\xff\xfe"}')
+        out = wh.report()
+        assert out["settings_exists"] is True and out["settings_valid"] is False
+        assert out["status_line"] is None
+
+    @pytest.mark.parametrize("dirs,expected", [
+        ("/src/pip-skills/plugins/census-mod/plugin", True),
+        ("/src/census-mod", True),
+        ("/a:/b/census-mod/plugin", True),
+        ("C:\\src\\census-mod\\plugin;D:\\x", True),
+        ("/tmp/census-mod-backup/plugin", False),
+        ("/tmp/not-census-mod/plugin", False),
+        ("/tmp/census-mod.old", False),
+        ("", False),
+    ])
+    def test_a_plugin_dir_names_census_mod_only_as_a_whole_path_component(self, cfg, monkeypatch, dirs, expected):
+        monkeypatch.setenv("CLAUDE_CODE_PLUGIN_DIRS", dirs)
+        assert wh.report()["census_mod"]["via_plugin_dir"] is expected
+        assert wh.report()["census_mod"]["enabled"] is expected
