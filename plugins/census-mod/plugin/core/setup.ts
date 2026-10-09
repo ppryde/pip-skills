@@ -17,7 +17,6 @@ export type Saved = {
 }
 
 export const SETUP_KEY = 'census-mod:setup'
-export const MIN_CENSUS = '0.5.0'
 export const BACKUP_FILE = 'census-mod.statusline.json'
 export const SHADOW_DIRNAME = 'census-shadow'
 
@@ -30,9 +29,6 @@ export const PRESETS: Record<Preset, string> = {
 // ---- what is on this machine ------------------------------------------------------------------
 
 export type Detection = {
-  cliPath: string | null
-  /** From the census plugin's plugin.json beside the CLI; null when it cannot be told. */
-  version: string | null
   /** This account's settings.json `statusLine.command`; null when there is none. */
   statusLineCommand: string | null
   /** Whether that command (or the script it runs) carries census's ingest block. */
@@ -41,23 +37,20 @@ export type Detection = {
   otherWriter: boolean
   /** settings.json exists but is not valid JSON: it is never edited. */
   settingsInvalid: boolean
-  /** This census ships /census:vitals (vitals.py beside its cli.py, or its `census where` says so). */
-  hasVitals: boolean
+  /** The census PLUGIN is enabled for this account (`census@<marketplace>` keys): census-mod replaces it. */
+  censusPlugins: string[]
 }
 
-export const NO_DETECTION: Detection = { cliPath: null, version: null, statusLineCommand: null, ingestBlock: false, otherWriter: false, settingsInvalid: false, hasVitals: false }
+export const NO_DETECTION: Detection = { statusLineCommand: null, ingestBlock: false, otherWriter: false, settingsInvalid: false, censusPlugins: [] }
 
-export function versionParts(v: string): number[] {
-  return v.split('.').map(p => (/^\d+$/.test(p) ? Number.parseInt(p, 10) : 0))
-}
-export function atLeast(version: string, min: string): boolean {
-  const a = versionParts(version)
-  const b = versionParts(min)
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const d = (a[i] ?? 0) - (b[i] ?? 0)
-    if (d !== 0) return d > 0
-  }
-  return true
+/** The enabled `census@<marketplace>` plugin keys in a settings.json `enabledPlugins` (census-mod does not count). */
+export function enabledCensusPlugins(data: Record<string, unknown>): string[] {
+  const enabled = data.enabledPlugins
+  if (!enabled || typeof enabled !== 'object' || Array.isArray(enabled)) return []
+  return Object.entries(enabled as Record<string, unknown>)
+    .filter(([key, on]) => on === true && /^census@[^@]+$/.test(key))
+    .map(([key]) => key)
+    .sort()
 }
 
 // Census's own sentinel (plugins/census/scripts/statusline.py START): the line that opens the block it adds.
@@ -148,8 +141,8 @@ const REC = ' (Recommended)'
 export const L = {
   offerYes: 'Set it up now',
   offerLater: 'Not now — use the defaults',
-  oldNo: "Don't record",
-  oldYes: 'Record anyway',
+  exStop: "Stop — I'll disable census first",
+  exGo: 'Continue anyway (two writers)',
   recReplace: 'Replace my status line — census-mod records and draws it',
   recYes: 'Yes — record into census (dashboards, vitals and liveness use it)',
   recShadow: "Shadow — record into a separate store to compare; dashboards won't see it",
@@ -177,10 +170,11 @@ export const Q = {
     question: 'census-mod is installed. Set it up now? It takes a few questions: whether to record sessions into census, whether and where to draw the status line, and which layout.',
     options: [rec(L.offerYes, true), L.offerLater],
   }),
-  old: (version: string): Question => ({
-    header: '📝 Census',
-    question: `The census plugin here is ${version}; census-mod needs ${MIN_CENSUS} or newer to tell a live session from a gone one. Record anyway?`,
-    options: [rec(L.oldNo, true), L.oldYes],
+  /** census and census-mod are alternatives: with the census plugin enabled there would be two writers. */
+  exclusive: (keys: string[]): Question => ({
+    header: '⚠️ census',
+    question: `census-mod replaces the census plugin, and ${keys.join(', ')} is still enabled here. Disable it first (${keys.map(k => `claude plugin disable ${k}`).join('; ')}), or two writers will share one store. Stop here, or continue anyway?`,
+    options: [rec(L.exStop, true), L.exGo],
   }),
   /**
    * Almost nobody else records into census, so the common path is Yes or No. Shadow (a separate store to compare
@@ -188,8 +182,8 @@ export const Q = {
    * records into the real store.
    */
   record: (det: Detection, shadowByEnv = false): Question => {
-    const readers = det.hasVitals ? 'the overseer dashboard, /census:vitals and session liveness' : 'the overseer dashboard and session liveness'
-    const OVERSEER = det.hasVitals ? 'the overseer dashboard, /census:vitals and liveness' : 'the overseer dashboard and liveness'
+    const readers = 'the overseer dashboard, /census-mod:vitals and session liveness'
+    const OVERSEER = 'the overseer dashboard, /census-mod:vitals and liveness'
     if (det.ingestBlock && shadowByEnv) {
       return {
         header: '📝 Record',
@@ -335,14 +329,5 @@ export function backupBlocks(existing: string | null, newBackup: string): boolea
   return old !== undefined && !same(old, statusOf(newBackup))
 }
 
-/** `census where` JSON to "does this census ship vitals"; anything unreadable (an older census, a failure) is no. */
-export function vitalsFromWhere(stdout: string): boolean {
-  try {
-    return (JSON.parse(stdout) as { vitals?: unknown }).vitals === true
-  } catch {
-    return false
-  }
-}
-
-/** A CLI that is a Python script has its plugin's scripts beside it; anything else (a launcher on PATH) is asked. */
-export const isPythonCli = (cliPath: string): boolean => cliPath.endsWith('.py')
+/** The answer to the mutual-exclusion question: true to go on despite the census plugin. */
+export const continueAnyway = (answer: string): boolean => is(answer, L.exGo)

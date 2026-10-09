@@ -1,11 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 import { EMPTY_COUNTERS, TAIL_CMD, addTurn, compacted, expiresAtMs, isWarm, parseWrites, ratio, sessionRatio, ttlFromWrites, withTtl } from '../plugin/core/cache'
-import { COALESCE_MS, ancestors, compareVersions, delayFor, endTimeoutMs, findSibling, highestVersion, ingestArgv, ingestEnv, pointerFiles } from '../plugin/core/census'
+import { COALESCE_MS, bundledCli, delayFor, endTimeoutMs, ingestArgv, ingestEnv } from '../plugin/core/census'
 import { GIT_DIR_ARGV, GIT_STATUS_ARGV, parseStatus, touchesGit, watchPaths, worktreeOf } from '../plugin/core/git'
 import { BACKOFF_MS, ghKey, ghArgv, parsePrList, shouldRefresh, touchesPr } from '../plugin/core/gh'
 import { findProc, lastTitle } from '../plugin/core/registry'
 import { configRoot, transcriptPathFor, trimSlashes } from '../plugin/core/name'
-import { censusDir } from '../plugin/core/census'
 
 const T0 = 1_791_000_000_000
 const USAGE = { input_tokens: 2, output_tokens: 100, cache_read_input_tokens: 90, cache_creation_input_tokens: 8 }
@@ -43,21 +42,21 @@ test('the ttl is read off the transcript tail: any 5m write makes it 5m, none fo
   expect(TAIL_CMD).toContain('tail -c 65536')
 })
 
-// ---- census CLI discovery and the ingest call ---------------------------------------------------
 
-test('pointers: the shadow dir first, then the census dir (CENSUS_STORE, else the config dir)', async () => {
-  expect(pointerFiles({ CLAUDE_CONFIG_DIR: '/cfg' })).toEqual(['/cfg/census/cli.path'])
-  expect(pointerFiles({ CLAUDE_CONFIG_DIR: '/cfg', CENSUS_STORE: '/store/' })).toEqual(['/store/cli.path'])
-  expect(pointerFiles({ CLAUDE_CONFIG_DIR: '/cfg', CENSUS_MOD_STORE: '~/shadow' , HOME: '/home/u' })).toEqual(['/home/u/shadow/cli.path', '/cfg/census/cli.path'])
-  expect(pointerFiles({ HOME: '/home/u' })).toEqual(['/home/u/.claude/census/cli.path'])
-  expect(pointerFiles({})).toEqual([])
+// ---- the bundled recorder and the ingest call ---------------------------------------------------
+
+test('census-mod records through its OWN bundled ingest: python3 <plugin root>/scripts/cli.py ingest, a list argv', async () => {
+  expect(bundledCli('/home/u/.claude/plugins/cache/pip-skills/census-mod/0.4.0')).toBe('/home/u/.claude/plugins/cache/pip-skills/census-mod/0.4.0/scripts/cli.py')
+  expect(bundledCli('/x/plugin/')).toBe('/x/plugin/scripts/cli.py')
+  expect(ingestArgv('/x/plugin/scripts/cli.py')).toEqual(['python3', '/x/plugin/scripts/cli.py', 'ingest'])
 })
 
-test('a .py runs under python3, anything else is the executable; shadow mode sets CENSUS_STORE for the child', async () => {
-  expect(ingestArgv('/x/cli.py')).toEqual(['python3', '/x/cli.py', 'ingest'])
-  expect(ingestArgv('/usr/local/bin/census')).toEqual(['/usr/local/bin/census', 'ingest'])
+test('shadow mode sets CENSUS_STORE for the child; the value goes unchanged, a .json file included', async () => {
   expect(ingestEnv({})).toBeUndefined()
   expect(ingestEnv({ CENSUS_MOD_STORE: '/cfg/census-shadow' })).toEqual({ CENSUS_STORE: '/cfg/census-shadow' })
+  expect(ingestEnv({ CENSUS_MOD_STORE: '/shadow/status.json' })).toEqual({ CENSUS_STORE: '/shadow/status.json' })
+  expect(ingestEnv({ CENSUS_MOD_STORE: '~/shadow/x.json', HOME: '/home/u' })).toEqual({ CENSUS_STORE: '/home/u/shadow/x.json' })
+  expect(ingestEnv({ CENSUS_MOD_STORE: '/shadow/dir/' })).toEqual({ CENSUS_STORE: '/shadow/dir' })
 })
 
 test('ingests are 2 s apart; the final one fits what is left of the session.end budget', async () => {
@@ -149,68 +148,7 @@ test('the session name is the last custom-title row', async () => {
   expect(lastTitle('')).toBeNull()
 })
 
-// ---- a census plugin installed beside this one ------------------------------------------------
-
-const fsOf = (files: string[], dirs: Record<string, string[]> = {}) => ({
-  exists: async (p: string) => files.includes(p),
-  list: async (p: string) => {
-    const names = dirs[p]
-    if (!names) throw new Error('ENOENT')
-    return names.map(name => ({ name }))
-  },
-})
-
-test('ancestors, nearest first, and version order is numeric (0.10.0 over 0.9.0)', async () => {
-  expect(ancestors('/a/b/census-mod')).toEqual(['/a/b', '/a', '/'])
-  expect(highestVersion(['0.9.0', '0.10.0', '0.2.5'])).toBe('0.10.0')
-  expect(highestVersion([])).toBeNull()
-  expect(compareVersions('1.0.0', '1.0')).toBe(0)
-})
-
-test('a repo checkout: <plugins>/census/scripts/cli.py, found by walking up', async () => {
-  const fs = fsOf(['/repo/plugins/census/scripts/cli.py'])
-
-  expect(await findSibling(fs, '/repo/plugins/census-mod')).toBe('/repo/plugins/census/scripts/cli.py')
-  expect(await findSibling(fs, '/repo/plugins/census-mod/hooks')).toBe('/repo/plugins/census/scripts/cli.py')
-  expect(await findSibling(fs, '/repo/plugins/census-mod/plugin')).toBe('/repo/plugins/census/scripts/cli.py')
-  expect(await findSibling(fs, '/elsewhere/census-mod')).toBeNull()
-})
-
-test('a marketplace cache: <cache>/<mkt>/census/<version>/scripts/cli.py, the highest version wins', async () => {
-  const base = '/cfg/plugins/cache/pip-skills/census'
-  const fs = fsOf(
-    [`${base}/0.9.0/scripts/cli.py`, `${base}/0.10.0/scripts/cli.py`, `${base}/0.2.0/scripts/cli.py`],
-    { [base]: ['0.9.0', '0.10.0', '0.2.0'] },
-  )
-
-  expect(await findSibling(fs, '/cfg/plugins/cache/pip-skills/census-mod/0.1.0')).toBe(`${base}/0.10.0/scripts/cli.py`)
-})
-
-test('an orphaned version dir is skipped, even when it is the highest', async () => {
-  const base = '/cache/pip-skills/census'
-  const fs = fsOf(
-    [`${base}/0.9.0/scripts/cli.py`, `${base}/0.10.0/scripts/cli.py`, `${base}/0.10.0/.orphaned_at`],
-    { [base]: ['0.9.0', '0.10.0'] },
-  )
-
-  expect(await findSibling(fs, '/cache/pip-skills/census-mod/0.1.0')).toBe(`${base}/0.9.0/scripts/cli.py`)
-})
-
-test('a version dir with no CLI in it, or only orphans, is nothing', async () => {
-  const base = '/cache/pip-skills/census'
-  const fs = fsOf([`${base}/0.1.0/.orphaned_at`, `${base}/0.1.0/scripts/cli.py`], { [base]: ['0.1.0', '0.2.0'] })
-
-  expect(await findSibling(fs, '/cache/pip-skills/census-mod/0.1.0')).toBeNull()
-})
-
 // ---- review round: edge cases -------------------------------------------------------------------
-
-test('a CENSUS_STORE ending .json is a file in census\'s eyes: the pointer lives in its parent', async () => {
-  expect(censusDir({ CENSUS_STORE: '/store/status.json', CLAUDE_CONFIG_DIR: '/cfg' })).toBe('/store')
-  expect(pointerFiles({ CENSUS_STORE: '/store/status.json' })).toEqual(['/store/cli.path'])
-  expect(pointerFiles({ CENSUS_MOD_STORE: '/shadow/x.json', CLAUDE_CONFIG_DIR: '/cfg' })).toEqual(['/shadow/cli.path', '/cfg/census/cli.path'])
-  expect(pointerFiles({ CENSUS_STORE: '/status.json' })).toEqual(['/cli.path'])
-})
 
 test('a config dir of "/" stays "/" instead of becoming the empty string', async () => {
   expect(trimSlashes('/')).toBe('/')
@@ -239,9 +177,3 @@ test('registry entries that are not objects are skipped, not fatal', async () =>
   expect(findProc(files, 's1')).toEqual({ pid: 9, procStart: 'p' })
 })
 
-test('a .json store override goes to the census child UNCHANGED; only the pointer lookup uses its parent dir', async () => {
-  expect(ingestEnv({ CENSUS_MOD_STORE: '/shadow/status.json' })).toEqual({ CENSUS_STORE: '/shadow/status.json' })
-  expect(ingestEnv({ CENSUS_MOD_STORE: '~/shadow/x.json', HOME: '/home/u' })).toEqual({ CENSUS_STORE: '/home/u/shadow/x.json' })
-  expect(pointerFiles({ CENSUS_MOD_STORE: '/shadow/status.json' })).toContain('/shadow/cli.path')
-  expect(ingestEnv({ CENSUS_MOD_STORE: '/shadow/dir/' })).toEqual({ CENSUS_STORE: '/shadow/dir' })
-})

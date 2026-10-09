@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.59.0",
+  "version": "1.60.0",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -147,7 +147,7 @@
     {
       "name": "census",
       "source": "./plugins/census",
-      "description": "Records the Claude Code status-line payload into a per-session, worktree-indexed store that dashboards and handover tools read, and draws a two-line status line (context, prompt cache, rate limits, cost, model, git) in one stdlib process. Skills /census:setup-statusline and /census:vitals (on-demand, phone-sized session vitals: lean, detailed). Pure Python, no mod.",
+      "description": "Records the Claude Code status-line payload into a per-session, worktree-indexed store that dashboards and handover tools read, and draws a two-line status line (context, prompt cache, rate limits, cost, model, git) in one stdlib process. Skills /census:setup-statusline and /census:vitals (on-demand, phone-sized session vitals: lean, detailed). Pure Python, no mod. census and census-mod are alternatives: install one.",
       "category": "engineering",
       "tags": [
         "context",
@@ -165,7 +165,7 @@
     {
       "name": "census-mod",
       "source": "./plugins/census-mod/plugin",
-      "description": "Census v2 recorded and drawn by a Claude Code mod: every interactive session is recorded into the census store (through census ingest, no heartbeat) on turn end, rate-limit, model, cwd, branch and PR changes, and the status line is drawn above the prompt (the band) or below it (under the hint line) with census's own segments. git and gh run only when something they report can have changed. Needs the census plugin. A mod.",
+      "description": "Standalone census as a Claude Code mod: every interactive session is recorded into the census store by its own bundled ingest (no heartbeat), the status line is drawn above the prompt or below it with census's own segments, and /census-mod:vitals shows the session on a phone. Includes census's store, ingest and vitals; does not need the census plugin (census and census-mod are alternatives: install one). git and gh run only when something they report can have changed. A mod.",
       "category": "engineering",
       "tags": [
         "census",

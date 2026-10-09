@@ -1,38 +1,46 @@
 # census-mod
 
-Census v2 recorded and drawn by a Claude Code mod. A status line is a command Claude
-Code re-runs every 60 s in every session, idle or not; a mod acts on events, so the
-steady-state cost is about zero.
+Census v2 recorded and drawn by a Claude Code mod. **census-mod is standalone**: it bundles
+census's store, ingest and vitals (`scripts/`, byte-identical copies of the census plugin's own
+Python) and never needs, calls or looks for the census plugin. census and census-mod are
+**alternatives: install one or the other**. census is the classic, mod-free plugin (a command
+status line); census-mod is this. A status line is a command Claude Code re-runs every 60 s in
+every session, idle or not; a mod acts on events, so the steady-state cost is about zero.
 
 - **Records** every interactive main session into the census v2 store (the same
-  `sessions/<sid>.json` and `limits/` files), by piping a status-line-shaped payload to
-  `census ingest`. One writer implementation: census's own. No status line needed.
+  `sessions/<sid>.json` and `limits/` files, the same `census read` output), by piping a
+  status-line-shaped payload to its own bundled `scripts/cli.py ingest`. The first ingest also
+  publishes `<census dir>/cli.path` pointing at that bundled `cli.py`, so the overseer
+  dashboard, vigil and other readers find a census CLI without census being installed.
 - **Draws** the status line, your choice of above the input (the band) or below it (under Claude
-  Code's hint line), with census's segments,
-  glyphs, colours and thresholds (`plugins/census/scripts/render.py` is the reference).
+  Code's hint line), with census's segments, glyphs, colours and thresholds.
+- **Ships vitals**: `/census-mod:vitals` (and `/census-mod:vitals-lean`, `/census-mod:vitals-detailed`)
+  show this session's vital signs on a phone, read straight from the store (the command is
+  `/census-mod:vitals`, not `/census:vitals`, because the plugin is `census-mod`).
 - **No heartbeat.** The payload carries `census_mod.{version,pid,proc_start,event,ended}`
-  so a reader can tell "open but idle" from "gone" by the session's process. (The reader
-  side is census 0.5.0: `stale` when `census_mod.ended` is set, the pid is gone, or Claude
-  Code's registry file `<config dir>/sessions/<pid>.json` is missing or has a different
-  `procStart` string; see the census README, "Liveness".) `pid` and `proc_start` come from
-  that same registry, matched by session id; if the entry cannot be found when a write is
-  made they are left out for that write (and looked for again on the next ones). A
-  `census_mod` block with no `pid` is "unknown" to census 0.5.0, which treats it as live unless
-  `ended` is set (it does not apply the 90 s rule), so a session whose registry entry never
-  turns up can stay non-stale after it died until its entry is pruned (24 h).
+  so a reader can tell "open but idle" from "gone" by the session's process: `stale` when
+  `census_mod.ended` is set, the pid is gone, or Claude Code's registry file
+  `<config dir>/sessions/<pid>.json` is missing or has a different `procStart` string (the
+  bundled store implements this; see "Liveness" in the census README). `pid` and `proc_start`
+  come from that same registry, matched by session id; if the entry cannot be found when a write
+  is made they are left out for that write (and looked for again on the next ones). A
+  `census_mod` block with no `pid` is "unknown" and treated as live unless `ended` is set (the
+  90 s rule is not applied), so a session whose registry entry never turns up can stay
+  non-stale after it died until its entry is pruned (24 h).
 
 ## Setup
 
 Run **`/census-setup`** (the first session after install offers it once). It asks a few
 questions one at a time through `$.ui.ask`, so nothing reaches the model and the phone can
-answer; every answer is saved as it is given. First it looks, with no questions: the census
-CLI and its version (0.5.0 or newer is needed for liveness; older offers recording off), this
+answer; every answer is saved as it is given. First it looks, with no questions: this
 account's `settings.json` `statusLine`, whether its script carries census's ingest block
-(or the command is `census ingest` / `census statusline`), and whether another writer wrote
-into the store in the last few minutes. Then:
+(or the command is `census ingest` / `census statusline`), whether another writer wrote
+into the store in the last few minutes, and whether the **census plugin is enabled**. census
+and census-mod are alternatives, so if it is, setup stops first: "census-mod replaces the
+census plugin — disable it with `claude plugin disable census@<marketplace>`", and offers to
+continue anyway (two writers on one store: a warning, not a ban). Then:
 
-1. **Record** into census, or not. Recording is what the overseer dashboard, `/census:vitals` (named
-   in the question only when the installed census ships it) and session liveness read (context, cost,
+1. **Record** into census, or not. Recording is what the overseer dashboard, `/census-mod:vitals` (bundled) and session liveness read (context, cost,
    limits, git, PR); when nothing else records into census they see nothing from this account.
    Where this account's status line (or another writer) already records, **No** leaves that
    writer active, so they keep getting this account's data from it; the option says so. Almost nobody else records into census, so the common question is just **Yes**
@@ -63,7 +71,7 @@ into the store in the last few minutes. Then:
 a removed status line back exactly, but only if `settings.json` has no status line now (or
 already has that one); otherwise it says so and keeps the backup.
 
-The payload's `census_mod.git` (`branch`, `uncommitted`, `ahead`, `has_upstream`, `detached`, or null when unknown) carries the git state from the mod's own `-uno` pass, so readers need not shell out to git or gh. For a phone-sized readout of a session, `/census:vitals` ships with census builds that include vitals (the setup summary mentions it only when yours does).
+The payload's `census_mod.git` (`branch`, `uncommitted`, `ahead`, `has_upstream`, `detached`, or null when unknown) carries the git state from the mod's own `-uno` pass, so readers need not shell out to git or gh. For a phone-sized readout of a session, `/census-mod:vitals` is bundled (the setup summary always mentions it).
 
 Precedence: an environment variable (`CENSUS_MOD_STORE`, `CENSUS_STATUSLINE_SEGMENTS`) wins,
 then the answers (kept in `$.store`), then the defaults. Before any answer the mod records to
@@ -71,20 +79,15 @@ the real store **only if** this account's status line does not carry the census 
 (otherwise it records nothing until you answer), draws the band, and uses `gh`. Dismissing the
 first-session offer keeps those defaults and is never repeated.
 
-It needs the **census plugin** (any version at or above 0.5.0, for the process-liveness
-reader) for the CLI. Recording stops only when no CLI is discoverable (see the discovery order
-below: `cli.path`, `CENSUS_CLI`, a sibling install, `census` on PATH); then the band still
-draws, nothing is recorded, and one line says so: "census not found — install the census plugin".
-
-census-mod **replaces census's status-line hook**: run one or the other on a store. Running
-both is discouraged, not forbidden (`/census-setup` offers "keep both"): two writers on one
-store muddle liveness and idle detection. Shadow mode, below, records elsewhere and is fine.
+Recording needs only the bundled `scripts/cli.py` and `python3`; there is no discovery step. If
+that file is missing (a broken install) the band still draws, nothing is recorded, and one line
+says so.
 
 ## Install
 
 A mod loads from disk: `claude --plugin-dir plugins/census-mod/plugin` for one session, or add
 the folder to `CLAUDE_CODE_PLUGIN_DIRS` in the account's `settings.json` `env` for every
-session. Run it beside your status line first (shadow mode, below).
+session. Run it beside your status line first (shadow mode, below). Do not install the census plugin as well: the two are alternatives.
 
 ## What it records, and when
 
@@ -150,24 +153,21 @@ gray, `yellowBright`, `#ff8700` for orange).
 ## Shadow mode
 
 Set `CENSUS_MOD_STORE` to a census dir (e.g. `~/.claude-personal/census-shadow`) and the
-mod records there instead: the child `census ingest` runs with `CENSUS_STORE` set to it,
+mod records there instead: the bundled ingest runs with `CENSUS_STORE` set to it,
 and the shadow dir gets its own `cli.path`, `limits/` and sweep. Compare the two views
 with `census read` against each dir, then cut over: unset `CENSUS_MOD_STORE` and remove
 `statusLine` from settings.
 
-CLI discovery order: `<shadow dir>/cli.path`, `<census dir>/cli.path` (`CENSUS_STORE`, else
-`$CLAUDE_CONFIG_DIR/census`), `CENSUS_CLI`, then the census plugin installed beside this
-one, then `census` on PATH. The sibling is found by walking up from this plugin's folder
-and testing both layouts at each level: a repo checkout
-(`<plugins>/census/scripts/cli.py`) and a marketplace cache
-(`<cache>/<marketplace>/census/<version>/scripts/cli.py`, the highest version, skipping any
-version dir marked `.orphaned_at`). So census + census-mod work with no status line at all
-and no `cli.path` yet. A `.py` runs under `python3`.
-
-The first successful ingest makes census write its own `cli.path` into the census dir, so
-the other readers (vigil, overseer, census vitals) find census from then on without being told.
+census-mod always runs its own bundled recorder: `CENSUS_CLI`, a `cli.path` pointer, a sibling
+census plugin and `census` on PATH are never consulted. The bundled files are copied by
+`plugins/census-mod/sync-bundle.sh` from `plugins/census/scripts/` (the one source), and a test in
+the census suite fails if they ever differ.
 
 ## Tests
 
 `plugins/census-mod/tests/` (fake engine, `world.tsx`; not shipped), run by `claude plugin test plugins/census-mod` (or `tests/run-mods.sh census-mod`);
 typecheck with `plugins/census-mod/typecheck.sh`.
+The bundle is checked by `tests/census/test_census_mod_bundle.py` in the census suite: it fails when
+`plugin/scripts/` differs from `plugins/census/scripts/`, runs the bundled recorder and reader with no
+census plugin anywhere, and checks the vitals command and skills ship. After changing census's Python,
+run `plugins/census-mod/sync-bundle.sh`.

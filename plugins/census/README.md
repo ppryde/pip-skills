@@ -18,6 +18,13 @@ indexes it **by worktree cwd**, which nothing else does — so a reader can ask 
 context for *this* worktree" without reconstructing transcript paths (which breaks inside git
 worktrees).
 
+## census or census-mod: install one
+
+census and census-mod are **alternatives**. census is the classic, mod-free plugin: a command status line that
+records and draws. census-mod is a standalone Claude Code mod that includes census's store, ingest and
+`/census-mod:vitals` and does not need this plugin. Install one or the other, not both: with both enabled there
+are two writers on one store. `census where` (and the setup-statusline skill) say so when census-mod is installed.
+
 ## Writers
 
 Census is fed by exactly one kind of writer per store: the status-line hook (`census ingest`, or `census statusline`
@@ -133,6 +140,7 @@ branch, session and tool names are clipped to fit). It writes nothing but one pr
 `vitals` plugin and is now part of census: it reads census's store directly, in-process (the same view `census read`
 prints), so it runs no census subprocess and needs no sibling plugin. `CENSUS_STORE` and the config dir are honoured as
 everywhere else; the only subprocess left is the fixed-argv `git` fallback below.
+census-mod bundles this same `vitals.py` (and the store it reads) as `/census-mod:vitals`, so it works without this plugin.
 
 **Default style.** The first time `/census:vitals` runs it shows the lean readout, ends it with the line
 `(vitals: no default style chosen yet)`, and the command asks once which style to show by default (lean or detailed).

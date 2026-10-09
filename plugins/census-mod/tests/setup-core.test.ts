@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import {
-  NO_DETECTION, PRESETS, vitalsFromWhere, isPythonCli, placementFrom, Q, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
+  NO_DETECTION, PRESETS, placementFrom, Q, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
   backupBlocks, removeStatusLine, restoreStatusLine, scriptCandidates, statusLineCommand, writerActive, writersFrom,
 } from '../plugin/core/setup'
 
@@ -70,11 +70,6 @@ test('another writer is one that wrote recently and is not the mod', async () =>
   expect(writerActive([{ updatedAt: now - 900_000, hasCensusMod: false }], now)).toBe(false)
 })
 
-test('census versions compare numerically; 0.5.0 is the floor', async () => {
-  expect(atLeast('0.5.0', '0.5.0') && atLeast('0.10.0', '0.5.0') && atLeast('1.0', '0.5.0')).toBe(true)
-  expect(atLeast('0.4.9', '0.5.0')).toBe(false)
-})
-
 // ---- the questions -----------------------------------------------------------------------------------
 
 const YES = 'Yes — record into census (dashboards, vitals and liveness use it)'
@@ -88,7 +83,7 @@ const OTHER = { ...NO_DETECTION, otherWriter: true }
 test('with no existing writer the record question is just Yes (recommended) or No', async () => {
   expect(Q.record(NO_DETECTION)).toEqual({
     header: '📝 Record',
-    question: "Record this account's sessions into census? That's what the overseer dashboard and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.",
+    question: "Record this account's sessions into census? That's what the overseer dashboard, /census-mod:vitals and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.",
     options: [`${YES} (Recommended)`, NO],
   })
 })
@@ -213,14 +208,6 @@ test('one draw question: below (recommended), above, or not at all, mapped back 
 
 // ---- review (wf #16): honest copy per shape ---------------------------------------------------------------
 
-test('/census:vitals is named only when this census ships it', async () => {
-  const withVitals = { ...NO_DETECTION, hasVitals: true }
-  expect(Q.record(withVitals).question).toContain('/census:vitals')
-  expect(Q.record(NO_DETECTION).question).not.toContain('/census:vitals')
-  for (const det of [{ ...WITH_BLOCK, hasVitals: false }, { ...OTHER, hasVitals: false }]) expect(Q.record(det).question).not.toContain('/census:vitals')
-  expect(Q.record({ ...WITH_BLOCK, hasVitals: true }).question).toContain('/census:vitals')
-})
-
 test('the No that leaves a recording status line active does not say the dashboards see nothing', async () => {
   for (const det of [WITH_BLOCK, OTHER]) {
     const no = Q.record(det).options.find(o => recordFrom(o) === 'no')!
@@ -244,13 +231,21 @@ test('CENSUS_MOD_STORE changes nothing for the shapes that never offered Replace
   expect(Q.record(OTHER, true)).toEqual(Q.record(OTHER))
 })
 
-test('`census where` output says whether vitals ships; anything else is no', async () => {
-  expect(vitalsFromWhere('{"vitals": true, "config_dir": "/x"}')).toBe(true)
-  expect(vitalsFromWhere('{"vitals": false}')).toBe(false)
-  for (const junk of ['', 'not json', '{}', '{"vitals": "yes"}', '[]', 'null']) expect(vitalsFromWhere(junk)).toBe(false)
+
+test('the enabled census plugins of any marketplace are found in enabledPlugins; census-mod and disabled ones are not', async () => {
+  expect(enabledCensusPlugins({ enabledPlugins: { 'census@pip-skills': true, 'census@wf-claude-market': true, 'census@x': false, 'census-mod@pip-skills': true, other: true } }))
+    .toEqual(['census@pip-skills', 'census@wf-claude-market'])
+  for (const junk of [{}, { enabledPlugins: [] }, { enabledPlugins: 'x' }, { enabledPlugins: null }]) expect(enabledCensusPlugins(junk)).toEqual([])
 })
 
-test('only a Python CLI has its scripts beside it', async () => {
-  expect(isPythonCli('/p/census/scripts/cli.py')).toBe(true)
-  expect(isPythonCli('/usr/local/bin/census')).toBe(false)
+test('the exclusivity question names every enabled census and how to disable it; Stop is recommended', async () => {
+  const q = Q.exclusive(['census@a', 'census@b'])
+  expect(q.header).toBe('⚠️ census')
+  expect(q.question).toContain('claude plugin disable census@a; claude plugin disable census@b')
+  expect(q.options).toEqual(["Stop — I'll disable census first (Recommended)", 'Continue anyway (two writers)'])
+  expect(q.options.map(continueAnyway)).toEqual([false, true])
+})
+
+test('/census-mod:vitals is always named in the record question: it is bundled', async () => {
+  for (const det of [NO_DETECTION, WITH_BLOCK, OTHER]) expect(Q.record(det).question).toContain('/census-mod:vitals')
 })

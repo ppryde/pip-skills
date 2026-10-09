@@ -1,6 +1,6 @@
 import type { EngineInterface, Register, Timer } from 'claude-code'
 import { COUNTER_KEEP_MS, EMPTY_COUNTERS, STORE_PREFIX, TAIL_CMD, addTurn, compacted, counterKey, DEFAULT_TTL, expiresAtMs, isWarm, parseWrites, ttlFromWrites, ttlMs, withTtl } from '../core/cache'
-import { INGEST_TIMEOUT_MS, WHICH_ARGV, censusDir, findSibling, delayFor, endTimeoutMs, ingestArgv, ingestEnv, pointerFiles } from '../core/census'
+import { INGEST_TIMEOUT_MS, bundledCli, censusDir, delayFor, endTimeoutMs, ingestArgv, ingestEnv } from '../core/census'
 import type { CensusEnv } from '../core/census'
 import { GH_TIMEOUT_MS, ghArgv, ghKey, parsePrList, shouldRefresh, touchesPr } from '../core/gh'
 import type { GhEntry, Why } from '../core/gh'
@@ -10,7 +10,7 @@ import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
 import type { Event } from '../core/payload'
 import { TITLE_ARGV, TITLE_TAIL_CMD, findProc, lastTitle } from '../core/registry'
 import { TONE_COLOR, draw, fit } from '../core/render'
-import { BACKUP_FILE, backupBlocks, placementFrom, replaceFrom, L, MIN_CENSUS, NO_DETECTION, PRESETS, Q, SETUP_KEY, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, vitalsFromWhere, isPythonCli, writerActive, writersFrom, is } from '../core/setup'
+import { BACKUP_FILE, backupBlocks, placementFrom, replaceFrom, L, NO_DETECTION, PRESETS, Q, SETUP_KEY, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
 import type { Detection, Effective, Saved } from '../core/setup'
 import type { Line, RenderEnv, RenderInput } from '../core/render'
 import type { Counters, RateLimit, Snap } from '../core/types'
@@ -46,13 +46,11 @@ let coldTimer: Timer | null = null
 let tickTimer: Timer | null = null
 let gitTimer: Timer | null = null
 let lastGitAt: number | null = null
-let cli: string | null | undefined
-let cliLookedAt = 0
+let cli: string | null | undefined // census-mod's own bundled recorder, once found there
 let saidNoCli = false
 let saidNoGh = false
 
 const TICK_MS = 30_000
-const CLI_RETRY_MS = 60_000
 
 async function nowMs($: EngineInterface): Promise<number> {
   return $.clock.now()
@@ -62,7 +60,6 @@ async function loadEnv($: EngineInterface): Promise<Env> {
   return {
     CENSUS_MOD_STORE: await $.env.get('CENSUS_MOD_STORE'),
     CENSUS_STORE: await $.env.get('CENSUS_STORE'),
-    CENSUS_CLI: await $.env.get('CENSUS_CLI'),
     CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
     HOME: await $.env.get('HOME'),
     USERPROFILE: await $.env.get('USERPROFILE'),
@@ -180,39 +177,22 @@ async function pruneCounters($: EngineInterface, keep: string, now: number) {
 
 // ---- recording -----------------------------------------------------------------------------
 
+/** census-mod records through its own bundled copy of census's ingest: no census plugin is ever needed or looked for. */
 async function discover($: EngineInterface): Promise<string | null> {
-  const now = await nowMs($)
   if (cli) return cli
-  if (cli === null && now - cliLookedAt < CLI_RETRY_MS) return null
-  cliLookedAt = now
-  cli = null
-  for (const pointer of pointerFiles(env)) {
-    const text = await $.fs.read(pointer).catch(() => undefined)
-    const path = typeof text === 'string' ? text.trim() : ''
-    if (path && (await $.fs.exists(path).catch(() => false))) return (cli = path)
-  }
-  if (env.CENSUS_CLI && (await $.fs.exists(env.CENSUS_CLI).catch(() => false))) return (cli = env.CENSUS_CLI)
-  const sibling = await siblingCli($)
-  if (sibling) return (cli = sibling)
-  const which = await $.process.run(WHICH_ARGV).catch(() => undefined)
-  const found = which?.exitCode === 0 ? which.stdout.trim() : ''
-  if (found) return (cli = found)
-  if (!saidNoCli) {
-    saidNoCli = true
-    $.ui.log('census not found — install the census plugin (the band is drawn, nothing is recorded)')
-  }
-  return null
-}
-
-async function siblingCli($: EngineInterface): Promise<string | null> {
   let root: string | undefined
   try {
     root = $.plugin.root
   } catch {
-    return null
+    root = undefined
   }
-  if (!root) return null
-  return findSibling({ exists: p => $.fs.exists(p), list: p => $.fs.list(p) }, root)
+  const path = root ? bundledCli(root) : null
+  if (path && (await $.fs.exists(path).catch(() => false))) return (cli = path)
+  if (!saidNoCli) {
+    saidNoCli = true
+    $.ui.log('census-mod\'s bundled recorder is missing (scripts/cli.py): reinstall census-mod. The band is drawn, nothing is recorded')
+  }
+  return null
 }
 
 async function ingest($: EngineInterface, event: Event, endedReason?: string, timeoutMs = INGEST_TIMEOUT_MS, of: Snap | null = snap) {
@@ -223,7 +203,7 @@ async function ingest($: EngineInterface, event: Event, endedReason?: string, ti
   const payload = buildPayload(of, await nowMs($), event, endedReason)
   try {
     const out = await $.process.run(ingestArgv(path), { stdin: JSON.stringify(payload), env: ingestEnv(env), timeoutMs })
-    if (out.exitCode !== 0) cli = undefined // the CLI moved or broke: look again next time
+    if (out.exitCode !== 0) cli = undefined // the bundle moved or broke: look again next time
   } catch {
     cli = undefined
   }
@@ -440,7 +420,6 @@ function applyEffective($: EngineInterface) {
   const before = env.CENSUS_MOD_STORE
   eff = effective(saved, rawEnv, det, configRoot(rawEnv))
   env = { ...rawEnv, CENSUS_MOD_STORE: eff.shadowDir ?? undefined, CENSUS_STATUSLINE_SEGMENTS: eff.segments }
-  if (before !== env.CENSUS_MOD_STORE) cli = undefined // another store, another pointer
   repaint($)
 }
 
@@ -456,34 +435,17 @@ const settingsPath = (): string | null => {
 }
 const realCensusDir = (): string | null => censusDir({ CENSUS_STORE: rawEnv.CENSUS_STORE, CLAUDE_CONFIG_DIR: rawEnv.CLAUDE_CONFIG_DIR, HOME: rawEnv.HOME })
 
-/** Step 1 of setup, no questions: the CLI and its version, this account's status line, any other writer. */
+/** Step 1 of setup, no questions: this account's status line, any other writer, whether the census plugin is enabled. */
 async function detect($: EngineInterface): Promise<Detection> {
   const out: Detection = { ...NO_DETECTION }
   try {
-    out.cliPath = await discover($)
-    if (out.cliPath) {
-      const root = out.cliPath.replace(/\/scripts\/[^/]+$/, '')
-      if (isPythonCli(out.cliPath)) {
-        out.hasVitals = await $.fs.exists(out.cliPath.replace(/[^/\\]*$/, 'vitals.py')).catch(() => false)
-      } else {
-        // A launcher on PATH or a CENSUS_CLI executable says nothing about where its plugin sits: ask it.
-        const asked = await $.process.run([out.cliPath, 'where'], { timeoutMs: 5000 }).catch(() => undefined)
-        out.hasVitals = asked?.exitCode === 0 && vitalsFromWhere(asked.stdout)
-      }
-      const meta = await $.fs.read(`${root}/.claude-plugin/plugin.json`).catch(() => undefined)
-      try {
-        const v = typeof meta === 'string' ? (JSON.parse(meta) as { version?: unknown }).version : undefined
-        out.version = typeof v === 'string' ? v : null
-      } catch {
-        out.version = null
-      }
-    }
     const path = settingsPath()
     const text = path ? await $.fs.read(path).catch(() => undefined) : undefined
     if (typeof text === 'string') {
       const parsed = parseSettings(text)
       if (!parsed.ok) out.settingsInvalid = true
       else {
+        out.censusPlugins = enabledCensusPlugins(parsed.data)
         const command = statusLineCommand(parsed.data)
         out.statusLineCommand = command
         if (command) {
@@ -622,22 +584,22 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   // step 1, no questions
   const d = det
   say($, '🧭 census-setup: looking around', [
-    `census CLI: ${d.cliPath ?? 'not found'}${d.version ? ` (${d.version})` : ''}`,
     `status line: ${d.statusLineCommand ?? 'none'}${d.ingestBlock ? ' (it records into census)' : ''}${d.settingsInvalid ? ' (settings.json is not valid JSON)' : ''}`,
     `another writer on the store: ${d.otherWriter ? 'yes, active in the last few minutes' : 'no'}`,
+    `the census plugin: ${d.censusPlugins.length ? `enabled (${d.censusPlugins.join(', ')})` : 'not enabled'}`,
   ])
-  let recordMode: 'yes' | 'shadow' | 'no' | null = null
-  if (!d.cliPath) {
-    say($, '🧭 census-setup: census not found — install the census plugin; nothing can be recorded until then')
-    recordMode = 'no'
-  } else if (d.version && !atLeast(d.version, MIN_CENSUS)) {
-    const a = await askOne($, run, Q.old(d.version))
+  // census and census-mod are alternatives: with the census plugin enabled there would be two writers on one store.
+  if (d.censusPlugins.length) {
+    const a = await askOne($, run, Q.exclusive(d.censusPlugins))
     if (typeof a !== 'object') return stop(a)
-    if (is(a.a, L.oldNo)) {
-      recordMode = 'no'
-      await saveAnswer($, { record: recordMode })
+    if (!continueAnyway(a.a)) {
+      say($, `🧭 census-setup: census-mod replaces the census plugin — disable it first: ${d.censusPlugins.map(k => `claude plugin disable ${k}`).join('; ')}. Then run /census-setup again`)
+      if (setupRun === run) setupRun = null
+      return
     }
+    say($, '🧭 census-setup: continuing with the census plugin still enabled — two writers on one store; expect muddled liveness')
   }
+  let recordMode: 'yes' | 'shadow' | 'no' | null = null
   let replace = false
   if (recordMode === null) {
     const a = await askOne($, run, Q.record(d, Boolean(rawEnv.CENSUS_MOD_STORE?.trim())))
@@ -696,15 +658,14 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   await saveAnswer($, { pr: is(pr.a, L.prYes), answeredAt: await nowMs($), offered: true })
   if (setupRun !== run) return
   setupRun = null
-  const hasVitals = det.hasVitals
   say($, '🧭 census-mod is set up', [
-    `recording: ${!d.cliPath ? 'off — census was not found' : eff.record === 'yes' ? 'into census (the real store)' : eff.record === 'shadow' ? `shadow store ${eff.shadowDir ?? ''} — the dashboards and vitals do not read it; run /census-setup and answer Yes to record into census itself` : 'off'}`,
+    `recording: ${eff.record === 'yes' ? 'into census (the real store)' : eff.record === 'shadow' ? `shadow store ${eff.shadowDir ?? ''} — the dashboards and vitals do not read it; run /census-setup and answer Yes to record into census itself` : 'off'}`,
     `band: ${drawOn ? `on, ${eff.placement === 'below' ? 'below the input' : 'above the input'}, ${PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
     `PR segment (gh): ${saved.pr === false ? 'off, gh is never called' : 'on'}`,
     ...(removed ? [`your status line was removed from settings.json; it is backed up in ${removed}`] : []),
     ...(keptForShadow ? ['your status line was kept: CENSUS_MOD_STORE makes census-mod record to a shadow store, so the status line is still the real store\'s writer. Unset it and run /census-setup again to replace it'] : []),
     'undo any time: /census-setup off (it restores a removed status line exactly), or /census-setup to answer again',
-    ...(hasVitals ? ['📊 /census:vitals shows this session on your phone'] : []),
+    '📊 /census-mod:vitals shows this session on your phone',
   ])
 }
 

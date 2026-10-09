@@ -1,16 +1,18 @@
 import { expect, test } from 'claude-code/testing'
-import { CLI, START, USAGE, classicStart, turn, world } from './world'
+import { START, USAGE, classicStart, turn, world } from './world'
 
 const SEC = 1000
 const MIN = 60 * SEC
 
-test('a session start records one ingest through the census CLI named by the cli.path pointer', async ($, on) => {
+test('a session start records one ingest through census-mod\'s own bundled recorder', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
 
   expect(w.ingests).toHaveLength(1)
-  expect(w.ingests[0]?.argv).toEqual(['python3', CLI, 'ingest'])
+  expect(w.ingests[0]?.argv[0]).toBe('python3')
+  expect(w.ingests[0]?.argv[1]).toMatch(/\/scripts\/cli\.py$/)
+  expect(w.ingests[0]?.argv.slice(2)).toEqual(['ingest'])
   expect(w.ingests[0]?.env).toBeUndefined()
   expect(w.ingests[0]?.payload).toMatchObject({
     session_id: 's1',
