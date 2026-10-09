@@ -1,6 +1,6 @@
 import type { EngineInterface, Register, Timer } from 'claude-code'
 import { COUNTER_KEEP_MS, EMPTY_COUNTERS, STORE_PREFIX, TAIL_CMD, addTurn, compacted, counterKey, DEFAULT_TTL, expiresAtMs, isWarm, parseWrites, ttlFromWrites, ttlMs, withTtl } from '../core/cache'
-import { INGEST_TIMEOUT_MS, WHICH_ARGV, findSibling, delayFor, endTimeoutMs, ingestArgv, ingestEnv, pointerFiles } from '../core/census'
+import { INGEST_TIMEOUT_MS, WHICH_ARGV, censusDir, findSibling, delayFor, endTimeoutMs, ingestArgv, ingestEnv, pointerFiles } from '../core/census'
 import type { CensusEnv } from '../core/census'
 import { GH_TIMEOUT_MS, ghArgv, ghKey, parsePrList, shouldRefresh, touchesPr } from '../core/gh'
 import type { GhEntry, Why } from '../core/gh'
@@ -10,6 +10,8 @@ import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
 import type { Event } from '../core/payload'
 import { TITLE_ARGV, findProc, lastTitle } from '../core/registry'
 import { TONE_COLOR, draw, fit } from '../core/render'
+import { BACKUP_FILE, L, MIN_CENSUS, NO_DETECTION, PRESETS, Q, SETUP_KEY, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
+import type { Detection, Effective, Saved } from '../core/setup'
 import type { RenderEnv, RenderInput } from '../core/render'
 import type { Counters, RateLimit, Snap } from '../core/types'
 
@@ -21,7 +23,12 @@ import type { Counters, RateLimit, Snap } from '../core/types'
 
 type Env = CensusEnv & RenderEnv
 
-let env: Env = {}
+let env: Env = {} // what the mod runs on: the environment, then the answers laid over it
+let rawEnv: Env = {} // the environment alone: it outranks an answer
+let saved: Saved = {}
+let det: Detection = NO_DETECTION
+let eff: Effective = effective({}, {}, NO_DETECTION, null)
+let setupRun: object | null = null
 let interactive: boolean | null = null
 let snap: Snap | null = null
 let hydrating: Promise<void> | null = null
@@ -198,6 +205,7 @@ async function siblingCli($: EngineInterface): Promise<string | null> {
 
 async function ingest($: EngineInterface, event: Event, endedReason?: string, timeoutMs = INGEST_TIMEOUT_MS, of: Snap | null = snap) {
   if (!of) return
+  if (eff.record === 'no') return
   const path = await discover($)
   if (!path) return
   const payload = buildPayload(of, await nowMs($), event, endedReason)
@@ -263,11 +271,12 @@ async function runGit($: EngineInterface) {
 }
 
 function scheduleGh($: EngineInterface, why: Why) {
-  if (!interactive) return
+  if (!interactive || !eff.pr) return
   $.clock.after(0, () => void refreshGh($, why).catch(() => undefined))
 }
 
 async function refreshGh($: EngineInterface, why: Why) {
+  if (!eff.pr) return // answered No: gh is never called
   if (!snap?.git?.branch || snap.git.detached) return
   const key = ghKey(snap.worktreePath ?? snap.cwd, snap.git.branch)
   const branch = snap.git.branch
@@ -338,11 +347,13 @@ function hydrate($: EngineInterface, known?: { exitCode: number; stdout: string 
   hydrating = new Promise<void>(done => {
     $.clock.after(0, () => {
       void (async () => {
+        await loadSetup($)
         if (!snap) return
         const gitDir = known ?? (await readGitDir($, snap.cwd))
         if (snap) snap.worktreePath = worktreeOf(gitDir)
         await readName($)
         repaint($)
+        offerOnce($)
       })()
         .catch(() => undefined)
         .finally(done)
@@ -365,7 +376,10 @@ async function bind($: EngineInterface, id: string, cwd: string, transcript: str
     const old = snap
     snap = fresh(id, cwd)
     limitsKey = ''
-    if (old && event !== 'session.start') closeOld($, old, event.replace('session.', ''))
+    if (old && event !== 'session.start') {
+      closeOld($, old, event.replace('session.', ''))
+      setupRun = null // an open setup dialog belongs to the session that is gone
+    }
     cancelTimers()
     pending = null
     snap.counters = await loadCounters($, id)
@@ -388,6 +402,272 @@ async function isInteractive($: EngineInterface): Promise<boolean> {
   return (await $.session.surfaces().catch(() => [])).length > 0
 }
 
+// ---- /census-setup -------------------------------------------------------------------------------------
+//
+// Asks through $.ui.ask, one question at a time: nothing is submitted, nothing reaches the model, and a
+// phone can answer. Each answer is saved the moment it is given, so a /clear or a dismissal loses only
+// what was not yet asked. The precedence is the environment, then these answers, then the defaults.
+
+async function loadSetup($: EngineInterface) {
+  saved = ((await $.store.get(SETUP_KEY).catch(() => undefined)) as Saved | undefined) ?? {}
+  det = await detect($)
+  applyEffective($)
+}
+
+function applyEffective($: EngineInterface) {
+  const before = env.CENSUS_MOD_STORE
+  eff = effective(saved, rawEnv, det, configRoot(rawEnv))
+  env = { ...rawEnv, CENSUS_MOD_STORE: eff.shadowDir ?? undefined, CENSUS_STATUSLINE_SEGMENTS: eff.segments }
+  if (before !== env.CENSUS_MOD_STORE) cli = undefined // another store, another pointer
+  repaint($)
+}
+
+async function saveAnswer($: EngineInterface, patch: Partial<Saved>) {
+  saved = { ...saved, ...patch }
+  await $.store.set(SETUP_KEY, saved).catch(() => undefined)
+  applyEffective($)
+}
+
+const settingsPath = (): string | null => {
+  const root = configRoot(rawEnv)
+  return root ? `${root}/settings.json` : null
+}
+const realCensusDir = (): string | null => censusDir({ CENSUS_STORE: rawEnv.CENSUS_STORE, CLAUDE_CONFIG_DIR: rawEnv.CLAUDE_CONFIG_DIR, HOME: rawEnv.HOME })
+
+/** Step 1 of setup, no questions: the CLI and its version, this account's status line, any other writer. */
+async function detect($: EngineInterface): Promise<Detection> {
+  const out: Detection = { ...NO_DETECTION }
+  try {
+    out.cliPath = await discover($)
+    if (out.cliPath) {
+      const root = out.cliPath.replace(/\/scripts\/[^/]+$/, '')
+      const meta = await $.fs.read(`${root}/.claude-plugin/plugin.json`).catch(() => undefined)
+      try {
+        const v = typeof meta === 'string' ? (JSON.parse(meta) as { version?: unknown }).version : undefined
+        out.version = typeof v === 'string' ? v : null
+      } catch {
+        out.version = null
+      }
+    }
+    const path = settingsPath()
+    const text = path ? await $.fs.read(path).catch(() => undefined) : undefined
+    if (typeof text === 'string') {
+      const parsed = parseSettings(text)
+      if (!parsed.ok) out.settingsInvalid = true
+      else {
+        const command = statusLineCommand(parsed.data)
+        out.statusLineCommand = command
+        if (command) {
+          out.ingestBlock = commandIsCensus(command)
+          for (const file of scriptCandidates(command, rawEnv.HOME)) {
+            const script = await $.fs.read(file).catch(() => undefined)
+            if (typeof script === 'string' && hasIngestBlock(script)) out.ingestBlock = true
+          }
+        }
+      }
+    }
+    const dir = realCensusDir()
+    if (dir) {
+      const files = ((await $.fs.list(`${dir}/sessions`).catch(() => [])) as { name: string; mtimeMs: number }[])
+        .filter(f => f.name.endsWith('.json'))
+        .sort((a, b) => b.mtimeMs - a.mtimeMs)
+        .slice(0, 20)
+      const entries: { updatedAt: number; hasCensusMod: boolean }[] = []
+      for (const f of files) {
+        const body = await $.fs.read(`${dir}/sessions/${f.name}`).catch(() => undefined)
+        try {
+          const d = JSON.parse(typeof body === 'string' ? body : '{}') as { updated_at?: number; payload?: { census_mod?: unknown } }
+          if (typeof d.updated_at === 'number') entries.push({ updatedAt: d.updated_at * 1000, hasCensusMod: d.payload?.census_mod !== undefined })
+        } catch {
+          // a file caught mid-write
+        }
+      }
+      out.otherWriter = writerActive(entries, await nowMs($))
+    }
+  } catch {
+    // detection is advice; setup goes on with what it has
+  }
+  return out
+}
+
+function say($: EngineInterface, headline: string, lines: string[] = []) {
+  $.ui.toast(headline)
+  for (const l of [headline, ...lines]) $.ui.log(l)
+}
+
+const writeSettings = async ($: EngineInterface, path: string, text: string): Promise<boolean> => {
+  // temp file, then rename: a reader never sees half a settings.json
+  try {
+    await $.fs.write(settingsTmp(path), text)
+    const mv = await $.process.run(['mv', '-f', settingsTmp(path), path])
+    return mv.exitCode === 0
+  } catch {
+    return false
+  }
+}
+
+/** Remove this account's statusLine for the band to replace; false (and a message) when it was left alone. */
+async function removeOwnStatusLine($: EngineInterface): Promise<{ done: boolean; backup?: string }> {
+  const path = settingsPath()
+  const dir = realCensusDir()
+  if (!path || !dir) return { done: false }
+  const text = await $.fs.read(path).catch(() => undefined)
+  if (typeof text !== 'string') return { done: false }
+  const r = removeStatusLine(text, path, new Date(await nowMs($)).toISOString())
+  if (!r.ok) {
+    if (r.reason === 'invalid') say($, `🧭 census-setup: ${path} is not valid JSON, so I left your status line alone`)
+    return { done: r.reason === 'none' }
+  }
+  const backup = `${dir}/${BACKUP_FILE}`
+  try {
+    await $.fs.write(backup, r.backup) // first: the removal is undoable before it happens
+  } catch {
+    say($, `🧭 census-setup: could not write the backup ${backup}, so I left your status line alone`)
+    return { done: false }
+  }
+  if (!(await writeSettings($, path, r.text))) {
+    say($, `🧭 census-setup: could not write ${path}, so I left your status line alone`)
+    return { done: false }
+  }
+  return { done: true, backup }
+}
+
+/** `/census-setup off`: stop recording and drawing, and put a status line we removed back exactly. */
+async function turnOff($: EngineInterface) {
+  await saveAnswer($, { record: 'no', draw: false, answeredAt: await nowMs($), offered: true })
+  const lines: string[] = ['recording: off', 'band: off']
+  const path = settingsPath()
+  const dir = realCensusDir()
+  const backupPath = dir ? `${dir}/${BACKUP_FILE}` : null
+  const backup = backupPath ? ((await $.fs.read(backupPath).catch(() => undefined)) as string | undefined) ?? null : null
+  if (path && backupPath && backup !== null) {
+    const text = await $.fs.read(path).catch(() => undefined)
+    const r = restoreStatusLine(typeof text === 'string' ? text : '', backup)
+    if (r.done === 'restored') {
+      if (await writeSettings($, path, r.text)) {
+        await $.process.run(['rm', '-f', backupPath]).catch(() => undefined)
+        lines.push(`your status line is back in ${path}`)
+      } else lines.push(`could not write ${path}: your status line is still backed up in ${backupPath}`)
+    } else if (r.done === 'already') {
+      await $.process.run(['rm', '-f', backupPath]).catch(() => undefined)
+      lines.push('your status line is already in place')
+    } else lines.push(`left ${path} alone (${r.why === 'present' ? 'it has a different status line now' : r.why === 'invalid' ? 'it is not valid JSON' : 'no usable backup'}); the backup stays in ${backupPath}`)
+  }
+  say($, '🧭 census-mod is off', [...lines, 'run /census-setup to turn it on again'])
+}
+
+type Answer = { a: string } | 'dismissed' | 'superseded'
+
+async function askOne($: EngineInterface, run: object, q: { header: string; question: string; options: string[] }): Promise<Answer> {
+  const got = await $.ui.ask(q.question, { header: q.header, options: q.options }).then(a => ({ a: String(a) }), () => null)
+  if (setupRun !== run) return 'superseded' // a /clear or another setup took over while the dialog was open
+  return got ?? 'dismissed'
+}
+
+async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
+  await loadSetup($)
+  const stop = async (why: Answer) => {
+    if (why === 'dismissed') say($, '🧭 census-setup stopped; what you answered is saved. Run /census-setup to carry on')
+    if (setupRun === run) setupRun = null
+  }
+  if (mode === 'offer') {
+    await saveAnswer($, { offered: true })
+    const a = await askOne($, run, Q.offer())
+    if (typeof a !== 'object' || !is(a.a, L.offerYes)) {
+      if (setupRun === run) setupRun = null // not now, or dismissed: the defaults stand and it is not offered again
+      return
+    }
+  }
+  // step 1, no questions
+  const d = det
+  say($, '🧭 census-setup: looking around', [
+    `census CLI: ${d.cliPath ?? 'not found'}${d.version ? ` (${d.version})` : ''}`,
+    `status line: ${d.statusLineCommand ?? 'none'}${d.ingestBlock ? ' (it records into census)' : ''}${d.settingsInvalid ? ' (settings.json is not valid JSON)' : ''}`,
+    `another writer on the store: ${d.otherWriter ? 'yes, active in the last few minutes' : 'no'}`,
+  ])
+  let recordMode: 'yes' | 'shadow' | 'no' | null = null
+  if (!d.cliPath) {
+    say($, '🧭 census-setup: census not found — install the census plugin; nothing can be recorded until then')
+    recordMode = 'no'
+  } else if (d.version && !atLeast(d.version, MIN_CENSUS)) {
+    const a = await askOne($, run, Q.old(d.version))
+    if (typeof a !== 'object') return stop(a)
+    if (is(a.a, L.oldNo)) {
+      recordMode = 'no'
+      await saveAnswer($, { record: recordMode })
+    }
+  }
+  if (recordMode === null) {
+    const a = await askOne($, run, Q.record(d))
+    if (typeof a !== 'object') return stop(a)
+    recordMode = recordFrom(a.a) ?? 'no'
+    await saveAnswer($, { record: recordMode })
+  }
+  const band = await askOne($, run, Q.draw())
+  if (typeof band !== 'object') return stop(band)
+  const drawOn = is(band.a, L.drawYes)
+  await saveAnswer($, { draw: drawOn })
+  let removed: string | undefined
+  if (recordMode === 'yes' && d.ingestBlock) {
+    const a = await askOne($, run, Q.writers(drawOn, d.otherWriter))
+    if (typeof a !== 'object') return stop(a)
+    const choice = writersFrom(a.a)
+    if (choice === 'remove') {
+      const r = await removeOwnStatusLine($)
+      if (r.done) {
+        removed = r.backup
+        det = await detect($)
+      } else {
+        recordMode = 'no'
+        await saveAnswer($, { record: recordMode })
+      }
+    } else if (choice === 'keep') {
+      recordMode = 'no'
+      await saveAnswer($, { record: recordMode })
+    }
+  }
+  if (recordMode === 'no' && !drawOn) {
+    await turnOff($)
+    if (setupRun === run) setupRun = null
+    return
+  }
+  let preset = saved.preset
+  if (drawOn) {
+    const a = await askOne($, run, Q.preset())
+    if (typeof a !== 'object') return stop(a)
+    preset = presetFrom(a.a) ?? 'two'
+    await saveAnswer($, { preset })
+  }
+  const pr = await askOne($, run, Q.pr())
+  if (typeof pr !== 'object') return stop(pr)
+  await saveAnswer($, { pr: is(pr.a, L.prYes), answeredAt: await nowMs($), offered: true })
+  if (setupRun !== run) return
+  setupRun = null
+  say($, '🧭 census-mod is set up', [
+    `recording: ${recordMode === 'yes' ? 'the real census store' : recordMode === 'shadow' ? `shadow store ${eff.shadowDir ?? ''}` : 'off'}`,
+    `band: ${drawOn ? `on, ${PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
+    `PR segment (gh): ${saved.pr === false ? 'off, gh is never called' : 'on'}`,
+    ...(removed ? [`your status line was removed from settings.json; it is backed up in ${removed}`] : []),
+    'undo any time: /census-setup off (it restores a removed status line exactly), or /census-setup to answer again',
+  ])
+}
+
+function startSetup($: EngineInterface, mode: 'full' | 'offer') {
+  const run = {}
+  setupRun = run
+  // After the command has replied: the dialogs follow it rather than holding it open.
+  $.clock.after(0, () => void setup($, run, mode).catch(() => { if (setupRun === run) setupRun = null }))
+}
+
+/** The first session after install: say so once, ever. An answer or a dismissal both count. */
+function offerOnce($: EngineInterface) {
+  if (saved.offered || setupRun || !interactive) return
+  $.clock.after(3000, () => {
+    if (saved.offered || setupRun) return
+    startSetup($, 'offer')
+  })
+}
+
 /** Our work after `next`: whatever it throws must not cost the other mods their result. */
 async function quietly(work: () => Promise<void>): Promise<void> {
   try {
@@ -403,7 +683,9 @@ export const register: Register = on => {
     interactive = e.isInteractive
     if (!interactive) return r
     await quietly(async () => {
-      env = await loadEnv($)
+      await $.command.register({ name: 'census-setup', description: 'Guided census-mod setup: record, draw, layout, gh. `off` stops it.', argumentHint: '[off]' }).catch(() => undefined)
+      rawEnv = await loadEnv($)
+      env = { ...rawEnv }
       await bind($, await $.session.id(), e.cwd, null, 'session.start')
     })
     return r
@@ -416,7 +698,10 @@ export const register: Register = on => {
     await quietly(async () => {
       if (!(await isInteractive($))) return
       interactive = true
-      if (Object.keys(env).length === 0) env = await loadEnv($)
+      if (Object.keys(rawEnv).length === 0) {
+        rawEnv = await loadEnv($)
+        env = { ...rawEnv }
+      }
       // watchPaths are this hook's answer, so this one git call is awaited; bind reuses it.
       const gitDir = await readGitDir($, e.cwd)
       watch = watchPaths(gitDir)
@@ -541,6 +826,19 @@ export const register: Register = on => {
   })
 
   // The ending session's last word: runs under the chain's shared budget, so it carries its own timeout.
+  on('command.run', { command: 'census-setup' }, async ($, e) => {
+    const args = ((e as unknown as { args?: string }).args ?? '').trim()
+    if (args === 'off') {
+      setupRun = null
+      await quietly(async () => { if (Object.keys(rawEnv).length === 0) { rawEnv = await loadEnv($); env = { ...rawEnv } } await loadSetup($); await turnOff($) })
+      return { text: 'census-mod is off. /census-setup to turn it on again.' }
+    }
+    if (args !== '') return { text: 'Usage: /census-setup (guided setup) or /census-setup off' }
+    if (Object.keys(rawEnv).length === 0) { rawEnv = await loadEnv($); env = { ...rawEnv } }
+    startSetup($, 'full')
+    return { text: '🧭 census-setup: a few questions follow.' }
+  })
+
   on('session.end', async ($, e, next) => {
     await quietly(async () => {
       if (interactive && snap && snap.sessionId === e.sessionId) {
@@ -558,7 +856,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const inner = await next(e)
-    if (e.props.hasSurvey || !interactive || !snap) return inner
+    if (e.props.hasSurvey || !interactive || !snap || !eff.draw) return inner
     const { Box, Text } = $.ui.resolve(e)
     const now = (await nowMs($)) / 1000
     const c = snap.counters
