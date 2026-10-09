@@ -11,8 +11,8 @@ fit). It reads three sources and writes nothing:
 | **the transcript** (`transcript_path` from census) | tool calls by name, subagent spawns, typed prompts |
 
 Every source is optional. A missing one leaves its lines out and never raises.
-Without census there is little to show, so install its status-line hook first
-(see the census README). census needs a `refreshInterval` on the status line to
+Without census there is little to show, so install one of its writers first: the
+status-line hook or the census-mod mod (see the census README). census needs a `refreshInterval` on the status line to
 keep its reading fresh while the session is idle; without one, a reading more
 than 90 s old is shown with its age.
 

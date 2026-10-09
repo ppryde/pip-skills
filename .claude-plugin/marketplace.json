@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.39.0",
+  "version": "1.40.0",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -159,6 +159,20 @@
         "session",
         "telemetry",
         "hooks"
+      ]
+    },
+    {
+      "name": "census-mod",
+      "source": "./plugins/census-mod",
+      "description": "Census v2 recorded and drawn by a Claude Code mod: every interactive session is recorded into the census store (through census ingest, no heartbeat) on turn end, rate-limit, model, cwd, branch and PR changes, and the status line is drawn in the band above the prompt with census's own segments. git and gh run only when something they report can have changed. Needs the census plugin. A mod.",
+      "category": "engineering",
+      "tags": [
+        "census",
+        "statusline",
+        "context",
+        "rate-limits",
+        "worktree",
+        "mod"
       ]
     },
     {

@@ -87,7 +87,8 @@ def _census_view() -> dict[str, Any] | None:
 
 
 def live_session_ids() -> "set[str] | None":
-    """Session ids whose census entry is fresh within the staleness horizon.
+    """Session ids census reports live: its ``stale`` verdict when the entry has one,
+    else a census entry fresh within the staleness horizon.
 
     ``None`` = liveness unknown: census missing or failing, or no sessions at all
     (``census read`` cannot tell a missing store from an empty one, and an empty
@@ -101,6 +102,11 @@ def live_session_ids() -> "set[str] | None":
     live: set[str] = set()
     for session_id, entry in sessions.items():
         if not isinstance(entry, dict):
+            continue
+        verdict = entry.get("stale")
+        if isinstance(verdict, bool):  # census's own judgement (by process for a census-mod session)
+            if not verdict:
+                live.add(session_id)
             continue
         try:
             updated_at = float(entry.get("updated_at", 0) or 0)

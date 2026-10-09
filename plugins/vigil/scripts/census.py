@@ -1,6 +1,6 @@
 """Read live context % through the census CLI (``census read``).
 
-census (the sibling status-line recorder) records each session's live context
+census (the sibling recorder, fed by its status-line hook or the census-mod mod) records each session's live context
 usage, keyed by session id, with its worktree cwd. Asking it is how vigil
 measures context correctly inside a git worktree — where reconstructing the
 transcript path from a cwd-slug fails because the worktree has no project dir
@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 CLI_ENV = "CENSUS_CLI"
-STALE_HORIZON_SECONDS = 90  # ~1.5x the status line's 60s refresh; older = not live
+STALE_HORIZON_SECONDS = 90  # ~1.5x the status line's 60s refresh; older = not live (when census sent no verdict)
 _TIMEOUT_SECONDS: float = 2
 
 
@@ -105,6 +105,16 @@ def _entry_ts(entry: dict) -> float:
         return 0.0
 
 
+def _is_live(entry: dict, now: float) -> bool:
+    """Is this census entry a live session? census's own ``stale`` verdict when it sent a
+    bool (a census-mod session has no heartbeat, so it is judged by its process), else
+    the age rule on ``updated_at``."""
+    verdict = entry.get("stale")
+    if isinstance(verdict, bool):
+        return not verdict
+    return now - _entry_ts(entry) <= STALE_HORIZON_SECONDS
+
+
 def _fresh_entry(root: Path, now: float, session_id: str | None = None) -> dict | None:
     if session_id is not None:
         own = _read(["--session", session_id])
@@ -114,9 +124,9 @@ def _fresh_entry(root: Path, now: float, session_id: str | None = None) -> dict 
         if own is not None:
             # Our own entry IS this session: if it is stale, the answer is
             # "unavailable" -- never a sibling's reading (misattribution guard).
-            return own if now - _entry_ts(own) <= STALE_HORIZON_SECONDS else None
+            return own if _is_live(own, now) else None
     best = _read(["--worktree", os.path.realpath(str(root))])
-    if best is None or best is _FAILED or now - _entry_ts(best) > STALE_HORIZON_SECONDS:
+    if best is None or best is _FAILED or not _is_live(best, now):
         return None
     return best
 

@@ -569,3 +569,60 @@ def test_sessions_merge_across_watched_config_dirs(
     assert by_id["s-work"]["config_dir"] == str(primary)
     assert by_id["s-home"]["config_dir"] == str(personal)
     assert by_id["s-home"]["session_name"] == "home"
+
+
+# --- census's own `stale` verdict (a census-mod session has no heartbeat) -----
+
+
+def _fake_census(monkeypatch: pytest.MonkeyPatch, sessions: dict) -> None:
+    monkeypatch.setattr("app.main.run_census_all", lambda: {"version": 1, "limits": {}, "sessions": sessions})
+
+
+def test_mod_entry_with_old_updated_at_and_stale_false_is_live(
+    client: TestClient, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cwd = os.path.realpath(str(root))
+    _fake_census(monkeypatch, {"mod": {"worktree_cwd": cwd, "updated_at": time.time() - 86_400,
+                                       "stale": False, "payload": {}}})
+    (session,) = client.get("/api/sessions").json()["sessions"]
+    assert session["stale"] is False
+
+
+def test_entry_with_fresh_updated_at_and_stale_true_is_stale(
+    client: TestClient, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cwd = os.path.realpath(str(root))
+    _fake_census(monkeypatch, {"gone": {"worktree_cwd": cwd, "updated_at": time.time(),
+                                        "stale": True, "payload": {}}})
+    (session,) = client.get("/api/sessions").json()["sessions"]
+    assert session["stale"] is True
+
+
+def test_entry_without_a_verdict_keeps_the_90s_rule(
+    client: TestClient, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cwd = os.path.realpath(str(root))
+    now = time.time()
+    _fake_census(monkeypatch, {
+        "old": {"worktree_cwd": cwd, "updated_at": now - 3600, "payload": {}},
+        "new": {"worktree_cwd": cwd, "updated_at": now, "payload": {}},
+        "odd": {"worktree_cwd": cwd, "updated_at": now, "stale": "yes", "payload": {}},
+    })
+    by_id = {s["id"]: s["stale"] for s in client.get("/api/sessions").json()["sessions"]}
+    assert by_id == {"old": True, "new": False, "odd": False}
+
+
+def test_live_count_per_repo_follows_the_verdict(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import main
+
+    cwd = os.path.realpath(str(root))
+    now = time.time()
+    _fake_census(monkeypatch, {
+        "mod-live": {"worktree_cwd": cwd, "updated_at": now - 9999, "stale": False},
+        "mod-dead": {"worktree_cwd": cwd, "updated_at": now, "stale": True},
+        "plain": {"worktree_cwd": cwd, "updated_at": now},
+    })
+    monkeypatch.setattr(main, "derive_repo_root", lambda p: Path(cwd))
+    assert main._census_activity_by_root()[Path(cwd)]["live"] == 2

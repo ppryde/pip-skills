@@ -275,19 +275,27 @@ def _active_ts(entry: dict[str, Any]) -> float:
     return active if active > 0 else _entry_ts(entry)
 
 
+def _entry_stale(entry: dict[str, Any], now: float) -> bool:
+    """Is this census entry dead or closed? Census's own ``stale`` verdict when it sent a
+    bool (by process for a census-mod session, which has no heartbeat), else the 90 s rule."""
+    verdict = entry.get("stale")
+    if isinstance(verdict, bool):
+        return verdict
+    return (now - _entry_ts(entry)) > _STALE_HORIZON_SECONDS
+
+
 def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, Any]:
     """Convert a census session entry into a session summary response object.
 
     Returns {id, session_name?, model?, worktree_cwd, branch?, pct?, pr?, updated_at,
-    active_at, stale, idle}. ``stale``: census has not seen a render for 90s (dead or
-    closed). ``idle``: still rendering (the status line reruns on a timer) but no API
+    active_at, stale, idle}. ``stale``: census's own verdict when it sent one (a
+    census-mod session is judged by its process), else no render for 90s (dead or closed). ``idle``: still rendering (the status line reruns on a timer) but no API
     activity for 10 minutes — an open TUI nobody is working in.
     Optional fields (model, pr, session_name, branch, pct) are omitted when absent,
     mirroring _census_extras's "forward what's there" style. Malformed updated_at
     values are coerced to 0.0 (treating as stale) rather than raising.
     """
     payload = entry.get("payload") or {}
-    ts = _entry_ts(entry)
     out: dict[str, Any] = {
         "id": sid,
         "worktree_cwd": entry.get("worktree_cwd"),
@@ -295,7 +303,7 @@ def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, A
         # Guarded, not raw: Starlette renders with allow_nan=False, so a NaN in
         # the store would 500 the one census read documented as never doing so.
         "active_at": entry.get("active_at") if _entry_ts(entry, "active_at") else None,
-        "stale": (now - ts) > _STALE_HORIZON_SECONDS,
+        "stale": _entry_stale(entry, now),
         "idle": (now - _active_ts(entry)) > _IDLE_HORIZON_SECONDS,
     }
     if entry.get("branch"):
@@ -387,7 +395,7 @@ def _census_activity_by_root() -> dict[Path, dict[str, float]]:
         if root is None:
             continue
         stats = out.setdefault(root, {"live": 0, "last_active": 0.0})
-        if (now - _entry_ts(entry)) <= _STALE_HORIZON_SECONDS:
+        if not _entry_stale(entry, now):
             stats["live"] += 1
         stats["last_active"] = max(stats["last_active"], _active_ts(entry))
     return out

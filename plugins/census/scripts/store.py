@@ -871,18 +871,73 @@ def _ingest(raw: str, now: float) -> None:
 # --- Readers -------------------------------------------------------------------
 
 
-def _with_meta(entry: dict[str, Any], limits: Any, now: float) -> dict[str, Any]:
+def _registry_proc_start(pid: int, config: Path | None = None) -> str | None:
+    """``procStart`` from Claude Code's session registry file
+    ``<config dir>/sessions/<pid>.json``, or None when the file is missing, unreadable
+    or carries none. ``config`` defaults to the account's config dir."""
+    folder = config if config is not None else config_dir()
+    data = _read_json(folder / "sessions" / f"{pid}.json")
+    start = data.get("procStart") if data else None
+    return start if isinstance(start, str) else None
+
+
+def _process_gone(mod: dict[str, Any], config: Path | None) -> bool:
+    """Is the session process named by ``census_mod`` gone? Its pid must be a real int
+    above 1; ``os.kill(pid, 0)`` failing with anything but EPERM means gone; and the
+    registry file must exist with a ``procStart`` string equal to the recorded
+    ``proc_start`` (registry files outlive crashes, and a pid can be reused). The two
+    strings are compared as text only; never against ``ps``."""
+    pid = mod.get("pid")
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1:
+        return True
+    try:
+        os.kill(pid, 0)
+    except PermissionError:  # EPERM: it exists, it is just not ours
+        pass
+    except OSError:
+        return True
+    recorded = mod.get("proc_start")
+    return not isinstance(recorded, str) or _registry_proc_start(pid, config) != recorded
+
+
+def is_stale(entry: dict[str, Any], now: float, config: Path | None = None) -> bool:
+    """Is this session entry dead or closed? Never raises.
+
+    An entry whose payload carries a ``census_mod`` block (recorded by the census mod, which
+    does not write on a timer) is stale iff ``census_mod.ended`` is set or its process is
+    gone (see ``_process_gone``), however old ``updated_at`` is; with no ``pid`` yet (the mod
+    could not find its registry entry) the process is unknown and the entry is live unless
+    ended. Any other entry is stale
+    when not rendered for ``STALE_HORIZON_SECONDS``. ``config`` is the Claude config dir
+    holding ``sessions/<pid>.json`` (default: the account's)."""
+    try:
+        payload = entry.get("payload")
+        mod = payload.get("census_mod") if isinstance(payload, dict) else None
+        if isinstance(mod, dict):
+            if mod.get("ended"):  # a clean exit is final, whatever the pid says
+                return True
+            if mod.get("pid") is None:  # the mod has not found its process yet: unknown, not dead
+                return False
+            return _process_gone(mod, config)
+    except Exception:  # noqa: BLE001 - a reader must never raise; an unjudgeable process is gone
+        return True
+    updated = _number(entry.get("updated_at")) or 0.0
+    return (now - updated) > STALE_HORIZON_SECONDS
+
+
+def _with_meta(
+    entry: dict[str, Any], limits: Any, now: float, config: Path | None = None
+) -> dict[str, Any]:
     """Decorate an entry with reader-side flags.
 
-    ``stale``: the status line has not run for this session recently (dead or
-    closed session). ``idle``: it is still rendering but its activity counters
-    have not moved for ``IDLE_HORIZON_SECONDS`` (open TUI, nobody working).
-    An entry from a pre-``active_at`` store falls back to ``updated_at``.
+    ``stale``: the session is dead or closed (``is_stale``: by its process when the census
+    mod recorded one, else not rendered for ``STALE_HORIZON_SECONDS``). ``idle``: it is still
+    open but its activity counters have not moved for ``IDLE_HORIZON_SECONDS`` (open TUI,
+    nobody working). An entry from a pre-``active_at`` store falls back to ``updated_at``.
     """
-    updated = _number(entry.get("updated_at")) or 0.0
     active = _entry_activity(entry)
     result = dict(entry)
-    result["stale"] = (now - updated) > STALE_HORIZON_SECONDS
+    result["stale"] = is_stale(entry, now, config)
     result["idle"] = (now - active) > IDLE_HORIZON_SECONDS
     result["limits"] = limits
     return result
@@ -904,9 +959,12 @@ def _all_sessions() -> dict[str, dict[str, Any]]:
 
 
 def read_all(now: float | None = None) -> dict[str, Any]:
-    """The whole store as the v1 view: ``{version: 1, limits, sessions}``."""
+    """The whole store as the v1 view: ``{version: 1, limits, sessions}``, each session
+    with one additive key, ``stale`` (``is_stale``)."""
     migrate()
-    return {"version": VIEW_VERSION, "limits": _stored_limits(), "sessions": _all_sessions()}
+    when = time.time() if now is None else now
+    sessions = {sid: {**entry, "stale": is_stale(entry, when)} for sid, entry in _all_sessions().items()}
+    return {"version": VIEW_VERSION, "limits": _stored_limits(), "sessions": sessions}
 
 
 def limits(now: float | None = None) -> dict[str, Any] | None:

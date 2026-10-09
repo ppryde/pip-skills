@@ -28,7 +28,12 @@ def test_read_forms_match_v1(store_file, capsys, monkeypatch):
     monkeypatch.setattr(st.time, "time", lambda: NOW)
     store_file.parent.mkdir(parents=True, exist_ok=True)
     store_file.write_text(json.dumps(V1))
-    assert _cli(capsys) == V1
+    # the full view is V1 plus one additive per-session key, `stale` (is_stale, at NOW)
+    expected = {**V1, "sessions": {
+        sid: {**entry, "stale": stale}
+        for (sid, entry), stale in zip(V1["sessions"].items(), (False, True, True))
+    }}
+    assert _cli(capsys) == expected
     assert not store_file.exists()
     assert st.session_path("a").exists()
     live = {k: V1["limits"][k] for k in ("five_hour", "seven_day")}
