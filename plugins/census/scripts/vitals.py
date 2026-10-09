@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """/census:vitals — an on-demand readout of this session's vital signs.
 
-Gathers from three read-only sources and renders one of three styles:
+Gathers from three read-only sources and renders one of two styles:
 
-- **census** (``census read``): the status-line payload (context window, model, cost,
+- **census** (read straight from its store, in-process: the same view ``census read`` prints): the status-line payload (context window, model, cost,
   duration, prompt cache, the account's rate-limit windows), the session's ``git`` block
   (branch, uncommitted, ahead, upstream) and the payload's ``pr`` (number, url, review state).
-  Read through this plugin's own ``cli.py`` first; ``CENSUS_CLI`` overrides it.
+  ``CENSUS_STORE`` and the config dir are honoured; nothing is run.
 - **git**: only when the census entry has no ``git`` block (a record from before it): one
   ``git status --porcelain=2 --branch -uno``. Never ``gh``: the PR comes from the payload.
 - **the transcript** (``transcript_path`` from the payload): tool calls by name and subagent
@@ -17,8 +17,8 @@ it never raises. Pure stdlib.
 
 Styles are sized for a phone (no line wider than 44 columns; free text such as
 branch, session and tool names is clipped to fit):
-``compact`` (six lines), ``detailed`` (sections, pace forecasts, tool
-breakdown), ``playful`` (the Witchfinder's reading).
+``compact`` (lean: three lines, a fourth only when the reading may not be live) and
+``detailed`` (sections, pace forecasts, tool breakdown).
 """
 
 from __future__ import annotations
@@ -28,9 +28,8 @@ import contextlib
 import json
 import math
 import os
-import shlex
-import shutil
 import subprocess
+import tempfile
 import sys
 import time
 import unicodedata
@@ -51,14 +50,12 @@ TIMEOUT_SECONDS = 4
 WINDOW_SECONDS = {"five_hour": 5 * 3600, "seven_day": 7 * 86400}
 WINDOW_LABEL = {"five_hour": "5h", "seven_day": "7d"}
 AGENT_TOOLS = {"Agent", "Task"}
-STYLES = ("compact", "detailed", "playful")
+STYLES = ("compact", "detailed")
 ALIASES = {
     "lean": "compact",
     "brief": "compact",
     "full": "detailed",
     "trend": "detailed",
-    "drama": "playful",
-    "witchfinder": "playful",
 }
 
 
@@ -173,72 +170,11 @@ def _git(*args: str, cwd: str | None = None) -> str | None:
 # ------------------------------------------------------------------------- census
 
 
-def _runnable(text: str) -> Path | None:
-    """``text`` as ONE path (never split, never shell-interpreted, so an env value
-    cannot smuggle arguments): returned only if it is absolute, a regular file, and
-    a Python script (run under this interpreter) or an executable."""
-    if not text or "\0" in text or "\n" in text:
-        return None
-    path = Path(text)
-    if not path.is_absolute() or not path.is_file():
-        return None
-    return path if path.suffix == ".py" or os.access(path, os.X_OK) else None
-
-
-def census_cli() -> Path | None:
-    """Where census's CLI is. ``CENSUS_CLI`` is authoritative when set (and refused, not
-    skipped past, when it is not runnable). Otherwise this plugin's own ``cli.py`` beside
-    this file, then census's ``cli.path`` pointer, then ``census`` on PATH. Whatever it
-    names must pass ``_runnable``."""
-    override = os.environ.get("CENSUS_CLI")
-    if override:
-        return _runnable(override)
-    if (own := _runnable(str(Path(__file__).resolve().with_name("cli.py")))) is not None:
-        return own
-    # census's own rule for where cli.path lives (a CENSUS_STORE ending .json is the legacy file: its parent holds it)
-    folder = store.census_dir()
-    try:
-        recorded = _runnable((folder / "cli.path").read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        recorded = None
-    if recorded:
-        return recorded
-    found = shutil.which("census")
-    return _runnable(found) if found else None
-
-
-def _one_arg(text: str) -> str:
-    """``text`` as exactly one argv element: quoted for a shell, then split back, so it is provably a single
-    token (list-form argv never reaches a shell anyway)."""
-    (token,) = shlex.split(shlex.quote(text))
-    return token
-
-
-def _census_read(args: list[str]) -> dict[str, Any] | None:
-    cli = census_cli()
-    if cli is None:
-        return None
-    program, extra = _one_arg(str(cli)), [_one_arg(a) for a in args]
-    try:
-        if cli.suffix == ".py":
-            done = subprocess.run(
-                [sys.executable, program, "read", *extra],
-                capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False,
-            )
-        else:
-            done = subprocess.run(
-                [program, "read", *extra],
-                capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False,
-            )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    out = _ok(done)
-    if not out:
-        return None
-    try:
-        data = json.loads(out)
-    except ValueError:
-        return None
+def _read_view(*, session: str | None = None, worktree: str | None = None) -> dict[str, Any] | None:
+    """What ``census read --session/--worktree`` prints, read straight from census's own store: no subprocess,
+    nothing to find or run. Round-tripped through JSON so the shape is exactly the CLI's."""
+    out = store.read_view(session=session, worktree=worktree)
+    data = json.loads(json.dumps(out)) if out is not None else None
     return data if isinstance(data, dict) and data else None
 
 
@@ -247,10 +183,10 @@ def census_entry(session_id: str | None, cwd: str) -> dict[str, Any] | None:
     session has none (or no id was given). A fallback entry may belong to a
     sibling session -- ``apply_census`` flags that as ``borrowed``."""
     if session_id:
-        own = _census_read(["--session", session_id])
+        own = _read_view(session=session_id)
         if own:
             return own
-    return _census_read(["--worktree", os.path.realpath(cwd)])
+    return _read_view(worktree=os.path.realpath(cwd))
 
 
 def apply_census(v: Vitals, entry: dict[str, Any]) -> None:
@@ -532,41 +468,74 @@ def liveness(v: Vitals) -> str | None:
 # ------------------------------------------------------------------------- styles
 
 
-def render_compact(v: Vitals) -> str:
-    lines = []
-    ctx = f"⚡ ctx {pct(v.ctx_pct)} {bar(v.ctx_pct)}"
+PHONE_COLUMNS = 44
+PR_MARK = {"approved": "✓ approved", "pending": "… pending", "changes_requested": "✗ changes"}
+
+
+def width(text: str) -> int:
+    return sum(map(_columns, text))
+
+
+def lean_ctx_line(v: Vitals) -> str:
+    """``⚡ 42% ▰▰▰▱▱▱ 88k/1M · Opus 5.5 · $0.90``. Too wide for a phone: the cost goes first, then the token
+    counts, and only then is the model name clipped (a part that is absent is simply not there)."""
+    head = f"⚡ {pct(v.ctx_pct)} {bar(v.ctx_pct, 6)}"
+    tokens = None
     if v.ctx_tokens is not None:
-        ctx += f" {fmt_tokens(v.ctx_tokens)}"
-        if v.ctx_size:
-            ctx += f"/{fmt_tokens(v.ctx_size)}"
-    lines.append(ctx)
-    mind = [clip(v.model or "model ?", 18)]
-    if v.effort:
-        mind.append(v.effort)
-    if v.cost_usd is not None:
-        mind.append(fmt_cost(v.cost_usd))
-    lines.append("🧠 " + " · ".join(mind))
-    if (repo := repo_line(v)) is not None:
-        lines.append(f"🌿 {repo}")
-    if (sync := sync_line(v)) is not None:
-        lines.append(f"✎  {sync}")
-    if any(w.key in WINDOW_SECONDS for w in v.windows):
-        lines.append(
-            "⏳ "
-            + " · ".join(
-                f"{w.label} {pct(w.used)} {gauge(w.used)} {fmt_duration(w.resets_at - v.now)}"
-                for w in [w for w in v.windows if w.key in WINDOW_SECONDS][:2]
-            )
-        )
-    clock = [fmt_duration((v.duration_ms or 0) / 1000) if v.duration_ms is not None else None]
-    if v.tools:
-        clock.append(f"{v.tool_calls} tools")
-    if v.agents:
-        clock.append(plural(v.agents, "agent"))
-    if any(clock):
-        lines.append("⏱  " + " · ".join(c for c in clock if c))
+        tokens = fmt_tokens(v.ctx_tokens) + (f"/{fmt_tokens(v.ctx_size)}" if v.ctx_size else "")
+    cost = fmt_cost(v.cost_usd) if v.cost_usd is not None else None
+
+    def build(with_tokens: bool, with_cost: bool, model: str | None) -> str:
+        first = head + (f" {tokens}" if tokens and with_tokens else "")
+        return " · ".join(p for p in (first, model, cost if with_cost else None) if p)
+
+    for with_tokens, with_cost in ((True, True), (True, False), (False, False)):
+        out = build(with_tokens, with_cost, v.model)
+        if width(out) <= PHONE_COLUMNS:
+            return out
+    room = PHONE_COLUMNS - width(build(False, False, None)) - width(" · ")
+
+    return build(False, False, clip(v.model, max(6, room)) if v.model else None)
+
+
+def lean_repo_line(v: Vitals) -> str | None:
+    """``🌿 feat/x · 🔀 #12 ✓ approved · ✏️ 3 ⬆️ 1``: the PR only with one, ⬆️ only above zero; a long branch is clipped."""
+    pr = None
+    if v.pr_number:
+        pr = f"🔀 #{v.pr_number}" + (f" {PR_MARK[v.pr_state]}" if v.pr_state in PR_MARK else "")
+    sync = None
+    if v.dirty is not None:
+        sync = f"✏️ {v.dirty}" + (f" ⬆️ {v.ahead}" if v.ahead else "")
+    if v.branch is None and pr is None and sync is None:
+        return None
+    tail = [p for p in (pr, sync) if p]
+    if v.branch is None:
+        return " · ".join(tail)
+    rest = " · " + " · ".join(tail) if tail else ""
+    if width(f"🌿 {v.branch}{rest}") > PHONE_COLUMNS and pr and PR_MARK.get(v.pr_state or ""):
+        pr = f"🔀 #{v.pr_number}"  # the state word goes before the branch is cut
+        tail = [p for p in (pr, sync) if p]
+        rest = " · " + " · ".join(tail)
+    room = PHONE_COLUMNS - width("🌿 ") - width(rest)
+    return f"🌿 {clip(v.branch, max(6, room))}{rest}"
+
+
+def lean_limits_line(v: Vitals) -> str | None:
+    """``⏳ 5h 41% ⟳1h59m · 7d 24% ⟳3d3h``: only the windows present."""
+    known = [w for w in v.windows if w.key in WINDOW_SECONDS][:2]
+    if not known:
+        return None
+    return "⏳ " + " · ".join(f"{w.label} {pct(w.used)} ⟳{fmt_duration(w.resets_at - v.now)}" for w in known)
+
+
+def render_compact(v: Vitals) -> str:
+    """Lean: three lines (context and model, git and PR, limits), a fourth only when the reading may not be live."""
+    lines = [lean_ctx_line(v)]
+    for line in (lean_repo_line(v), lean_limits_line(v)):
+        if line is not None:
+            lines.append(line)
     if (live := liveness(v)) is not None:
-        lines.append(f"⚠️  {live}")
+        lines.append(f"⚠️ {clip(live, PHONE_COLUMNS - 3)}")
     return "\n".join(lines)
 
 
@@ -629,89 +598,7 @@ def render_detailed(v: Vitals) -> str:
     return "\n".join(out)
 
 
-def _ctx_verse(p: float | None) -> str:
-    if p is None:
-        return "The breath cannot be measured."
-    if p >= 80:
-        return "The breath grows short. Hand over."
-    if p >= 50:
-        return "Half the breath is spent."
-    return "The lungs are full and clear."
-
-
-def _limit_verse(w: Window, now: float) -> str:
-    pace = w.pace(now)
-    if w.used >= 90:
-        return "the gate is all but shut"
-    if pace is not None and pace > 100:
-        return "the pace offends the gate"
-    if w.used >= 50:
-        return "the ward holds, but strains"
-    return "the gate stands open"
-
-
-def _verdict(v: Vitals) -> str:
-    worst_limit = max((w.used for w in v.windows), default=0.0)
-    if not v.has_reading:
-        return "The signs are hidden.\n   No census reading to judge."
-    if (v.ctx_pct or 0) >= 80 or worst_limit >= 90:
-        return "Found wanting.\n   Seek absolution: hand over."
-    if (v.ctx_pct or 0) >= 50 or worst_limit >= 70 or (v.dirty or 0) > 20:
-        return "Venial sins accrue.\n   Proceed with care."
-    return "The soul is clean.\n   Continue with righteous purpose."
-
-
-def render_playful(v: Vitals) -> str:
-    out = ["🔮 THE SANCTUM'S VITAL SIGNS 🔮", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"]
-
-    out += ["", "⚡ THE BREATH (context)", f"   {bar(v.ctx_pct, 16, '█', '░')} {pct(v.ctx_pct)}"]
-    if v.ctx_tokens is not None and v.ctx_size:
-        out.append(
-            f"   {fmt_tokens(v.ctx_tokens)} drawn · {fmt_tokens(max(0, v.ctx_size - v.ctx_tokens))}"
-            " remain"
-        )
-    out.append(f"   {_ctx_verse(v.ctx_pct)}")
-
-    out += ["", "🧠 THE MIND", f"   {clip(v.model or 'an unknown spirit', 38)}"]
-    if v.cost_usd is not None:
-        out.append(f"   {fmt_cost(v.cost_usd)} tithed this session")
-    if v.tokens_out is not None:
-        out.append(f"   {fmt_tokens(v.tokens_out)} tokens of prophecy")
-
-    if repo_line(v) is not None:
-        out += ["", "📜 THE SANCTUM", f"   {repo_line(v, 38)}"]
-        if v.dirty is not None:
-            out.append(
-                "   unblemished — nothing uncommitted"
-                if v.dirty == 0
-                else f"   {plural(v.dirty, 'file')} await penance"
-            )
-        if v.ahead:
-            out.append(f"   {plural(v.ahead, 'commit')} unconfessed to the remote")
-
-    if v.duration_ms is not None or v.tools:
-        out += ["", "⏳ THE VIGIL"]
-        if v.duration_ms is not None:
-            out.append(f"   {fmt_duration(v.duration_ms / 1000)} in meditation")
-        if v.tools:
-            out.append(f"   {plural(v.tool_calls, 'act')} of devotion")
-        if v.agents:
-            out.append(f"   {plural(v.agents, 'spirit')} summoned")
-
-    if v.windows:
-        out += ["", "🚪 THE GATES (rate limits)"]
-        for w in v.windows:
-            out.append(f"   {gauge(w.used)} {w.label} {pct(w.used)}")
-            out.append(f"      {_limit_verse(w, v.now)}")
-            out.append(f"      reopens {fmt_reset(w.resets_at, v.now)}")
-
-    out += ["", f"✨ {_verdict(v)}"]
-    if (live := liveness(v)) is not None:
-        out.append(f"   (⚠️  {live})")
-    return "\n".join(out)
-
-
-RENDERERS = {"compact": render_compact, "detailed": render_detailed, "playful": render_playful}
+RENDERERS = {"compact": render_compact, "detailed": render_detailed}
 
 
 # --------------------------------------------------------------------------- main
@@ -741,15 +628,56 @@ def _clean_session(value: str | None) -> str | None:
     return value
 
 
-def resolve_style(words: list[str]) -> str:
-    """The first word naming a style or alias wins; otherwise compact."""
+def style_named(words: list[str]) -> str | None:
+    """The first word naming a style or alias, as a style; None when none does."""
     for word in " ".join(words).split():
         w = word.lower()
         if w in STYLES:
             return w
         if w in ALIASES:
             return ALIASES[w]
-    return "compact"
+    return None
+
+
+def resolve_style(words: list[str]) -> str:
+    """The first word naming a style or alias wins; otherwise compact."""
+    return style_named(words) or "compact"
+
+
+# ------------------------------------------------------------------- the saved default
+
+PREF_FILE = "vitals.json"
+NO_DEFAULT_MARKER = "(vitals: no default style chosen yet)"
+
+
+def pref_path() -> Path:
+    """Per account: beside the sessions, in the census dir (census's own rule, so a ``.json`` store works too)."""
+    return store.census_dir() / PREF_FILE
+
+
+def read_default() -> str | None:
+    """The saved default style, or None when there is none or the file is unreadable or odd. Never raises."""
+    try:
+        data = json.loads(pref_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return None
+    style = data.get("default_style") if isinstance(data, dict) else None
+    return style if isinstance(style, str) and style in STYLES else None
+
+
+def write_default(style: str) -> None:
+    """Save ``style`` atomically (same-directory temp file, then replace). Raises OSError."""
+    path = pref_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{PREF_FILE}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"default_style": style}, handle)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 def _emit(text: str) -> None:
@@ -772,11 +700,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vitals", description=__doc__.splitlines()[0])
     parser.add_argument("words", nargs="*", help="style name or alias (from /census:vitals arguments)")
     parser.add_argument("--style", choices=STYLES)
+    parser.add_argument("--set-default", metavar="STYLE", help="save the default style (lean|detailed or an alias), then show it")
     parser.add_argument("--session", help="session id (default: freshest for the worktree)")
     parser.add_argument("--cwd", default=os.getcwd())
     args = parser.parse_args(argv)
     session = _clean_session(args.session) or _clean_session(os.environ.get("CLAUDE_SESSION_ID"))
-    style = args.style or resolve_style(args.words)
+    explicit = args.style or style_named(args.words)
+    if args.set_default is not None:
+        # exactly one name or alias, nothing else: "lean; ls" or "lean detailed" is not a style
+        word = args.set_default.strip().lower()
+        chosen = word if word in STYLES else ALIASES.get(word)
+        if chosen is None:
+            print(f"vitals: {args.set_default!r} is not a style; use lean or detailed", file=sys.stderr)
+            return 2
+        try:
+            write_default(chosen)
+        except OSError as exc:
+            _emit(f"(vitals could not save the default style: {type(exc).__name__}: {exc})")
+            return 1
+        _emit(f"(vitals: default style saved: {chosen})")
+        explicit = chosen
+    saved = None if explicit else read_default()
+    style = explicit or saved or "compact"
     try:
         vitals = gather(session, args.cwd)
         reading = RENDERERS[style](vitals)
@@ -786,6 +731,8 @@ def main(argv: list[str] | None = None) -> int:
     if not vitals.has_reading:
         _emit("(no census reading yet — census's status-line hook or the census-mod mod feeds it)")
     _emit(reading)
+    if not explicit and saved is None:
+        _emit(NO_DEFAULT_MARKER)  # the command asks the person once, then runs --set-default
     return 0
 
 

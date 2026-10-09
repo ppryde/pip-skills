@@ -129,12 +129,22 @@ before this block have none, and readers fall back to their own `git`.
 ## Vitals
 
 An on-demand readout of the current session's vital signs, sized for a phone (no line wider than 44 display columns;
-branch, session and tool names are clipped to fit). It writes nothing. It was the separate `vitals` plugin and is now
-part of census, so it needs no sibling plugin and reads census through this plugin's own `cli.py`.
+branch, session and tool names are clipped to fit). It writes nothing but one preference (below). It was the separate
+`vitals` plugin and is now part of census: it reads census's store directly, in-process (the same view `census read`
+prints), so it runs no census subprocess and needs no sibling plugin. `CENSUS_STORE` and the config dir are honoured as
+everywhere else; the only subprocess left is the fixed-argv `git` fallback below.
+
+**Default style.** The first time `/census:vitals` runs it shows the lean readout, ends it with the line
+`(vitals: no default style chosen yet)`, and the command asks once which style to show by default (lean or detailed).
+The answer is saved per account in `<census dir>/vitals.json` (`{"default_style": "compact|detailed"}`, written
+atomically; a missing, corrupt or unknown value, such as an old `playful`, just means "not chosen yet"). From then on a
+bare `/census:vitals` shows that style; naming a style (`/census:vitals detailed`) overrides it for that run, and
+`/census:vitals default detailed` changes it. From a shell: `vitals.py --set-default <lean|detailed>` (a name or alias
+such as `brief`, `full`, `trend`; anything else is an error and nothing is written).
 
 | Source | Gives |
 |---|---|
-| **census** (`census read`) | context %, tokens and window size, model, effort, cost, duration, prompt-cache warmth, the account's rate-limit windows; the session's `git` block (branch, uncommitted files, ahead of upstream); the payload's `pr` (number, state) |
+| **census** (its store, in-process) | context %, tokens and window size, model, effort, cost, duration, prompt-cache warmth, the account's rate-limit windows; the session's `git` block (branch, uncommitted files, ahead of upstream); the payload's `pr` (number, state) |
 | **git**, only when the entry has no usable `git` block (missing, from before it, or malformed) | one `git --no-optional-locks status --porcelain=2 --branch -uno` in the worktree |
 | **the transcript** (`transcript_path` from census) | tool calls by name, subagent spawns, typed prompts |
 
@@ -143,37 +153,34 @@ there is no "ahead". Every source is optional: a missing one leaves its lines ou
 
 | Invoke | Style |
 |---|---|
-| `/census:vitals` | lean (default); `detailed` or `playful` by argument (aliases `brief`, `full`, `trend`, `drama`, `witchfinder`) |
-| `/census:vitals-lean` | up to seven lines with emoji gauges: context, model, repo, sync, limits, time, freshness |
-| `/census:vitals-detailed` | sectioned: context headroom and cache, cost and tokens, git sync and lines changed, tool breakdown, each rate-limit window with reset time and **pace** |
-| `/census:vitals-playful` | the Witchfinder's reading, ending in a verdict |
+| `/census:vitals` | your default style (lean until you choose); `lean` or `detailed` by argument (aliases `brief`, `full`, `trend`) |
+| `/census:vitals-lean` | three lines with emoji gauges: context, model and cost; branch, PR and uncommitted work; rate-limit windows. A fourth line only when the reading may not be live |
+| `/census:vitals-detailed` | sectioned: context headroom and cache, cost and tokens, git sync and lines changed, tool breakdown, duration, each rate-limit window with reset time and **pace** |
 
 ```text
-⚡ ctx 9% ▰▱▱▱▱▱▱▱▱▱ 88k/1M
-🧠 Opus 5.5 · high · $0.90
-🌿 feat/vitals · PR #102 open
-✎  2 dirty · ↑1
-⏳ 5h 3% 🟢 4h · 7d 22% 🟢 5d
-⏱  3m · 18 tools · 2 agents
+⚡ 9% ▰▱▱▱▱▱ 88k/1M · Opus 5.5 · $0.90
+🌿 feat/vitals · 🔀 #102 ✓ approved · ✏️ 2 ⬆️ 1
+⏳ 5h 3% ⟳4h · 7d 22% ⟳5d
 ```
+
+Lean drops parts that are absent (no PR, no limits, no cost), shows `⬆️` only above zero, and when a line would pass 44
+columns drops its lowest-priority part rather than wrap: the cost first, then the token counts, then the model name is
+clipped; a long branch is clipped, and a PR's state word goes before the branch is cut.
 
 **Pace** projects a window's usage at reset from the rate so far, `used × window length ÷ elapsed`, once 5% of the window
 has gone, for the known `five_hour` and `seven_day` windows only. It is a straight line, so it overstates early-week
-bursts. The playful verdict follows real thresholds: *found wanting* at 80% context or 90% of any limit, *venial* at 50%
-context, 70% of a limit or more than 20 dirty files, *hidden signs* with no reading at all.
+bursts.
 
 Each skill and the command run `scripts/vitals.py` through `!` command injection, so the reading is in the prompt before
 the model sees it and the model only echoes it in a `text` fence. By hand:
 
 ```bash
-python3 scripts/vitals.py [lean|detailed|playful|alias] [--session ID] [--cwd DIR]
+python3 scripts/vitals.py [lean|detailed|alias] [--session ID] [--cwd DIR]
 ```
 
 The session comes from `--session`, then `CLAUDE_SESSION_ID`; with no entry for it (a brand-new session, right after
 `/clear`) it uses the freshest entry for the worktree and says *another session's reading* if that is a sibling's.
-census is found via `CENSUS_CLI` (authoritative when set), else the `cli.py` beside `vitals.py`, else the `cli.path`
-pointer, else `census` on PATH. Whatever it names is taken as one path (never split, never shell-interpreted) and run
-only if it is absolute, a regular file, and a Python script or an executable. The vitals pieces are separable:
+The vitals pieces are separable:
 `scripts/vitals.py`, `skills/vitals-*`, `commands/vitals.md` and the census test suite's `test_vitals.py` depend on
 nothing else in census but `scripts/gitcache.py` and `scripts/store.py`.
 
@@ -257,6 +264,7 @@ census install            # dry run: what it would add or replace
 census install --yes      # launcher at ~/.local/bin/census + ingest block in a bash status-line script (prints the line to add by hand when there is no script)
 census install --statusline [--replace] [--segments LIST] --yes   # set settings.json statusLine to `census statusline`
 census uninstall --yes    # remove the launcher and block; restore a replaced statusLine; --purge also deletes data
+census statusline --preview [--segments LIST] [--config-dir DIR]   # a canned preview; both flags are valid only with --preview
 census where              # (where, install, uninstall and `statusline --preview` take --config-dir DIR: that account, for that run) read-only JSON: config dir, census dir, settings path, status line, plugin installs, census-mod enabled
 ```
 

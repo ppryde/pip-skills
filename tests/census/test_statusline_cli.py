@@ -174,6 +174,31 @@ class TestPreviewForAnotherAccount:
         assert os.environ["CLAUDE_CONFIG_DIR"] == str(mine)  # restored
 
 
+class TestPreviewOnlyFlags:
+    """--config-dir and --segments only mean something for a preview: without one they would act on a live ingest."""
+
+    @pytest.mark.parametrize("flag,value", [("--config-dir", "/elsewhere"), ("--segments", "model")])
+    def test_refused_without_preview_and_nothing_is_ingested(self, store_file, monkeypatch, capsys, flag, value):
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps(payload()).encode())))
+        assert cli.main(["statusline", flag, value]) == 1
+        assert "only valid with --preview" in capsys.readouterr().err
+        assert not list(st.census_dir().rglob("*.json")) if st.census_dir().exists() else True
+
+    def test_segments_choose_the_previews_layout_without_an_env_assignment(self, store_file, monkeypatch, capsysbinary):
+        monkeypatch.setenv("CENSUS_STATUSLINE_COLOR", "never")
+        monkeypatch.delenv("CENSUS_STATUSLINE_SEGMENTS", raising=False)
+        assert cli.main(["statusline", "--preview", "--segments", "model"]) == 0
+        out = capsysbinary.readouterr().out.decode().strip()
+        assert out.count("\n") == 0 and "Opus 5.5" in out and "🧠" not in out
+        assert os.environ.get("CENSUS_STATUSLINE_SEGMENTS") is None  # that run only
+
+    def test_the_environment_still_works_for_a_real_status_line(self, store_file, monkeypatch, capsysbinary):
+        monkeypatch.setenv("CENSUS_STATUSLINE_COLOR", "never")
+        monkeypatch.setenv("CENSUS_STATUSLINE_SEGMENTS", "model")
+        assert cli.main(["statusline", "--preview"]) == 0
+        assert "🧠" not in capsysbinary.readouterr().out.decode()
+
+
 def test_real_process_end_to_end(tmp_path):
     """The shipped entry point, as Claude Code runs it, with a pinned environment."""
     env = {

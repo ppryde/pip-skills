@@ -70,7 +70,8 @@ def _statusline(args: argparse.Namespace) -> int:
     nothing here raises."""
     if args.preview:
         try:
-            _emit(rd.statusline(rd.preview_payload()))
+            env = {**os.environ, rd.SEGMENTS_ENV: args.segments} if args.segments else None
+            _emit(rd.statusline(rd.preview_payload(), env=env))
         except Exception:  # noqa: BLE001 - never a traceback
             _emit(rd.fallback(None))
         return 0
@@ -104,14 +105,7 @@ def _statusline(args: argparse.Namespace) -> int:
 
 
 def cmd_read(args: argparse.Namespace) -> int:
-    if args.limits:
-        out: object = st.all_limits() if args.all else st.limits()
-    elif args.session:
-        out = st.for_session(args.session)
-    elif args.worktree:
-        out = st.latest_for_worktree(args.worktree)
-    else:
-        out = st.read_all()
+    out = st.read_view(session=args.session, worktree=args.worktree, limits_only=args.limits, every_account=args.all)
     print(json.dumps(out if out is not None else {}))
     return 0
 
@@ -208,7 +202,8 @@ def build_parser() -> argparse.ArgumentParser:
     line.add_argument(
         "--preview", action="store_true", help="draw a canned payload and the live census store; no stdin, no ingest"
     )
-    line.add_argument("--config-dir", help="use this Claude config dir instead of $CLAUDE_CONFIG_DIR, for this run (with --preview)")
+    line.add_argument("--config-dir", help="with --preview: use this Claude config dir instead of $CLAUDE_CONFIG_DIR, for this run")
+    line.add_argument("--segments", help="with --preview: draw this segment list instead of $CENSUS_STATUSLINE_SEGMENTS")
     line.set_defaults(func=cmd_statusline)
 
     where = sub.add_parser(
@@ -266,6 +261,8 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
         if getattr(args, "all", False) and not args.limits:
             parser.error("--all is only valid with --limits")
+        if args.command == "statusline" and not args.preview and (args.config_dir or args.segments):
+            parser.error("--config-dir and --segments are only valid with --preview")
         if args.command == "install" and not args.statusline and (
             args.replace or args.segments is not None or args.settings
         ):

@@ -1012,6 +1012,21 @@ def read_all(now: float | None = None) -> dict[str, Any]:
     return {"version": VIEW_VERSION, "limits": _stored_limits(), "sessions": sessions}
 
 
+def read_view(
+    *, session: str | None = None, worktree: str | None = None, limits_only: bool = False, every_account: bool = False
+) -> Any:
+    """What ``census read`` prints (before it is JSON): the one place that picks the view, shared by the CLI and by
+    vitals, which reads census in-process instead of running it. ``limits_only`` wins, then ``session``, then
+    ``worktree``, else the whole store."""
+    if limits_only:
+        return all_limits() if every_account else limits()
+    if session:
+        return for_session(session)
+    if worktree:
+        return latest_for_worktree(worktree)
+    return read_all()
+
+
 def limits(now: float | None = None) -> dict[str, Any] | None:
     """The account rate-limit windows that are still live (future ``resets_at``).
 

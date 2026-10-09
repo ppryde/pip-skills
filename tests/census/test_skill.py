@@ -54,8 +54,8 @@ COMMANDS = SKILL.parents[2] / "commands"
 VITALS_FILES = [COMMANDS / "vitals.md", *sorted((SKILL.parents[1]).glob("vitals-*/SKILL.md"))]
 
 
-def test_there_are_the_command_and_three_vitals_skills():
-    assert len(VITALS_FILES) == 4 and all(f.is_file() for f in VITALS_FILES)
+def test_there_are_the_command_and_two_vitals_skills():
+    assert len(VITALS_FILES) == 3 and all(f.is_file() for f in VITALS_FILES)
 
 
 def test_no_shell_line_in_the_vitals_command_or_skills_splices_arguments():
@@ -71,6 +71,34 @@ def test_the_command_runs_the_default_readout_and_lets_the_model_pick_a_style_fr
     text = " ".join((COMMANDS / "vitals.md").read_text().split())
     bang = [l for l in (COMMANDS / "vitals.md").read_text().splitlines() if l.startswith("!")]
     assert len(bang) == 1 and "--session" in bang[0] and "--style" not in bang[0]
-    for style in ("lean", "detailed", "playful"):
+    for style in ("lean", "detailed"):
         assert style in text
+    assert "playful" not in text.lower()
     assert "never pasting the user's own text" in text  # the user's words never reach a command
+
+
+def test_the_command_asks_for_a_default_style_once_when_the_marker_ends_the_reading():
+    text = " ".join((COMMANDS / "vitals.md").read_text().split())
+    assert "(vitals: no default style chosen yet)" in text
+    assert "AskUserQuestion" in text
+    for part in ("📊 Vitals", "Which style should /census:vitals show by default?", "Lean — three lines (Recommended)",
+                 "Detailed — the full readout"):
+        assert part in text
+    assert "Playful" not in text
+    assert "--set-default" in text and "default <style>" in text
+
+
+def test_the_command_sets_the_default_only_from_the_fixed_list():
+    text = " ".join((COMMANDS / "vitals.md").read_text().split())
+    assert "--set-default <lean|detailed>" in text
+    assert "never the raw" in text
+
+
+def test_no_command_carries_an_environment_assignment_prefix():
+    """`NAME=value command` is a shell variable too; segments go through --segments instead."""
+    text = SKILL.read_text()
+    assert "CENSUS statusline --preview --segments" in text
+    for line in text.splitlines():
+        if "CENSUS " in line and "statusline" in line:
+            assert not line.strip().startswith(("CENSUS_", "`CENSUS_")), line
+    assert 'CENSUS_STATUSLINE_SEGMENTS="' not in text

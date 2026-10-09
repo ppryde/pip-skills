@@ -62,7 +62,7 @@ which account it touches.
    `context,cache,limits,cost/model,git,dir,changes,pr`. `git` is the branch;
    `changes` is the uncommitted and unpushed counts; `pr` is the branch's open
    PR and its review state (from the payload, hidden without one). Re-run the preview with
-   `CENSUS_STATUSLINE_SEGMENTS="<list>" CENSUS statusline --preview` until
+   `CENSUS statusline --preview --segments "<list>"` until
    they are happy. Keeping the default is fine: then pass no `--segments`.
 
 4. **Dry run.** Run `CENSUS install --statusline [--segments "<list>"]` (no
