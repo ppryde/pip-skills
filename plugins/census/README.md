@@ -135,7 +135,7 @@ part of census, so it needs no sibling plugin and reads census through this plug
 | Source | Gives |
 |---|---|
 | **census** (`census read`) | context %, tokens and window size, model, effort, cost, duration, prompt-cache warmth, the account's rate-limit windows; the session's `git` block (branch, uncommitted files, ahead of upstream); the payload's `pr` (number, state) |
-| **git**, only when the entry has no `git` block (a record from before it) | one `git --no-optional-locks status --porcelain=2 --branch -uno` in the worktree |
+| **git**, only when the entry has no usable `git` block (missing, from before it, or malformed) | one `git --no-optional-locks status --porcelain=2 --branch -uno` in the worktree |
 | **the transcript** (`transcript_path` from census) | tool calls by name, subagent spawns, typed prompts |
 
 It never calls `gh`: the PR is whatever the payload carries. Untracked files are not counted (`-uno`), and with no upstream
@@ -174,8 +174,8 @@ The session comes from `--session`, then `CLAUDE_SESSION_ID`; with no entry for 
 census is found via `CENSUS_CLI` (authoritative when set), else the `cli.py` beside `vitals.py`, else the `cli.path`
 pointer, else `census` on PATH. Whatever it names is taken as one path (never split, never shell-interpreted) and run
 only if it is absolute, a regular file, and a Python script or an executable. The vitals pieces are separable:
-`scripts/vitals.py`, `skills/vitals-*`, `commands/vitals.md` and `tests/census/test_vitals.py` depend on nothing else in
-census but `scripts/gitcache.py`.
+`scripts/vitals.py`, `skills/vitals-*`, `commands/vitals.md` and the census test suite's `test_vitals.py` depend on
+nothing else in census but `scripts/gitcache.py` and `scripts/store.py`.
 
 ## Liveness
 

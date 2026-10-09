@@ -7,7 +7,7 @@ allowed-tools: Bash(python3:*)
 
 # /census:vitals-playful
 
-The same vital signs, read aloud by the Witchfinder. The closing verdict is real: it turns *wanting* at 80% context or 90% of a rate limit, and venial at 50% / 70% or 20+ dirty files.
+The same vital signs, read aloud by the Witchfinder. The closing verdict is real: it turns *wanting* at 80% context or 90% of a rate limit, and venial at 50% / 70% or more than 20 dirty files.
 
 ## Reading
 

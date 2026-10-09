@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import subprocess
@@ -629,11 +630,13 @@ def test_cli_path_pointer_in_a_census_store_dir_is_followed(tmp_path, monkeypatc
     assert vitals.census_cli() == CENSUS_CLI
 
 
-def test_a_dotjson_store_is_a_directory_like_any_other(tmp_path, monkeypatch, real_census_env):
+def test_a_dotjson_store_is_read_as_census_reads_it_its_parent_holds_cli_path(tmp_path, monkeypatch, real_census_env):
+    """Vitals ships inside census, and census's own rule (store.census_dir) is that a CENSUS_STORE ending .json is
+    the legacy FILE, whose parent is the census dir: that is where `census install` publishes cli.path."""
     (tmp_path / "pointer-parent").mkdir()
     (tmp_path / "pointer-parent" / "cli.path").write_text(str(CENSUS_CLI))
     monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "pointer-parent" / "status.json"))
-    assert vitals.census_cli() is None
+    assert vitals.census_cli() == CENSUS_CLI
 
 
 def test_gather_reads_a_session_recorded_by_the_real_census(tmp_path, monkeypatch):
@@ -720,3 +723,45 @@ def test_clip_counts_wide_characters_as_two_columns():
     assert vitals.clip("日本語日本語", 7).endswith("…")
     assert vitals.clip("日本語", 6) == "日本語"
     assert vitals.clip("abcdefgh", 5) == "abcd…"
+
+
+# ------------------------------------------------------------------ review round: output, prompts, argv
+
+
+def test_output_is_utf8_bytes_even_on_a_legacy_windows_stdout(tmp_path, monkeypatch):
+    """Every renderer prints emoji and box glyphs; a cp1252 console raises on them unless the bytes are written."""
+    raw = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="cp1252", errors="strict", write_through=True))
+
+    assert vitals.main(["--cwd", str(tmp_path)]) == 0
+
+    out = raw.getvalue().decode("utf-8")
+    assert "no census reading yet" in out and "ctx" in out
+    assert any(ord(ch) > 0x2000 for ch in out)  # glyphs a cp1252 console cannot encode were written
+
+
+def test_a_failure_message_is_utf8_bytes_too(tmp_path, monkeypatch):
+    raw = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="cp1252", errors="strict", write_through=True))
+    monkeypatch.setitem(vitals.RENDERERS, "compact", lambda v: (_ for _ in ()).throw(RuntimeError("boom ✻")))
+
+    assert vitals.main(["--cwd", str(tmp_path)]) == 0
+    assert "boom ✻" in raw.getvalue().decode("utf-8")
+
+
+@pytest.mark.parametrize("content", ["[Request interrupted by user]", "[Request interrupted by user for tool use]"])
+def test_an_interruption_marker_is_not_a_prompt_in_either_form(content):
+    assert vitals._is_prompt({}, content) is False
+    assert vitals._is_prompt({}, [{"type": "text", "text": content}]) is False
+    assert vitals._is_prompt({}, "a real prompt") is True
+
+
+def test_the_census_argv_is_single_tokens_whatever_the_session_id_holds(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(vitals, "census_cli", lambda: CENSUS_CLI)
+    monkeypatch.setattr(vitals.subprocess, "run", lambda cmd, **kw: seen.append(cmd) or (_ for _ in ()).throw(OSError()))
+
+    vitals._census_read(["--session", "x; rm -rf / $(id) 'q' \"r\""])
+
+    assert seen[0][-3:] == ["read", "--session", "x; rm -rf / $(id) 'q' \"r\""]
+    assert vitals._one_arg("a b; c") == "a b; c" and vitals._one_arg("") == ""
