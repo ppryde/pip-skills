@@ -727,9 +727,14 @@ def test_an_interruption_marker_is_not_a_prompt_in_either_form(content):
 # ------------------------------------------------------------------------ the default style
 
 
+def mine(census_dir):
+    """This account's own preference file in a census dir."""
+    return census_dir / "vitals" / f"{st.account_info()['key']}.json"
+
+
 @pytest.fixture
 def census_home(tmp_path, monkeypatch):
-    """The census dir (and so vitals.json) pinned inside tmp_path."""
+    """The census dir (and so vitals/<account>.json) pinned inside tmp_path."""
     monkeypatch.delenv("CENSUS_STORE", raising=False)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
     return tmp_path / "cfg" / "census"
@@ -754,7 +759,7 @@ class TestDefaultStyle:
     def test_set_default_saves_and_the_next_run_uses_it_with_no_marker(self, census_home, tmp_path, capsys):
         code, out = run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))
         assert code == 0 and "detailed" in out
-        assert json.loads((census_home / "vitals.json").read_text()) == {st.account_info()["key"]: {"default_style": "detailed"}}
+        assert json.loads(mine(census_home).read_text()) == {"default_style": "detailed"}
         code, out = run(capsys, "--cwd", str(tmp_path))
         assert "SESSION VITALS" in out and MARKER not in out
 
@@ -764,12 +769,12 @@ class TestDefaultStyle:
     ])
     def test_set_default_takes_names_and_aliases(self, census_home, tmp_path, capsys, given, saved):
         assert run(capsys, "--set-default", given, "--cwd", str(tmp_path))[0] == 0
-        assert json.loads((census_home / "vitals.json").read_text())[st.account_info()["key"]]["default_style"] == saved
+        assert json.loads(mine(census_home).read_text())["default_style"] == saved
 
     @pytest.mark.parametrize("bad", ["playful", "drama", "witchfinder", "", "rm -rf /", "lean; ls", "$(id)", "fancy", "lean detailed"])
     def test_anything_else_is_an_error_and_nothing_is_written(self, census_home, tmp_path, capsys, bad):
         assert run(capsys, "--set-default", bad, "--cwd", str(tmp_path))[0] == 2
-        assert not (census_home / "vitals.json").exists()
+        assert not (census_home / "vitals").exists()
 
     def test_an_explicit_style_wins_and_shows_no_marker(self, census_home, tmp_path, capsys):
         run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))
@@ -785,14 +790,16 @@ class TestDefaultStyle:
     @pytest.mark.parametrize("content", ["{ nope", "[]", "42", '{"default_style": "fancy"}', '{"default_style": 7}', "{}", ""])
     def test_a_corrupt_or_odd_file_is_unset_and_never_raises(self, census_home, tmp_path, capsys, content):
         census_home.mkdir(parents=True)
-        (census_home / "vitals.json").write_text(content)
+        mine(census_home).parent.mkdir(parents=True)
+        mine(census_home).write_text(content)
         assert vitals.read_default() is None
         _, out = run(capsys, "--cwd", str(tmp_path))
         assert MARKER in out
 
     def test_a_default_of_playful_from_the_old_branch_reads_as_unset(self, census_home, tmp_path, capsys):
         census_home.mkdir(parents=True)
-        (census_home / "vitals.json").write_text(json.dumps({st.account_info()["key"]: {"default_style": "playful"}}))
+        mine(census_home).parent.mkdir(parents=True)
+        mine(census_home).write_text('{"default_style": "playful"}')
         assert vitals.read_default() is None
         assert MARKER in run(capsys, "--cwd", str(tmp_path))[1]
 
@@ -807,7 +814,7 @@ class TestDefaultStyle:
         run(capsys, "--set-default", "lean", "--cwd", str(tmp_path))
         run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))
         assert vitals.read_default() == "detailed"
-        assert sorted(p.name for p in census_home.iterdir()) == ["vitals.json"]  # no temp file left
+        assert [p.name for p in (census_home / "vitals").iterdir()] == [mine(census_home).name]  # no temp file left
 
     def test_it_lives_in_the_census_dir_so_it_is_per_account(self, tmp_path, monkeypatch, capsys):
         monkeypatch.delenv("CENSUS_STORE", raising=False)
@@ -817,12 +824,12 @@ class TestDefaultStyle:
         for name, style in (("a", "detailed"), ("b", "compact")):
             monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / name))
             st.reset_account_cache()
-            assert json.loads((tmp_path / name / "census" / "vitals.json").read_text())[st.account_info()["key"]]["default_style"] == style
+            assert json.loads(mine(tmp_path / name / "census").read_text())["default_style"] == style
 
     def test_a_dotjson_census_store_keeps_it_beside_the_file(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "legacy" / "status.json"))
         run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))
-        assert (tmp_path / "legacy" / "vitals.json").is_file()
+        assert (tmp_path / "legacy" / "vitals" / f"{st.account_info()['key']}.json").is_file()
 
     def test_an_unwritable_census_dir_says_so_and_does_not_traceback(self, census_home, tmp_path, monkeypatch, capsys):
         (tmp_path / "cfg").mkdir()
@@ -835,7 +842,8 @@ class TestDefaultStyle:
 
 
 class TestSharedStore:
-    """Accounts that share CENSUS_STORE share the file, not the choice: it is keyed by the account key."""
+    """Accounts that share CENSUS_STORE share the dir, not a file: each account has its own, so there is no shared
+    read-modify-write to lose a choice in."""
 
     @pytest.fixture
     def two_accounts(self, tmp_path, monkeypatch):
@@ -852,6 +860,7 @@ class TestSharedStore:
             st.reset_account_cache()
             return homes[name][1]
 
+        become.homes = homes
         return become
 
     def test_one_accounts_choice_does_not_change_the_others(self, two_accounts, tmp_path, capsys):
@@ -865,31 +874,62 @@ class TestSharedStore:
         two_accounts("personal")
         assert vitals.read_default() == "compact"
 
-    def test_the_file_holds_both_keyed_by_account(self, two_accounts, tmp_path, capsys):
+    def test_each_account_has_its_own_file(self, two_accounts, tmp_path, capsys):
         work = two_accounts("work")
         run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))
         personal = two_accounts("personal")
         run(capsys, "--set-default", "lean", "--cwd", str(tmp_path))
-        data = json.loads((tmp_path / "shared" / "vitals.json").read_text())
-        assert data == {work: {"default_style": "detailed"}, personal: {"default_style": "compact"}}
+        folder = tmp_path / "shared" / "vitals"
+        assert sorted(p.name for p in folder.iterdir()) == sorted([f"{work}.json", f"{personal}.json"])
+        assert json.loads((folder / f"{work}.json").read_text()) == {"default_style": "detailed"}
+        assert json.loads((folder / f"{personal}.json").read_text()) == {"default_style": "compact"}
 
-    def test_the_old_single_key_shape_is_ignored_and_dropped_on_the_next_write(self, two_accounts, tmp_path, capsys):
+    def test_two_accounts_writing_at_the_same_time_both_survive(self, two_accounts, tmp_path):
+        """Real concurrent processes sharing one CENSUS_STORE, each hammering its own choice."""
         two_accounts("work")
-        (tmp_path / "shared").mkdir()
-        (tmp_path / "shared" / "vitals.json").write_text('{"default_style": "detailed"}')
-        assert vitals.read_default() is None
-        run(capsys, "--set-default", "lean", "--cwd", str(tmp_path))
-        assert "default_style" not in json.loads((tmp_path / "shared" / "vitals.json").read_text())
+        procs = []
+        for name, style in (("work", "detailed"), ("personal", "lean")):
+            cfg, _ = two_accounts.homes[name]
+            env = {**os.environ, "CENSUS_STORE": str(tmp_path / "shared"), "CLAUDE_CONFIG_DIR": str(cfg)}
+            code = (
+                "import sys; sys.path.insert(0, %r)\n"
+                "from scripts import vitals\n"
+                "for _ in range(60):\n    vitals.write_default(%r)\n" % (str(PLUGIN), "detailed" if style == "detailed" else "compact")
+            )
+            procs.append(subprocess.Popen([sys.executable, "-c", code], env=env))
+        assert [p.wait(timeout=60) for p in procs] == [0, 0]
+        for name, expected in (("work", "detailed"), ("personal", "compact")):
+            two_accounts(name)
+            assert vitals.read_default() == expected
 
-    @pytest.mark.parametrize("junk", ["[]", "42", '{"x": 5}', '{"a": {"default_style": 3}}'])
-    def test_other_odd_content_is_replaced_not_crashed_on(self, two_accounts, tmp_path, capsys, junk):
-        key = two_accounts("work")
+    def test_the_earlier_shared_file_is_read_as_a_fallback_for_that_account_only(self, two_accounts, tmp_path):
+        work = two_accounts("work")
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        legacy = json.dumps({work: {"default_style": "detailed"}, "someone-else": {"default_style": "compact"}})
+        (shared / "vitals.json").write_text(legacy)
+        assert vitals.read_default() == "detailed"
+        two_accounts("personal")
+        assert vitals.read_default() is None  # work's entry is not personal's
+
+    def test_the_earlier_file_is_never_written_and_the_accounts_own_file_wins(self, two_accounts, tmp_path, capsys):
+        work = two_accounts("work")
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        legacy = json.dumps({work: {"default_style": "detailed"}})
+        (shared / "vitals.json").write_text(legacy)
+        run(capsys, "--set-default", "lean", "--cwd", str(tmp_path))
+        assert (shared / "vitals.json").read_text() == legacy  # untouched
+        assert vitals.read_default() == "compact"  # the new file beats the old entry
+
+    @pytest.mark.parametrize("junk", ["[]", "42", '{"default_style": "detailed"}', '{"x": 5}', "{ nope", ""])
+    def test_an_odd_earlier_file_is_just_unset(self, two_accounts, tmp_path, capsys, junk):
+        two_accounts("work")
         (tmp_path / "shared").mkdir()
         (tmp_path / "shared" / "vitals.json").write_text(junk)
         assert vitals.read_default() is None
         assert run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))[0] == 0
         assert vitals.read_default() == "detailed"
-        assert key in json.loads((tmp_path / "shared" / "vitals.json").read_text())
 
 
 def test_the_no_buffer_stdout_fallback_adds_no_second_newline(monkeypatch):

@@ -136,11 +136,12 @@ everywhere else; the only subprocess left is the fixed-argv `git` fallback below
 
 **Default style.** The first time `/census:vitals` runs it shows the lean readout, ends it with the line
 `(vitals: no default style chosen yet)`, and the command asks once which style to show by default (lean or detailed).
-The answer is saved per account in `<census dir>/vitals.json`, keyed by the census account key (the same key as
-`limits/<account>.json`): `{"<account key>": {"default_style": "compact|detailed"}}`. Accounts that share a
-`CENSUS_STORE` share the file but not the choice, and writing one account's keeps the others'. It is written
-atomically; a missing, corrupt or unknown value (an old `playful`, or the earlier single-key shape) just means "not
-chosen yet". From then on a
+The answer is saved per account in its own file, `<census dir>/vitals/<account key>.json` (the same key as
+`limits/<account>.json`): `{"default_style": "compact|detailed"}`. Accounts that share a `CENSUS_STORE` share the
+folder but never a file, so there is no shared read-modify-write for two of them to lose a choice in. It is written
+atomically; a missing, corrupt or unknown value (an old `playful`) just means "not chosen yet". The earlier shared
+`vitals.json` (`{"<account key>": {"default_style": …}}`) is read once as a fallback for the calling account only,
+and never written. From then on a
 bare `/census:vitals` shows that style; naming a style (`/census:vitals detailed`) overrides it for that run, and
 `/census:vitals default detailed` changes it. From a shell: `vitals.py --set-default <lean|detailed>` (a name or alias
 such as `brief`, `full`, `trend`; anything else is an error and nothing is written).

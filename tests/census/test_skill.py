@@ -104,7 +104,19 @@ def test_no_command_carries_an_environment_assignment_prefix():
     assert 'CENSUS_STATUSLINE_SEGMENTS="' not in text
 
 
+def _paragraph(starting_with: str) -> str:
+    """One blank-line-separated paragraph of the command, whitespace-normalised."""
+    for block in (COMMANDS / "vitals.md").read_text().split("\n\n"):
+        if block.lstrip().startswith(starting_with):
+            return " ".join(block.split())
+    raise AssertionError(f"no paragraph starts with {starting_with!r}")
+
+
 def test_an_explicit_default_wins_over_the_first_run_question():
-    text = " ".join((COMMANDS / "vitals.md").read_text().split())
-    assert "default <style>" in text
-    assert "do not ask the first-run question" in text
+    """The precedence as ONE instruction from each side, not independent fragments: the changing-the-default paragraph
+    says an explicit `default <style>` wins and the first-run question is not asked, even on a fresh install; the
+    first-run paragraph says it is only for a bare run."""
+    change = _paragraph("**Changing the default.**")
+    assert re.search(r"typed `default <style>`.*that explicit choice wins: do not ask the first-run question, even on a fresh install", change)
+    first = _paragraph("**First run: choosing a default.**")
+    assert re.search(r"Only for a bare run.*explicit `default <style>` below always wins, so do not ask the first-run question then", first)
