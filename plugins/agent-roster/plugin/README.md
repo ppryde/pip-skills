@@ -19,7 +19,12 @@ number (1 = All, then 2–9) while the pane holds the keyboard. The header
 counts stay global, so nothing waiting in another repo hides behind a tab.
 
 The pane rescans every 5 s; **refresh** (hotkey `r`) rescans now and re-reads
-git branches, and the header says how long ago it last looked. The status line reads `agents: N waiting` while any session waits on you.
+git branches, and the header says how long ago it last looked. While any session waits on you, a one-row button sits in the band above the prompt:
+`👥 N waiting · open roster`. Click it, or focus the band and press Enter, and the pane opens exactly as `/roster`
+does. It draws after whatever other mods put in that band (census-mod's lines, context-vigil-mod's bar), yields to a
+survey, is left out when the band has no row to spare, is cut to the band's width, has no hotkey of its own, and is
+redrawn only when the count changes. The band is raised on the terminal and desktop surfaces only; a session
+drawing on neither (VS Code, mobile) keeps the old plain `agents: N waiting` status line instead.
 
 ## Over Remote Control
 
@@ -162,7 +167,7 @@ Title and prompt come from the session's transcript,
 file's mtime changes. The branch is `git branch --show-current` per cwd,
 cached for a minute.
 
-None of it reaches the model: the pane, the polling and the status line cost
+None of it reaches the model: the pane, the polling and the band button cost
 no context. The model sees only `/roster`'s reply: one line at the terminal, the roster
 text when it runs over Remote Control.
 

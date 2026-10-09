@@ -433,3 +433,140 @@ test('a record with no startedAt cannot be told from a reused pid, so it is not 
   expect(text).toMatch(/cc-nostart.*at a startup prompt/)
   expect(text).not.toMatch(/cc-nostart.*another account/)
 })
+
+// --- the clickable "N waiting" button in the band above the prompt -------------------------
+
+type DrawnNode = { type?: string; key?: string; props?: object; text?: string; children?: (DrawnNode | string)[] }
+const textOf = (n: DrawnNode | string): string =>
+  typeof n === 'string' ? n : (n.text ?? '') + ((n.props as { label?: string } | undefined)?.label ?? '') + (n.children ?? []).map(textOf).join('')
+const BAND = (props: Record<string, unknown> = {}) =>
+  ({ plugin: 'agent-roster', surface: 'terminal' as const, component: 'AbovePrompt' as const, props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, ...props } as never })
+async function bandRows(ui: { drawn: () => Promise<unknown> }): Promise<string[]> {
+  const root = (await ui.drawn()) as DrawnNode
+  return (root.children ?? []).map(textOf).filter(l => l !== '')
+}
+
+// `waiting` registry entries that wait on the person, plus one that is busy.
+function bandWorld(on: On, opts: { waiting: number; surfaces?: string[]; inner?: string } = { waiting: 2 }) {
+  const seen = { status: [] as (string | undefined)[], opened: 0, invalidated: 0 }
+  const reg: Record<string, object> = { '900.json': { pid: 900, sessionId: 'b', cwd: '/r/busy', tmux: 'cc-busy:@0.%0', status: 'busy', updatedAt: 0 } }
+  for (let i = 0; i < opts.waiting; i++) {
+    reg[`${100 + i}.json`] = { pid: 100 + i, sessionId: `w${i}`, cwd: `/r/w${i}`, tmux: `cc-w${i}:@0.%${i}`, status: 'waiting', updatedAt: 0 }
+  }
+  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home' : undefined }))
+  on('session.id', () => ({ value: 'self' }))
+  on('session.surfaces', () => ({ value: (opts.surfaces ?? ['terminal']) as never }))
+  on('fs.list', ($, e) => ({ value: e.path === SESSIONS_DIR ? Object.keys(reg).map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) : [] }))
+  on('fs.read', ($, e) => ({ value: JSON.stringify(reg[e.path.slice(SESSIONS_DIR.length + 1)]) }))
+  on('fs.exists', () => ({ value: false }))
+  on('ui.open', () => { seen.opened++; return { value: { isPlaced: true as const } } })
+  on('ui.status', (_$, e) => { seen.status.push((e as { text?: string }).text); return { value: undefined } })
+  on('ui.invalidate', () => { seen.invalidated++; return { value: undefined } })
+  on('process.run', ($, e) => ({
+    value: {
+      exitCode: e.argv[0] === 'git' ? 1 : 0,
+      stdout: e.argv[0] === 'ps' ? Object.keys(reg).map(n => `${n.replace('.json', '')} /bin/claude`).join('\n') + '\n' : '',
+      stderr: '',
+    } as never,
+  }))
+  // Whatever the mods beneath draw in the band; an empty Box when there is nothing.
+  const text = opts.inner
+  on('ui.render', ($, e) => { const { Box, Text } = $.ui.resolve(e); return text ? <Box><Text>{text}</Text></Box> : <Box /> })
+  return { seen, reg }
+}
+
+const refreshAndMount = async ($: Engine, props: Record<string, unknown> = {}) => {
+  await bridgeText($) // a scan fills the roster
+  return $.ui.mount(BAND(props))
+}
+
+test('N waiting draws one button row that opens the roster pane like /roster', async ($, on) => {
+  const { seen } = bandWorld(on, { waiting: 2 })
+  const ui = await refreshAndMount($)
+
+  expect(await bandRows(ui)).toEqual(['👥 2 waiting · open roster'])
+  await ui.press({ key: 'roster-waiting' })
+  expect(seen.opened).toBe(1)
+  await ui.unmount()
+})
+
+test('nothing waiting: no row, and the engine tree is returned untouched', async ($, on) => {
+  bandWorld(on, { waiting: 0, inner: 'INNER' })
+  const ui = await refreshAndMount($)
+
+  expect(await bandRows(ui)).toEqual(['INNER'])
+  await ui.unmount()
+})
+
+test('what other mods draw stays first and our row follows it', async ($, on) => {
+  bandWorld(on, { waiting: 1, inner: 'CENSUS LINE' })
+  const ui = await refreshAndMount($)
+
+  expect(await bandRows(ui)).toEqual(['CENSUS LINE', '👥 1 waiting · open roster'])
+  await ui.unmount()
+})
+
+test('a survey holding the band is never drawn over', async ($, on) => {
+  bandWorld(on, { waiting: 3, inner: 'SURVEY' })
+  const ui = await refreshAndMount($, { hasSurvey: true })
+
+  expect(await bandRows(ui)).toEqual(['SURVEY'])
+  await ui.unmount()
+})
+
+test('maxRows: dropped with no room, kept with one row free', async ($, on) => {
+  bandWorld(on, { waiting: 1 })
+  await bridgeText($)
+  const none = await $.ui.mount(BAND({ maxRows: 0 }))
+  expect(await bandRows(none)).toEqual([])
+  await none.unmount()
+  const one = await $.ui.mount(BAND({ maxRows: 1 }))
+  expect(await bandRows(one)).toEqual(['👥 1 waiting · open roster'])
+  await one.unmount()
+})
+
+test('maxRows 1 with another mod already drawing leaves no room for our row', async ($, on) => {
+  bandWorld(on, { waiting: 1, inner: 'CENSUS LINE' })
+  const ui = await refreshAndMount($, { maxRows: 1 })
+
+  expect(await bandRows(ui)).toEqual(['CENSUS LINE'])
+  await ui.unmount()
+})
+
+test('a narrow band truncates the label to bodyColumns', async ($, on) => {
+  bandWorld(on, { waiting: 12 })
+  const ui = await refreshAndMount($, { bodyColumns: 12 })
+  const [row] = await bandRows(ui)
+
+  expect(row!.length).toBeLessThanOrEqual(12)
+  expect(row).toMatch(/…$/)
+  await ui.unmount()
+})
+
+test('the old status line is cleared, not left behind, when the band can draw', async ($, on) => {
+  const { seen } = bandWorld(on, { waiting: 2 })
+  await bridgeText($)
+
+  expect(seen.status.filter(s => s !== undefined)).toEqual([])
+})
+
+test('a surface without the band (vscode, mobile only) keeps the plain status line', async ($, on) => {
+  const { seen } = bandWorld(on, { waiting: 2, surfaces: ['vscode'] })
+  await bridgeText($)
+
+  expect(seen.status.at(-1)).toBe('agents: 2 waiting')
+})
+
+test('the band is redrawn when the waiting count changes, and only then', async ($, on) => {
+  const { seen, reg } = bandWorld(on, { waiting: 1 })
+  await bridgeText($)
+  const after1 = seen.invalidated
+  expect(after1).toBeGreaterThan(0)
+
+  await bridgeText($) // same count again
+  expect(seen.invalidated).toBe(after1)
+
+  reg['150.json'] = { pid: 150, sessionId: 'x', cwd: '/r/x', tmux: 'cc-x:@0.%9', status: 'waiting', updatedAt: 0 }
+  await bridgeText($)
+  expect(seen.invalidated).toBe(after1 + 1)
+})

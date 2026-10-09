@@ -716,9 +716,43 @@ async function rescan($: EngineInterface) {
   }
   const selfId = await $.session.id()
   await update($, sessions, () => ({ rows, checkedAt: Date.now(), selfId, warnings }))
-  const waiting = rows.filter(r => r.status === 'waiting').length
-  $.ui.status(waiting ? `agents: ${waiting} waiting` : undefined)
+  await showWaiting($, rows.filter(r => r.status === 'waiting').length)
 }
+
+// How many sessions wait on the person, as last drawn: the band is redrawn when this changes, and only then.
+let drawnWaiting = -1
+
+/**
+ * The band above the prompt carries the waiting count as a button (see the `AbovePrompt` hook). It is raised on the
+ * terminal and desktop surfaces only, so a session drawing on neither (VS Code, mobile) keeps the plain status line.
+ */
+async function showWaiting($: EngineInterface, waiting: number) {
+  const surfaces = await $.session.surfaces().catch(() => [])
+  const band = surfaces.some(s => s === 'terminal' || s === 'desktop')
+  $.ui.status(!band && waiting ? `agents: ${waiting} waiting` : undefined)
+  if (waiting !== drawnWaiting) {
+    drawnWaiting = waiting
+    $.ui.invalidate('ui.render')
+  }
+}
+
+/** Opens the roster pane: what `/roster` and the band's button both do. */
+async function openPane($: EngineInterface) {
+  await $.ui.open({ id: PANE, title: TITLE, focus: true })
+}
+
+/** Does a tree drawn beneath this hook put anything in the band? An empty Box (a mod with nothing to say) does not. */
+function drawsRows(tree: unknown): boolean {
+  if (tree === null || tree === undefined || tree === false || tree === '') return false
+  if (typeof tree !== 'object') return true
+  const kids = (tree as { children?: unknown }).children
+  if (Array.isArray(kids)) return kids.some(drawsRows)
+
+  return (tree as { type?: unknown }).type !== 'Box'
+}
+
+const WAITING_ROW = (n: number) => `👥 ${n} waiting · open roster`
+const fitLabel = (text: string, columns: number) => (text.length <= columns ? text : `${text.slice(0, Math.max(0, columns - 1))}…`)
 
 /** A refresh the person asked for: branches re-read now, not when their minute is up. */
 async function refreshNow($: EngineInterface) {
@@ -1127,9 +1161,34 @@ export const register: Register = on => {
       const { rows, checkedAt, warnings } = await read($, sessions)
       return { text: summary(rows, checkedAt, warnings) }
     }
-    await $.ui.open({ id: PANE, title: TITLE, focus: true })
+    await openPane($)
 
     return { text: 'Agents pane opened.' }
+  })
+
+  // One row above the prompt: a button that opens the roster. Other mods' bands (census-mod, context-vigil-mod)
+  // keep their place: theirs is `inner`, ours follows it. No hotkey, so it can clash with none; Enter under focus
+  // and a click press it.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const inner = await next(e)
+    if (e.props.hasSurvey) return inner
+    const waiting = (await read($, sessions)).rows.filter(r => r.status === 'waiting').length
+    if (waiting === 0) return inner
+    // Our row is one row: with another mod already drawing, it needs a second one.
+    if (e.props.maxRows < (drawsRows(inner) ? 2 : 1)) return inner
+    const { Box, Button } = $.ui.resolve(e)
+    const row = (
+      <Box key="roster-waiting-row">
+        <Button key="roster-waiting" plain label={fitLabel(WAITING_ROW(waiting), e.props.bodyColumns)} onPress={() => void openPane($)} />
+      </Box>
+    )
+
+    return (
+      <Box flexDirection="column">
+        {inner}
+        {row}
+      </Box>
+    )
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
