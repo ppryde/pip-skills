@@ -186,8 +186,55 @@ class TestReaders:
         monkeypatch.setattr(st, "_registry_proc_start", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
         assert st.for_session("s1", now=2.0)["stale"] is True
 
-    def test_census_read_view_is_unchanged(self, cfg, alive):
+    def test_the_view_keeps_the_payload_and_adds_stale(self, cfg, alive):
         registry(cfg, 4242)
         self.seed(cfg, alive)
         assert "census_mod" in st.read_all()["sessions"]["s1"]["payload"]
-        assert "stale" not in st.read_all()["sessions"]["s1"]
+        assert st.read_all()["sessions"]["s1"]["stale"] is False
+
+
+class TestReadViewCarriesStale:
+    """`census read` adds an additive per-session `stale` boolean, from is_stale."""
+
+    def _cli(self, capsys, *argv):
+        from scripts import cli
+
+        cli.main(["read", *argv])
+        return json.loads(capsys.readouterr().out)
+
+    def seed(self, cfg, alive, sid="s1", cwd="/wt/a", **kw):
+        st.ingest(json.dumps({"session_id": sid, "cwd": cwd, "census_mod": mod(**kw)}), now=1.0)
+
+    def test_full_view_entries_carry_stale(self, cfg, alive, capsys):
+        registry(cfg, 4242)
+        self.seed(cfg, alive)
+        st.ingest(json.dumps({"session_id": "plain", "cwd": "/wt/b"}), now=1.0)  # no census_mod, ancient
+        view = self._cli(capsys)
+        assert view["sessions"]["s1"]["stale"] is False  # live process, however old
+        assert view["sessions"]["plain"]["stale"] is True  # 90 s rule
+
+    def test_full_view_marks_a_dead_process(self, cfg, alive, capsys):
+        registry(cfg, 4242)
+        self.seed(cfg, alive)
+        alive["dead"].add(4242)
+        assert self._cli(capsys)["sessions"]["s1"]["stale"] is True
+
+    def test_single_entry_forms_agree(self, cfg, alive, capsys):
+        registry(cfg, 4242)
+        self.seed(cfg, alive)
+        assert self._cli(capsys, "--session", "s1")["stale"] is False
+        assert self._cli(capsys, "--worktree", "/wt/a")["stale"] is False
+
+    def test_only_stale_is_added(self, cfg, alive, capsys):
+        registry(cfg, 4242)
+        self.seed(cfg, alive)
+        stored = json.loads(st.session_path("s1").read_text())
+        stored.pop("version")
+        shown = self._cli(capsys)["sessions"]["s1"]
+        assert {k: v for k, v in shown.items() if k != "stale"} == stored
+
+    def test_stale_is_not_written_to_the_store(self, cfg, alive, capsys):
+        registry(cfg, 4242)
+        self.seed(cfg, alive)
+        self._cli(capsys)
+        assert "stale" not in json.loads(st.session_path("s1").read_text())

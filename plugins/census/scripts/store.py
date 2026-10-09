@@ -953,9 +953,12 @@ def _all_sessions() -> dict[str, dict[str, Any]]:
 
 
 def read_all(now: float | None = None) -> dict[str, Any]:
-    """The whole store as the v1 view: ``{version: 1, limits, sessions}``."""
+    """The whole store as the v1 view: ``{version: 1, limits, sessions}``, each session
+    with one additive key, ``stale`` (``is_stale``)."""
     migrate()
-    return {"version": VIEW_VERSION, "limits": _stored_limits(), "sessions": _all_sessions()}
+    when = time.time() if now is None else now
+    sessions = {sid: {**entry, "stale": is_stale(entry, when)} for sid, entry in _all_sessions().items()}
+    return {"version": VIEW_VERSION, "limits": _stored_limits(), "sessions": sessions}
 
 
 def limits(now: float | None = None) -> dict[str, Any] | None:
