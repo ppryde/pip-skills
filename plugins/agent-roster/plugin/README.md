@@ -23,8 +23,10 @@ git branches, and the header says how long ago it last looked. While any session
 `👥 N waiting · open roster`. Click it, or focus the band and press Enter, and the pane opens exactly as `/roster`
 does. It draws after whatever other mods put in that band (census-mod's lines, context-vigil-mod's bar), yields to a
 survey, is left out when the band has no row to spare, is cut to the band's width, has no hotkey of its own, and is
-redrawn only when the count changes. The band is raised on the terminal and desktop surfaces only; a session
-drawing on neither (VS Code, mobile) keeps the old plain `agents: N waiting` status line instead.
+redrawn only when the count changes. The band is raised on the terminal and desktop surfaces only, so the old plain
+`agents: N waiting` status line is cleared only when every attached surface draws the band; while any attached surface
+lacks it (VS Code, mobile), or none is attached, the line stays. Claude Code draws that line on terminal and desktop
+only, so VS Code and mobile show neither; a terminal attached beside one of them shows the line and the button together.
 
 ## Over Remote Control
 

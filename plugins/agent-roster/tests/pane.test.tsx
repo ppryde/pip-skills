@@ -548,6 +548,41 @@ test('the old status line is cleared, not left behind, when the band can draw', 
   await bridgeText($)
 
   expect(seen.status.filter(s => s !== undefined)).toEqual([])
+  // the clear is a call of its own: a missing one would leave an older line on screen
+  expect(seen.status.length).toBeGreaterThan(0)
+  expect(seen.status.at(-1)).toBeUndefined()
+})
+
+test('the line is cleared again once the waiting sessions are gone', async ($, on) => {
+  const { seen, reg } = bandWorld(on, { waiting: 1, surfaces: ['vscode'] })
+  await bridgeText($)
+  expect(seen.status.at(-1)).toBe('agents: 1 waiting')
+  delete reg['100.json']
+  await bridgeText($)
+  expect(seen.status.length).toBeGreaterThan(1)
+  expect(seen.status.at(-1)).toBeUndefined()
+})
+
+test('a terminal and a VS Code window attached together: the status line stays for the one without the band', async ($, on) => {
+  const { seen } = bandWorld(on, { waiting: 2, surfaces: ['terminal', 'vscode'] })
+  await bridgeText($)
+
+  expect(seen.status.at(-1)).toBe('agents: 2 waiting')
+})
+
+test('terminal and desktop both draw the band: the line is cleared', async ($, on) => {
+  const { seen } = bandWorld(on, { waiting: 2, surfaces: ['terminal', 'desktop'] })
+  await bridgeText($)
+
+  expect(seen.status.at(-1)).toBeUndefined()
+  expect(seen.status.some(s => s !== undefined)).toBe(false)
+})
+
+test('no surface attached: the line stays rather than the notice vanishing', async ($, on) => {
+  const { seen } = bandWorld(on, { waiting: 1, surfaces: [] })
+  await bridgeText($)
+
+  expect(seen.status.at(-1)).toBe('agents: 1 waiting')
 })
 
 test('a surface without the band (vscode, mobile only) keeps the plain status line', async ($, on) => {
