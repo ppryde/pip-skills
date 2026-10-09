@@ -14,6 +14,8 @@ export type SessionRow = {
   status: string
   /** Why it waits (`input needed`), while `status` is `waiting`. */
   waitingFor?: string
+  /** Why a tmux pane is listed without a registry entry of its own (`agents view`, another account). */
+  note?: string
   kind: string
   /** Epoch ms of its last status change. */
   lastActive: number

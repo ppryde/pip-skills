@@ -18,9 +18,12 @@ import {
   resolveConfigDirs,
   sorted,
   strayRows,
+  agentsViewPidsIn,
+  otherClaudeDirs,
   summary,
   tabMarks,
   toRow,
+  isStray,
   transcriptFacts,
   vscodeUri,
   windowFolderFor,
@@ -386,4 +389,77 @@ test('one pid in several registries keeps only the most recently active row', as
   expect(newestPerPid(found).map(f => `${f.configDir}:${f.row.pid}`)).toEqual(['/other:7', '/own:8'])
   // A tie keeps the first, the own dir's.
   expect(newestPerPid([mk('/own', 5), mk('/other', 5)]).map(f => f.configDir)).toEqual(['/own'])
+})
+
+
+// --- stray panes: registered in another account, or the agents view ---------------------
+
+const PANES = [
+  'cc-own-1\t101\t2.1.289\t/r/mine\t1791148000',
+  'cc-work-1\t777\t2.1.289\t/r/work\t1791148100',
+  'cc-agents\t800\t2.1.289\t/r/x\t1791148200',
+  'cc-new-1\t900\t2.1.289\t/r/new\t1791148300',
+].join('\n')
+const REGISTERED = { pids: new Set([101]), tmuxNames: new Set(['cc-own-1']) }
+
+test('a pane registered in another account is labelled so, not left as a startup prompt', async () => {
+  const rows = strayRows(PANES, REGISTERED, { elsewhere: new Map([[777, 'work']]), agentsView: new Set<number>() })
+  const work = rows.find(r => r.pid === 777)!
+
+  expect(work.note).toBe('running in another account (work) — set ROSTER_CONFIG_DIRS to list it')
+  expect(work.waitingFor).toBeUndefined()
+  expect(work.status).not.toBe('waiting')
+  expect(isStray(work)).toBe(true)   // no kill is ever offered for it
+})
+
+test('a pane running `claude agents` is the agents view, not a startup prompt', async () => {
+  const rows = strayRows(PANES, REGISTERED, { elsewhere: new Map(), agentsView: new Set([800]) })
+  const agents = rows.find(r => r.pid === 800)!
+
+  expect(agents.note).toBe('agents view')
+  expect(agents.status).not.toBe('waiting')
+  expect(isStray(agents)).toBe(true)
+})
+
+test('only a pane that is neither registered anywhere nor the agents view is a startup prompt', async () => {
+  const rows = strayRows(PANES, REGISTERED, { elsewhere: new Map([[777, 'work']]), agentsView: new Set([800]) })
+  const byPid = Object.fromEntries(rows.map(r => [r.pid, r.waitingFor]))
+
+  expect(rows.map(r => r.pid)).toEqual([777, 800, 900])
+  expect(byPid[900]).toContain('startup prompt')
+  expect(byPid[777]).toBeUndefined()
+  expect(rows.find(r => r.pid === 900)!.status).toBe('waiting')
+})
+
+test('without that context every unregistered pane is still a startup prompt', async () => {
+  expect(strayRows(PANES, REGISTERED).map(r => r.waitingFor)).toEqual([
+    expect.stringContaining('startup prompt'), expect.stringContaining('startup prompt'), expect.stringContaining('startup prompt'),
+  ])
+})
+
+test('the agents view is recognised from the process arguments', async () => {
+  const ps = [
+    '  800 /Users/me/.local/share/claude/versions/2.1.289 agents',
+    '  801 claude agents --foo',
+    '  802 /Users/me/.local/share/claude/versions/2.1.289',
+    '  803 /Users/me/.local/bin/claude --resume agents',
+    '  804 node /x/agents.js',
+    '',
+  ].join('\n')
+
+  expect([...agentsViewPidsIn(ps)].sort()).toEqual([800, 801])
+})
+
+test('the registry tmux field is <session>:@W.%P and only the session part is the name', async () => {
+  expect(toRow({ pid: 5, cwd: '/r', tmux: 'cc-wf-claude-market-3:@29.%29' })?.tmux).toBe('cc-wf-claude-market-3')
+  expect(toRow({ pid: 5, cwd: '/r', tmux: 'plain' })?.tmux).toBe('plain')
+  // the name fallback then matches tmux list-panes' session name
+  const panes = 'cc-wf-claude-market-3\t41000\t2.1.289\t/r\t1791148000'
+  const registered = toRow({ pid: 5, cwd: '/r', tmux: 'cc-wf-claude-market-3:@29.%29' })!
+  expect(strayRows(panes, { pids: new Set([5]), tmuxNames: new Set([registered.tmux!]) })).toEqual([])
+})
+
+test('another-account dirs are the HOME dirs starting .claude, minus those already listed', async () => {
+  const names = ['.claude', '.claude-work', '.claude-personal', '.config', 'claude', '.claudeX']
+  expect(otherClaudeDirs('/home', names, ['/home/.claude', '/home/.claude-personal/'])).toEqual(['/home/.claude-work', '/home/.claudeX'])
 })

@@ -134,7 +134,20 @@ last status change. The mod reads the config dir (`$CLAUDE_CONFIG_DIR`, else
 longer running (the registry outlives crashed processes). A session held at a startup
 prompt (trusting a folder, logging in) has not registered yet, so the roster
 also lists the panes on every tmux server: one running Claude with no
-registry entry shows under *Needs you* as "at a startup prompt". If a scan
+registry entry shows under *Needs you* as "at a startup prompt" -- unless it is one of
+the following, which the sweep checks first (one `exists` per candidate pid and other
+`$HOME/.claude*` dir, and one batched `ps -o pid=,args=`), and which are listed as
+quiet idle rows with a note, never a kill button and never counted as needing you:
+
+- **`running in another account (<tag>) — set ROSTER_CONFIG_DIRS to list it`**: the
+  pid has a registry file in another `$HOME/.claude*/sessions/` dir that this
+  mod is not reading, so it is a working session of another account, not a stray.
+  List the dir in `ROSTER_CONFIG_DIRS` and it becomes an ordinary row. A dir already
+  listed is never reported this way.
+- **`agents view`**: the pane runs `claude agents`, which never registers.
+
+The registry's `tmux` field is `<session>:@<window>.%<pane>`; only the session part
+is the name, and it is what the sweep matches against `tmux list-panes`. If a scan
 fails, the header says why in red and the last good roster stays on screen.
 
 Title and prompt come from the session's transcript,
