@@ -57,3 +57,64 @@ export function endTimeoutMs(remainingMs: number): number {
 export function delayFor(now: number, lastAt: number | null): number {
   return lastAt === null ? 0 : Math.max(0, lastAt + COALESCE_MS - now)
 }
+
+/** Every ancestor of `root`, nearest first: where a sibling plugin's folder may sit. */
+export function ancestors(root: string): string[] {
+  const parts = root.split('/').filter(Boolean)
+  const out: string[] = []
+  for (let n = parts.length - 1; n >= 0; n--) out.push(`/${parts.slice(0, n).join('/')}`.replace(/\/$/, '') || '/')
+  return out
+}
+
+/** A version dir name as numbers, so 0.10.0 outranks 0.9.0 (non-numeric parts count 0). */
+export const versionKey = (name: string): number[] => name.split('.').map(p => (/^\d+$/.test(p) ? Number.parseInt(p, 10) : 0))
+
+export function compareVersions(a: string, b: string): number {
+  const ka = versionKey(a)
+  const kb = versionKey(b)
+  for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+    const d = (ka[i] ?? 0) - (kb[i] ?? 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
+/** The highest of the version dirs that hold a CLI and are not marked `.orphaned_at`. */
+export function highestVersion(names: string[]): string | null {
+  return names.length ? [...names].sort(compareVersions).at(-1) ?? null : null
+}
+
+export const SIBLING = 'census'
+export const CLI_REL = 'scripts/cli.py'
+
+export type FsLike = {
+  exists(path: string): Promise<boolean>
+  list(path: string): Promise<{ name: string }[]>
+}
+
+/**
+ * The census plugin installed beside the plugin at `root`, in EITHER layout, found by walking up
+ * (port of overseer's cli_client.find_plugin, over a file system):
+ *   repo       <plugins>/census/scripts/cli.py
+ *   installed  <cache>/<marketplace>/census/<version>/scripts/cli.py
+ * Among cached versions the highest wins; a version dir marked `.orphaned_at` is skipped. Needs no
+ * pointer, so it works before census has ever ingested.
+ */
+export async function findSibling(fs: FsLike, root: string): Promise<string | null> {
+  const no = () => false
+  for (const parent of ancestors(root)) {
+    const dir = `${parent === '/' ? '' : parent}/${SIBLING}`
+    const direct = `${dir}/${CLI_REL}`
+    if (await fs.exists(direct).catch(no)) return direct
+    const entries = await fs.list(dir).catch(() => undefined)
+    if (!entries) continue
+    const live: string[] = []
+    for (const child of entries) {
+      if (await fs.exists(`${dir}/${child.name}/.orphaned_at`).catch(no)) continue
+      if (await fs.exists(`${dir}/${child.name}/${CLI_REL}`).catch(no)) live.push(child.name)
+    }
+    const best = highestVersion(live)
+    if (best) return `${dir}/${best}/${CLI_REL}`
+  }
+  return null
+}

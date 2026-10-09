@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import { EMPTY_COUNTERS, TAIL_CMD, addTurn, compacted, expiresAtMs, isWarm, parseWrites, ratio, sessionRatio, ttlFromWrites, withTtl } from '../../plugins/census-mod/core/cache'
-import { COALESCE_MS, delayFor, endTimeoutMs, ingestArgv, ingestEnv, pointerFiles } from '../../plugins/census-mod/core/census'
+import { COALESCE_MS, ancestors, compareVersions, delayFor, endTimeoutMs, findSibling, highestVersion, ingestArgv, ingestEnv, pointerFiles } from '../../plugins/census-mod/core/census'
 import { GIT_DIR_ARGV, GIT_STATUS_ARGV, parseStatus, touchesGit, watchPaths, worktreeOf } from '../../plugins/census-mod/core/git'
 import { BACKOFF_MS, ghArgv, parsePrList, shouldRefresh, touchesPr } from '../../plugins/census-mod/core/gh'
 import { findProc, lastTitle } from '../../plugins/census-mod/core/registry'
@@ -143,4 +143,57 @@ test('the session name is the last custom-title row', async () => {
   const rows = '{"type":"custom-title","customTitle":"Old","sessionId":"s"}\n{"type":"custom-title","customTitle":" New name ","sessionId":"s"}\n{"type":"custom-ti'
   expect(lastTitle(rows)).toBe('New name')
   expect(lastTitle('')).toBeNull()
+})
+
+// ---- a census plugin installed beside this one ------------------------------------------------
+
+const fsOf = (files: string[], dirs: Record<string, string[]> = {}) => ({
+  exists: async (p: string) => files.includes(p),
+  list: async (p: string) => {
+    const names = dirs[p]
+    if (!names) throw new Error('ENOENT')
+    return names.map(name => ({ name }))
+  },
+})
+
+test('ancestors, nearest first, and version order is numeric (0.10.0 over 0.9.0)', async () => {
+  expect(ancestors('/a/b/census-mod')).toEqual(['/a/b', '/a', '/'])
+  expect(highestVersion(['0.9.0', '0.10.0', '0.2.5'])).toBe('0.10.0')
+  expect(highestVersion([])).toBeNull()
+  expect(compareVersions('1.0.0', '1.0')).toBe(0)
+})
+
+test('a repo checkout: <plugins>/census/scripts/cli.py, found by walking up', async () => {
+  const fs = fsOf(['/repo/plugins/census/scripts/cli.py'])
+
+  expect(await findSibling(fs, '/repo/plugins/census-mod')).toBe('/repo/plugins/census/scripts/cli.py')
+  expect(await findSibling(fs, '/repo/plugins/census-mod/hooks')).toBe('/repo/plugins/census/scripts/cli.py')
+  expect(await findSibling(fs, '/elsewhere/census-mod')).toBeNull()
+})
+
+test('a marketplace cache: <cache>/<mkt>/census/<version>/scripts/cli.py, the highest version wins', async () => {
+  const base = '/cfg/plugins/cache/pip-skills/census'
+  const fs = fsOf(
+    [`${base}/0.9.0/scripts/cli.py`, `${base}/0.10.0/scripts/cli.py`, `${base}/0.2.0/scripts/cli.py`],
+    { [base]: ['0.9.0', '0.10.0', '0.2.0'] },
+  )
+
+  expect(await findSibling(fs, '/cfg/plugins/cache/pip-skills/census-mod/0.1.0')).toBe(`${base}/0.10.0/scripts/cli.py`)
+})
+
+test('an orphaned version dir is skipped, even when it is the highest', async () => {
+  const base = '/cache/pip-skills/census'
+  const fs = fsOf(
+    [`${base}/0.9.0/scripts/cli.py`, `${base}/0.10.0/scripts/cli.py`, `${base}/0.10.0/.orphaned_at`],
+    { [base]: ['0.9.0', '0.10.0'] },
+  )
+
+  expect(await findSibling(fs, '/cache/pip-skills/census-mod/0.1.0')).toBe(`${base}/0.9.0/scripts/cli.py`)
+})
+
+test('a version dir with no CLI in it, or only orphans, is nothing', async () => {
+  const base = '/cache/pip-skills/census'
+  const fs = fsOf([`${base}/0.1.0/.orphaned_at`, `${base}/0.1.0/scripts/cli.py`], { [base]: ['0.1.0', '0.2.0'] })
+
+  expect(await findSibling(fs, '/cache/pip-skills/census-mod/0.1.0')).toBeNull()
 })

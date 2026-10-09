@@ -13,8 +13,12 @@ steady-state cost is about zero.
   so a reader can tell "open but idle" from "gone" by the session's process. (The reader
   side lives in census and ships separately.)
 
-It needs the **census plugin** for the CLI. Without it the band still draws, nothing is
-recorded, and one line says so.
+It needs the **census plugin** (any version at or above 0.5.0, for the process-liveness
+reader) for the CLI. Without it the band still draws, nothing is recorded, and one line
+says so: "census not found — install the census plugin".
+
+census-mod **replaces census's status-line hook**: run one or the other on a store, never
+both at once (shadow mode, below, is the one exception, because it records elsewhere).
 
 ## Install
 
@@ -82,7 +86,16 @@ with `census read` against each dir, then cut over: unset `CENSUS_MOD_STORE` and
 `statusLine` from settings.
 
 CLI discovery order: `<shadow dir>/cli.path`, `<census dir>/cli.path` (`CENSUS_STORE`, else
-`$CLAUDE_CONFIG_DIR/census`), `CENSUS_CLI`, `census` on PATH. A `.py` runs under `python3`.
+`$CLAUDE_CONFIG_DIR/census`), `CENSUS_CLI`, then the census plugin installed beside this
+one, then `census` on PATH. The sibling is found by walking up from this plugin's folder
+and testing both layouts at each level: a repo checkout
+(`<plugins>/census/scripts/cli.py`) and a marketplace cache
+(`<cache>/<marketplace>/census/<version>/scripts/cli.py`, the highest version, skipping any
+version dir marked `.orphaned_at`). So census + census-mod work with no status line at all
+and no `cli.path` yet. A `.py` runs under `python3`.
+
+The first successful ingest makes census write its own `cli.path` into the census dir, so
+the other readers (vigil, overseer, vitals) find census from then on without being told.
 
 ## Tests
 

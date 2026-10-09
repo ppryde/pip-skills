@@ -23,6 +23,8 @@ export type World = {
   logs: string[]
   invalidations: { count: number }
   surfaces: { value: string[] }
+  /** A census plugin beside this one, answered for WHATEVER folder the plugin sits in (the kit stages it in a temp dir). */
+  sibling: { layout: 'repo' | 'cache' | null; versions: Record<string, { orphaned?: boolean; cli?: boolean }> }
   below: { text: string }              // what another mod beneath this one draws in the band ('' = nothing)
 }
 
@@ -43,7 +45,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     git: { status: '# branch.oid abc1234def\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +1 -0\n1 .M N... 100644 100644 100644 a b f.ts\n', dir: '/repo/.git\n/repo\n', exitCode: 0 },
     gh: { stdout: '[]', exitCode: 0, throws: false },
     titles: new Map(), tail: { value: '"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":100}\n' },
-    which: { value: '' }, logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' },
+    which: { value: '' }, logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' }, sibling: { layout: null, versions: {} },
   }
   w.files.set(`${REGISTRY}/22695.json`, JSON.stringify({ pid: 22695, sessionId: 's1', procStart: 'Sun Oct  4 22:57:51 2026', version: '2.1.289' }))
   on('store.get', (_$, e) => ({ value: w.store.get(e.key) as never }))
@@ -52,9 +54,23 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
   on('store.keys', () => ({ value: [...w.store.keys()] }))
   mock.env(on, opts.env ?? { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
   on('fs.read', (_$, e) => { const t = w.files.get(e.path); return t === undefined ? { deny: `ENOENT ${e.path}` } : { value: t as never } })
-  on('fs.exists', (_$, e) => ({ value: w.files.has((e as { path: string }).path) }))
+  on('fs.exists', (_$, e) => {
+    const path = (e as { path: string }).path
+    if (w.files.has(path)) return { value: true }
+    if (w.sibling.layout === 'repo') return { value: /\/census\/scripts\/cli\.py$/.test(path) && !path.startsWith('/cfg') && path !== CLI }
+    if (w.sibling.layout === 'cache') {
+      const m = /\/census\/([^/]+)\/(\.orphaned_at|scripts\/cli\.py)$/.exec(path)
+      const v = m ? w.sibling.versions[m[1] ?? ''] : undefined
+      return { value: m?.[2] === '.orphaned_at' ? v?.orphaned === true : v?.cli !== false && v !== undefined }
+    }
+    return { value: false }
+  })
   on('fs.list', (_$, e) => {
-    const names = w.dirs.get((e as { path: string }).path)
+    const path = (e as { path: string }).path
+    if (w.sibling.layout === 'cache' && /\/census$/.test(path) && !path.startsWith('/cfg')) {
+      return { value: Object.keys(w.sibling.versions).map(name => ({ name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false })) as never }
+    }
+    const names = w.dirs.get(path)
     return names ? { value: names.map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) as never } : { deny: 'ENOENT' }
   })
   on('process.run', (_$, e) => {

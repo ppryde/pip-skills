@@ -1,6 +1,6 @@
 import type { EngineInterface, Register, Timer } from 'claude-code'
 import { COUNTER_KEEP_MS, EMPTY_COUNTERS, STORE_PREFIX, TAIL_CMD, addTurn, compacted, counterKey, DEFAULT_TTL, expiresAtMs, isWarm, parseWrites, ttlFromWrites, ttlMs, withTtl } from '../core/cache'
-import { INGEST_TIMEOUT_MS, WHICH_ARGV, delayFor, endTimeoutMs, ingestArgv, ingestEnv, pointerFiles } from '../core/census'
+import { INGEST_TIMEOUT_MS, WHICH_ARGV, findSibling, delayFor, endTimeoutMs, ingestArgv, ingestEnv, pointerFiles } from '../core/census'
 import type { CensusEnv } from '../core/census'
 import { GH_TIMEOUT_MS, ghArgv, ghKey, parsePrList, shouldRefresh, touchesPr } from '../core/gh'
 import type { GhEntry, Why } from '../core/gh'
@@ -174,14 +174,27 @@ async function discover($: EngineInterface): Promise<string | null> {
     if (path && (await $.fs.exists(path).catch(() => false))) return (cli = path)
   }
   if (env.CENSUS_CLI && (await $.fs.exists(env.CENSUS_CLI).catch(() => false))) return (cli = env.CENSUS_CLI)
+  const sibling = await siblingCli($)
+  if (sibling) return (cli = sibling)
   const which = await $.process.run(WHICH_ARGV).catch(() => undefined)
   const found = which?.exitCode === 0 ? which.stdout.trim() : ''
   if (found) return (cli = found)
   if (!saidNoCli) {
     saidNoCli = true
-    $.ui.log('census CLI not found: the status line is drawn but nothing is recorded (install the census plugin)')
+    $.ui.log('census not found — install the census plugin (the band is drawn, nothing is recorded)')
   }
   return null
+}
+
+async function siblingCli($: EngineInterface): Promise<string | null> {
+  let root: string | undefined
+  try {
+    root = $.plugin.root
+  } catch {
+    return null
+  }
+  if (!root) return null
+  return findSibling({ exists: p => $.fs.exists(p), list: p => $.fs.list(p) }, root)
 }
 
 async function ingest($: EngineInterface, event: Event, ended?: string, timeoutMs = INGEST_TIMEOUT_MS) {

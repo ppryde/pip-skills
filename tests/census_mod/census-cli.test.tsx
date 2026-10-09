@@ -19,6 +19,50 @@ test('a pointer to a file that is gone falls through to CENSUS_CLI', async ($, o
   expect(w.ingests.at(-1)?.argv).toEqual(['python3', '/opt/census.py', 'ingest'])
 })
 
+test('with no pointer yet, the census plugin installed beside this one is found (repo layout)', async ($, on) => {
+  const w = world(on)
+  w.files.delete('/cfg/census/cli.path')
+  w.sibling.layout = 'repo'
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  expect(w.ingests.at(-1)?.argv[0]).toBe('python3')
+  expect(w.ingests.at(-1)?.argv[1]).toMatch(/\/census\/scripts\/cli\.py$/)
+})
+
+test('...or in the marketplace cache: the highest version, orphans skipped', async ($, on) => {
+  const w = world(on)
+  w.files.delete('/cfg/census/cli.path')
+  w.sibling.layout = 'cache'
+  w.sibling.versions = { '0.9.0': {}, '0.10.0': {}, '0.11.0': { orphaned: true } }
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  expect(w.ingests.at(-1)?.argv[1]).toMatch(/\/census\/0\.10\.0\/scripts\/cli\.py$/)
+})
+
+test('CENSUS_CLI outranks the sibling plugin, and the sibling outranks PATH', async ($, on) => {
+  const a = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u', CENSUS_CLI: '/opt/census.py' }, files: { '/opt/census.py': '' } })
+  a.files.delete('/cfg/census/cli.path')
+  a.sibling.layout = 'repo'
+  a.which.value = '/usr/bin/census'
+  await $.session.start(START)
+  await a.clock.advance(0)
+  expect(a.ingests.at(-1)?.argv[1]).toBe('/opt/census.py')
+})
+
+test('the sibling outranks census on PATH', async ($, on) => {
+  const w = world(on)
+  w.files.delete('/cfg/census/cli.path')
+  w.sibling.layout = 'repo'
+  w.which.value = '/usr/bin/census'
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  expect(w.ingests.at(-1)?.argv[1]).toMatch(/census\/scripts\/cli\.py$/)
+  expect(w.runs.some(r => r.argv[2]?.includes('command -v census'))).toBe(false)
+})
+
 test('then census on PATH, run as the executable it is', async ($, on) => {
   const w = world(on, { files: { '/cfg/census/cli.path': '' } })
   w.files.delete('/cfg/census/cli.path')
@@ -46,7 +90,7 @@ test('no census anywhere: nothing is recorded, one line says so, the band still 
   await w.clock.advance(3 * SEC)
 
   expect(w.ingests).toHaveLength(0)
-  expect(w.logs.filter(l => l.includes('census CLI not found'))).toHaveLength(1)
+  expect(w.logs.filter(l => l.includes('census not found — install the census plugin'))).toHaveLength(1)
 })
 
 test('shadow mode: CENSUS_MOD_STORE is the child\'s CENSUS_STORE, and its own pointer is read first', async ($, on) => {
