@@ -47,8 +47,9 @@ class TestContextPercent:
     def test_fresh_entry_returned(self, tmp_path, monkeypatch):
         store = tmp_path / "census" / "status.json"
         monkeypatch.setenv("CENSUS_STORE", str(store))
-        _store(store, tmp_path, 37, updated=1000.0)
-        assert census.context_percent(tmp_path, now=1000.0 + 10) == 37
+        now = time.time()  # the real census CLI judges against the real clock
+        _store(store, tmp_path, 37, updated=now - 10)
+        assert census.context_percent(tmp_path, now=now) == 37
 
     def test_rounds_float_percentage(self, tmp_path, monkeypatch):
         store = tmp_path / "census" / "status.json"
@@ -112,7 +113,7 @@ class TestContextPercentBySessionId:
         # newest-write race.
         store = tmp_path / "census" / "status.json"
         monkeypatch.setenv("CENSUS_STORE", str(store))
-        now = 1000.0
+        now = time.time()  # the real census CLI judges against the real clock
         _two_sessions_same_worktree(store, tmp_path, mine_pct=9, sibling_pct=49, now=now)
         assert census.context_percent(tmp_path, now=now, session_id="s-mine") == 9
 
@@ -304,3 +305,39 @@ class TestCensusCliDiscovery:
         (store.parent / "cli.path").write_text(str(fake))
         monkeypatch.setenv("CENSUS_STORE", str(store))
         assert census.census_cli() == [sys.executable, str(fake)]
+
+
+class TestCensusVerdict:
+    """A census-mod session has no heartbeat: census's own `stale` bool beats updated_at."""
+
+    def _entry(self, pct=33, **extra):
+        return {"updated_at": 1.0, "payload": {"context_window": {"used_percentage": pct}}, **extra}
+
+    def _serve(self, monkeypatch, by_flag):
+        monkeypatch.setattr(census, "_read", lambda args: by_flag[args[0]])
+
+    def test_old_updated_at_with_stale_false_is_live(self, tmp_path, monkeypatch):
+        self._serve(monkeypatch, {"--session": self._entry(stale=False), "--worktree": None})
+        assert census.context_percent(tmp_path, now=1e9, session_id="s1") == 33
+        self._serve(monkeypatch, {"--worktree": self._entry(stale=False)})
+        assert census.context_percent(tmp_path, now=1e9) == 33
+
+    def test_fresh_updated_at_with_stale_true_is_not_live(self, tmp_path, monkeypatch):
+        fresh = {"updated_at": 1e9, "payload": {"context_window": {"used_percentage": 33}}, "stale": True}
+        self._serve(monkeypatch, {"--session": fresh})
+        assert census.context_percent(tmp_path, now=1e9, session_id="s1") is None
+        self._serve(monkeypatch, {"--worktree": fresh})
+        assert census.context_percent(tmp_path, now=1e9) is None
+
+    def test_a_stale_own_entry_never_falls_back_to_a_sibling(self, tmp_path, monkeypatch):
+        sibling = self._entry(pct=49, stale=False)
+        self._serve(monkeypatch, {"--session": self._entry(stale=True), "--worktree": sibling})
+        assert census.context_percent(tmp_path, now=1e9, session_id="s1") is None
+
+    def test_no_verdict_keeps_the_age_rule(self, tmp_path, monkeypatch):
+        self._serve(monkeypatch, {"--worktree": self._entry()})
+        assert census.context_percent(tmp_path, now=1e9) is None
+        self._serve(monkeypatch, {"--worktree": self._entry(stale="no")})
+        assert census.context_percent(tmp_path, now=1e9) is None
+        self._serve(monkeypatch, {"--worktree": self._entry()})
+        assert census.context_percent(tmp_path, now=1.0 + 10) == 33
