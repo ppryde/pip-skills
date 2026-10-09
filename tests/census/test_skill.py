@@ -92,3 +92,13 @@ def test_the_command_sets_the_default_only_from_the_fixed_list():
     text = " ".join((COMMANDS / "vitals.md").read_text().split())
     assert "--set-default <lean|detailed>" in text
     assert "never the raw" in text
+
+
+def test_no_command_carries_an_environment_assignment_prefix():
+    """`NAME=value command` is a shell variable too; segments go through --segments instead."""
+    text = SKILL.read_text()
+    assert "CENSUS statusline --preview --segments" in text
+    for line in text.splitlines():
+        if "CENSUS " in line and "statusline" in line:
+            assert not line.strip().startswith(("CENSUS_", "`CENSUS_")), line
+    assert 'CENSUS_STATUSLINE_SEGMENTS="' not in text

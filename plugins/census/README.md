@@ -264,6 +264,7 @@ census install            # dry run: what it would add or replace
 census install --yes      # launcher at ~/.local/bin/census + ingest block in a bash status-line script (prints the line to add by hand when there is no script)
 census install --statusline [--replace] [--segments LIST] --yes   # set settings.json statusLine to `census statusline`
 census uninstall --yes    # remove the launcher and block; restore a replaced statusLine; --purge also deletes data
+census statusline --preview [--segments LIST] [--config-dir DIR]   # a canned preview; both flags are valid only with --preview
 census where              # (where, install, uninstall and `statusline --preview` take --config-dir DIR: that account, for that run) read-only JSON: config dir, census dir, settings path, status line, plugin installs, census-mod enabled
 ```
 
