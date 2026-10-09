@@ -31,4 +31,5 @@ The script is read-only and never fails loudly: a missing source (no census
 entry, not a git repo) just leaves its lines out. If it prints
 "no census reading yet", add one line after the fence: census-mod records a session
 from inside Claude Code, so a brand-new or headless session has none yet; if it never
-appears, census-mod is not recording (run /census-setup).
+appears, census-mod may be recording into a shadow store (`CENSUS_MOD_STORE`), which vitals does not read,
+or is not recording at all (run /census-setup).

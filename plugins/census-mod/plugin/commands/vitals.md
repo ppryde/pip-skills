@@ -52,4 +52,5 @@ run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py"` yourself (the plugin roo
 this command file's `../`) and print the result the same way. If it says "no census
 reading yet", add one line after the fence: census-mod records a session from inside
 Claude Code, so a brand-new or headless session has none yet; if it never appears,
-census-mod is not recording (run /census-setup).
+census-mod may be recording into a shadow store (`CENSUS_MOD_STORE`), which vitals does not read, or is not
+recording at all (run /census-setup).

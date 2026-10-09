@@ -692,20 +692,84 @@ def _identity() -> dict[str, Any]:
             "org_name": info["org_name"], "billing": info["billing"]}
 
 
-def _merge_limits_file(incoming: dict[str, Any], now: float) -> None:
-    """Forward-only merge into the calling account's limits file; no lock.
+_LOCK_WAIT_SECONDS = 0.25   # how long a merge waits for another writer before going on without the lock
+_LOCK_STALE_SECONDS = 5.0   # a lock older than this was left by a crashed writer
+_MERGE_ATTEMPTS = 4
 
-    Two sessions may race here. The ordering (``_window_is_fresher``) only moves
-    forward, so the loser of a race costs one refresh of a lower figure, and the
-    next write from the working session restores it. Written only on change.
+
+def _acquire_limits_lock(lock: Path) -> bool:
+    """Take the limits file's lock (``O_CREAT | O_EXCL``, portable). False if it could not be had within
+    ``_LOCK_WAIT_SECONDS`` or the folder is unwritable: the merge then goes on WITHOUT it and relies on
+    re-reading before and after its write. The status line never blocks on this."""
+    try:
+        lock.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+    deadline = time.monotonic() + _LOCK_WAIT_SECONDS
+    while True:
+        try:
+            os.close(os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+            return True
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > _LOCK_STALE_SECONDS:
+                    _unlink(lock)
+            except OSError:
+                pass   # it vanished between the two calls: the next pass takes it
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.005)
+        except OSError:
+            return False
+
+
+def _release_limits_lock(lock: Path) -> None:
+    _unlink(lock)
+
+
+def _merged_limits_body(current: dict[str, Any], incoming: dict[str, Any], now: float) -> dict[str, Any]:
+    holder: dict[str, Any] = {"limits": {k: v for k, v in current.items() if k not in _LIMITS_META}}
+    _hoist_limits(holder, incoming, now)
+    return {"version": SCHEMA_VERSION, **_identity(), **holder["limits"]}
+
+
+def _keeps(after: dict[str, Any], body: dict[str, Any]) -> bool:
+    """Does ``after`` hold every window of ``body`` or a fresher one? (Nothing of ours was clobbered by an older write.)"""
+    for key, window in body.items():
+        if key in _LIMITS_RESERVED or not _is_window(window, key):
+            continue
+        stored = after.get(key)
+        if not isinstance(stored, dict) or _window_is_fresher(window, stored):
+            return False
+    return True
+
+
+def _merge_limits_file(incoming: dict[str, Any], now: float) -> None:
+    """Forward-only merge into the calling account's limits file.
+
+    Several sessions may merge at once, and a writer holding a stale snapshot must not replace a newer window. The
+    merge runs under a short ``O_EXCL`` lock file when it can get one (never blocking for long, never a global
+    lock: one per account file). Whether or not it has the lock it looks again just before writing, and merges onto
+    what it finds if the file changed; and when it had no lock it checks afterwards that its figures survived,
+    redoing the merge (bounded) if an older write landed on top. Written only on change.
     """
     path = limits_path()
-    current = _read_json(path) or {}
-    holder: dict[str, Any] = {"limits": _stored_limits() or {}}
-    _hoist_limits(holder, incoming, now)
-    body = {"version": SCHEMA_VERSION, **_identity(), **holder["limits"]}
-    if json.dumps(body, sort_keys=True) != json.dumps(current, sort_keys=True):
-        _atomic_write(path, body)
+    lock = path.with_name(path.name + ".lock")
+    held = _acquire_limits_lock(lock)
+    try:
+        for _ in range(_MERGE_ATTEMPTS):
+            current = _read_json(path) or {}
+            body = _merged_limits_body(current, incoming, now)
+            if json.dumps(body, sort_keys=True) == json.dumps(current, sort_keys=True):
+                return
+            if (_read_json(path) or {}) != current:
+                continue   # it changed since we read it: merge onto the new contents instead
+            _atomic_write(path, body)
+            if held or _keeps(_read_json(path) or {}, body):
+                return
+    finally:
+        if held:
+            _release_limits_lock(lock)
 
 
 def _fold_old_limits(old: dict[str, Any], now: float) -> None:

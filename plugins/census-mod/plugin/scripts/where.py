@@ -22,8 +22,10 @@ def _settings(path: Path) -> tuple[bool, bool | None, dict[str, Any]]:
     """(exists, valid, data): valid is None when there is no file; data is {} unless it is a JSON object."""
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
         return False, None, {}
+    except OSError:  # there, but not readable (permissions, a directory): it exists, and is no use
+        return True, False, {}
     except UnicodeError:  # there, but not text we can read (not UTF-8): invalid, not a crash
         return True, False, {}
     try:
@@ -54,8 +56,9 @@ def _installs(cache: Path, plugin: str, marker: str) -> list[dict[str, Any]]:
     return found
 
 
-def _plugin_dir_mentions(settings: dict[str, Any], name: str) -> bool:
-    values = [os.environ.get(PLUGIN_DIRS_ENV, "")]
+def _plugin_dir_mentions(settings: dict[str, Any], name: str, active: bool = True) -> bool:
+    # This process's own plugin dirs describe the ACTIVE account; another account is judged by its settings alone.
+    values = [os.environ.get(PLUGIN_DIRS_ENV, "")] if active else []
     env = settings.get("env")
     if isinstance(env, dict) and isinstance(env.get(PLUGIN_DIRS_ENV), str):
         values.append(env[PLUGIN_DIRS_ENV])
@@ -63,7 +66,7 @@ def _plugin_dir_mentions(settings: dict[str, Any], name: str) -> bool:
     return any(name in re.split(r"[\\/]", root) for v in values for root in re.split(r"[:;]", v))
 
 
-def report() -> dict[str, Any]:
+def report(active: bool = True) -> dict[str, Any]:
     config = st.config_dir()
     settings_path = config / "settings.json"
     exists, valid, data = _settings(settings_path)
@@ -73,18 +76,19 @@ def report() -> dict[str, Any]:
     command = line.get("command") if isinstance(line, dict) else None
     cache = config / "plugins" / "cache"
     mod_installs = [i for i in _installs(cache, "census-mod", MOD_MARKER) if not i["orphaned"]]
-    via_dir = _plugin_dir_mentions(data, "census-mod")
+    via_dir = _plugin_dir_mentions(data, "census-mod", active)
     mod_enabled = via_dir or any(
         v is True for k, v in enabled.items() if isinstance(k, str) and k.startswith("census-mod@")
     )
     plugin_root = Path(__file__).resolve().parents[1]
-    mod_enabled_keys = [k for k, v in enabled.items() if isinstance(k, str) and k.startswith("census@") and v is True]
+    census_enabled_keys = [k for k, v in enabled.items() if isinstance(k, str) and k.startswith("census@") and v is True]
     notes: list[str] = []
     if (plugin_root / "hooks" / "hooks.json").is_file():
         # this file is census-mod's bundled copy: the thing to flag is the census plugin it replaces
-        if mod_enabled_keys:
-            keys = ", ".join(sorted(mod_enabled_keys))
-            cmds = "; ".join(f"claude plugin disable {k}" for k in sorted(mod_enabled_keys))
+        # only when census-mod is itself enabled: disabling census beside a disabled census-mod would leave no recorder
+        if mod_enabled and census_enabled_keys:
+            keys = ", ".join(sorted(census_enabled_keys))
+            cmds = "; ".join(f"claude plugin disable {k}" for k in sorted(census_enabled_keys))
             notes.append(f"the census plugin is enabled too ({keys}) — census-mod replaces it; disable it: {cmds}")
     elif mod_enabled and (mod_installs or via_dir):
         notes.append(

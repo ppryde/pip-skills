@@ -938,3 +938,58 @@ def test_the_no_buffer_stdout_fallback_adds_no_second_newline(monkeypatch):
     vitals._emit("one line ✻")
     vitals._emit("two")
     assert out.getvalue() == "one line ✻\ntwo\n"
+
+
+# --- idle is shown ---------------------------------------------------------------------------
+
+
+def idle_vitals():
+    v = full_vitals()
+    v.idle = True
+    return v
+
+
+def test_lean_shows_idle_on_the_first_line_within_a_phone():
+    lines = vitals.render_compact(idle_vitals()).splitlines()
+    assert lines[0].endswith("idle") or " · idle" in lines[0]
+    assert all(width(line) <= 44 for line in lines)
+
+
+def test_lean_idle_survives_a_long_model_name_and_big_numbers():
+    v = idle_vitals()
+    v.model = "Claude Opus 5.5 with an extremely long display name"
+    v.ctx_tokens, v.ctx_size, v.cost_usd = 123_456, 1_000_000, 123.45
+    first = vitals.render_compact(v).splitlines()[0]
+    assert "idle" in first and width(first) <= 44
+
+
+def test_lean_says_nothing_when_active():
+    assert "idle" not in vitals.render_compact(full_vitals())
+
+
+def test_detailed_has_an_idle_line_only_when_idle():
+    assert any("idle" in line for line in vitals.render_detailed(idle_vitals()).splitlines()[:6])
+    assert "idle" not in vitals.render_detailed(full_vitals())
+
+
+# --- the command name follows where the file lives ---------------------------------------------
+
+
+def test_the_command_is_census_vitals_in_the_census_plugin():
+    assert vitals.command_name() == "/census:vitals"
+
+
+def test_the_command_is_census_mod_vitals_in_the_bundle(tmp_path, monkeypatch):
+    root = tmp_path / "plugin"
+    (root / "scripts").mkdir(parents=True)
+    (root / "hooks").mkdir()
+    (root / "hooks" / "hooks.json").write_text("{}")
+    monkeypatch.setattr(vitals, "__file__", str(root / "scripts" / "vitals.py"))
+    assert vitals.command_name() == "/census-mod:vitals"
+    assert "/census-mod:vitals" in vitals.build_parser().format_help()
+    assert "/census:vitals" not in vitals.build_parser().format_help()
+
+
+def test_help_names_the_census_command_in_the_census_plugin():
+    text = vitals.build_parser().format_help()
+    assert "/census:vitals" in text and "/census-mod:vitals" not in text

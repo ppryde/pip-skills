@@ -52,4 +52,5 @@ run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py"` yourself (the plugin roo
 this command file's `../`) and print the result the same way. If it says "no census
 reading yet", add one line after the fence: census is fed by its status-line hook or by
 the census-mod mod, so a brand-new or headless session has none yet; if it never appears,
-neither is installed (see the census README).
+either neither is installed or census-mod is recording into a shadow store (`CENSUS_MOD_STORE`), which vitals
+does not read (see the census README).

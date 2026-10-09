@@ -31,4 +31,5 @@ The script is read-only and never fails loudly: a missing source (no census
 entry, not a git repo) just leaves its lines out. If it prints
 "no census reading yet", add one line after the fence: census is fed by its
 status-line hook or by the census-mod mod, so a brand-new or headless session has none
-yet; if it never appears, neither is installed (see the census README).
+yet; if it never appears, either neither is installed or census-mod is recording into a shadow
+store (`CENSUS_MOD_STORE`), which vitals does not read (see the census README).

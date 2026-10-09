@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""/census:vitals — an on-demand readout of this session's vital signs.
+"""vitals — an on-demand readout of this session's vital signs.
 
 Gathers from three read-only sources and renders one of two styles:
 
@@ -485,9 +485,11 @@ def lean_ctx_line(v: Vitals) -> str:
         tokens = fmt_tokens(v.ctx_tokens) + (f"/{fmt_tokens(v.ctx_size)}" if v.ctx_size else "")
     cost = fmt_cost(v.cost_usd) if v.cost_usd is not None else None
 
+    idle = "idle" if v.idle else None   # kept to the end: a live-but-inactive session must not look active
+
     def build(with_tokens: bool, with_cost: bool, model: str | None) -> str:
         first = head + (f" {tokens}" if tokens and with_tokens else "")
-        return " · ".join(p for p in (first, model, cost if with_cost else None) if p)
+        return " · ".join(p for p in (first, model, cost if with_cost else None, idle) if p)
 
     for with_tokens, with_cost in ((True, True), (True, False), (False, False)):
         out = build(with_tokens, with_cost, v.model)
@@ -545,6 +547,8 @@ def render_detailed(v: Vitals) -> str:
         out.append(f"“{clip(v.session_name, 40)}”")
     if (live := liveness(v)) is not None:
         out.append(f"⚠️  {live}")
+    if v.idle:
+        out.append("💤 idle — no activity for 10+ min")
 
     out += ["", f"💾 Context {pct(v.ctx_pct)} {bar(v.ctx_pct, 12)}"]
     if v.ctx_tokens is not None:
@@ -725,13 +729,26 @@ def _emit(text: str) -> None:
     sys.stdout.write(data.decode("utf-8", "replace"))  # ``data`` already ends with its newline
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="vitals", description=__doc__.splitlines()[0])
-    parser.add_argument("words", nargs="*", help="style name or alias (from /census:vitals arguments)")
+def command_name() -> str:
+    """The slash command that runs this file: census-mod bundles the file byte for byte, and a mod's plugin root
+    (this file's grandparent) carries hooks/hooks.json, which the census plugin's does not."""
+    root = Path(__file__).resolve().parents[1]
+    return "/census-mod:vitals" if (root / "hooks" / "hooks.json").is_file() else "/census:vitals"
+
+
+def build_parser() -> argparse.ArgumentParser:
+    command = command_name()
+    parser = argparse.ArgumentParser(prog="vitals", description=f"{command} — an on-demand readout of this session's vital signs.")
+    parser.add_argument("words", nargs="*", help=f"style name or alias (from {command} arguments)")
     parser.add_argument("--style", choices=STYLES)
     parser.add_argument("--set-default", metavar="STYLE", help="save the default style (lean|detailed or an alias), then show it")
     parser.add_argument("--session", help="session id (default: freshest for the worktree)")
     parser.add_argument("--cwd", default=os.getcwd())
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
     session = _clean_session(args.session) or _clean_session(os.environ.get("CLAUDE_SESSION_ID"))
     explicit = args.style or style_named(args.words)
