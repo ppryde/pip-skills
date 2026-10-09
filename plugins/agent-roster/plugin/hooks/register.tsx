@@ -723,13 +723,17 @@ async function rescan($: EngineInterface) {
 let drawnWaiting = -1
 
 /**
- * The band above the prompt carries the waiting count as a button (see the `AbovePrompt` hook). It is raised on the
- * terminal and desktop surfaces only, so a session drawing on neither (VS Code, mobile) keeps the plain status line.
+ * The band above the prompt carries the waiting count as a button (see the `AbovePrompt` hook), but it is raised on the
+ * terminal and desktop surfaces only. A session can draw on several surfaces at once, so the plain status line is
+ * cleared only when EVERY attached surface draws the band; while any one lacks it (VS Code, mobile) or none is
+ * attached, the line stays. In practice `$.ui.status` is itself drawn on terminal and desktop only, so VS Code and
+ * mobile show neither: on a mixed session the line is the fallback the engine can offer, and a terminal that is
+ * attached beside one of them shows the line and the button together.
  */
 async function showWaiting($: EngineInterface, waiting: number) {
   const surfaces = await $.session.surfaces().catch(() => [])
-  const band = surfaces.some(s => s === 'terminal' || s === 'desktop')
-  $.ui.status(!band && waiting ? `agents: ${waiting} waiting` : undefined)
+  const everyBand = surfaces.length > 0 && surfaces.every(s => s === 'terminal' || s === 'desktop')
+  $.ui.status(!everyBand && waiting ? `agents: ${waiting} waiting` : undefined)
   if (waiting !== drawnWaiting) {
     drawnWaiting = waiting
     $.ui.invalidate('ui.render')
