@@ -55,7 +55,8 @@ export const INPUT_SCHEMA = {
 
 export const TOOL_DESCRIPTION =
   'Save a handover for this session so work can resume after the context is cleared. ' +
-  'Call it only when context-vigil-mod asks you to. Write for a fresh reader who knows nothing of this conversation.'
+  'Call it when context-vigil-mod asks you to, or when the person asks you for a handover. Never write a handover any other way: no ad-hoc files or summaries. ' +
+  'Write for a fresh reader who knows nothing of this conversation.'
 
 export function cleanName(raw: string): string {
   return raw.replace(/\s+/g, ' ').trim().replace(/^\/+/, '').slice(0, 60).trim()
@@ -120,4 +121,33 @@ export function limitResumeText(path: string | null): string {
     return '[context-vigil-mod] The usage limit has reset. No handover was written before the stop (it was deferred or classic was active); pick up from the conversation as it stands.'
   }
   return `[context-vigil-mod] The usage limit has reset. Continue the work; the handover you wrote is saved at ${path} if you need it.`
+}
+
+// Any mention of a handover at all: the looser net behind the tool (a person who said "handover" and
+// then had the model call the tool meant it).
+export function mentionsHandover(text: string): boolean {
+  return /hand[ -]?over|hand(?:ing)?[ -]?off/i.test(text)
+}
+
+const REQUEST_MAX_WORDS = 12
+const REQUEST_CORE = /\bhand[ -]?over\b|\bhand(?:ing)?[ -]?off\b|\bhand\s+(?:this|it|that|things|everything|us|work|session|this session)\s+(?:over|off)\b|\bhand\s+this\s+session\s+(?:over|off)\b/
+const REQUEST_NEGATION = /\b(?:don'?t|do not|dont|never|no|not|stop|cancel|without|skip|instead|isn'?t|won'?t|can'?t)\b/
+// Questions about handovers, and talk about the mod's code, files and behaviour.
+const REQUEST_ABOUT = /\b(?:how|what|what'?s|whats|why|when|where|which|who|does|did|is|are|was|were|has|have|bug|bugs|fix|fixing|fixed|broken|broke|fail|fails|failed|failing|wrong|work|works|working|implement|code|file|files|test|tests|spec|docs?|document|explain|show|read|review|check|debug|issue|error|last|previous|latest|update|improve|refactor|think|tool|mod|hook|slow|empty|status|summary|details?|info|information|list|history|log|logs|count|size|path|location|contents?|diff|name)\b/
+const REQUEST_CONDITION = /\b(?:if|unless|after|before|once|whenever|until)\b/
+const REQUEST_LEAD = new Set([
+  'handover', 'handoff', 'hand', 'do', 'run', 'start', 'begin', 'make', 'write', 'create', 'give', 'trigger', 'initiate', 'time', "let's", 'lets', 'let',
+  'go', 'ok', 'okay', 'alright', 'right', 'so', 'now', 'please', 'pls', 'can', 'could', 'would', 'will', 'shall', 'i', 'we', "it's", 'its', 'ready',
+  'need', 'needs', 'want', 'yes', 'yep', 'yeah', 'sure', 'just', 'then', 'kindly', 'hey', 'hi',
+])
+
+/** Is this short human message a request to hand over now (not a question or talk about handovers)? */
+export function isHandoverRequest(text: string): boolean {
+  const clean = text.toLowerCase().replace(/[.!?,;:-]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!clean || clean.startsWith('/')) return false
+  const words = clean.split(' ')
+  if (words.length > REQUEST_MAX_WORDS) return false
+  if (!REQUEST_CORE.test(clean)) return false
+  if (REQUEST_NEGATION.test(clean) || REQUEST_ABOUT.test(clean) || REQUEST_CONDITION.test(clean)) return false
+  return REQUEST_LEAD.has(words[0]!)
 }

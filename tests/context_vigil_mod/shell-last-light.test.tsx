@@ -269,7 +269,7 @@ test('a rejected follow-up after a resume clear keeps the held message visible',
   w.sessionId.value = 's2'
   await $.classic.SessionStart({ source: 'clear' } as never)
   w.submitRefused.value = true
-  await w.clock.advance(500)
+  await w.clock.advance(16_000)   // 0.5 s and four retries: about 15.5 s before it gives up
   expect(w.notices.some(n => n.includes("Couldn't resume") && n.includes('morning!') && n.includes('/handovers/s1-1.md'))).toBe(true)
 })
 

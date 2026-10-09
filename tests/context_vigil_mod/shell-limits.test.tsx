@@ -210,7 +210,7 @@ test('a rejected limit resume is announced and logged, not swallowed', async ($,
   await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
   await w.clock.settle()
   w.submitRefused.value = true
-  await w.clock.advance(HOUR + 300_000)
+  await w.clock.advance(HOUR + 300_000 + 16_000)   // the submit is retried for about 15 s first
   expect(w.notices.some(n => n.includes("Couldn't resume"))).toBe(true)
   expect(w.notices).not.toContain("📜 Couldn't write a handover — nothing was cleared")
   expect([...w.files.values()].some(t => t.includes('submit-rejected'))).toBe(true)
@@ -225,7 +225,7 @@ test('a refused limit resume clears the job: the next early stop is judged on it
   await $.tool.call(write)
   await w.clock.settle()
   w.submitRefused.value = true
-  await w.clock.advance(HOUR + 300_000)
+  await w.clock.advance(HOUR + 300_000 + 16_000)   // the submit is retried for about 15 s first
   expect(w.notices.some(n => n.includes("Couldn't resume"))).toBe(true)
   w.submitRefused.value = false
   const first = [...w.files.keys()].filter(p => p.includes('/handovers/'))

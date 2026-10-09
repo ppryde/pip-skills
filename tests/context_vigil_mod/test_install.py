@@ -45,7 +45,7 @@ def test_uninstall_removes_only_ours(tmp_path):
     assert settings(tmp_path)["env"]["CLAUDE_CODE_PLUGIN_DIRS"] == "/a:/b"
 
 
-# Same fixture string as CLASSIC_CMD in interlock.test.ts beside this file (Task 10).
+# Same fixture string as CLASSIC_CMD in tests/context_vigil_mod/interlock.test.ts (Task 10).
 CLASSIC_CMD = '"/s/context-vigil/scripts/context-vigil" hook stop'
 
 
