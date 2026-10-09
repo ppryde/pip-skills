@@ -101,7 +101,7 @@ Terminal only. Shown from the threshold crossing until you choose or a handover 
 - Attended guard: an auto-mode (unattended) handover never clears once you are back. The mode is re-checked at the moment of clearing; if you have prompted since it began, the handover is kept, the log says `clear.skipped`, and a notice says to `/vho` or `/clear` when ready. `/vho` and the bar's `1` are attended and unaffected.
 - Baseline guard: an auto-mode threshold handover fires only once context has grown at least one `step` (default 5) above the session's baseline, its first context reading (a /clear starts a new baseline). This stops a session that resumes just under the threshold from handing over again within a turn; the log says `guard.baseline` when it holds one back. Attended nudges are unaffected.
 - A handover still pending when a session restarts is offered at session start with a `/clear` notice. Parked handovers older than 14 days are pruned.
-- With neither `HOME` nor `CLAUDE_CONFIG_DIR` set, nothing is written anywhere and a handover is refused with a notice.
+- With no config dir to be found (`CLAUDE_CONFIG_DIR`, `HOME`, `USERPROFILE` and `HOMEDRIVE`+`HOMEPATH` all unset), nothing is written anywhere and a handover is refused with a notice naming those variables.
 
 ## Last light
 
@@ -127,6 +127,14 @@ Under `$CLAUDE_CONFIG_DIR/context-vigil-mod/`, one account only:
 ## Temporary interlock
 
 The mod stands down (no arming, clearing or bar; one notice) when classic context-vigil is active for the session: classic hooks in the account's `settings.json`, or a classic session record. **Temporary:** removed, with all classic-detection code, when classic retires.
+
+## Windows
+
+Works on Windows with Claude Code's own shell tools. The config dir is `CLAUDE_CONFIG_DIR`, else `<home>\.claude`, with the home
+taken from `HOME`, else `USERPROFILE`, else `HOMEDRIVE`+`HOMEPATH`; paths keep the separator of the base (`C:\Users\you\.claude\context-vigil-mod\...`).
+Last light and the "is this session named" check read the transcript with `tail` and `grep`; where `sh` does not run (no Git Bash)
+they read the transcript file directly instead, and a transcript over the engine's 4 MiB read cap reads as "cannot tell": last
+light then stays off (unknown never fires) and the session is left unrenamed. Everything else spawns only `git`.
 
 ## Verify
 

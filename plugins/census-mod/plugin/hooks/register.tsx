@@ -5,7 +5,9 @@ import type { CensusEnv } from '../core/census'
 import { GH_TIMEOUT_MS, ghArgv, ghKey, parsePrList, shouldRefresh, touchesPr } from '../core/gh'
 import type { GhEntry, Why } from '../core/gh'
 import { COALESCE_MS as GIT_COALESCE_MS, GIT_DIR_ARGV, GIT_STATUS_ARGV, parseStatus, touchesGit, watchPaths, worktreeOf } from '../core/git'
+import { homeOf, joinPath } from '../core/home'
 import { configRoot, transcriptPathFor } from '../core/name'
+import { cacheLinesFromText, copyModeArgv, moveArgv, pickPython, removeArgv, titleLinesFromText } from '../core/portable'
 import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
 import type { Event } from '../core/payload'
 import { TITLE_ARGV, TITLE_TAIL_CMD, findProc, lastTitle } from '../core/registry'
@@ -48,6 +50,8 @@ let gitTimer: Timer | null = null
 let lastGitAt: number | null = null
 let cli: string | null | undefined // census-mod's own bundled recorder, once found there
 let saidNoCli = false
+let python: string[] | null | undefined // the launcher that ran --version, once; null = none found
+let shell: boolean | undefined // whether `sh` runs here (it does not on Windows)
 let saidNoGh = false
 
 const TICK_MS = 30_000
@@ -63,6 +67,8 @@ async function loadEnv($: EngineInterface): Promise<Env> {
     CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
     HOME: await $.env.get('HOME'),
     USERPROFILE: await $.env.get('USERPROFILE'),
+    HOMEDRIVE: await $.env.get('HOMEDRIVE'),
+    HOMEPATH: await $.env.get('HOMEPATH'),
     CENSUS_STATUSLINE_SEGMENTS: await $.env.get('CENSUS_STATUSLINE_SEGMENTS'),
     CENSUS_MOD_PLACEMENT: await $.env.get('CENSUS_MOD_PLACEMENT'),
     CENSUS_STATUSLINE_MASCOT: await $.env.get('CENSUS_STATUSLINE_MASCOT'),
@@ -105,11 +111,12 @@ async function locateProc($: EngineInterface) {
   try {
     const root = configRoot(env)
     if (!root) return
-    const entries = await $.fs.list(`${root}/sessions`)
+    const sessions = joinPath(root, 'sessions')
+    const entries = await $.fs.list(sessions)
     const files: { text: string }[] = []
     for (const f of entries) {
       if (!f.name.endsWith('.json')) continue
-      const text = await $.fs.read(`${root}/sessions/${f.name}`).catch(() => undefined)
+      const text = await $.fs.read(joinPath(sessions, f.name)).catch(() => undefined)
       if (typeof text === 'string') files.push({ text })
     }
     const proc = findProc(files, snap.sessionId)
@@ -130,6 +137,10 @@ async function locateProc($: EngineInterface) {
 async function readName($: EngineInterface, s: Snap | null = snap, whole = false) {
   if (!s?.transcriptPath) return
   try {
+    if (!(await hasShell($))) {
+      s.sessionName = lastTitle(titleLinesFromText(await transcriptText($, s.transcriptPath), whole ? undefined : 262144)) ?? s.sessionName
+      return
+    }
     const argv = whole ? TITLE_ARGV(s.transcriptPath) : ['sh', '-c', TITLE_TAIL_CMD, 'sh', s.transcriptPath]
     const r = await $.process.run(argv)
     if (r.exitCode === 0) s.sessionName = lastTitle(r.stdout) ?? s.sessionName
@@ -141,8 +152,10 @@ async function readName($: EngineInterface, s: Snap | null = snap, whole = false
 async function readTtl($: EngineInterface, s: Snap | null = snap) {
   if (!s?.transcriptPath) return
   try {
-    const r = await $.process.run(['sh', '-c', TAIL_CMD, 'sh', s.transcriptPath])
-    const found = r.exitCode === 0 ? ttlFromWrites(parseWrites(r.stdout)) : null
+    const out = (await hasShell($))
+      ? await $.process.run(['sh', '-c', TAIL_CMD, 'sh', s.transcriptPath]).then(r => (r.exitCode === 0 ? r.stdout : ''))
+      : cacheLinesFromText(await transcriptText($, s.transcriptPath))
+    const found = out ? ttlFromWrites(parseWrites(out)) : null
     if (found) {
       s.ttl = found
       s.counters = withTtl(s.counters, found)
@@ -195,14 +208,33 @@ async function discover($: EngineInterface): Promise<string | null> {
   return null
 }
 
+/** `python3`, `python` or `py -3`, the first that runs `--version`; asked once per process. null: none, said once in the log. */
+async function pythonLauncher($: EngineInterface): Promise<string[] | null> {
+  if (python !== undefined) return python
+  python = await pickPython(async argv => (await $.process.run(argv, { timeoutMs: 5000 })).exitCode === 0)
+  if (!python) $.ui.log('census-mod found no Python (tried python3, python, py -3): the band is drawn, nothing is recorded')
+  return python
+}
+
+/** Whether `sh` runs here; asked once per process. */
+async function hasShell($: EngineInterface): Promise<boolean> {
+  if (shell === undefined) shell = await $.process.run(['sh', '-c', 'exit 0'], { timeoutMs: 5000 }).then(r => r.exitCode === 0, () => false)
+  return shell
+}
+
+/** The transcript's text (a file over the engine's read cap reads as nothing): for where there is no sh/tail/grep. */
+const transcriptText = async ($: EngineInterface, path: string): Promise<string> => ((await $.fs.read(path).catch(() => '')) as string) || ''
+
 async function ingest($: EngineInterface, event: Event, endedReason?: string, timeoutMs = INGEST_TIMEOUT_MS, of: Snap | null = snap) {
   if (!of) return
   if (eff.record === 'no') return
   const path = await discover($)
   if (!path) return
+  const py = await pythonLauncher($)
+  if (!py) return
   const payload = buildPayload(of, await nowMs($), event, endedReason)
   try {
-    const out = await $.process.run(ingestArgv(path), { stdin: JSON.stringify(payload), env: ingestEnv(env), timeoutMs })
+    const out = await $.process.run(ingestArgv(path, py), { stdin: JSON.stringify(payload), env: ingestEnv(env), timeoutMs })
     if (out.exitCode !== 0) cli = undefined // the bundle moved or broke: look again next time
   } catch {
     cli = undefined
@@ -431,9 +463,9 @@ async function saveAnswer($: EngineInterface, patch: Partial<Saved>) {
 
 const settingsPath = (): string | null => {
   const root = configRoot(rawEnv)
-  return root ? `${root}/settings.json` : null
+  return root ? joinPath(root, 'settings.json') : null
 }
-const realCensusDir = (): string | null => censusDir({ CENSUS_STORE: rawEnv.CENSUS_STORE, CLAUDE_CONFIG_DIR: rawEnv.CLAUDE_CONFIG_DIR, HOME: rawEnv.HOME })
+const realCensusDir = (): string | null => censusDir(rawEnv)
 
 /** Step 1 of setup, no questions: this account's status line, any other writer, whether the census plugin is enabled. */
 async function detect($: EngineInterface): Promise<Detection> {
@@ -450,7 +482,7 @@ async function detect($: EngineInterface): Promise<Detection> {
         out.statusLineCommand = command
         if (command) {
           out.ingestBlock = commandIsCensus(command)
-          for (const file of scriptCandidates(command, rawEnv.HOME, rawEnv.USERPROFILE)) {
+          for (const file of scriptCandidates(command, homeOf(rawEnv) ?? undefined, homeOf(rawEnv) ?? undefined)) {
             const script = await $.fs.read(file).catch(() => undefined)
             if (typeof script === 'string' && hasIngestBlock(script)) out.ingestBlock = true
           }
@@ -459,13 +491,13 @@ async function detect($: EngineInterface): Promise<Detection> {
     }
     const dir = realCensusDir()
     if (dir) {
-      const files = ((await $.fs.list(`${dir}/sessions`).catch(() => [])) as { name: string; mtimeMs: number }[])
+      const files = ((await $.fs.list(joinPath(dir, 'sessions')).catch(() => [])) as { name: string; mtimeMs: number }[])
         .filter(f => f.name.endsWith('.json'))
         .sort((a, b) => b.mtimeMs - a.mtimeMs)
         .slice(0, 20)
       const entries: { updatedAt: number; hasCensusMod: boolean }[] = []
       for (const f of files) {
-        const body = await $.fs.read(`${dir}/sessions/${f.name}`).catch(() => undefined)
+        const body = await $.fs.read(joinPath(dir, 'sessions', f.name)).catch(() => undefined)
         try {
           const d = JSON.parse(typeof body === 'string' ? body : '{}') as { updated_at?: number; payload?: { census_mod?: unknown } }
           if (typeof d.updated_at === 'number') entries.push({ updatedAt: d.updated_at * 1000, hasCensusMod: d.payload?.census_mod !== undefined })
@@ -492,14 +524,15 @@ const writeSettings = async ($: EngineInterface, path: string, text: string): Pr
   const target = (await $.fs.stat(path, { resolve: true }).catch(() => undefined))?.realPath ?? path
   const tmp = settingsTmp(target)
   try {
-    await $.process.run(['cp', '-p', target, tmp]).catch(() => undefined)
+    const copy = copyModeArgv(target, tmp) // keeps the mode on POSIX; a Windows file has none
+    if (copy) await $.process.run(copy).catch(() => undefined)
     await $.fs.write(tmp, text)
-    const mv = await $.process.run(['mv', '-f', tmp, target])
+    const mv = await $.process.run(moveArgv(tmp, target))
     if (mv.exitCode === 0) return true
   } catch {
     // fall through to the cleanup
   }
-  await $.process.run(['rm', '-f', tmp]).catch(() => undefined)
+  await $.process.run(removeArgv(tmp)).catch(() => undefined)
   return false
 }
 
@@ -515,7 +548,7 @@ async function removeOwnStatusLine($: EngineInterface): Promise<{ done: boolean;
     if (r.reason === 'invalid') say($, `🧭 census-setup: ${path} is not valid JSON, so I left your status line alone`)
     return { done: r.reason === 'none' }
   }
-  const backup = `${dir}/${BACKUP_FILE}`
+  const backup = joinPath(dir, BACKUP_FILE)
   const existing = ((await $.fs.read(backup).catch(() => undefined)) as string | undefined) ?? null
   if (backupBlocks(existing, r.backup)) {
     say($, `🧭 census-setup: the backup already holds a different status line (${backup}), so I left your status line alone`)
@@ -540,18 +573,18 @@ async function turnOff($: EngineInterface) {
   const lines: string[] = ['recording: off', 'band: off']
   const path = settingsPath()
   const dir = realCensusDir()
-  const backupPath = dir ? `${dir}/${BACKUP_FILE}` : null
+  const backupPath = dir ? joinPath(dir, BACKUP_FILE) : null
   const backup = backupPath ? ((await $.fs.read(backupPath).catch(() => undefined)) as string | undefined) ?? null : null
   if (path && backupPath && backup !== null) {
     const text = await $.fs.read(path).catch(() => undefined)
     const r = restoreStatusLine(typeof text === 'string' ? text : '', backup)
     if (r.done === 'restored') {
       if (await writeSettings($, path, r.text)) {
-        await $.process.run(['rm', '-f', backupPath]).catch(() => undefined)
+        await $.process.run(removeArgv(backupPath)).catch(() => undefined)
         lines.push(`your status line is back in ${path}`)
       } else lines.push(`could not write ${path}: your status line is still backed up in ${backupPath}`)
     } else if (r.done === 'already') {
-      await $.process.run(['rm', '-f', backupPath]).catch(() => undefined)
+      await $.process.run(removeArgv(backupPath)).catch(() => undefined)
       lines.push('your status line is already in place')
     } else lines.push(`left ${path} alone (${r.why === 'present' ? 'it has a different status line now' : r.why === 'invalid' ? 'it is not valid JSON' : 'no usable backup'}); the backup stays in ${backupPath}`)
   }

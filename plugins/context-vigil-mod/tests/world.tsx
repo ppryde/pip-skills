@@ -27,6 +27,7 @@ export type World = {
   eventsWriteRefused: { value: boolean }   // makes fs.write under /events/ deny
   renameRefused: { value: boolean }    // makes $.command.run({ command: 'rename' }) reject
   renames: string[]                    // args of every rename command run
+  shell: { value: boolean }            // whether `sh` runs (it does not on Windows)
   titled: Set<string>                  // transcript paths holding a custom-title line
   grepFails: { value: boolean }        // makes the custom-title grep exit 2
   greps: string[][]                    // argv of every grep run
@@ -52,7 +53,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined }, model: { value: 'claude-opus-5-5[1m]' },
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '', dir: '/repo/.git' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, submitFails: { count: 0 }, eventsWriteRefused: { value: false }, renames: [],
-    titled: new Set(), grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
+    shell: { value: true }, titled: new Set(), grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
     handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, askHold: { held: false, waiting: [] }, asks: [], askReply: { value: null }, promptReadFails: { count: 0 }, onStoreSet: { value: null }, fsRead: { gate: null, error: null },
   }
   // $.store, per account: in memory, survives a clear, and open to the test (another process's writes).
@@ -76,6 +77,8 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   })
   on('fs.exists', (_$, e) => ({ value: w.files.has((e as { path: string }).path) }))
   on('process.run', (_$, e) => {
+    if (e.argv[0] === 'sh' && e.argv[2] === 'exit 0') { if (!w.shell.value) throw new Error('spawn sh ENOENT'); return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } }
+    if (e.argv[0] === 'sh' && !w.shell.value) throw new Error('spawn sh ENOENT')
     w.runs.count++
     if (e.argv[0] === 'grep') {
       w.greps.push([...e.argv])

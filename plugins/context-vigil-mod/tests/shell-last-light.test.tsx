@@ -198,6 +198,32 @@ for (const value of ['none', 'fail'] as const) {
   })
 }
 
+test('no sh (Windows): the cache lifetime is read from the transcript file, and nothing shells out', async ($, on) => {
+  const w = world(on, LL)
+  w.shell.value = false
+  w.files.set('/cfg/projects/-repo/s1.jsonl', '{"x":1}\n"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":40}\n')
+  await idleUntilTimer($, w)
+  expect(w.tails).toEqual([])
+  expect(asks(w)).toBe(1)
+})
+
+test('no sh and a 5-minute write in the file: it does not fire, and says why', async ($, on) => {
+  const w = world(on, LL)
+  w.shell.value = false
+  w.files.set('/cfg/projects/-repo/s1.jsonl', '"cache_creation":{"ephemeral_5m_input_tokens":9,"ephemeral_1h_input_tokens":0}\n')
+  await idleUntilTimer($, w)
+  expect(asks(w)).toBe(0)
+  expect(eventLog(w)).toContain('"reason":"ttl-5m"')
+})
+
+test('no sh and no readable transcript: unknown, no fire', async ($, on) => {
+  const w = world(on, LL)
+  w.shell.value = false
+  await idleUntilTimer($, w)
+  expect(asks(w)).toBe(0)
+  expect(eventLog(w)).toContain('"reason":"ttl-unknown"')
+})
+
 test('walks back over pure cache reads to the latest write', async ($, on) => {
   const w = world(on, LL)
   w.cacheWrites.value = { raw: '"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":40}\n"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0}\n"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0}\n' }

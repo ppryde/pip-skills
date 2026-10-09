@@ -1,18 +1,17 @@
-export type CensusEnv = {
+import { configRootOf, expandHome, joinPath, trimSeps } from './home'
+import type { HomeEnv } from './home'
+
+export type CensusEnv = HomeEnv & {
   CENSUS_MOD_STORE?: string
   CENSUS_STORE?: string
-  CLAUDE_CONFIG_DIR?: string
-  HOME?: string
 }
 
-const trim = (p: string): string => (p.length > 1 ? p.replace(/\/+$/, '') || '/' : p)
 /** Census reads a store ending `.json` as that FILE: its census dir is the parent (store.census_dir). */
-const asDir = (p: string): string => (p.endsWith('.json') ? trim(p.slice(0, p.lastIndexOf('/')) || '/') : p)
-const expand = (p: string, home?: string): string => (home && (p === '~' || p.startsWith('~/')) ? home.replace(/\/+$/, '') + p.slice(1) : p)
+const asDir = (p: string): string => (p.endsWith('.json') ? trimSeps(p.slice(0, Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))) || '/') : p)
 
 /** Shadow mode: the store value as given (`~` expanded), which census itself reads, `.json` and all. */
 export function shadowStore(env: CensusEnv): string | null {
-  return env.CENSUS_MOD_STORE ? trim(expand(env.CENSUS_MOD_STORE, env.HOME)) : null
+  return env.CENSUS_MOD_STORE ? trimSeps(expandHome(env.CENSUS_MOD_STORE, env)) : null
 }
 
 /** Shadow mode: the DIR that store lives in, where `cli.path` sits. */
@@ -23,17 +22,19 @@ export function shadowDir(env: CensusEnv): string | null {
 
 /** The census dir readers use: `CENSUS_STORE`, else `<config dir>/census`. */
 export function censusDir(env: CensusEnv): string | null {
-  if (env.CENSUS_STORE) return asDir(trim(expand(env.CENSUS_STORE, env.HOME)))
-  const root = env.CLAUDE_CONFIG_DIR ? trim(env.CLAUDE_CONFIG_DIR) : env.HOME ? `${trim(env.HOME)}/.claude` : null
-  return root ? `${root}/census` : null
+  if (env.CENSUS_STORE) return asDir(trimSeps(expandHome(env.CENSUS_STORE, env)))
+  const root = configRootOf(env)
+  return root ? joinPath(root, 'census') : null
 }
 
 /**
  * census-mod records through its OWN bundled copy of census's ingest (`<plugin root>/scripts/cli.py`), never through a
  * census plugin: a Python script run under python3 with a list argv.
  */
-export const bundledCli = (pluginRoot: string): string => `${pluginRoot.replace(/[\\/]+$/, '')}/scripts/cli.py`
-export const ingestArgv = (cli: string): string[] => ['python3', cli, 'ingest']
+export const bundledCli = (pluginRoot: string): string => joinPath(pluginRoot, 'scripts', 'cli.py')
+
+/** The ingest argv for a launcher that passed `--version`. */
+export const ingestArgv = (cli: string, python: readonly string[] = ['python3']): string[] => [...python, cli, 'ingest']
 
 /** Shadow mode points the child's census at the shadow dir; ingest honours `CENSUS_STORE`. */
 export function ingestEnv(env: CensusEnv): Record<string, string> | undefined {

@@ -1,4 +1,5 @@
 import type { Git } from '../types'
+import { isAbsolute } from './home'
 
 // Two questions only: `ahead` was dropped while the status-line band is parked (pre-flight F30).
 export const GIT_ARGV = {
@@ -29,5 +30,6 @@ export const GIT_DIR_ARGV = ['git', 'rev-parse', '--absolute-git-dir'] as const
 /** What to watch for a `git rev-parse --absolute-git-dir` answer; nothing when it failed. */
 export function watchPaths(gitDir: RunOut): string[] {
   const dir = gitDir.exitCode === 0 ? gitDir.stdout.trim() : ''
-  return dir.startsWith('/') ? [`${dir}/HEAD`, `${dir}/index`] : []
+  // git prints forward slashes even on Windows (`C:/repo/.git`)
+  return isAbsolute(dir) ? [`${dir}/HEAD`, `${dir}/index`] : []
 }
