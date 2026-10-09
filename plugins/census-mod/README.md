@@ -58,7 +58,7 @@ measurable from a mod and is left out.
 - git: exactly `git --no-optional-locks status --porcelain=2 --branch -uno`, run at the
   start and after an Edit/Write/NotebookEdit/Bash call, a `.git/HEAD` or index change
   (watched through classic `SessionStart`'s `watchPaths`, resolved for worktrees), or a
-  cwd change; at most one a second. Detached and unborn HEAD follow census's rules.
+  cwd change; at most one every 5 seconds. Detached and unborn HEAD follow census's rules.
 - gh: exactly `gh pr list --head <branch> --state open --limit 1 --json
   number,url,reviewDecision`, in the session's directory, 5 s timeout. Run on a branch
   change, after a Bash call containing `git push` or `gh pr`, and when the answer is over

@@ -238,3 +238,68 @@ test('a reload re-arms the cache-cold timer from the stored counters', async ($,
   await w.clock.advance(MIN + 2 * SEC)
   expect(w.ingests.at(-1)?.payload).toMatchObject({ census_mod: { event: 'cache.cold' }, prompt_cache: { warm: false } })
 })
+
+test('a process the registry does not know yet is looked for on every later write until it is found', async ($, on) => {
+  const w = world(on)
+  w.files.delete('/cfg/sessions/22695.json')
+  await $.session.start(START)
+  await w.clock.advance(0)
+  expect(w.ingests.at(-1)?.payload.census_mod).not.toHaveProperty('pid')
+
+  for (let i = 0; i < 8; i++) {
+    await $.turn.complete(turn(USAGE))
+    await w.clock.advance(2 * SEC)
+  }
+  expect(w.ingests.at(-1)?.payload.census_mod).not.toHaveProperty('pid') // far more than five tries
+
+  w.files.set('/cfg/sessions/22695.json', JSON.stringify({ pid: 22695, sessionId: 's1', procStart: 'Sun Oct  4 22:57:51 2026', version: '2.1.289' }))
+  await $.turn.complete(turn(USAGE))
+  await w.clock.advance(2 * SEC)
+  expect(w.ingests.at(-1)?.payload.census_mod).toMatchObject({ pid: 22695, proc_start: 'Sun Oct  4 22:57:51 2026' })
+  const reads = w.runs.length
+  await $.turn.complete(turn(USAGE))
+  await w.clock.advance(2 * SEC)
+  expect(w.runs.length).toBeGreaterThanOrEqual(reads) // and once found it is not looked for again
+})
+
+test('a /clear, resume or fork writes the old session\'s end itself, once, even if session.end never came', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart(classicStart('clear', 's2'))
+  await w.clock.advance(0)
+  const ends = w.ingests.filter(i => i.payload.census_mod.ended !== undefined)
+  expect(ends).toHaveLength(1)
+  expect(ends[0]?.payload).toMatchObject({ session_id: 's1', census_mod: { event: 'session.end', ended: 'clear' } })
+
+  w.sessionId.value = 's3'
+  await $.classic.SessionStart(classicStart('fork', 's3'))
+  await w.clock.advance(0)
+  expect(w.ingests.filter(i => i.payload.census_mod.ended === 'fork')[0]?.payload.session_id).toBe('s2')
+})
+
+test('...but not twice when session.end already closed it', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} as never })
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart(classicStart('clear', 's2'))
+  await w.clock.advance(5 * SEC)
+
+  expect(w.ingests.filter(i => i.payload.session_id === 's1' && i.payload.census_mod.ended !== undefined)).toHaveLength(1)
+})
+
+test('the git dir and the session name are read off the start hooks\' path, then folded into the first write', async ($, on) => {
+  const w = world(on)
+  w.git.dir = '/repo/.git/worktrees/w\n/wt\n'
+  w.titles.set('/cfg/projects/-repo/s1.jsonl', '{"type":"custom-title","customTitle":"named","sessionId":"s1"}\n')
+  await $.session.start(START)
+  expect(w.runs.filter(r => r.argv.includes('rev-parse'))).toHaveLength(0)
+  expect(w.runs.filter(r => r.argv[0] === 'grep')).toHaveLength(0)
+
+  await w.clock.advance(0)
+  expect(w.ingests).toHaveLength(1)
+  expect(w.ingests[0]?.payload).toMatchObject({ session_name: 'named', worktree: { path: '/wt' } })
+})

@@ -124,8 +124,8 @@ does not write on a timer, so it is judged by its process instead, however old `
   string differs from the recorded `proc_start` (registry files outlive crashes, and pids are reused). The two
   strings are compared as text only.
 
-`<config dir>` is the account's `CLAUDE_CONFIG_DIR` (else `~/.claude`). The check is same-machine only. Entries
-without `census_mod.pid` keep the 90 s rule, `idle` (10 min without activity) is unchanged, and a reader never
+`<config dir>` is the account's `CLAUDE_CONFIG_DIR` (else `~/.claude`). The check is same-machine only. A `census_mod` block with no `pid` yet
+(the mod could not find its registry entry) is live unless `ended`. Entries without a `census_mod` block keep the 90 s rule, `idle` (10 min without activity) is unchanged, and a reader never
 raises: an entry it cannot judge is stale. `census read` carries `stale` on every session entry (the full view's `sessions.<sid>` and the `--session` /
 `--worktree` forms), computed by this rule: an additive key, every other key unchanged. Readers should prefer it
 over their own `updated_at` arithmetic.

@@ -37,20 +37,23 @@ test('git is re-asked after an Edit, Write or Bash call, a HEAD/index change and
     () => $.classic.CwdChanged({ old_cwd: '/repo', new_cwd: '/repo/sub' } as never),
   ].entries()) {
     await trigger()
-    await w.clock.advance(1100)
+    await w.clock.advance(5100)
     expect(gitStatusRuns(w)).toHaveLength(base + i + 1)
   }
 })
 
-test('git runs coalesce to one a second', async ($, on) => {
+test('git runs coalesce to one every 5 seconds', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
   const base = gitStatusRuns(w).length
   for (let i = 0; i < 6; i++) await $.tool.call(call('Edit', { file_path: '/repo/a' }))
-  await w.clock.advance(0)
+  await w.clock.advance(4000)
+  expect(gitStatusRuns(w)).toHaveLength(base) // the burst waits out the window
   await w.clock.advance(1100)
-  expect(gitStatusRuns(w).length).toBeLessThanOrEqual(base + 2)
+  expect(gitStatusRuns(w)).toHaveLength(base + 1)
+  await w.clock.advance(20_000)
+  expect(gitStatusRuns(w)).toHaveLength(base + 1)
 })
 
 test('HEAD and the index are watched through classic SessionStart (git dir resolved for worktrees)', async ($, on) => {
@@ -97,6 +100,7 @@ test('gh runs after a Bash git push or gh pr, not after any other command, and o
 
   w.git.status = '# branch.oid abc\n# branch.head other\n'
   await $.classic.FileChanged({ file_path: '/repo/.git/HEAD', event: 'change' } as never)
+  await w.clock.advance(5100)
   await w.clock.advance(2 * SEC)
   expect(ghRuns(w)).toHaveLength(base + 3)
   expect(ghRuns(w).at(-1)?.argv).toContain('other')

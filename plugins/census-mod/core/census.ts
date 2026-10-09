@@ -44,13 +44,17 @@ export const WHICH_ARGV = ['sh', '-c', 'command -v census'] as const
 /** Time budgets (ms) */
 export const INGEST_TIMEOUT_MS = 10_000
 export const COALESCE_MS = 2000
-export const END_RESERVE_MS = 300
-export const END_MIN_MS = 200
+export const END_RESERVE_MS = 200
+export const END_MIN_MS = 300
 
-/** `timeoutMs` for the final ingest so it finishes under `session.end`'s shared budget. */
-export function endTimeoutMs(remainingMs: number): number {
+/**
+ * `timeoutMs` for the final ingest so it finishes inside `session.end`'s shared budget, or null to
+ * skip it: with under END_MIN_MS left an ingest would only overrun the exit.
+ */
+export function endTimeoutMs(remainingMs: number): number | null {
   if (!Number.isFinite(remainingMs)) return 1000
-  return Math.max(END_MIN_MS, Math.min(1000, Math.floor(remainingMs) - END_RESERVE_MS))
+  if (remainingMs < END_MIN_MS) return null
+  return Math.min(1000, Math.floor(remainingMs) - END_RESERVE_MS)
 }
 
 /** How long to wait before the next ingest may run: 0 when the last was over `COALESCE_MS` ago. */

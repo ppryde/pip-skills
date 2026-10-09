@@ -66,8 +66,17 @@ class TestWithoutCensusMod:
     def test_ninety_seconds_exactly_is_live(self, cfg):
         assert stale(entry(NOW - 90)) is False
 
-    def test_a_census_mod_without_a_pid_keeps_the_rule(self, cfg):
-        assert stale(entry(NOW - 3600, {"ended": None})) is True
+    def test_a_census_mod_without_a_pid_is_unknown_so_live_however_old(self, cfg):
+        # the mod could not find its registry entry yet: not a reason to call a live session dead
+        assert stale(entry(NOW - 86_400, {"version": 1, "event": "turn.complete"})) is False
+        assert stale(entry(NOW - 86_400, {"ended": None})) is False
+
+    def test_a_census_mod_without_a_pid_is_still_stale_once_ended(self, cfg):
+        assert stale(entry(NOW - 3, {"version": 1, "ended": "prompt_input_exit"})) is True
+
+    def test_ended_is_judged_before_the_pid_is_looked_at(self, cfg, alive):
+        assert stale(entry(NOW - 3, mod(pid="junk", ended="clear"))) is True
+        assert alive["calls"] == []
 
 
 class TestWithCensusMod:

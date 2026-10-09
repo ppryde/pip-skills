@@ -24,7 +24,8 @@ type Env = CensusEnv & RenderEnv
 let env: Env = {}
 let interactive: boolean | null = null
 let snap: Snap | null = null
-let procTries = 0
+let hydrating: Promise<void> | null = null
+const ended = new Set<string>()
 let lastActiveAt: number | null = null
 let limitsKey = ''
 let ingestTimer: Timer | null = null
@@ -41,7 +42,6 @@ let saidNoGh = false
 
 const TICK_MS = 30_000
 const CLI_RETRY_MS = 60_000
-const PROC_TRIES = 5
 
 async function nowMs($: EngineInterface): Promise<number> {
   return $.clock.now()
@@ -91,8 +91,7 @@ async function refreshEngine($: EngineInterface) {
 const limitsFingerprint = (l: RateLimit[]): string => l.map(x => `${x.kind}:${x.percentUsed}:${x.resetsAt ?? ''}`).sort().join('|')
 
 async function locateProc($: EngineInterface) {
-  if (!snap || snap.proc || procTries >= PROC_TRIES) return
-  procTries++
+  if (!snap || snap.proc) return // looked for again on every write until found: it is one small read
   try {
     const root = configRoot(env)
     if (!root) return
@@ -197,11 +196,11 @@ async function siblingCli($: EngineInterface): Promise<string | null> {
   return findSibling({ exists: p => $.fs.exists(p), list: p => $.fs.list(p) }, root)
 }
 
-async function ingest($: EngineInterface, event: Event, ended?: string, timeoutMs = INGEST_TIMEOUT_MS) {
-  if (!snap) return
+async function ingest($: EngineInterface, event: Event, endedReason?: string, timeoutMs = INGEST_TIMEOUT_MS, of: Snap | null = snap) {
+  if (!of) return
   const path = await discover($)
   if (!path) return
-  const payload = buildPayload(snap, await nowMs($), event, ended)
+  const payload = buildPayload(of, await nowMs($), event, endedReason)
   try {
     const out = await $.process.run(ingestArgv(path), { stdin: JSON.stringify(payload), env: ingestEnv(env), timeoutMs })
     if (out.exitCode !== 0) cli = undefined // the CLI moved or broke: look again next time
@@ -228,6 +227,7 @@ async function flush($: EngineInterface) {
   pending = null
   if (!event || !snap) return
   lastIngestAt = await nowMs($)
+  await hydrating
   await refreshEngine($)
   await locateProc($)
   await ingest($, event)
@@ -333,13 +333,41 @@ function armTimers($: EngineInterface) {
   armCold($)
 }
 
+/** The git dir (worktree) and the session name: shell-outs kept off the start hooks' path. The first write waits for them. */
+function hydrate($: EngineInterface, known?: { exitCode: number; stdout: string }) {
+  hydrating = new Promise<void>(done => {
+    $.clock.after(0, () => {
+      void (async () => {
+        if (!snap) return
+        const gitDir = known ?? (await readGitDir($, snap.cwd))
+        if (snap) snap.worktreePath = worktreeOf(gitDir)
+        await readName($)
+        repaint($)
+      })()
+        .catch(() => undefined)
+        .finally(done)
+    })
+  })
+}
+
+/** An ended record for a session this process is leaving, from its last snapshot; once per session. */
+function closeOld($: EngineInterface, old: Snap | null, why: string) {
+  if (!old || ended.has(old.sessionId)) return
+  ended.add(old.sessionId)
+  $.clock.after(0, () => void ingest($, 'session.end', why, INGEST_TIMEOUT_MS, old).catch(() => undefined))
+}
+
 /** (Re)bind the live state to a session. Idempotent: a reload or a repeated start finds it bound. */
-async function bind($: EngineInterface, id: string, cwd: string, transcript: string | null, event: Event) {
+async function bind($: EngineInterface, id: string, cwd: string, transcript: string | null, event: Event, gitDir?: { exitCode: number; stdout: string }) {
   const same = snap?.sessionId === id
+  ended.delete(id) // a resumed id is live again
   if (!same) {
+    const old = snap
     snap = fresh(id, cwd)
-    procTries = 0
     limitsKey = ''
+    if (old && event !== 'session.start') closeOld($, old, event.replace('session.', ''))
+    cancelTimers()
+    pending = null
     snap.counters = await loadCounters($, id)
     snap.ttl = snap.counters.ttl ?? DEFAULT_TTL
   }
@@ -348,9 +376,7 @@ async function bind($: EngineInterface, id: string, cwd: string, transcript: str
   snap.transcriptPath = transcript ?? snap.transcriptPath ?? (root ? transcriptPathFor(root, snap.cwd, id) : null)
   await refreshEngine($)
   await locateProc($)
-  const gitDir = await readGitDir($, snap.cwd)
-  snap.worktreePath = worktreeOf(gitDir)
-  await readName($)
+  hydrate($, gitDir)
   armTimers($)
   scheduleGit($)
   record($, event)
@@ -391,11 +417,13 @@ export const register: Register = on => {
       if (!(await isInteractive($))) return
       interactive = true
       if (Object.keys(env).length === 0) env = await loadEnv($)
+      // watchPaths are this hook's answer, so this one git call is awaited; bind reuses it.
+      const gitDir = await readGitDir($, e.cwd)
+      watch = watchPaths(gitDir)
       if (e.source !== 'compact') {
         const event: Event = e.source === 'startup' ? 'session.start' : (`session.${e.source}` as Event)
-        await bind($, e.session_id, e.cwd, e.transcript_path || null, event)
+        await bind($, e.session_id, e.cwd, e.transcript_path || null, event, gitDir)
       } else if (snap && e.transcript_path) snap.transcriptPath = e.transcript_path
-      watch = watchPaths(await readGitDir($, e.cwd))
     })
     return watch.length ? { ...r, watchPaths: [...(r.watchPaths ?? []), ...watch] } : r
   })
@@ -518,7 +546,11 @@ export const register: Register = on => {
       if (interactive && snap && snap.sessionId === e.sessionId) {
         cancelTimers()
         pending = null
-        await ingest($, 'session.end', e.reason, endTimeoutMs(next.budget.remainingMs))
+        const timeoutMs = endTimeoutMs(next.budget.remainingMs)
+        if (timeoutMs !== null && !ended.has(e.sessionId)) {
+          ended.add(e.sessionId)
+          await ingest($, 'session.end', e.reason, timeoutMs)
+        }
       }
     })
     return next(e)

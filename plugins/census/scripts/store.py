@@ -903,16 +903,22 @@ def _process_gone(mod: dict[str, Any], config: Path | None) -> bool:
 def is_stale(entry: dict[str, Any], now: float, config: Path | None = None) -> bool:
     """Is this session entry dead or closed? Never raises.
 
-    An entry whose payload carries ``census_mod.pid`` (recorded by the census mod, which
+    An entry whose payload carries a ``census_mod`` block (recorded by the census mod, which
     does not write on a timer) is stale iff ``census_mod.ended`` is set or its process is
-    gone (see ``_process_gone``), however old ``updated_at`` is. Any other entry is stale
+    gone (see ``_process_gone``), however old ``updated_at`` is; with no ``pid`` yet (the mod
+    could not find its registry entry) the process is unknown and the entry is live unless
+    ended. Any other entry is stale
     when not rendered for ``STALE_HORIZON_SECONDS``. ``config`` is the Claude config dir
     holding ``sessions/<pid>.json`` (default: the account's)."""
     try:
         payload = entry.get("payload")
         mod = payload.get("census_mod") if isinstance(payload, dict) else None
-        if isinstance(mod, dict) and mod.get("pid") is not None:
-            return bool(mod.get("ended")) or _process_gone(mod, config)
+        if isinstance(mod, dict):
+            if mod.get("ended"):  # a clean exit is final, whatever the pid says
+                return True
+            if mod.get("pid") is None:  # the mod has not found its process yet: unknown, not dead
+                return False
+            return _process_gone(mod, config)
     except Exception:  # noqa: BLE001 - a reader must never raise; an unjudgeable process is gone
         return True
     updated = _number(entry.get("updated_at")) or 0.0

@@ -4,7 +4,7 @@ import type { GitState } from './types'
 export const GIT_STATUS_ARGV = ['git', '--no-optional-locks', 'status', '--porcelain=2', '--branch', '-uno'] as const
 // Line 1: the git dir (HEAD and index live there, elsewhere for a linked worktree); line 2: the top level.
 export const GIT_DIR_ARGV = ['git', 'rev-parse', '--absolute-git-dir', '--show-toplevel'] as const
-export const COALESCE_MS = 1000
+export const COALESCE_MS = 5000
 
 export type RunOut = { exitCode: number; stdout: string }
 

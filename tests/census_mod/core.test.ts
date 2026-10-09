@@ -64,8 +64,10 @@ test('ingests are 2 s apart; the final one fits what is left of the session.end 
   expect(delayFor(T0 + 500, T0)).toBe(1500)
   expect(delayFor(T0 + 2500, T0)).toBe(0)
   expect(endTimeoutMs(1500)).toBe(1000)
-  expect(endTimeoutMs(900)).toBe(600)
-  expect(endTimeoutMs(100)).toBe(200)
+  expect(endTimeoutMs(900)).toBe(700)
+  expect(endTimeoutMs(300)).toBe(100)
+  expect(endTimeoutMs(299)).toBeNull() // too little left: skip, never overrun
+  expect(endTimeoutMs(0)).toBeNull()
   expect(endTimeoutMs(Number.POSITIVE_INFINITY)).toBe(1000)
 })
 
