@@ -6,6 +6,8 @@ allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*), AskUserQuestion
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1 || python "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1 || py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1`
 
+Launcher: wherever this file says `python3`, use the first of `python3`, `python` and `py -3` that exists on this machine.
+
 The reading above is the person's saved default style (lean until they choose one).
 
 **Showing it.** If the user named no style, reply with the reading above **verbatim** inside
@@ -52,4 +54,5 @@ run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py"` yourself (the plugin roo
 this command file's `../`) and print the result the same way. If it says "no census
 reading yet", add one line after the fence: census-mod records a session from inside
 Claude Code, so a brand-new or headless session has none yet; if it never appears,
-census-mod is not recording (run /census-setup).
+census-mod may be recording into a shadow store (`CENSUS_MOD_STORE`), which vitals does not read, or is not
+recording at all (run /census-setup).

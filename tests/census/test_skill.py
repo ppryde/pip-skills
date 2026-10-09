@@ -120,3 +120,21 @@ def test_an_explicit_default_wins_over_the_first_run_question():
     assert re.search(r"typed `default <style>`.*that explicit choice wins: do not ask the first-run question, even on a fresh install", change)
     first = _paragraph("**First run: choosing a default.**")
     assert re.search(r"Only for a bare run.*explicit `default <style>` below always wins, so do not ask the first-run question then", first)
+
+
+# --- the vitals command and skills run on any launcher (python3, python, py -3) -----------------
+
+import pytest  # noqa: E402
+
+_ROOTS = [Path(__file__).resolve().parents[2] / "plugins" / "census", Path(__file__).resolve().parents[2] / "plugins" / "census-mod" / "plugin"]
+_FILES = [r / rel for r in _ROOTS for rel in ("commands/vitals.md", "skills/vitals-lean/SKILL.md", "skills/vitals-detailed/SKILL.md")]
+
+
+@pytest.mark.parametrize("path", _FILES, ids=lambda p: "/".join(p.parts[-4:]))
+def test_the_vitals_files_allow_and_try_every_launcher(path):
+    text = path.read_text()
+    tools = next(line for line in text.splitlines() if line.startswith("allowed-tools:"))
+    assert all(f"Bash({name}:*)" in tools for name in ("python3", "python", "py"))
+    injected = next(line for line in text.splitlines() if line.startswith("!`"))
+    assert injected.index("python3 ") < injected.index("|| python ") < injected.index("|| py -3 ")
+    assert "first of `python3`, `python` and `py -3`" in text

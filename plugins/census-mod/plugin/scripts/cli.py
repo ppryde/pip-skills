@@ -127,7 +127,8 @@ def cmd_where(args: argparse.Namespace) -> int:
     """Read-only: where census and census-mod are, as one JSON object (no shell variables needed)."""
     from scripts import where as wh
 
-    print(json.dumps(wh.report(), indent=2))
+    # --config-dir names another account: this process's plugin dirs belong to the active one
+    print(json.dumps(wh.report(active=not getattr(args, "config_dir", None)), indent=2))
     return 0
 
 

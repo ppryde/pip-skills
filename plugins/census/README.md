@@ -81,9 +81,13 @@ until the file is removed.
 (only when it changed), so other tools can locate census without walking plugin directories.
 Readers use `CENSUS_CLI`, else `cli.path`, else `census` on `PATH`.
 
-**No lock; Windows-safe.** Each session writes only its own file (temp file plus `os.replace`), so
-sessions never contend. Only each account's limits file is shared, and its merge only ever moves forward, so a
-lost race costs at most one refresh of a lower figure and can never stick wrong. A session id that
+**Windows-safe, no global lock.** Each session writes only its own file (temp file plus `os.replace`), so
+sessions never contend. Only each account's limits file is shared, and its merge only ever moves forward. That merge
+runs under a short per-file `O_EXCL` lock (`limits/<key>.json.lock`; never held across sessions' other work, waited for
+at most a quarter second, a crashed holder's lock taken over after 5 s, and gone without it if the folder is unwritable).
+With or without the lock it looks again just before writing, merges onto what it finds, and without the lock checks
+afterwards that its figures survived, redoing the merge (up to four times) if an older write landed on top. So a
+stale snapshot cannot replace a newer window. A session id that
 is not a safe filename (`[A-Za-z0-9._-]+`, up to 128 chars) is refused.
 
 Pruning is write-side: each ingest deletes session files whose `updated_at` is more than 24 h older

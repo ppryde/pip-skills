@@ -233,7 +233,7 @@ class TestAlternatives:
         (plugin / "hooks").mkdir()
         (plugin / "hooks" / "hooks.json").write_text("{}")
         monkeypatch.setattr(wh, "__file__", str(plugin / "scripts" / "where.py"))
-        settings(cfg, {"enabledPlugins": {"census@pip-skills": True, "census@wf-claude-market": False}})
+        settings(cfg, {"enabledPlugins": {"census@pip-skills": True, "census@wf-claude-market": False, "census-mod@pip-skills": True}})
         assert wh.report()["notes"] == [
             "the census plugin is enabled too (census@pip-skills) — census-mod replaces it; disable it: claude plugin disable census@pip-skills"
         ]
@@ -245,3 +245,44 @@ class TestAlternatives:
         (plugin / "hooks" / "hooks.json").write_text("{}")
         monkeypatch.setattr(wh, "__file__", str(plugin / "scripts" / "where.py"))
         assert wh.report()["notes"] == []
+
+
+class TestReviewWf23:
+    def test_another_account_does_not_inherit_this_processs_plugin_dirs(self, cfg, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_PLUGIN_DIRS", "/x/census-mod/plugin")
+        assert wh.report()["census_mod"]["via_plugin_dir"] is True
+        other = wh.report(active=False)["census_mod"]
+        assert other["via_plugin_dir"] is False and other["installed"] is False
+
+    def test_another_accounts_own_settings_env_still_counts(self, cfg):
+        settings(cfg, {"env": {"CLAUDE_CODE_PLUGIN_DIRS": "/x/census-mod/plugin"}})
+        assert wh.report(active=False)["census_mod"]["via_plugin_dir"] is True
+
+    def test_where_with_config_dir_uses_the_other_accounts_view(self, cfg, tmp_path, monkeypatch, capsys):
+        monkeypatch.setenv("CLAUDE_CODE_PLUGIN_DIRS", "/x/census-mod/plugin")
+        other = tmp_path / ".claude-other"
+        other.mkdir()
+        assert cli.main(["where", "--config-dir", str(other)]) == 0
+        assert json.loads(capsys.readouterr().out)["census_mod"]["via_plugin_dir"] is False
+        assert cli.main(["where"]) == 0
+        assert json.loads(capsys.readouterr().out)["census_mod"]["via_plugin_dir"] is True
+
+    def test_a_settings_file_that_cannot_be_read_exists_but_is_invalid_not_missing(self, cfg):
+        (cfg / "settings.json").mkdir()   # reading it raises IsADirectoryError, an OSError that is not "not found"
+        report = wh.report()
+        assert report["settings_exists"] is True and report["settings_valid"] is False
+
+    def test_a_missing_settings_file_is_still_missing(self, cfg):
+        report = wh.report()
+        assert report["settings_exists"] is False and report["settings_valid"] is None
+
+    def test_the_bundle_warns_about_the_census_plugin_only_when_census_mod_is_enabled(self, cfg, monkeypatch, tmp_path):
+        plugin = tmp_path / "census-mod-plugin"
+        (plugin / "scripts").mkdir(parents=True)
+        (plugin / "hooks").mkdir()
+        (plugin / "hooks" / "hooks.json").write_text("{}")
+        monkeypatch.setattr(wh, "__file__", str(plugin / "scripts" / "where.py"))
+        settings(cfg, {"enabledPlugins": {"census@pip-skills": True, "census-mod@pip-skills": False}})
+        assert wh.report()["notes"] == []   # disabling census would leave no recorder at all
+        settings(cfg, {"enabledPlugins": {"census@pip-skills": True, "census-mod@pip-skills": True}})
+        assert "disable census@pip-skills" in wh.report()["notes"][0]

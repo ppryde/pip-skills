@@ -21,6 +21,7 @@ export type World = {
   tail: { value: string }              // transcript tail grep output
   logs: string[]
   invalidations: { count: number }
+  lookups: string[]                    // every path the mod read, listed or asked about, in order
   surfaces: { value: string[] }
   toasts: string[]
   gitGate: { value: Promise<void> | null } // while set, `git status` waits on it
@@ -62,7 +63,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     git: { status: '# branch.oid abc1234def\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +1 -0\n1 .M N... 100644 100644 100644 a b f.ts\n', dir: '/repo/.git\n/repo\n', exitCode: 0 },
     gh: { stdout: '[]', exitCode: 0, throws: false },
     titles: new Map(), tail: { value: '"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":100}\n' },
-    logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, bundle: { present: true }, pythons: { value: ['python3'] }, shell: { value: true },
+    logs: [], invalidations: { count: 0 }, lookups: [], surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, bundle: { present: true }, pythons: { value: ['python3'] }, shell: { value: true },
   }
   w.files.set(`${REGISTRY}/22695.json`, JSON.stringify({ pid: 22695, sessionId: 's1', procStart: 'Sun Oct  4 22:57:51 2026', version: '2.1.289' }))
   const real = (p: string): string => w.links.get(p) ?? p
@@ -71,13 +72,15 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
   on('store.delete', (_$, e) => { w.store.delete(e.key); return { value: undefined } })
   on('store.keys', () => ({ value: [...w.store.keys()] }))
   mock.env(on, opts.env ?? { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
-  on('fs.read', (_$, e) => { const t = w.files.get(real(winPath(e.path))); return t === undefined ? { deny: `ENOENT ${e.path}` } : { value: t as never } })
+  on('fs.read', (_$, e) => { w.lookups.push(e.path); const t = w.files.get(real(winPath(e.path))); return t === undefined ? { deny: `ENOENT ${e.path}` } : { value: t as never } })
   on('fs.exists', (_$, e) => {
+    w.lookups.push((e as { path: string }).path)
     const path = winPath((e as { path: string }).path)
     if (w.files.has(real(path))) return { value: true }
     return { value: w.bundle.present && BUNDLED_CLI.test(path) }
   })
   on('fs.list', (_$, e) => {
+    w.lookups.push(e.path)
     const path = winPath((e as { path: string }).path)
     if (path === REGISTRY) w.registryLists.count++
     const names = w.dirs.get(path)
