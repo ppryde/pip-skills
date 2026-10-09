@@ -650,48 +650,58 @@ PREF_FILE = "vitals.json"
 NO_DEFAULT_MARKER = "(vitals: no default style chosen yet)"
 
 
-def pref_path() -> Path:
-    """Beside the sessions, in the census dir (census's own rule, so a ``.json`` store works too). Accounts that
-    share a ``CENSUS_STORE`` share the file; the choice inside it is keyed by account."""
-    return store.census_dir() / PREF_FILE
+def pref_dir() -> Path:
+    """``<census dir>/vitals/``: one file per account, so accounts that share a ``CENSUS_STORE`` never share a
+    read-modify-write (census's own rule for the dir, so a ``.json`` store works too)."""
+    return store.census_dir() / "vitals"
 
 
 def _account_key() -> str:
     return str(store.account_info()["key"])
 
 
-def _read_prefs() -> dict[str, Any]:
-    """The whole file as ``{account key: {"default_style": ...}}``; anything else (missing, corrupt, the old single-key
-    shape, a list) is an empty dict. Never raises."""
-    try:
-        data = json.loads(pref_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError, UnicodeError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    return {k: v for k, v in data.items() if isinstance(k, str) and k != "default_style" and isinstance(v, dict)}
+def pref_path(key: str | None = None) -> Path:
+    return pref_dir() / f"{key or _account_key()}.json"
 
 
-def read_default() -> str | None:
-    """This account's saved default style, or None when there is none or the file is unreadable or odd."""
-    try:
-        style = _read_prefs().get(_account_key(), {}).get("default_style")
-    except Exception:  # noqa: BLE001 - a preference never takes the readout down
-        return None
+def _style_in(data: Any) -> str | None:
+    style = data.get("default_style") if isinstance(data, dict) else None
     return style if isinstance(style, str) and style in STYLES else None
 
 
-def write_default(style: str) -> None:
-    """Save ``style`` for this account atomically (same-directory temp file, then replace), keeping every other
-    account's choice. Raises OSError."""
-    path = pref_path()
+def _load(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return None
+
+
+def read_default() -> str | None:
+    """This account's saved default style, or None when there is none or the file is unreadable or odd.
+
+    Its own ``vitals/<account key>.json`` first; failing that, once, this account's entry in the earlier shared
+    ``vitals.json`` (``{key: {"default_style": ...}}``), which is only ever read, never written. Never raises."""
+    try:
+        key = _account_key()
+        own = _style_in(_load(pref_path(key)))
+        if own is not None:
+            return own
+        legacy = _load(store.census_dir() / PREF_FILE)
+        return _style_in(legacy.get(key)) if isinstance(legacy, dict) else None
+    except Exception:  # noqa: BLE001 - a preference never takes the readout down
+        return None
+
+
+def write_default(style: str, key: str | None = None) -> None:
+    """Save ``style`` for an account (this one by default) in its own file, atomically: a same-directory temp file,
+    then replace. Nothing is read first, so two accounts writing at once cannot lose each other's choice.
+    Raises OSError."""
+    path = pref_path(key)
     path.parent.mkdir(parents=True, exist_ok=True)
-    prefs = _read_prefs()
-    prefs[_account_key()] = {"default_style": style}
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{PREF_FILE}.", suffix=".tmp")
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(prefs, handle)
+            json.dump({"default_style": style}, handle)
         os.replace(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):
