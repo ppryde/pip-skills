@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""/vitals — an on-demand readout of this session's vital signs.
+"""/census:vitals — an on-demand readout of this session's vital signs.
 
 Gathers from three read-only sources and renders one of three styles:
 
@@ -196,7 +196,8 @@ def census_cli() -> Path | None:
         return own
     store = os.environ.get("CENSUS_STORE")
     if store:
-        folder = Path(store)
+        # A v1-era value names the status.json file; census reads its parent as the folder.
+        folder = Path(store).parent if store.endswith(".json") else Path(store)
     else:
         config = os.environ.get("CLAUDE_CONFIG_DIR")
         folder = (Path(config) if config else Path.home() / ".claude") / "census"
