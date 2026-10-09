@@ -29,6 +29,6 @@ python3 <skill base directory>/../../scripts/vitals.py --style playful
 
 The script is read-only and never fails loudly: a missing source (no census
 entry, not a git repo, no `gh`) just leaves its lines out. If it prints
-"no census reading yet", add one line after the fence: census is fed by the
-status line, so a brand-new or headless session has none yet; if it never
-appears, census's status-line hook is not installed (see the census README).
+"no census reading yet", add one line after the fence: census is fed by its
+status-line hook or by the census-mod mod, so a brand-new or headless session has none
+yet; if it never appears, neither is installed (see the census README).

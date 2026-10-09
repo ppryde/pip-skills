@@ -18,6 +18,12 @@ indexes it **by worktree cwd**, which nothing else does — so a reader can ask 
 context for *this* worktree" without reconstructing transcript paths (which breaks inside git
 worktrees).
 
+## Writers
+
+Census is fed by exactly one kind of writer per store: the status-line hook (`census ingest`, or `census statusline`
+which also draws the line) **or** the census-mod mod. Run one, not both, against the same store. Readers do not
+care which: they see the same entries, and `stale` (see Liveness) is judged by process for the mod's sessions.
+
 ## Store
 
 A folder at `$CLAUDE_CONFIG_DIR/census/` — i.e. `~/.claude/census/` by default, or

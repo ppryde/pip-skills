@@ -91,7 +91,7 @@ class Vitals:
     session_name: str | None = None
     stale: bool = False
     idle: bool = False
-    age: float | None = None  # seconds since census last saw the status line render
+    age: float | None = None  # seconds since census last recorded this session (status-line render or mod event)
     borrowed: bool = False  # reading is another session's (worktree fallback)
     has_reading: bool = False
     model: str | None = None
@@ -709,7 +709,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"(vitals could not read this session: {type(exc).__name__}: {exc})")
         return 0
     if not vitals.has_reading:
-        print("(no census reading yet — the status line feeds it)")
+        print("(no census reading yet — census's status-line hook or the census-mod mod feeds it)")
     print(reading)
     return 0
 

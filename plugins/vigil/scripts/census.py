@@ -1,6 +1,6 @@
 """Read live context % through the census CLI (``census read``).
 
-census (the sibling status-line recorder) records each session's live context
+census (the sibling recorder, fed by its status-line hook or the census-mod mod) records each session's live context
 usage, keyed by session id, with its worktree cwd. Asking it is how vigil
 measures context correctly inside a git worktree — where reconstructing the
 transcript path from a cwd-slug fails because the worktree has no project dir
