@@ -1,0 +1,10 @@
+{
+  "name": "context-vigil-mod",
+  "version": "0.3.0",
+  "description": "Context handover as a Claude Code mod: nudge, auto handover, last light, limits — no tmux, no status line.",
+  "author": {
+    "name": "Pip",
+    "url": "https://github.com/ppryde/pip-skills"
+  },
+  "types": "./types/index.d.ts"
+}

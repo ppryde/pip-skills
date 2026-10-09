@@ -14,7 +14,7 @@ tests/
   README.md        # this file
 ```
 
-Currently relocated: `overseer/`, `census/`, `vigil/`, `review-clone/`, `chronicle/`, `almoner/`, `vitals/`, plus the two mods' TypeScript suites, `agent_roster/` and `context_vigil_mod/` (the latter also holds a pytest suite).
+Currently relocated: `overseer/`, `census/`, `vigil/`, `review-clone/`, `chronicle/`, `almoner/`, `vitals/`, plus the mods' suites, which live with the mods (see below).
 
 ## How a suite finds its code
 
@@ -43,24 +43,23 @@ cd plugins/overseer && ../../.venv/bin/python -m pytest   # a single suite
 
 ## Mod tests (TypeScript)
 
-`agent_roster/` and `context_vigil_mod/` hold the `*.test.ts[x]` suites of the
-`agent-roster` and `context-vigil-mod` Claude Code mods. Their imports point at
-the real sources (`'../../plugins/<mod>/core/...'`), so editors and `tsc`
-resolve them where they sit. They cannot run there, though: `claude plugin
-test <dir>` only runs inside a mod folder (one that contains the hooks module)
-and does not follow a symlinked `tests/`.
+The mods (`agent-roster`, `context-vigil-mod`, `census-mod`) keep their tests
+beside, not inside, what ships: `plugins/<mod>/plugin/` is the marketplace
+source and `plugins/<mod>/tests/` holds the `*.test.ts[x]` suites (and
+context-vigil-mod's pytest `test_install.py`), importing `../plugin/...`. A
+small harness (`plugins/<mod>/hooks/hooks.json` and `.claude-plugin/plugin.json`)
+lets `claude plugin test plugins/<mod>` see both folders, because the engine
+refuses imports and symlinks outside the folder it is given.
 
 ```bash
 bash tests/run-mods.sh                    # every mod
 bash tests/run-mods.sh context-vigil-mod  # one mod
 ```
 
-`run-mods.sh` stages each mod in a temp dir: it copies the plugin, copies that
-mod's tests into `<tmp>/<mod>/tests/` with the `../../plugins/<mod>/` import
-prefix rewritten to `../`, runs `claude plugin test` on the copy, and removes
-it afterwards. If the engine reports a stale "rollout switch ... not
-refreshed", the runner refreshes it with one `claude -p` call and retries once.
-`plugins/context-vigil-mod/scripts/typecheck.sh` typechecks the tests in place.
+If the engine reports a stale "rollout switch ... not refreshed", the runner
+refreshes it with one `claude -p` call and retries once. `tests/run.sh` also
+fails if any test file or `tests/` dir turns up inside a `plugins/*/plugin/`.
+`plugins/<mod>/typecheck.sh` typechecks a mod's sources and tests.
 
 ## What is NOT here (and why)
 

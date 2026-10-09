@@ -1,11 +1,5 @@
 {
   "name": "agent-roster",
-  "version": "0.2.1",
-  "description": "A live /roster pane (the roster as text over Remote Control) listing the Claude sessions registered in the configured config dirs (`ROSTER_CONFIG_DIRS`), plus tmux sessions still at a startup prompt: tmux name, repo and worktree, branch, status, last active and last prompt. A mod.",
-  "author": {
-    "name": "Pip",
-    "url": "https://github.com/ppryde/pip-skills"
-  },
-  "keywords": ["sessions", "tmux", "agents", "pane", "remote-control", "mod"],
-  "types": "./types/index.d.ts"
+  "version": "0.0.0",
+  "description": "Test harness only: lets claude plugin test run tests/ against plugin/. Never installed; the marketplace points at plugin/."
 }

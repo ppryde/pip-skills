@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.40.0",
+  "version": "1.41.0",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -163,7 +163,7 @@
     },
     {
       "name": "census-mod",
-      "source": "./plugins/census-mod",
+      "source": "./plugins/census-mod/plugin",
       "description": "Census v2 recorded and drawn by a Claude Code mod: every interactive session is recorded into the census store (through census ingest, no heartbeat) on turn end, rate-limit, model, cwd, branch and PR changes, and the status line is drawn in the band above the prompt with census's own segments. git and gh run only when something they report can have changed. Needs the census plugin. A mod.",
       "category": "engineering",
       "tags": [
@@ -208,7 +208,7 @@
     },
     {
       "name": "agent-roster",
-      "source": "./plugins/agent-roster",
+      "source": "./plugins/agent-roster/plugin",
       "description": "A live /roster pane (the roster as text over Remote Control) listing the Claude sessions registered in the configured config dirs (`ROSTER_CONFIG_DIRS`), plus tmux sessions still at a startup prompt: tmux name, repo and worktree, branch, status, last active and last prompt. A mod.",
       "category": "engineering",
       "tags": [
@@ -222,7 +222,7 @@
     },
     {
       "name": "context-vigil-mod",
-      "source": "./plugins/context-vigil-mod",
+      "source": "./plugins/context-vigil-mod/plugin",
       "description": "Context handover as a Claude Code mod: a threshold nudge and vigil bar, auto handover with an in-process /clear and resume while you're away, last light before the 1-hour prompt cache expires, and a limit latch with early stop. No tmux, no status line. Commands /vho, /vhandoff, /vsetup. A mod.",
       "category": "engineering",
       "tags": [

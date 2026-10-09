@@ -31,6 +31,27 @@ the agents.md library):
 
 - **context-vigil** — census + vigil + handover-work in one portable skill: ctx % watch, nudge, structured handover, tmux auto-/clear, resume; self-installs its hooks
 
+## Mod layout
+
+Mods (agent-roster, context-vigil-mod, census-mod) follow wf-claude-market's
+layout, so syncing with it is a plain copy (identity lines aside):
+
+```
+plugins/<p>/plugin/                  # ships; the marketplace source
+plugins/<p>/tests/                   # tests, importing ../plugin/...
+plugins/<p>/hooks/hooks.json         # { "modules": ["../plugin/hooks/register.tsx"] }
+plugins/<p>/.claude-plugin/plugin.json   # harness only; name matches plugin/'s
+plugins/<p>/typecheck.sh             # dev-only, so outside plugin/
+```
+
+- **Nothing test- or dev-only goes in `plugin/`**: installs copy it whole.
+  `tests/run.sh` fails if a test file or `tests/` dir lands there.
+- `claude plugin test` refuses imports, hooks paths and symlinks outside the
+  folder it is given, which is why the harness sits one level above `plugin/`.
+- Load a mod from `plugins/<p>/plugin` (`CLAUDE_CODE_PLUGIN_DIRS`, `--plugin-dir`).
+- Bump `plugin/.claude-plugin/plugin.json` `version` when a mod changes, and
+  the marketplace `version` with it.
+
 ## Tool Discipline
 
 Skills in this repo instruct Claude to read doctrine files, scan templates, and search codebases.
