@@ -101,9 +101,27 @@ difference.
 - `updated_at` is "last rendered": the status line reruns on `refreshInterval` as well as after
   each API response, so a dormant TUI keeps refreshing it. `active_at` is "last active": it moves
   only when the payload's activity counters (prompt id, cost, API duration, token totals, cache
-  requests) change between ingests. Readers derive `stale` (not rendered for 90s — dead or closed)
+  requests) change between ingests. Readers derive `stale` (by default: not rendered for 90s — dead or closed; see Liveness below)
   and `idle` (still rendering, no activity for 10 min — open, nobody working) from the two.
 - Sessions are keyed by `session_id` (one file each); readers resolve the freshest entry **by worktree cwd**.
+
+## Liveness
+
+`stale` normally means "the status line has not rendered this session for 90 s". A session recorded by the
+census mod (its payload carries `census_mod.pid`, `census_mod.proc_start`, and `census_mod.ended` once it closes)
+does not write on a timer, so it is judged by its process instead, however old `updated_at` is. It is stale iff:
+
+- `census_mod.ended` is set, or
+- the pid is not an integer above 1, or
+- `os.kill(pid, 0)` fails with anything but `EPERM` (`EPERM` means alive, just not yours), or
+- Claude Code's registry file `<config dir>/sessions/<pid>.json` is missing, unreadable, or its `procStart`
+  string differs from the recorded `proc_start` (registry files outlive crashes, and pids are reused). The two
+  strings are compared as text only.
+
+`<config dir>` is the account's `CLAUDE_CONFIG_DIR` (else `~/.claude`). The check is same-machine only. Entries
+without `census_mod.pid` keep the 90 s rule, `idle` (10 min without activity) is unchanged, and a reader never
+raises: an entry it cannot judge is stale. `census read` (the v1 view) does not carry `stale`; `--session` and
+`--worktree` do.
 
 ## Upgrading from v1
 
