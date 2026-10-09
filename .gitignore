@@ -52,3 +52,12 @@ plugins/*/.claude-plugin/types/
 
 # The agent-roster VS Code helper, built by plugins/agent-roster/plugin/vscode/build.sh.
 *.vsix
+
+# Local machine and agent state: never committed (this repo is public). Session
+# settings, worktrees, vigil state, agent build notes, design hand-offs and
+# packaged plugin zips all live beside the checkout but belong to this machine.
+/.claude/
+/.superpowers/
+/design_handoff_quest_board/
+*.zip
+.DS_Store
