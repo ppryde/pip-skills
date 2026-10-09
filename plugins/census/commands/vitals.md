@@ -1,5 +1,5 @@
 ---
-description: Show this session's vital signs — lean by default; pass detailed or playful for the other styles.
+description: Show this session's vital signs (census) — lean by default; pass detailed or playful for the other styles.
 argument-hint: "[lean|detailed|playful]"
 allowed-tools: Bash(python3:*)
 ---
@@ -11,7 +11,7 @@ preamble, no commentary, no reformatting (it is pre-sized for a phone; re-wrappi
 breaks the gauges). Nothing else in the reply.
 
 If it is empty or shows a shell error, run
-`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" $ARGUMENTS` yourself (the plugin
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" -- "$ARGUMENTS"` yourself (the plugin
 root is this command file's `../`) and print the result the same way. If it says
 "no census reading yet", add one line after the fence: census is fed by its
 status-line hook or by the census-mod mod, so a brand-new or headless session has none

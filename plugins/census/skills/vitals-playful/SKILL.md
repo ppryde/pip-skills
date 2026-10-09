@@ -1,11 +1,11 @@
 ---
-name: playful
-description: Show this session's vital signs as the Witchfinder's reading — the breath (context), the mind (model), the sanctum (repo), the vigil (time) and the gates (rate limits), closed by a verdict. Use when the user runs /vitals:playful.
+name: vitals-playful
+description: Show this session's vital signs as the Witchfinder's reading — the breath (context), the mind (model), the sanctum (repo), the vigil (time) and the gates (rate limits), closed by a verdict. Use when the user runs /census:vitals-playful.
 disable-model-invocation: true
 allowed-tools: Bash(python3:*)
 ---
 
-# /vitals:playful
+# /census:vitals-playful
 
 The same vital signs, read aloud by the Witchfinder. The closing verdict is real: it turns *wanting* at 80% context or 90% of a rate limit, and venial at 50% / 70% or 20+ dirty files.
 
@@ -28,7 +28,7 @@ python3 <skill base directory>/../../scripts/vitals.py --style playful
 ```
 
 The script is read-only and never fails loudly: a missing source (no census
-entry, not a git repo, no `gh`) just leaves its lines out. If it prints
+entry, not a git repo) just leaves its lines out. If it prints
 "no census reading yet", add one line after the fence: census is fed by its
 status-line hook or by the census-mod mod, so a brand-new or headless session has none
 yet; if it never appears, neither is installed (see the census README).

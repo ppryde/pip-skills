@@ -14,7 +14,7 @@ tests/
   README.md        # this file
 ```
 
-Currently relocated: `overseer/`, `census/`, `vigil/`, `review-clone/`, `chronicle/`, `almoner/`, `vitals/`, plus the mods' suites, which live with the mods (see below).
+Currently relocated: `overseer/`, `census/`, `vigil/`, `review-clone/`, `chronicle/`, `almoner/`, plus the mods' suites, which live with the mods (see below).
 
 ## How a suite finds its code
 

@@ -111,6 +111,72 @@ than that ingest; reads never delete.
   and `idle` (still rendering, no activity for 10 min — open, nobody working) from the two.
 - Sessions are keyed by `session_id` (one file each); readers resolve the freshest entry **by worktree cwd**.
 
+## The `git` block
+
+Every session record carries an additive `git` block, which `census read` shows in all its forms (the full view's
+`sessions.<sid>`, `--session`, `--worktree`):
+
+```json
+"git": { "branch": "feat/x", "uncommitted": 3, "ahead": 1, "has_upstream": true, "detached": false }
+```
+
+`branch` is the short SHA on a detached HEAD; `uncommitted` counts tracked changes only; `ahead` is 0 without an
+upstream. Source, in order: the payload's `census_mod.git` when it has all five fields with the right types (the mod
+reads git itself, so ingest runs none), else the git cache described under Status line. The top-level `branch`
+stays as it was (null on a detached HEAD); when the mod supplies the block it is taken from it. Records written
+before this block have none, and readers fall back to their own `git`.
+
+## Vitals
+
+An on-demand readout of the current session's vital signs, sized for a phone (no line wider than 44 display columns;
+branch, session and tool names are clipped to fit). It writes nothing. It was the separate `vitals` plugin and is now
+part of census, so it needs no sibling plugin and reads census through this plugin's own `cli.py`.
+
+| Source | Gives |
+|---|---|
+| **census** (`census read`) | context %, tokens and window size, model, effort, cost, duration, prompt-cache warmth, the account's rate-limit windows; the session's `git` block (branch, uncommitted files, ahead of upstream); the payload's `pr` (number, state) |
+| **git**, only when the entry has no `git` block (a record from before it) | one `git --no-optional-locks status --porcelain=2 --branch -uno` in the worktree |
+| **the transcript** (`transcript_path` from census) | tool calls by name, subagent spawns, typed prompts |
+
+It never calls `gh`: the PR is whatever the payload carries. Untracked files are not counted (`-uno`), and with no upstream
+there is no "ahead". Every source is optional: a missing one leaves its lines out and never raises.
+
+| Invoke | Style |
+|---|---|
+| `/census:vitals` | lean (default); `detailed` or `playful` by argument (aliases `brief`, `full`, `trend`, `drama`, `witchfinder`) |
+| `/census:vitals-lean` | up to seven lines with emoji gauges: context, model, repo, sync, limits, time, freshness |
+| `/census:vitals-detailed` | sectioned: context headroom and cache, cost and tokens, git sync and lines changed, tool breakdown, each rate-limit window with reset time and **pace** |
+| `/census:vitals-playful` | the Witchfinder's reading, ending in a verdict |
+
+```text
+⚡ ctx 9% ▰▱▱▱▱▱▱▱▱▱ 88k/1M
+🧠 Opus 5.5 · high · $0.90
+🌿 feat/vitals · PR #102 open
+✎  2 dirty · ↑1
+⏳ 5h 3% 🟢 4h · 7d 22% 🟢 5d
+⏱  3m · 18 tools · 2 agents
+```
+
+**Pace** projects a window's usage at reset from the rate so far, `used × window length ÷ elapsed`, once 5% of the window
+has gone, for the known `five_hour` and `seven_day` windows only. It is a straight line, so it overstates early-week
+bursts. The playful verdict follows real thresholds: *found wanting* at 80% context or 90% of any limit, *venial* at 50%
+context, 70% of a limit or more than 20 dirty files, *hidden signs* with no reading at all.
+
+Each skill and the command run `scripts/vitals.py` through `!` command injection, so the reading is in the prompt before
+the model sees it and the model only echoes it in a `text` fence. By hand:
+
+```bash
+python3 scripts/vitals.py [lean|detailed|playful|alias] [--session ID] [--cwd DIR]
+```
+
+The session comes from `--session`, then `CLAUDE_SESSION_ID`; with no entry for it (a brand-new session, right after
+`/clear`) it uses the freshest entry for the worktree and says *another session's reading* if that is a sibling's.
+census is found via `CENSUS_CLI` (authoritative when set), else the `cli.py` beside `vitals.py`, else the `cli.path`
+pointer, else `census` on PATH. Whatever it names is taken as one path (never split, never shell-interpreted) and run
+only if it is absolute, a regular file, and a Python script or an executable. The vitals pieces are separable:
+`scripts/vitals.py`, `skills/vitals-*`, `commands/vitals.md` and `tests/census/test_vitals.py` depend on nothing else in
+census but `scripts/gitcache.py`.
+
 ## Liveness
 
 `stale` normally means "the status line has not rendered this session for 90 s". A session recorded by the
@@ -178,7 +244,7 @@ Configuration, all optional, read from the environment (so it can live in `setti
 - `CLAUDE_COST_BUDGET` (default 20), `CENSUS_STATUSLINE_MASCOT`, `CLAUDE_PROFILE` / `CLAUDE_CONFIG_DIR` (mascot).
 - `AGENT_UI_STATUSLINE_CACHE`: when set, the raw payload is also written to `<dir>/<session_id>.json`.
 
-Git state is cached per worktree under `<census dir>/gitcache/`: one `git status --porcelain=2 --branch` pass fills
+Git state is cached per worktree under `<census dir>/gitcache/`: one `git status --porcelain=2 --branch -uno` pass (untracked files are never listed, so never counted) fills
 branch, uncommitted and ahead, and an entry expires after the TTL or as soon as `HEAD` changes, so most refreshes run
 no git. The ✏️ and ⬆️ counts can lag a commit or edit by up to the TTL (a checkout shows at once). Ingest's recorded `branch` reads through the same cache. A draw error prints a one-line `🤖 <model>`, never a
 traceback. `census statusline --preview` draws a canned payload against the live store, with no ingest.

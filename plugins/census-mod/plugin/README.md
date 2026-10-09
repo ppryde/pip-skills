@@ -100,7 +100,7 @@ version dir marked `.orphaned_at`). So census + census-mod work with no status l
 and no `cli.path` yet. A `.py` runs under `python3`.
 
 The first successful ingest makes census write its own `cli.path` into the census dir, so
-the other readers (vigil, overseer, vitals) find census from then on without being told.
+the other readers (vigil, overseer, census vitals) find census from then on without being told.
 
 ## Tests
 

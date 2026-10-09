@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 # `scripts` is the shipped package; plugins/census/pyproject.toml puts it on pythonpath.
@@ -27,6 +29,18 @@ def _isolated_account(tmp_path_factory, monkeypatch):
         "CENSUS_STATUSLINE_MASCOT", "CENSUS_STATUSLINE_GIT_TTL", "CLAUDE_COST_BUDGET", "CLAUDE_PROFILE", "NO_COLOR",
     ):
         monkeypatch.delenv(name, raising=False)
+    # git sees only the temp repos a test builds: no user or system config, no inherited repo
+    # (pytest run from a git hook exports GIT_DIR and friends), and no hook from anywhere
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / ".gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"):
+        monkeypatch.delenv(var, raising=False)
+    for var in [v for v in os.environ if v.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))]:
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", os.devnull)
     reset = getattr(store, "reset_account_cache", None)
     if reset:
         reset()

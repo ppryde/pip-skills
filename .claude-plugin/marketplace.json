@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.41.0",
+  "version": "1.42.0",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -147,18 +147,19 @@
     {
       "name": "census",
       "source": "./plugins/census",
-      "description": "Records the Claude Code status-line payload into a per-session, worktree-indexed store that dashboards and handover tools read, and draws a two-line status line (context, prompt cache, rate limits, cost, model, git) in one stdlib process. Skill /census:setup-statusline. Pure Python, no mod.",
+      "description": "Records the Claude Code status-line payload into a per-session, worktree-indexed store that dashboards and handover tools read, and draws a two-line status line (context, prompt cache, rate limits, cost, model, git) in one stdlib process. Skills /census:setup-statusline and /census:vitals (on-demand, phone-sized session vitals: lean, detailed, playful). Pure Python, no mod.",
       "category": "engineering",
       "tags": [
-        "statusline",
-        "status-line",
         "context",
+        "hooks",
         "rate-limits",
-        "usage",
-        "worktree",
         "session",
+        "status-line",
+        "statusline",
         "telemetry",
-        "hooks"
+        "usage",
+        "vitals",
+        "worktree"
       ]
     },
     {
@@ -233,20 +234,6 @@
         "rate-limits",
         "remote-control",
         "mod"
-      ]
-    },
-    {
-      "name": "vitals",
-      "source": "./plugins/vitals",
-      "description": "On-demand session vital signs sized for a phone: context, model, cost, rate-limit windows with pace forecasts, git/PR state and tool counts. /vitals:vitals [style], or /vitals:lean, /vitals:detailed, /vitals:playful. Reads census, git and the transcript; writes nothing.",
-      "category": "engineering",
-      "tags": [
-        "status",
-        "context",
-        "rate-limits",
-        "mobile",
-        "census",
-        "session"
       ]
     }
   ]
