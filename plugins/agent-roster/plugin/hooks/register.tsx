@@ -575,11 +575,11 @@ const START_TOLERANCE_MS = 120_000
 
 /**
  * Does a registry record belong to the live process? Its `startedAt` (epoch ms) should be about `now` minus the
- * process's elapsed time; a record a crash left behind, whose pid was reused, is days off. Nothing to compare
- * (no startedAt, no etime) does not disprove it.
+ * process's elapsed time; a record a crash left behind, whose pid was reused, is days off. With nothing to
+ * compare (no startedAt, or no etime) the record cannot be told from a reused pid's, so it does not match.
  */
 export function startMatches(startedAt: unknown, etimeMs: number | null, now: number): boolean {
-  if (typeof startedAt !== 'number' || etimeMs === null) return true
+  if (typeof startedAt !== 'number' || etimeMs === null) return false
 
   return Math.abs(now - etimeMs - startedAt) <= START_TOLERANCE_MS
 }

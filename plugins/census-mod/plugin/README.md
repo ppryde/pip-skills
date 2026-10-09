@@ -31,9 +31,11 @@ account's `settings.json` `statusLine`, whether its script carries census's inge
 (or the command is `census ingest` / `census statusline`), and whether another writer wrote
 into the store in the last few minutes. Then:
 
-1. **Record** into census, or not. Recording is what the overseer dashboard, `/census:vitals` and
-   session liveness read (context, cost, limits, git, PR); without it they see nothing from this
-   account. Almost nobody else records into census, so the common question is just **Yes**
+1. **Record** into census, or not. Recording is what the overseer dashboard, `/census:vitals` (named
+   in the question only when the installed census ships it) and session liveness read (context, cost,
+   limits, git, PR); when nothing else records into census they see nothing from this account.
+   Where this account's status line (or another writer) already records, **No** leaves that
+   writer active, so they keep getting this account's data from it; the option says so. Almost nobody else records into census, so the common question is just **Yes**
    (recommended) or **No**. Two more answers appear only where something already records into the
    real store, i.e. this account's status line feeds census (or another writer wrote in the last
    few minutes): **Shadow** (a separate store, `<config dir>/census-shadow`, to compare first;
@@ -42,7 +44,9 @@ into the store in the last few minutes. Then:
    (the recommended answer there): census-mod records and draws it, setup asks only where to
    draw, then removes the status line as in step 3 without asking again. A status line that
    does not feed census is never offered for replacement and never touched. `CENSUS_MOD_STORE`
-   still forces shadow regardless.
+   still forces shadow regardless, and while it is set **Replace is not offered at all** (the
+   status line is then the real store's only writer and is kept): unset it and run
+   `/census-setup` again to replace the status line.
 2. **Draw**: one question, "Should census-mod draw your status line, and where?": below the
    input, under Claude Code's hint line (recommended; see "The band"), above it in the band,
    or not at all.

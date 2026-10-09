@@ -297,13 +297,14 @@ test('a session file that lists but cannot be read is a warning for its dir', as
 // The tmux sweep: a pane with no entry in the dir this session reads.
 // `extra`: `shell` adds a pane whose pid is a zsh above a Claude registered in the work account;
 // `reused` adds a pane whose pid has a long-dead work-account record (the pid was reused).
-function otherAccountsWorld(on: On, listed = '', extra: { shell?: boolean; reused?: boolean } = {}) {
+function otherAccountsWorld(on: On, listed = '', extra: { shell?: boolean; reused?: boolean; nostart?: boolean } = {}) {
   const now = Date.now()
   const registries: Record<string, Record<string, object>> = {
     '/home/.claude/sessions': { '101.json': { pid: 101, sessionId: 'a', cwd: '/r/mine', tmux: 'cc-own-1:@0.%0', status: 'busy', updatedAt: 0 } },
     '/home/.claude-work/sessions': {
       '777.json': { pid: 777, sessionId: 'w', cwd: '/r/work', tmux: 'cc-work-1:@1.%1', status: 'busy', updatedAt: 0, startedAt: now - 3_600_000 },
       ...(extra.shell ? { '951.json': { pid: 951, sessionId: 'sh', cwd: '/r/shell', tmux: 'cc-shell-1:@2.%2', status: 'busy', updatedAt: 0, startedAt: now - 180_000 } } : {}),
+      ...(extra.nostart ? { '870.json': { pid: 870, sessionId: 'ns', cwd: '/r/ns', tmux: 'cc-nostart:@4.%4', status: 'idle', updatedAt: 0 } } : {}),
       ...(extra.reused ? { '860.json': { pid: 860, sessionId: 'old', cwd: '/r/old', tmux: 'cc-old:@3.%3', status: 'idle', updatedAt: 0, startedAt: now - 5 * 86_400_000 } } : {}),
     },
   }
@@ -315,6 +316,7 @@ function otherAccountsWorld(on: On, listed = '', extra: { shell?: boolean; reuse
     `cc-agents\t800\t2.1.289\t/r/x\t${recent}`,
     `cc-new-1\t900\t2.1.289\t/r/new\t${recent}`,
     ...(extra.shell ? [`cc-shell-1\t950\t2.1.289\t/r/shell\t${recent}`] : []),
+    ...(extra.nostart ? [`cc-nostart\t870\t2.1.289\t/r/ns\t${recent}`] : []),
     ...(extra.reused ? [`cc-reused\t860\t2.1.289\t/r/reused\t${recent}`] : []),
   ].join('\n')
   const procs = [
@@ -324,6 +326,7 @@ function otherAccountsWorld(on: On, listed = '', extra: { shell?: boolean; reuse
     '  950     1     03:00 -zsh',
     '  951   950     03:00 /v/2.1.289',
     '  860     1     00:30 /v/2.1.289',
+    '  870     1     00:30 /v/2.1.289',
     '',
   ].join('\n')
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home' : e.name === 'ROSTER_CONFIG_DIRS' ? listed || undefined : undefined }))
@@ -421,4 +424,12 @@ test('no kill is offered for an other-account or agents-view pane', async ($, on
     expect(JSON.stringify(reply)).toContain('Refused')
   }
   await ui.unmount()
+})
+
+test('a record with no startedAt cannot be told from a reused pid, so it is not tagged: a startup prompt', async ($, on) => {
+  otherAccountsWorld(on, '', { nostart: true })
+  const text = await bridgeText($)
+
+  expect(text).toMatch(/cc-nostart.*at a startup prompt/)
+  expect(text).not.toMatch(/cc-nostart.*another account/)
 })

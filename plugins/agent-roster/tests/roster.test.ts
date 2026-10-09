@@ -521,6 +521,8 @@ test('a registry record belongs to a live process only if their start times agre
   expect(startMatches(now - 3_600_000, 3_600_000, now)).toBe(true)
   expect(startMatches(now - 3_600_000 + 90_000, 3_600_000, now)).toBe(true) // inside the tolerance
   expect(startMatches(now - 5 * 86_400_000, 30_000, now)).toBe(false) // a days-old record, a half-minute-old process
-  expect(startMatches(undefined, 30_000, now)).toBe(true) // nothing to compare: not disproved
-  expect(startMatches(now, null, now)).toBe(true)
+  // nothing to compare is nothing to prove: a possibly reused pid is never tagged
+  expect(startMatches(undefined, 30_000, now)).toBe(false)
+  expect(startMatches('yesterday', 30_000, now)).toBe(false)
+  expect(startMatches(now, null, now)).toBe(false)
 })
