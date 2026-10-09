@@ -10,7 +10,7 @@ import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
 import type { Event } from '../core/payload'
 import { TITLE_ARGV, TITLE_TAIL_CMD, findProc, lastTitle } from '../core/registry'
 import { TONE_COLOR, draw, fit } from '../core/render'
-import { BACKUP_FILE, backupBlocks, placementFrom, replaceFrom, L, MIN_CENSUS, NO_DETECTION, PRESETS, Q, SETUP_KEY, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
+import { BACKUP_FILE, backupBlocks, placementFrom, replaceFrom, L, MIN_CENSUS, NO_DETECTION, PRESETS, Q, SETUP_KEY, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, vitalsFromWhere, isPythonCli, writerActive, writersFrom, is } from '../core/setup'
 import type { Detection, Effective, Saved } from '../core/setup'
 import type { Line, RenderEnv, RenderInput } from '../core/render'
 import type { Counters, RateLimit, Snap } from '../core/types'
@@ -463,7 +463,13 @@ async function detect($: EngineInterface): Promise<Detection> {
     out.cliPath = await discover($)
     if (out.cliPath) {
       const root = out.cliPath.replace(/\/scripts\/[^/]+$/, '')
-      out.hasVitals = await $.fs.exists(out.cliPath.replace(/[^/\\]*$/, 'vitals.py')).catch(() => false)
+      if (isPythonCli(out.cliPath)) {
+        out.hasVitals = await $.fs.exists(out.cliPath.replace(/[^/\\]*$/, 'vitals.py')).catch(() => false)
+      } else {
+        // A launcher on PATH or a CENSUS_CLI executable says nothing about where its plugin sits: ask it.
+        const asked = await $.process.run([out.cliPath, 'where'], { timeoutMs: 5000 }).catch(() => undefined)
+        out.hasVitals = asked?.exitCode === 0 && vitalsFromWhere(asked.stdout)
+      }
       const meta = await $.fs.read(`${root}/.claude-plugin/plugin.json`).catch(() => undefined)
       try {
         const v = typeof meta === 'string' ? (JSON.parse(meta) as { version?: unknown }).version : undefined

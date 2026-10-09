@@ -26,6 +26,7 @@ export type World = {
   /** A census plugin beside this one, answered for WHATEVER folder the plugin sits in (the kit stages it in a temp dir). */
   sibling: { layout: 'repo' | 'cache' | null; versions: Record<string, { orphaned?: boolean; cli?: boolean }> }
   toasts: string[]
+  where: { stdout: string; exitCode: number; calls: string[][] } // what `<cli> where` answers
   gitGate: { value: Promise<void> | null } // while set, `git status` waits on it
   registryLists: { count: number }        // reads of the session registry directory
   links: Map<string, string>            // symlink path -> target
@@ -55,7 +56,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     git: { status: '# branch.oid abc1234def\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +1 -0\n1 .M N... 100644 100644 100644 a b f.ts\n', dir: '/repo/.git\n/repo\n', exitCode: 0 },
     gh: { stdout: '[]', exitCode: 0, throws: false },
     titles: new Map(), tail: { value: '"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":100}\n' },
-    which: { value: '' }, logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, sibling: { layout: null, versions: {} },
+    which: { value: '' }, logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], where: { stdout: '{"vitals": false}', exitCode: 0, calls: [] }, gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, sibling: { layout: null, versions: {} },
   }
   w.files.set(`${REGISTRY}/22695.json`, JSON.stringify({ pid: 22695, sessionId: 's1', procStart: 'Sun Oct  4 22:57:51 2026', version: '2.1.289' }))
   const real = (p: string): string => w.links.get(p) ?? p
@@ -103,6 +104,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     if (cmd === 'cp') { w.cps.push([...e.argv]); const [, , from, to] = e.argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.set(to ?? '', t); return { value: done(0) } }
     if (cmd === 'mv') { if (w.mvFails.value) return { value: done(1) }; const [, , from, to] = e.argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.delete(from ?? ''); w.links.delete(to ?? ''); w.files.set(to ?? '', t); return { value: done(0) } }
     if (cmd === 'rm') { w.files.delete(e.argv[e.argv.length - 1] ?? ''); return { value: done(0) } }
+    if (args[0] === 'where' && cmd !== 'git') { w.where.calls.push([...e.argv]); return { value: done(w.where.exitCode, w.where.stdout) } }
     if (args.includes('ingest')) {
       w.ingests.push({ payload: JSON.parse(init.stdin ?? '{}'), argv: [...e.argv], env: init.env, timeoutMs: init.timeoutMs })
       return { value: done(0) }

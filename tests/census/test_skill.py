@@ -102,3 +102,9 @@ def test_no_command_carries_an_environment_assignment_prefix():
         if "CENSUS " in line and "statusline" in line:
             assert not line.strip().startswith(("CENSUS_", "`CENSUS_")), line
     assert 'CENSUS_STATUSLINE_SEGMENTS="' not in text
+
+
+def test_an_explicit_default_wins_over_the_first_run_question():
+    text = " ".join((COMMANDS / "vitals.md").read_text().split())
+    assert "default <style>" in text
+    assert "do not ask the first-run question" in text

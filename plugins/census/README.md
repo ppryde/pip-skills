@@ -136,8 +136,11 @@ everywhere else; the only subprocess left is the fixed-argv `git` fallback below
 
 **Default style.** The first time `/census:vitals` runs it shows the lean readout, ends it with the line
 `(vitals: no default style chosen yet)`, and the command asks once which style to show by default (lean or detailed).
-The answer is saved per account in `<census dir>/vitals.json` (`{"default_style": "compact|detailed"}`, written
-atomically; a missing, corrupt or unknown value, such as an old `playful`, just means "not chosen yet"). From then on a
+The answer is saved per account in `<census dir>/vitals.json`, keyed by the census account key (the same key as
+`limits/<account>.json`): `{"<account key>": {"default_style": "compact|detailed"}}`. Accounts that share a
+`CENSUS_STORE` share the file but not the choice, and writing one account's keeps the others'. It is written
+atomically; a missing, corrupt or unknown value (an old `playful`, or the earlier single-key shape) just means "not
+chosen yet". From then on a
 bare `/census:vitals` shows that style; naming a style (`/census:vitals detailed`) overrides it for that run, and
 `/census:vitals default detailed` changes it. From a shell: `vitals.py --set-default <lean|detailed>` (a name or alias
 such as `brief`, `full`, `trend`; anything else is an error and nothing is written).
@@ -265,7 +268,7 @@ census install --yes      # launcher at ~/.local/bin/census + ingest block in a 
 census install --statusline [--replace] [--segments LIST] --yes   # set settings.json statusLine to `census statusline`
 census uninstall --yes    # remove the launcher and block; restore a replaced statusLine; --purge also deletes data
 census statusline --preview [--segments LIST] [--config-dir DIR]   # a canned preview; both flags are valid only with --preview
-census where              # (where, install, uninstall and `statusline --preview` take --config-dir DIR: that account, for that run) read-only JSON: config dir, census dir, settings path, status line, plugin installs, census-mod enabled
+census where              # (where, install, uninstall and `statusline --preview` take --config-dir DIR: that account, for that run) read-only JSON: config dir, census dir, settings path, status line, plugin installs, census-mod enabled, and `vitals` (whether this census ships /census:vitals)
 ```
 
 `--statusline` skips the bash-block step, still installs the launcher (on Windows the command is `python "<census dir>\launcher.py" statusline`, a stable file that follows plugin upgrades), and needs a readable `settings.json`

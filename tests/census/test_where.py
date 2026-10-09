@@ -197,3 +197,14 @@ class TestReviewRound:
         monkeypatch.setenv("CLAUDE_CODE_PLUGIN_DIRS", dirs)
         assert wh.report()["census_mod"]["via_plugin_dir"] is expected
         assert wh.report()["census_mod"]["enabled"] is expected
+
+
+class TestVitalsFlag:
+    def test_where_says_whether_this_census_ships_vitals(self, cfg):
+        assert wh.report()["vitals"] is (Path(wh.__file__).resolve().parent / "vitals.py").is_file() is True
+
+    def test_it_is_false_when_vitals_py_is_absent(self, cfg, monkeypatch, tmp_path):
+        fake = tmp_path / "scripts"
+        fake.mkdir()
+        monkeypatch.setattr(wh, "__file__", str(fake / "where.py"))
+        assert wh.report()["vitals"] is False

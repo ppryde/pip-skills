@@ -41,7 +41,7 @@ export type Detection = {
   otherWriter: boolean
   /** settings.json exists but is not valid JSON: it is never edited. */
   settingsInvalid: boolean
-  /** This census ships /census:vitals (vitals.py beside its cli.py). */
+  /** This census ships /census:vitals (vitals.py beside its cli.py, or its `census where` says so). */
   hasVitals: boolean
 }
 
@@ -334,3 +334,15 @@ export function backupBlocks(existing: string | null, newBackup: string): boolea
   const old = statusOf(existing)
   return old !== undefined && !same(old, statusOf(newBackup))
 }
+
+/** `census where` JSON to "does this census ship vitals"; anything unreadable (an older census, a failure) is no. */
+export function vitalsFromWhere(stdout: string): boolean {
+  try {
+    return (JSON.parse(stdout) as { vitals?: unknown }).vitals === true
+  } catch {
+    return false
+  }
+}
+
+/** A CLI that is a Python script has its plugin's scripts beside it; anything else (a launcher on PATH) is asked. */
+export const isPythonCli = (cliPath: string): boolean => cliPath.endsWith('.py')
