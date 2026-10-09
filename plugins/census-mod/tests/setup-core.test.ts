@@ -77,17 +77,38 @@ test('census versions compare numerically; 0.5.0 is the floor', async () => {
 
 // ---- the questions -----------------------------------------------------------------------------------
 
-test('the record question recommends Replace when the status line already feeds census, else Yes', async () => {
-  expect(Q.record(NO_DETECTION).options[0]).toBe('Yes — the real census store (Recommended)')
-  expect(Q.record(NO_DETECTION).options.join('|')).not.toContain('Replace')
-  expect(Q.record(WITH_BLOCK).options[0]).toBe('Replace my status line — census-mod records and draws it (Recommended)')
-  expect(Q.record(WITH_BLOCK).options.slice(1).join('|')).not.toContain('(Recommended)')
-  expect(Q.record(WITH_BLOCK).options.map(recordFrom)).toEqual(['yes', 'shadow', 'yes', 'no'])
+const YES = 'Yes — record into census (dashboards, vitals and liveness use it)'
+const NO = "No — don't record (dashboards and vitals won't see this account)"
+const SHADOW = "Shadow — record into a separate store to compare; dashboards won't see it"
+const REPLACE = 'Replace my status line — census-mod records and draws it'
+const OTHER = { ...NO_DETECTION, otherWriter: true }
+
+test('with no existing writer the record question is just Yes (recommended) or No', async () => {
+  expect(Q.record(NO_DETECTION)).toEqual({
+    header: '📝 Record',
+    question: "Record this account's sessions into census? That's what the overseer dashboard, /census:vitals and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.",
+    options: [`${YES} (Recommended)`, NO],
+  })
+})
+
+test('where the status line already feeds census: Replace (recommended), Shadow, Yes, No', async () => {
+  const q = Q.record(WITH_BLOCK)
+
+  expect(q.options).toEqual([`${REPLACE} (Recommended)`, SHADOW, YES, NO])
+  expect(q.question).toContain('Your status line already records this account')
+  expect(q.options.map(recordFrom)).toEqual(['yes', 'shadow', 'yes', 'no'])
+})
+
+test('another writer alone brings Shadow (recommended) but not Replace', async () => {
+  const q = Q.record(OTHER)
+
+  expect(q.options).toEqual([`${SHADOW} (Recommended)`, YES, NO])
+  expect(q.question).toContain('into census in the last few minutes')
 })
 
 test('answers map back to values, recommendation marker or not', async () => {
   for (const o of Q.record(NO_DETECTION).options) expect(recordFrom(o)).not.toBeNull()
-  expect(Q.record(NO_DETECTION).options.map(recordFrom)).toEqual(['yes', 'shadow', 'no'])
+  expect(Q.record(NO_DETECTION).options.map(recordFrom)).toEqual(['yes', 'no'])
   expect(Q.preset().options.map(presetFrom)).toEqual(['two', 'compact', 'minimal'])
   expect(Q.writers(true, false).options.map(writersFrom)).toEqual(['remove', 'keep', 'both'])
   expect(Q.writers(false, false).options.map(writersFrom)).toEqual(['keep', 'both']) // no band to replace it: no removal on offer
