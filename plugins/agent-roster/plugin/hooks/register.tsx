@@ -1235,8 +1235,6 @@ async function runSetup($: EngineInterface): Promise<void> {
   if (setupRunning) return
   setupRunning = true
   try {
-    // Asked once, whatever the answer: the automatic offer never comes back after this.
-    await $.store.set(OFFERED_KEY, true).catch(() => undefined)
     const home = (await $.env.get('HOME')) ?? ''
     const own = await configDirOf($)
     const current = await storedDirs($)
@@ -1246,9 +1244,13 @@ async function runSetup($: EngineInterface): Promise<void> {
     try {
       answer = String(await $.ui.ask(q.question, { header: q.header, options: q.options, ...(q.multiSelect ? { multiSelect: true as const } : {}) }))
     } catch {
+      // Dismissed by a person: that is an answer, so the automatic offer is spent. Rejected because nobody can be
+      // asked (a -p or SDK run, no terminal or desktop attached) it is not, and the offer waits for a session that can.
+      if (await canAsk($)) await $.store.set(OFFERED_KEY, true).catch(() => undefined)
       await say($, '👥 Roster setup dismissed — nothing changed. Run /roster setup to answer later.')
       return
     }
+    await $.store.set(OFFERED_KEY, true).catch(() => undefined) // answered: never offered again
     const { chosen, typed } = splitAnswer(answer, q.options)
     const byLabel = new Map(found.map(a => [accountLabel(a, home), a.dir]))
     const picked = chosen.flatMap(label => (byLabel.has(label) ? [byLabel.get(label)!] : []))
@@ -1267,15 +1269,31 @@ async function runSetup($: EngineInterface): Promise<void> {
   }
 }
 
-/** The first time the roster meets a pane of another account it cannot list yet, offer setup once. */
+// Set from `session.start`: a `-p` or SDK run has no one to ask.
+let interactive = true
+
+/** Is there someone to ask: an interactive session with a terminal or desktop surface attached? */
+async function canAsk($: EngineInterface): Promise<boolean> {
+  if (!interactive) return false
+  const surfaces = await $.session.surfaces().catch(() => [])
+
+  return surfaces.some(s => s === 'terminal' || s === 'desktop')
+}
+
+/**
+ * The first time the roster meets a pane of another account it cannot list yet, offer setup once. Only to someone
+ * who can answer: a headless run neither asks nor spends the offer.
+ */
 async function maybeOfferSetup($: EngineInterface, rows: readonly SessionRow[]) {
   if (setupRunning || !rows.some(r => r.note?.startsWith('running in another account'))) return
   if ((await $.store.get(OFFERED_KEY).catch(() => undefined)) || (await $.env.get('ROSTER_CONFIG_DIRS'))?.trim()) return
+  if (!(await canAsk($))) return
   void runSetup($).catch(() => undefined)
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    interactive = e.isInteractive !== false
     // Polling first: a refused command must not take the roster down with it.
     $.clock.every(POLL_MS, () => void refresh($).catch(() => undefined))
     void refresh($).catch(() => undefined)

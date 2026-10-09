@@ -115,7 +115,10 @@ account is found the question is "No other accounts found. Add a config dir?" wi
 or a path typed under Other. The answer is saved in this account's `$.store` (`roster:configDirs`) and a toast
 and log line say `Roster now shows: this account + work, personal (N live sessions).` Re-run `/roster setup` to
 change it; the current choices are listed in the question. The first time the roster meets a pane of another
-account it cannot list yet, it offers this once, and never again whatever the answer.
+account it cannot list yet, it offers this once, and never again once you have answered or dismissed it. The automatic
+offer is made only in an interactive session with a terminal or desktop surface attached (a headless `-p` or SDK
+run neither asks nor uses it up), and it is skipped while `ROSTER_CONFIG_DIRS` is set; `/roster setup` still works
+then, and says that the variable overrides what it saves.
 
 `ROSTER_CONFIG_DIRS` still outranks what setup saved (setup says so when it is set). To set it yourself, list the config dirs, separated by `:`, in `ROSTER_CONFIG_DIRS`, and
 set it in each account's `settings.json` `env`:

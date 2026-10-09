@@ -10,9 +10,10 @@ type Asked = { header: string; question: string; options: string[]; multiSelect:
 type Reg = Record<string, number[]>   // dir -> live pids in its sessions/ folder
 
 /** A fake machine: HOME with `.claude*` dirs holding session registries, `ps` knowing which pids run Claude. */
-function machine(on: On, opts: { dirs: Reg; env?: Record<string, string>; answer?: (q: Asked) => string | null; files?: string[]; dead?: number[]; stray?: number }) {
+function machine(on: On, opts: { dirs: Reg; env?: Record<string, string>; answer?: (q: Asked) => string | null; files?: string[]; dead?: number[]; stray?: number; surfaces?: string[] }) {
   const w = {
     asks: [] as Asked[], toasts: [] as string[], logs: [] as string[], store: new Map<string, unknown>(), opened: 0,
+    surfaces: { value: opts.surfaces ?? ['terminal'] },
     answer: opts.answer ?? ((q: Asked) => q.options[0] ?? null),
     files: new Set(opts.files ?? []),
   }
@@ -21,7 +22,8 @@ function machine(on: On, opts: { dirs: Reg; env?: Record<string, string>; answer
   const folders = new Set(Object.keys(opts.dirs).flatMap(d => [d, `${d}/sessions`]))
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? HOME : e.name === 'CLAUDE_CONFIG_DIR' ? `${HOME}/.claude` : opts.env?.[e.name] }))
   on('session.id', () => ({ value: 'self' }))
-  on('session.surfaces', () => ({ value: ['terminal'] as never }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('session.surfaces', () => ({ value: w.surfaces.value as never }))
   on('store.get', (_$, e) => ({ value: w.store.get(e.key) as never }))
   on('store.set', (_$, e) => { w.store.set(e.key, e.value); return { value: undefined } })
   on('fs.list', ($, e) => {
@@ -241,6 +243,61 @@ test('an answered offer is not repeated, and its note points at /roster setup', 
   await bridge($)
   await clock.settle()
   expect(w.asks).toHaveLength(1)
+})
+
+const START = (isInteractive: boolean, surface: 'terminal' | 'desktop' = 'terminal') => ({ cwd: '/r', surface, isInteractive }) as never
+
+test('a headless run (-p, SDK) neither asks nor spends the one-time offer', async ($, on) => {
+  const { w, clock } = machine(on, { dirs: STRAY_DIRS, stray: 777 })
+  await $.session.start(START(false))
+  await bridge($)
+  await clock.settle()
+
+  expect(w.asks).toHaveLength(0)
+  expect(w.store.get('roster:setupOffered')).toBeUndefined()
+})
+
+test('no terminal or desktop attached: no offer, flag untouched, and a later session that can ask still gets it', async ($, on) => {
+  const { w, clock } = machine(on, { dirs: STRAY_DIRS, stray: 777, surfaces: [] })
+  await $.session.start(START(true))
+  await bridge($)
+  await clock.settle()
+  expect(w.asks).toHaveLength(0)
+  expect(w.store.get('roster:setupOffered')).toBeUndefined()
+
+  w.surfaces.value = ['terminal']
+  await bridge($)
+  await clock.settle()
+  expect(w.asks).toHaveLength(1)
+  expect(w.store.get('roster:setupOffered')).toBe(true)
+})
+
+test('an interactive desktop session is offered it too', async ($, on) => {
+  const { w, clock } = machine(on, { dirs: STRAY_DIRS, stray: 777, surfaces: ['desktop'], answer: q => q.options[0]! })
+  await $.session.start(START(true, 'desktop'))
+  await bridge($)
+  await clock.settle()
+
+  expect(w.asks).toHaveLength(1)
+})
+
+test('a dismissal by someone who could answer spends the offer', async ($, on) => {
+  const { w, clock } = machine(on, { dirs: STRAY_DIRS, stray: 777, answer: () => null })
+  await $.session.start(START(true))
+  await roster($, 'setup')
+  await clock.settle()
+
+  expect(w.store.get('roster:setupOffered')).toBe(true)
+})
+
+test('a rejection with nobody left to ask does not spend the offer', async ($, on) => {
+  const { w, clock } = machine(on, { dirs: STRAY_DIRS, stray: 777, answer: () => null, surfaces: [] })
+  await $.session.start(START(true))
+  await roster($, 'setup')
+  await clock.settle()
+
+  expect(w.asks).toHaveLength(1)
+  expect(w.store.get('roster:setupOffered')).toBeUndefined()
 })
 
 test('no stray pane, no offer', async ($, on) => {

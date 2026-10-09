@@ -140,8 +140,8 @@ The answer is saved per account in its own file, `<census dir>/vitals/<account k
 `limits/<account>.json`): `{"default_style": "compact|detailed"}`. Accounts that share a `CENSUS_STORE` share the
 folder but never a file, so there is no shared read-modify-write for two of them to lose a choice in. It is written
 atomically; a missing, corrupt or unknown value (an old `playful`) just means "not chosen yet". The earlier shared
-`vitals.json` (`{"<account key>": {"default_style": …}}`) is read once as a fallback for the calling account only,
-and never written. From then on a
+`vitals.json` (`{"<account key>": {"default_style": …}}`) is checked as a fallback on each read, for the calling account only and only while that account's own
+file has no style yet; it is never written. Once the account's own file holds a style, a
 bare `/census:vitals` shows that style; naming a style (`/census:vitals detailed`) overrides it for that run, and
 `/census:vitals default detailed` changes it. From a shell: `vitals.py --set-default <lean|detailed>` (a name or alias
 such as `brief`, `full`, `trend`; anything else is an error and nothing is written).
