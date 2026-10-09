@@ -1,5 +1,5 @@
 ---
-description: Show this session's vital signs — lean by default; pass detailed or playful for the other styles.
+description: Show this session's vital signs (census) — lean by default; pass detailed or playful for the other styles.
 argument-hint: "[lean|detailed|playful]"
 allowed-tools: Bash(python3:*)
 ---

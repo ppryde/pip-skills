@@ -3,13 +3,14 @@
 
 Gathers from three read-only sources and renders one of three styles:
 
-- **census** (``census read``): the status-line payload — context window,
-  model, cost, duration, prompt cache, and the account's rate-limit windows.
-  Read only through the census CLI (``CENSUS_CLI``, census's ``cli.path``
-  pointer, or ``census`` on PATH), the same contract vigil uses.
-- **git** (+ ``gh`` when present): branch, dirty files, ahead/behind, PR.
-- **the transcript** (``transcript_path`` from the payload): tool calls by
-  name and subagent spawns.
+- **census** (``census read``): the status-line payload (context window, model, cost,
+  duration, prompt cache, the account's rate-limit windows), the session's ``git`` block
+  (branch, uncommitted, ahead, upstream) and the payload's ``pr`` (number, url, review state).
+  Read through this plugin's own ``cli.py`` first; ``CENSUS_CLI`` overrides it.
+- **git**: only when the census entry has no ``git`` block (a record from before it): one
+  ``git status --porcelain=2 --branch -uno``. Never ``gh``: the PR comes from the payload.
+- **the transcript** (``transcript_path`` from the payload): tool calls by name and subagent
+  spawns.
 
 Every source is optional and fail-safe: a missing one leaves its lines out,
 it never raises. Pure stdlib.
@@ -31,11 +32,17 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+if __package__ in (None, ""):  # run as a script: put the plugin root on sys.path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts import gitcache
 
 STALE_SECONDS = 90  # census: not rendered for 90s (idle without refreshInterval, or closed)
 MAX_RESET_SECONDS = 10 * 86400  # census's own ceiling: further out is a corrupt/ms value
@@ -111,9 +118,7 @@ class Vitals:
     windows: list[Window] = field(default_factory=list)
     branch: str | None = None
     dirty: int | None = None
-    untracked: int | None = None
-    ahead: int | None = None
-    behind: int | None = None
+    ahead: int | None = None  # None without an upstream: there is nothing to be ahead of
     pr_number: int | None = None
     pr_state: str | None = None
     tools: Counter[str] = field(default_factory=Counter)
@@ -147,47 +152,82 @@ def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _run(cmd: list[str], cwd: str | None = None) -> str | None:
-    """stdout of ``cmd``, or None on any failure. Never raises."""
+def _ok(result: subprocess.CompletedProcess[str]) -> str | None:
+    return result.stdout if result.returncode == 0 else None
+
+
+def _git(*args: str, cwd: str | None = None) -> str | None:
+    """stdout of ``git <args>``, or None on any failure. Never raises."""
     try:
-        result = subprocess.run(
-            cmd, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False
+        return _ok(
+            subprocess.run(
+                ["git", "--no-optional-locks", *args],
+                cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False,
+            )
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return result.stdout if result.returncode == 0 else None
 
 
 # ------------------------------------------------------------------------- census
 
 
-def census_cli() -> list[str] | None:
-    """How to run census: ``CENSUS_CLI``, else census's ``cli.path`` pointer,
-    else ``census`` on PATH. Mirrors vigil's resolution."""
+def _runnable(text: str) -> Path | None:
+    """``text`` as ONE path (never split, never shell-interpreted, so an env value
+    cannot smuggle arguments): returned only if it is absolute, a regular file, and
+    a Python script (run under this interpreter) or an executable."""
+    if not text or "\0" in text or "\n" in text:
+        return None
+    path = Path(text)
+    if not path.is_absolute() or not path.is_file():
+        return None
+    return path if path.suffix == ".py" or os.access(path, os.X_OK) else None
+
+
+def census_cli() -> Path | None:
+    """Where census's CLI is. ``CENSUS_CLI`` is authoritative when set (and refused, not
+    skipped past, when it is not runnable). Otherwise this plugin's own ``cli.py`` beside
+    this file, then census's ``cli.path`` pointer, then ``census`` on PATH. Whatever it
+    names must pass ``_runnable``."""
     override = os.environ.get("CENSUS_CLI")
     if override:
-        return [sys.executable, override] if override.endswith(".py") else [override]
+        return _runnable(override)
+    if (own := _runnable(str(Path(__file__).resolve().with_name("cli.py")))) is not None:
+        return own
     store = os.environ.get("CENSUS_STORE")
     if store:
-        folder = Path(store).parent if store.endswith(".json") else Path(store)
+        folder = Path(store)
     else:
         config = os.environ.get("CLAUDE_CONFIG_DIR")
         folder = (Path(config) if config else Path.home() / ".claude") / "census"
     try:
-        recorded = (folder / "cli.path").read_text(encoding="utf-8").strip()
-        if recorded and Path(recorded).is_file():
-            return [sys.executable, recorded]
+        recorded = _runnable((folder / "cli.path").read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
-        pass
+        recorded = None
+    if recorded:
+        return recorded
     found = shutil.which("census")
-    return [found] if found else None
+    return _runnable(found) if found else None
 
 
 def _census_read(args: list[str]) -> dict[str, Any] | None:
-    cmd = census_cli()
-    if cmd is None:
+    cli = census_cli()
+    if cli is None:
         return None
-    out = _run([*cmd, "read", *args])
+    try:
+        if cli.suffix == ".py":
+            done = subprocess.run(
+                [sys.executable, str(cli), "read", *args],
+                capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False,
+            )
+        else:
+            done = subprocess.run(
+                [str(cli), "read", *args],
+                capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False,
+            )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = _ok(done)
     if not out:
         return None
     try:
@@ -229,6 +269,10 @@ def apply_census(v: Vitals, entry: dict[str, Any]) -> None:
     v.session_id = v.session_id or (owner if isinstance(owner, str) else None)
     v.session_name = payload.get("session_name") or None
     v.branch = v.branch or entry.get("branch") or None
+    pr = _dict(payload.get("pr"))  # the status line's own PR facts: never a `gh` call
+    v.pr_number = _int(pr.get("number")) or None
+    state = pr.get("review_state")
+    v.pr_state = str(state).lower() if isinstance(state, str) and state else None
 
     model = _dict(payload.get("model"))
     v.model = model.get("display_name") or model.get("id") or None
@@ -273,33 +317,33 @@ def apply_census(v: Vitals, entry: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------- git
 
 
-def apply_git(v: Vitals, cwd: str, with_pr: bool) -> None:
-    status = _run(["git", "status", "--porcelain=v2", "--branch", "--untracked-files=all"], cwd=cwd)
-    if status is None:
-        return
-    dirty = untracked = 0
-    for line in status.splitlines():
-        if line.startswith("# branch.head "):
-            head = line.split(" ", 2)[2]
-            v.branch = None if head == "(detached)" else head
-        elif line.startswith("# branch.ab "):
-            ahead, behind = line.split(" ")[2:4]
-            v.ahead, v.behind = int(ahead.lstrip("+")), abs(int(behind))
-        elif line.startswith("? "):
-            untracked += 1
-        elif line and not line.startswith("#"):
-            dirty += 1
-    v.dirty, v.untracked = dirty, untracked
-    if with_pr and v.branch and shutil.which("gh"):
-        out = _run(["gh", "pr", "view", "--json", "number,state,isDraft"], cwd=cwd)
-        try:
-            pr = json.loads(out) if out else {}
-        except ValueError:
-            pr = {}
-        if isinstance(pr, dict) and _int(pr.get("number")):
-            v.pr_number = _int(pr.get("number"))
-            state = str(pr.get("state") or "").lower() or None
-            v.pr_state = "draft" if pr.get("isDraft") and state == "open" else state
+def _git_block(entry: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The entry's census ``git`` block when it has the right shape, else None."""
+    block = entry.get("git") if isinstance(entry, dict) else None
+    if not isinstance(block, dict):
+        return None
+    branch, dirty, ahead = block.get("branch"), _int(block.get("uncommitted")), _int(block.get("ahead"))
+    if (branch is not None and not isinstance(branch, str)) or dirty is None or ahead is None:
+        return None
+    if not isinstance(block.get("has_upstream"), bool):
+        return None
+    return block
+
+
+def apply_git(v: Vitals, entry: dict[str, Any] | None, cwd: str) -> None:
+    """Branch, uncommitted files and ahead from the session's census ``git`` block. Only an
+    entry with none (written before the block existed) makes vitals ask git itself, once:
+    ``git status --porcelain=2 --branch -uno`` in the worktree."""
+    block = _git_block(entry)
+    if block is None:
+        recorded = (entry or {}).get("worktree_cwd")
+        status = _git("status", "--porcelain=2", "--branch", "-uno", cwd=recorded if isinstance(recorded, str) else cwd)
+        if status is None:
+            return
+        block = gitcache.parse_status(status)
+    v.branch = block.get("branch") or v.branch
+    v.dirty = _int(block.get("uncommitted"))
+    v.ahead = _int(block.get("ahead")) if block.get("has_upstream") else None
 
 
 # --------------------------------------------------------------------- transcript
@@ -414,9 +458,24 @@ def gauge(pct: float | None) -> str:
     return "🟢"
 
 
+def _columns(char: str) -> int:
+    """Terminal columns one character takes: 2 for East Asian wide/fullwidth, 0 for combining."""
+    if unicodedata.combining(char):
+        return 0
+    return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+
+
 def clip(text: str, limit: int) -> str:
-    """``text`` cut to ``limit`` characters, ending in an ellipsis if cut."""
-    return text if len(text) <= limit else text[: max(0, limit - 1)] + "…"
+    """``text`` cut to ``limit`` terminal columns, ending in an ellipsis if cut."""
+    if sum(map(_columns, text)) <= limit:
+        return text
+    kept, used = [], 0
+    for char in text:
+        if used + _columns(char) > limit - 1:
+            break
+        kept.append(char)
+        used += _columns(char)
+    return "".join(kept) + "…" if limit > 0 else ""
 
 
 def tool_label(name: str) -> str:
@@ -449,10 +508,8 @@ def sync_line(v: Vitals) -> str | None:
     if v.dirty is None:
         return None
     parts = ["clean" if v.dirty == 0 else f"{v.dirty} dirty"]
-    if v.untracked:
-        parts.append(f"{v.untracked} new")
     if v.ahead is not None:
-        parts.append(f"↑{v.ahead} ↓{v.behind}")
+        parts.append(f"↑{v.ahead}")
     return " · ".join(parts)
 
 
@@ -624,8 +681,6 @@ def render_playful(v: Vitals) -> str:
                 if v.dirty == 0
                 else f"   {plural(v.dirty, 'file')} await penance"
             )
-        if v.untracked:
-            out.append(f"   {plural(v.untracked, 'stranger')} unbaptised (untracked)")
         if v.ahead:
             out.append(f"   {plural(v.ahead, 'commit')} unconfessed to the remote")
 
@@ -657,7 +712,7 @@ RENDERERS = {"compact": render_compact, "detailed": render_detailed, "playful": 
 # --------------------------------------------------------------------------- main
 
 
-def gather(session_id: str | None, cwd: str, *, with_pr: bool, now: float | None = None) -> Vitals:
+def gather(session_id: str | None, cwd: str, *, now: float | None = None) -> Vitals:
     v = Vitals(now=time.time() if now is None else now, session_id=session_id)
     # Each source is independent: one failing (odd input we did not foresee)
     # must not hide the others.
@@ -667,7 +722,7 @@ def gather(session_id: str | None, cwd: str, *, with_pr: bool, now: float | None
         if entry:
             apply_census(v, entry)
     with contextlib.suppress(Exception):
-        apply_git(v, cwd, with_pr)
+        apply_git(v, entry, cwd)
     if entry:
         with contextlib.suppress(Exception):
             apply_transcript(v, _dict(entry.get("payload")).get("transcript_path"))
@@ -698,12 +753,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--style", choices=STYLES)
     parser.add_argument("--session", help="session id (default: freshest for the worktree)")
     parser.add_argument("--cwd", default=os.getcwd())
-    parser.add_argument("--no-pr", action="store_true", help="skip the gh PR lookup")
     args = parser.parse_args(argv)
     session = _clean_session(args.session) or _clean_session(os.environ.get("CLAUDE_SESSION_ID"))
     style = args.style or resolve_style(args.words)
     try:
-        vitals = gather(session, args.cwd, with_pr=not args.no_pr)
+        vitals = gather(session, args.cwd)
         reading = RENDERERS[style](vitals)
     except Exception as exc:  # noqa: BLE001 -- last line of defence: never dump a traceback
         print(f"(vitals could not read this session: {type(exc).__name__}: {exc})")
