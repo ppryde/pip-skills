@@ -128,7 +128,7 @@ def cmd_where(args: argparse.Namespace) -> int:
     from scripts import where as wh
 
     # --config-dir names another account: this process's plugin dirs belong to the active one
-    print(json.dumps(wh.report(active=not getattr(args, "config_dir", None)), indent=2))
+    print(json.dumps(wh.report(active=getattr(args, "config_is_active", True)), indent=2))
     return 0
 
 
@@ -288,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
               "use the census plugin for a command status line", file=sys.stderr)
         return 1
     override = getattr(args, "config_dir", None)
+    # --config-dir naming the account already in effect is still the ACTIVE account: its plugin dirs count
+    args.config_is_active = not override or Path(override).expanduser().resolve() == st.config_dir().resolve()
     if not override:
         result: int = args.func(args)
         return result

@@ -993,3 +993,32 @@ def test_the_command_is_census_mod_vitals_in_the_bundle(tmp_path, monkeypatch):
 def test_help_names_the_census_command_in_the_census_plugin():
     text = vitals.build_parser().format_help()
     assert "/census:vitals" in text and "/census-mod:vitals" not in text
+
+
+# --- ended and gone sessions are not idle -------------------------------------------------------
+
+
+def test_a_stale_session_is_not_shown_as_idle():
+    v = idle_vitals()
+    v.stale = True
+    assert "idle" not in vitals.render_compact(v).splitlines()[0]
+    assert "idle" not in vitals.render_detailed(v)
+
+
+def test_an_ended_session_says_ended_not_idle():
+    e = entry(stale=True, idle=True)
+    e["payload"]["census_mod"] = {"pid": 4242, "ended": 1}
+    v = Vitals(now=NOW)
+    vitals.apply_census(v, e)
+    assert v.ended is True
+    assert "session ended" in vitals.render_compact(v)
+    assert "session ended" in vitals.render_detailed(v)
+    assert "idle" not in vitals.render_compact(v).splitlines()[0]
+    assert "idle" not in vitals.render_detailed(v)
+
+
+def test_a_live_idle_session_is_still_idle():
+    e = entry(stale=False, idle=True)
+    v = Vitals(now=NOW)
+    vitals.apply_census(v, e)
+    assert "idle" in vitals.render_compact(v).splitlines()[0]

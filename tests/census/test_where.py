@@ -286,3 +286,19 @@ class TestReviewWf23:
         assert wh.report()["notes"] == []   # disabling census would leave no recorder at all
         settings(cfg, {"enabledPlugins": {"census@pip-skills": True, "census-mod@pip-skills": True}})
         assert "disable census@pip-skills" in wh.report()["notes"][0]
+
+
+    def test_a_config_dir_that_is_a_file_has_no_settings_file(self, tmp_path):
+        not_a_dir = tmp_path / "file"
+        not_a_dir.write_text("x")
+        assert wh._settings(not_a_dir / "settings.json") == (False, None, {})
+
+    def test_config_dir_naming_the_active_account_keeps_its_plugin_dirs(self, cfg, monkeypatch, capsys):
+        monkeypatch.setenv("CLAUDE_CODE_PLUGIN_DIRS", "/x/census-mod/plugin")
+        assert cli.main(["where", "--config-dir", str(cfg)]) == 0
+        assert json.loads(capsys.readouterr().out)["census_mod"]["via_plugin_dir"] is True
+
+    def test_config_dir_spelled_differently_but_the_same_dir_is_still_active(self, cfg, monkeypatch, capsys):
+        monkeypatch.setenv("CLAUDE_CODE_PLUGIN_DIRS", "/x/census-mod/plugin")
+        assert cli.main(["where", "--config-dir", str(cfg) + "/../" + cfg.name]) == 0
+        assert json.loads(capsys.readouterr().out)["census_mod"]["via_plugin_dir"] is True

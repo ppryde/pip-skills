@@ -51,8 +51,60 @@ def test_windows_probe_that_cannot_tell_leaves_the_registry_to_decide(cfg, monke
 
 
 def test_windows_probe_without_ctypes_windll_cannot_tell(monkeypatch):
-    # On this machine there is no windll: the probe must answer None, not raise.
-    assert st._windows_pid_alive(4242) in (None, True, False)
+    import ctypes
+
+    monkeypatch.delattr(ctypes, "windll", raising=False)   # whatever this machine has: pretend it is not Windows
+    assert st._windows_pid_alive(4242) is None
+
+
+class _Fn:
+    """A stand-in Win32 function: records its calls, and accepts the argtypes/restype ctypes would set."""
+
+    def __init__(self, result, on_call=None):
+        self.result, self.on_call, self.calls, self.argtypes, self.restype = result, on_call, [], None, None
+
+    def __call__(self, *args):
+        self.calls.append(args)
+        if self.on_call:
+            self.on_call(*args)
+        return self.result
+
+
+def _fake_windll(monkeypatch, handle, code=259):
+    import ctypes
+    from types import SimpleNamespace
+
+    kernel32 = SimpleNamespace(
+        OpenProcess=_Fn(handle),
+        GetExitCodeProcess=_Fn(1, on_call=lambda h, ref: setattr(ref._obj, "value", code)),
+        CloseHandle=_Fn(1),
+        GetLastError=lambda: 0,
+    )
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(kernel32=kernel32), raising=False)
+    return kernel32
+
+
+def test_the_win32_calls_declare_pointer_sized_handles(monkeypatch):
+    import ctypes
+
+    k = _fake_windll(monkeypatch, handle=0x1_2345_6789)
+    assert st._windows_pid_alive(4242) is True
+    assert k.OpenProcess.restype is ctypes.c_void_p
+    assert k.GetExitCodeProcess.argtypes[0] is ctypes.c_void_p
+    assert k.CloseHandle.argtypes == [ctypes.c_void_p]
+    assert k.OpenProcess.argtypes is not None and len(k.OpenProcess.argtypes) == 3
+
+
+def test_a_handle_wider_than_32_bits_reaches_the_later_calls_whole(monkeypatch):
+    k = _fake_windll(monkeypatch, handle=0x1_2345_6789)
+    st._windows_pid_alive(4242)
+    assert k.GetExitCodeProcess.calls[0][0] == 0x1_2345_6789
+    assert k.CloseHandle.calls == [(0x1_2345_6789,)]
+
+
+def test_an_exited_process_is_not_alive(monkeypatch):
+    _fake_windll(monkeypatch, handle=0x1_0000_0001, code=0)
+    assert st._windows_pid_alive(4242) is False
 
 
 def test_posix_still_probes_with_os_kill(cfg, monkeypatch):

@@ -29,8 +29,8 @@ import json
 import math
 import os
 import subprocess
-import tempfile
 import sys
+import tempfile
 import time
 import unicodedata
 from collections import Counter
@@ -96,6 +96,7 @@ class Vitals:
     session_name: str | None = None
     stale: bool = False
     idle: bool = False
+    ended: bool = False  # the census mod recorded this session as closed
     age: float | None = None  # seconds since census last recorded this session (status-line render or mod event)
     borrowed: bool = False  # reading is another session's (worktree fallback)
     has_reading: bool = False
@@ -204,6 +205,7 @@ def apply_census(v: Vitals, entry: dict[str, Any]) -> None:
     else:
         v.stale = v.age is not None and v.age > STALE_SECONDS
     v.idle = bool(entry.get("idle"))
+    v.ended = bool(_dict(payload.get("census_mod")).get("ended"))
     owner = payload.get("session_id")
     if v.session_id and isinstance(owner, str) and owner != v.session_id:
         v.borrowed = True
@@ -454,10 +456,17 @@ def sync_line(v: Vitals) -> str | None:
     return " · ".join(parts)
 
 
+def shows_idle(v: Vitals) -> bool:
+    """Idle is a state of a LIVE session: one that has ended or whose process is gone is not idle, it is gone."""
+    return v.idle and not v.stale and not v.ended
+
+
 def liveness(v: Vitals) -> str | None:
     """Why the figures may not be this session's live ones, or None."""
     if v.borrowed:
         return "another session's reading"
+    if v.ended:
+        return "session ended"
     if v.stale and v.age is not None:
         return f"reading is {fmt_duration(v.age)} old"
     if v.stale:
@@ -485,7 +494,7 @@ def lean_ctx_line(v: Vitals) -> str:
         tokens = fmt_tokens(v.ctx_tokens) + (f"/{fmt_tokens(v.ctx_size)}" if v.ctx_size else "")
     cost = fmt_cost(v.cost_usd) if v.cost_usd is not None else None
 
-    idle = "idle" if v.idle else None   # kept to the end: a live-but-inactive session must not look active
+    idle = "idle" if shows_idle(v) else None   # kept to the end: a live-but-inactive session must not look active
 
     def build(with_tokens: bool, with_cost: bool, model: str | None) -> str:
         first = head + (f" {tokens}" if tokens and with_tokens else "")
@@ -547,7 +556,7 @@ def render_detailed(v: Vitals) -> str:
         out.append(f"“{clip(v.session_name, 40)}”")
     if (live := liveness(v)) is not None:
         out.append(f"⚠️  {live}")
-    if v.idle:
+    if shows_idle(v):
         out.append("💤 idle — no activity for 10+ min")
 
     out += ["", f"💾 Context {pct(v.ctx_pct)} {bar(v.ctx_pct, 12)}"]
