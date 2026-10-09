@@ -113,6 +113,8 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     if (cmd === 'mv') { if (w.mvFails.value) return { value: done(1) }; const [, , from, to] = argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.delete(from ?? ''); w.links.delete(to ?? ''); w.files.set(to ?? '', t); return { value: done(0) } }
     if (cmd === 'rm') { w.files.delete(argv[argv.length - 1] ?? ''); return { value: done(0) } }
     if (args.includes('ingest') && cmd !== 'sh') {
+      const at = argv.findIndex(x => /cli\.py$/.test(x))
+      if (at > 0 && !w.pythons.value.includes(argv.slice(0, at).join(' '))) throw new Error(`spawn ${cmd} ENOENT`)
       w.ingests.push({ payload: JSON.parse(init.stdin ?? '{}'), argv: [...e.argv], env: init.env, timeoutMs: init.timeoutMs })
       return { value: done(0) }
     }
