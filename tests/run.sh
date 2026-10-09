@@ -34,6 +34,9 @@ done
 echo "=================== context-vigil ==================="
 ( cd "$ROOT/skills/context-vigil" && "$PY" -m pytest "$@" ) || FAIL=1
 
+echo "=================== context-vigil-mod ==================="
+( cd "$ROOT" && "$PY" -m pytest tests/context_vigil_mod "$@" ) || FAIL=1
+
 echo
 if [ "$FAIL" -eq 0 ]; then
   echo "All plugin suites passed."

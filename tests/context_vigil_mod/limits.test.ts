@@ -16,9 +16,21 @@ describe('latch', () => {
   test('rate_limit with no window known latches for an hour', () => {
     expect(latchFromStopFailure('rate_limit', [], T)).toEqual({ kind: 'unknown', resetsAtMs: T + 3600_000 })
   })
+  test('equally full windows latch on the later reset', () => {
+    const l = latchFromStopFailure('rate_limit', [
+      { kind: 'five_hour', percentUsed: 100, resetsAt: iso(T + 3600_000) },
+      { kind: 'seven_day', percentUsed: 100, resetsAt: iso(T + 86400_000) },
+    ], T)
+    expect(l).toEqual({ kind: 'seven_day', resetsAtMs: T + 86400_000 })
+  })
   test('a measure at or past 100% latches', () => {
-    expect(latchFromMeasure([{ kind: 'seven_day', percentUsed: 100, resetsAt: iso(T + 5) }])).toEqual({ kind: 'seven_day', resetsAtMs: T + 5 })
-    expect(latchFromMeasure([{ kind: 'seven_day', percentUsed: 99.9, resetsAt: iso(T + 5) }])).toBe(null)
+    expect(latchFromMeasure([{ kind: 'seven_day', percentUsed: 100, resetsAt: iso(T + 5) }], T)).toEqual({ kind: 'seven_day', resetsAtMs: T + 5 })
+    expect(latchFromMeasure([{ kind: 'seven_day', percentUsed: 99.9, resetsAt: iso(T + 5) }], T)).toBe(null)
+  })
+  test('a full window with no reset time latches for an hour; one with a reset wins', () => {
+    expect(latchFromMeasure([{ kind: 'seven_day', percentUsed: 100 }], T)).toEqual({ kind: 'unknown', resetsAtMs: T + 3600_000 })
+    expect(latchFromMeasure([{ kind: 'seven_day', percentUsed: 100 }, { kind: 'spend_limit', percentUsed: 100, resetsAt: iso(T + 9) }], T))
+      .toEqual({ kind: 'spend_limit', resetsAtMs: T + 9 })
   })
   test('the latch clears at resetsAt or when its window drops', () => {
     const l = { kind: 'five_hour', resetsAtMs: T + 100 }

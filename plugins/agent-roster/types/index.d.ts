@@ -1,8 +1,6 @@
 export type SessionRow = {
   pid: number
   sessionId: string
-  /** Which config dir's registry it came from: `personal` or `work`. */
-  account: string
   /** The tmux session name, absent when it runs outside tmux. */
   tmux?: string
   cwd: string
@@ -10,6 +8,8 @@ export type SessionRow = {
   /** The worktree name when cwd is under `<repo>/.claude/worktrees/<name>`. */
   worktree?: string
   branch?: string
+  /** The tag of the config dir it was read from, when that is not the session's own (`personal`). */
+  account?: string
   /** `busy`, `idle`, `waiting`, `shell`, ... as the session reports it. */
   status: string
   /** Why it waits (`input needed`), while `status` is `waiting`. */
@@ -29,7 +29,7 @@ declare module 'claude-code' {
   interface PluginState {
     'agent-roster': {
       /** `error`: why the last scan failed, while the rows are the last good ones. */
-      sessions: { rows: SessionRow[]; checkedAt: number; selfId?: string; error?: string }
+      sessions: { rows: SessionRow[]; checkedAt: number; selfId?: string; error?: string; warnings?: string[] }
       /** The pid whose kill button was pressed and awaits confirmation. */
       pendingKill: number | null
       /** Whether idle sessions quiet for over a day are unfolded. */

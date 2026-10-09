@@ -25,6 +25,7 @@ export function loadSettings(raw: unknown): Settings {
   const s: Settings = { ...DEFAULTS, limitWindows: [...DEFAULTS.limitWindows] }
   if (!raw || typeof raw !== 'object') return s
   const r = raw as Record<string, unknown>
+  if (r.modelThresholds !== undefined) s.modelThresholds = r.modelThresholds
   if (isPct(r.nudgeAt)) s.nudgeAt = r.nudgeAt
   if (inRange(r.step, 1, 50)) s.step = r.step
   if (typeof r.bar === 'boolean') s.bar = r.bar
@@ -36,7 +37,8 @@ export function loadSettings(raw: unknown): Settings {
   if (isPct(r.limitPct)) s.limitPct = r.limitPct
   if (Array.isArray(r.limitWindows)) {
     const ok = r.limitWindows.filter((w): w is Window => w === 'seven_day' || w === 'spend_limit')
-    s.limitWindows = [...new Set(ok)]
+    // An empty list would watch nothing while limits reads On: keep the defaults instead.
+    if (ok.length) s.limitWindows = [...new Set(ok)]
   }
   if (r.rcAutoClear === 'yes' || r.rcAutoClear === 'no' || r.rcAutoClear === 'unanswered') s.rcAutoClear = r.rcAutoClear
   return s

@@ -50,7 +50,12 @@ describe('record', () => {
     const a = record(record(EMPTY_ACTIVITY, { kind: 'prompt', origin: 'composer', at: 1 }), { kind: 'edit', at: 9 })
     expect(a.lastHumanAt).toBe(9)
     expect(a.lastHumanOrigin).toBe('composer')
-    expect(record(a, { kind: 'human-command', at: 11 }).lastHumanAt).toBe(11)
+    const cmd = record(a, { kind: 'human-command', at: 11 })
+    expect(cmd.lastHumanAt).toBe(11)
+    expect(cmd.lastHumanOrigin).toBe('composer')
+    // A phone origin survives a command too: onPhone reads it.
+    const phone = record(record(EMPTY_ACTIVITY, { kind: 'prompt', origin: 'bridge', at: 1 }), { kind: 'human-command', at: 2 })
+    expect(phone.lastHumanOrigin).toBe('bridge')
   })
   test('agent steps', () => expect(record(EMPTY_ACTIVITY, { kind: 'agent-step', at: 3 }).lastAgentAt).toBe(3))
 })

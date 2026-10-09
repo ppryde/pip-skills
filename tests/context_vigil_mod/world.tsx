@@ -1,6 +1,8 @@
 import { mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+export type AskSeen = { question: string; header: string; multiSelect: boolean; options: string[]; descriptions: string[] }
+
 export type World = {
   clock: ReturnType<typeof mock.clock>
   files: Map<string, string>
@@ -12,8 +14,9 @@ export type World = {
   draft: { value: string }
   sessionId: { value: string }
   contextPct: { value: number | undefined }
+  model: { value: string | null }      // $.session.model(); null makes it reject
   rateLimits: { value: { kind: string; percentUsed: number; resetsAt?: string }[] }
-  git: { branch: string; status: string }
+  git: { branch: string; status: string; dir: string | null }   // dir: what `git rev-parse --absolute-git-dir` prints; null fails it
   runs: { count: number }              // process.run calls answered
   state: Map<string, unknown>          // $.state values by `plugin.key` — the engine's session state, wiped by a clear
   askAnswer: { value: string | null }  // answers $.ui.ask and AskUserQuestion; null = dismissed
@@ -33,27 +36,30 @@ export type World = {
   clearHold: { held: boolean; release(): void }   // while held, $.command.run({ command: 'clear' }) stays pending until release()
   promptReadFails: { count: number }   // the next N $.prompt.read calls reject
   askHold: { held: boolean; waiting: ((answer: string) => void)[] }   // while held, each ask stays open until its resolver is called
+  asks: AskSeen[]                      // every AskUserQuestion question asked, $.ui.ask included, in order
+  askReply: { value: ((q: AskSeen) => string | null) | null }   // answers per question when set (null = dismissed); else askAnswer
   onStoreSet: { value: ((key: string) => Promise<unknown>) | null }  // runs inside store.set, before it answers
 }
 
-export function world(on: On, opts: { now?: number; store?: Record<string, unknown>; files?: Record<string, string> } = {}): World {
+export function world(on: On, opts: { now?: number; store?: Record<string, unknown>; files?: Record<string, string>; env?: Record<string, string> } = {}): World {
   const w: World = {
     clock: mock.clock(on, { now: opts.now ?? 1_000_000 }),
     files: new Map(Object.entries(opts.files ?? {})),
     submits: [], commands: [], notices: [], logs: [],
     registered: { tools: [], commands: [] },
-    draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined },
-    rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
+    draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined }, model: { value: 'claude-opus-5-5[1m]' },
+    rateLimits: { value: [] }, git: { branch: 'main\n', status: '', dir: '/repo/.git' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, renames: [],
     titled: new Set(), grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
-    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, askHold: { held: false, waiting: [] }, promptReadFails: { count: 0 }, onStoreSet: { value: null }, fsRead: { gate: null, error: null },
+    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, askHold: { held: false, waiting: [] }, asks: [], askReply: { value: null }, promptReadFails: { count: 0 }, onStoreSet: { value: null }, fsRead: { gate: null, error: null },
   }
   // $.store, per account: in memory, survives a clear, and open to the test (another process's writes).
   on('store.get', (_$, e) => ({ value: w.store.get(e.key) as never }))
-  on('store.set', async (_$, e) => { w.store.set(e.key, e.value); await w.onStoreSet.value?.(e.key); return { value: undefined } })
+  // The hook runs first: a refused write (the hook throws) must leave nothing stored.
+  on('store.set', async (_$, e) => { await w.onStoreSet.value?.(e.key); w.store.set(e.key, e.value); return { value: undefined } })
   on('store.delete', (_$, e) => { w.store.delete(e.key); return { value: undefined } })
   on('store.keys', () => ({ value: [...w.store.keys()] }))
-  mock.env(on, { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
+  mock.env(on, opts.env ?? { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
   on('fs.read', async (_$, e) => {
     await w.fsRead.gate
     if (w.fsRead.error !== null) return { deny: w.fsRead.error }
@@ -82,6 +88,10 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
       return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     const a = e.argv.join(' ')
+    if (a.includes('--absolute-git-dir')) {
+      const dir = w.git.dir
+      return { value: { exitCode: dir === null ? 128 : 0, stdout: dir === null ? '' : `${dir}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     const out = a.includes('symbolic-ref') ? w.git.branch : w.git.status
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -99,6 +109,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   })
   on('session.id', () => ({ value: w.sessionId.value }))
   on('session.cwd', () => ({ value: '/repo' }))
+  on('session.model', () => (w.model.value === null ? { deny: 'no model' } : { value: w.model.value }))
   on('session.repo', () => ({ value: { root: '/repo', remote: null, internal: false, name: 'repo', id: 'r' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000, percent: w.contextPct.value }, rateLimits: w.rateLimits.value } }))
   on('prompt.read', () => { if (w.promptReadFails.count > 0) { w.promptReadFails.count--; throw new Error('prompt.read failed') } return { value: { text: w.draft.value, cursor: w.draft.value.length } } })
@@ -137,8 +148,19 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   // A test that passes `answers` on the input gets them echoed; otherwise every question
   // gets w.askAnswer; null means the person dismissed the dialog.
   on('tool.call', async (_$, e) => {
-    const input = e as unknown as { tool: string; questions?: { question: string }[]; answers?: Record<string, string> }
+    const input = e as unknown as { tool: string; questions?: { question: string; header?: string; multiSelect?: boolean; options?: (string | { label: string; description?: string })[] }[]; answers?: Record<string, string> }
     if (input.tool === 'AskUserQuestion') {
+      const seen = (input.questions ?? []).map(q => ({
+        question: q.question, header: q.header ?? '', multiSelect: q.multiSelect === true,
+        options: (q.options ?? []).map(o => (typeof o === 'string' ? o : o.label)),
+        descriptions: (q.options ?? []).map(o => (typeof o === 'string' ? '' : o.description ?? '')),
+      }))
+      if (!input.answers) w.asks.push(...seen)
+      if (w.askReply.value && !input.answers && !w.askHold.held) {
+        const replies = seen.map(q => [q.question, w.askReply.value?.(q) ?? null] as const)
+        if (replies.some(([, a]) => a === null)) return { deny: 'dismissed' }
+        return { result: { questions: input.questions, answers: Object.fromEntries(replies) } } as never
+      }
       if (w.askHold.held && !input.answers) {
         const held = await new Promise<string>(res => w.askHold.waiting.push(res))
         return { result: { questions: input.questions, answers: Object.fromEntries((input.questions ?? []).map(q => [q.question, held])) } } as never

@@ -31,8 +31,10 @@ def test_install_creates_and_appends(tmp_path):
 
 
 def test_install_is_idempotent(tmp_path):
-    run(tmp_path, "install")
-    run(tmp_path, "install")
+    assert run(tmp_path, "install").returncode == 0
+    second = run(tmp_path, "install")
+    assert second.returncode == 0, second.stderr
+    assert "already installed" in second.stdout
     assert settings(tmp_path)["env"]["CLAUDE_CODE_PLUGIN_DIRS"] == PLUGIN
 
 
@@ -43,7 +45,7 @@ def test_uninstall_removes_only_ours(tmp_path):
     assert settings(tmp_path)["env"]["CLAUDE_CODE_PLUGIN_DIRS"] == "/a:/b"
 
 
-# Same fixture string as CLASSIC_CMD in plugins/context-vigil-mod/tests/interlock.test.ts (Task 10).
+# Same fixture string as CLASSIC_CMD in interlock.test.ts beside this file (Task 10).
 CLASSIC_CMD = '"/s/context-vigil/scripts/context-vigil" hook stop'
 
 

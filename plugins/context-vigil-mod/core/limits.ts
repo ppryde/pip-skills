@@ -8,16 +8,23 @@ const resetMs = (l: RateLimit): number | null => {
 
 export function latchFromStopFailure(error: string, limits: RateLimit[], now: number): Latch {
   if (error !== 'rate_limit') return null
-  const known = limits.filter(l => resetMs(l) !== null).sort((a, b) => b.percentUsed - a.percentUsed)
+  // Equally full windows: the later reset, or latchCleared lifts it while the other is still full.
+  const known = limits
+    .filter(l => resetMs(l) !== null)
+    .sort((a, b) => b.percentUsed - a.percentUsed || (resetMs(b) as number) - (resetMs(a) as number))
   const top = known[0]
-  if (!top) return { kind: 'unknown', resetsAtMs: now + 3_600_000 }
+  if (!top) return { kind: 'unknown', resetsAtMs: now + UNKNOWN_LATCH_MS }
   return { kind: top.kind, resetsAtMs: resetMs(top) as number }
 }
 
-export function latchFromMeasure(limits: RateLimit[]): Latch {
-  const full = limits.filter(l => l.percentUsed >= 100 && resetMs(l) !== null)
-  if (!full.length) return null
-  const last = full.reduce((a, b) => ((resetMs(a) as number) >= (resetMs(b) as number) ? a : b))
+const UNKNOWN_LATCH_MS = 3_600_000
+
+export function latchFromMeasure(limits: RateLimit[], now: number): Latch {
+  const full = limits.filter(l => l.percentUsed >= 100)
+  const timed = full.filter(l => resetMs(l) !== null)
+  // A full window with no reset time still latches, as a stop failure without one does.
+  if (!timed.length) return full.length ? { kind: 'unknown', resetsAtMs: now + UNKNOWN_LATCH_MS } : null
+  const last = timed.reduce((a, b) => ((resetMs(a) as number) >= (resetMs(b) as number) ? a : b))
   return { kind: last.kind, resetsAtMs: resetMs(last) as number }
 }
 

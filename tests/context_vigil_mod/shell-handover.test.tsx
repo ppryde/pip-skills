@@ -63,10 +63,10 @@ test('the person present before a clear is still present after it: no armed hand
   expect(w.submits.some(s => s.text.includes(TOOL))).toBe(false)
 })
 
-test('/vhandoff does the same as /vho', async ($, on) => {
+test('/vigil-handover does the same as /vho', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
-  await $.command.run({ command: 'vhandoff', args: '', origin: { kind: 'composer' } as never } as never)
+  await $.command.run({ command: 'vigil-handover', args: '', origin: { kind: 'composer' } as never } as never)
   await w.clock.settle()
   expect(w.submits.at(-1)?.text).toContain(TOOL)
 })
@@ -581,11 +581,14 @@ test('R1-02: a subagent turn ending is not a missed attempt', async ($, on) => {
 test('R1-02: a main turn already in flight ending is not a missed attempt', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
+  await $.prompt.submit(human('long task'))
+  await $.turn.start({ text: 'long task', turnId: 'inflight' } as never)   // the main turn is running when /vho lands
   await $.command.run(vho)
   await w.clock.settle()
-  await $.turn.complete(turn('inflight'))     // started before the instruction; no turn.start of ours yet
+  await $.turn.complete(turn('inflight'))     // that same turn ends; no turn.start of ours yet
   await w.clock.settle()
   expect(asked(w)).toBe(1)
+  expect(w.notices).not.toContain("📜 Couldn't write a handover — nothing was cleared")
 })
 
 test('R1-02: an interrupted instruction turn is not retried, and the interrupt is presence', async ($, on) => {
@@ -738,7 +741,7 @@ test('auto mode switched Off while an unattended clear waits stops it, with a no
   w.draft.value = 'half a sen'                   // typed after the tool hook's own look at the box
   await w.clock.settle()
   expect(w.notices).toContain('✍️ Handover waiting — there is a draft in your prompt box')
-  w.store.set('settings', { auto: false })      // another session, or /vsetup auto on the phone
+  w.store.set('settings', { auto: false })      // another session, or /vigil-setup auto on the phone
   w.draft.value = ''
   await w.clock.advance(5000)
   expect(w.commands).not.toContain('clear')
@@ -838,6 +841,7 @@ test('a store that refuses the pending handover: the hook does not throw, a noti
   const r = await $.tool.call(call() as never) as { result?: string }
   expect(r.result).toContain('not saved')
   expect(w.notices).toContain(V.handoverFailed)
+  expect([...w.store.keys()].filter(k => k.startsWith('pending:'))).toEqual([])   // refused means not stored
   await w.clock.settle()
   expect(w.commands).not.toContain('clear')
 })
@@ -853,5 +857,5 @@ test('a clear attempt that errors is announced and leaves the handover offered, 
   await w.clock.settle()
   expect(w.notices).toContain(V.clearRejected)
   expect(w.commands).not.toContain('clear')
-  expect(w.state.get('context-vigil-mod.pending')).not.toBe(null)
+  expect(w.state.get('context-vigil-mod.pending')).toMatchObject({ path: expect.any(String) })
 })

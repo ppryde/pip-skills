@@ -1,6 +1,6 @@
 # context-vigil-mod live smokes
 
-Owner-run checklist (the controller may also drive a throwaway session via tmux for probes). Run in an account with the mod installed and `/vsetup` done. Fill each result line.
+Owner-run checklist (the controller may also drive a throwaway session via tmux for probes). Run in an account with the mod installed and `/vigil-setup` done. Fill each result line.
 
 ## 1. Requested handover (terminal)
 `/vho` -> instruction turn -> `vigil_handover` called -> file under `handovers/` -> `/clear` runs by itself -> handover injected -> resume prompt arrives.
@@ -15,11 +15,11 @@ Push context past 35%: bar shows `context NN% · threshold 35%`. `1` starts a ha
 Result: PASS 2026-10-04 except the survey half (not forceable). Bar `context 25% · threshold 25%` at setup; `2` hid it until the next step (returned at 48% offering `Remind me at 50%`); `0` hid it silently, threshold lines kept logging with no bar. Survey hide/return: NOT RUN.
 
 ## 4. Phone (Remote Control)
-Auto mode on, idle window 15 min (`/vsetup auto`), work from the phone. When auto mode first arms, the `📱 RC clear` question is asked (once). Yes: at the threshold the 30 s countdown notice reaches the phone, the terminal bar shows the countdown with `0: ✖ Cancel`; pressing 0 or sending a message cancels. No: handover saved, nothing clears.
-Result: PASS (Yes path) 2026-10-04, controller + owner on the phone, run on fix/cvm-auto-guards. Auto mode armed 18 min after a `bridge` prompt; the `📱 RC clear` question reached the phone, answered Yes (`rc.answer yes`). Threshold handover -> `guard.wait countdown-start` -> terminal bar `🧹 Handing over in N s — 0 or send anything to cancel  0: ✖ Cancel` -> clear after 30 s -> resumed. **FAIL: the countdown notice never reaches the phone** (two runs, owner watching) -- `$.ui.toast`/`$.ui.log` are terminal-only over Remote Control (PROBES.md §1 phone result); what looked like the `/vho` notice on the phone was the handover tool's own result. Fix pending: phone notices as a plugin prompt. 2-min RC holdback after a phone message verified live (`guard.wait rc-holdback`). A clear swaps the phone to the new session, so pre-clear notices do not persist there. After a handover rename the RC list shows the session under its NEW name. Not run: cancel (0 / phone message) and the No path -- owner to check.
+Auto mode on, idle window 15 min (`/vigil-setup auto`), work from the phone. When auto mode first arms, the `📱 RC clear` question is asked (once). Yes: at the threshold the 30 s countdown notice reaches the phone, the terminal bar shows the countdown with `0: ✖ Cancel`; pressing 0 or sending a message cancels. No: handover saved, nothing clears.
+Result: PARTIAL (Yes path) 2026-10-04 -- countdown notice never reaches the phone (see FAIL below); the rest of the Yes path passed. Controller + owner on the phone, run on fix/cvm-auto-guards. Auto mode armed 18 min after a `bridge` prompt; the `📱 RC clear` question reached the phone, answered Yes (`rc.answer yes`). Threshold handover -> `guard.wait countdown-start` -> terminal bar `🧹 Handing over in N s — 0 or send anything to cancel  0: ✖ Cancel` -> clear after 30 s -> resumed. **FAIL: the countdown notice never reaches the phone** (two runs, owner watching) -- `$.ui.toast`/`$.ui.log` are terminal-only over Remote Control (PROBES.md §1 phone result); what looked like the `/vho` notice on the phone was the handover tool's own result. Fix pending: phone notices as a plugin prompt. 2-min RC holdback after a phone message verified live (`guard.wait rc-holdback`). A clear swaps the phone to the new session, so pre-clear notices do not persist there. After a handover rename the RC list shows the session under its NEW name. Not run: cancel (0 / phone message) and the No path -- owner to check.
 
 ## 5. Last light
-`/vsetup last-light` On; leave idle ~55 min at >= 25%: handover written, nothing cleared. Return after the hour: resume/carry-on dialog; the held message is re-sent either way.
+`/vigil-setup last-light` On; leave idle ~55 min at >= 25%: handover written, nothing cleared. Return after the hour: resume/carry-on dialog; the held message is re-sent either way.
 Result: PASS 2026-10-04. Fired after 55 min idle at 26%: `last_light.fired` -> handover written, nothing cleared, prompt pre-filled with /clear. Note: the fire's own handover turn refreshes the 1 h cache (spec loop guard), so the return-dialog half needs > 1 h after the fire with no prompt in between. Return half (23:01, cache cold since 22:02): the next prompt was dropped (`🌅 Held by context-vigil-mod — last light asks first`), the `Plugin` dialog offered Resume / Carry on; Carry on -> `last_light.choice carry_on` and the held message was re-sent and answered. Not re-fired while its handover was pending (by design, `reason: pending`). Resume path not run live.
 
 ## 6. Limits
@@ -27,12 +27,12 @@ Force a `rate_limit` (or wait for one): `⏳ resumes HH:MM` notice, no clear unt
 Result: NOT RUN -- a rate limit cannot be forced. Covered by limits/shell-limits unit tests.
 
 ## 7. Coexistence
-With classic installed in the account: one "standing down" notice, nothing else happens.
-Result: NOT RUN live (classic is installed in neither account) -- owner accepts unit-test coverage (interlock.test.ts); owner to check manually.
+With classic installed: one "standing down" notice, nothing else happens.
+Result: NOT RUN.
 
 ## 8. Event log
 `events/<today>/<session>.jsonl` holds `threshold`, `handover.written`, `clear`, `resume` lines with reasons.
-Result: PASS 2026-10-04. threshold, handover.requested, handover.written, guard.wait, clear, resume, rename, arm/disarm all logged with reasons. Minor: the `clear` line carries `unattended` but no `reason` field.
+Result: PARTIAL 2026-10-04. threshold, handover.requested, handover.written, guard.wait, resume, rename, arm/disarm logged with reasons; `clear` carries `unattended` but no `reason` field.
 
 ## 9. Session naming, unnamed session
 Start a fresh session without `/rename`; run a handover. After the clear the prompt border and `/resume` show the handover's `session_name`.

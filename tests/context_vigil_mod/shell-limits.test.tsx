@@ -31,6 +31,15 @@ test('while latched nothing is submitted or cleared; at the lift the deferred ha
   expect(w.commands).toContain('clear')
 })
 
+test('a latch left by a process that has gone is lifted at its reset by this one, with no limit event', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { latch: { kind: 'seven_day', resetsAtMs: 1_000_000 + HOUR } } })
+  await $.session.start(START)
+  expect(w.store.has('latch')).toBe(true)
+  await w.clock.advance(HOUR + 2000)                             // no measure, no StopFailure: only the timer
+  expect(w.store.has('latch')).toBe(false)
+  expect(w.notices).toContain('⏳ Usage limit lifted — back to normal')
+})
+
 // A clear parked on the latch (R2-01): the latch lands between the instruction and the write.
 async function parkedOnLatch($: Engine, w: World, opts: { turnAfterWrite?: boolean } = {}) {
   await $.session.start(START)
@@ -54,7 +63,7 @@ test('a clear parked by the latch, auto Off, is offered at the lift — never ru
   expect(w.commands).not.toContain('clear')
   expect(w.notices.some(n => n.startsWith('📜 A handover is waiting'))).toBe(true)
   expect(parkedDropped(w)).toBe(true)
-  expect(w.state.get('context-vigil-mod.pending')).not.toBe(null)
+  expect(w.state.get('context-vigil-mod.pending')).toMatchObject({ path: expect.any(String) })
 })
 
 test('a clear parked by the latch, auto On and the person still away, runs at the lift as unattended (R2-01)', async ($, on) => {
@@ -73,7 +82,7 @@ test('a person who returns while a clear is parked on the latch turns it into an
   await $.turn.complete(turn('mine'))
   await w.clock.advance(HOUR + 2000)
   expect(w.commands).not.toContain('clear')
-  expect(w.state.get('context-vigil-mod.pending')).not.toBe(null)
+  expect(w.state.get('context-vigil-mod.pending')).toMatchObject({ path: expect.any(String) })
 })
 
 test('a clear parked by the latch is offered, not run, when a turn has run since the write (R2-01)', async ($, on) => {
@@ -440,7 +449,7 @@ test('an early stop with a fresh /vho handover already on disk writes no second 
   await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
   await w.clock.settle()
   expect(asks(w)).toBe(1)                                             // no second handover
-  expect(w.state.get('context-vigil-mod.pending')).not.toBe(null)    // the requested one is untouched
+  expect(w.state.get('context-vigil-mod.pending')).toMatchObject({ path: expect.any(String) })    // the requested one is untouched
   w.draft.value = ''
   await w.clock.advance(5000)
   expect(w.commands).toContain('clear')                               // the person's clear still happens
@@ -459,7 +468,7 @@ test('a skipped limit resume keeps its handover; a later manual /clear injects i
   await $.prompt.submit(human('back already'))
   await w.clock.advance(HOUR + 300_000)
   expect(w.notices.some(n => n.includes('you are back') && n.includes('s1-1.md'))).toBe(true)
-  expect(w.state.get('context-vigil-mod.pending')).not.toBe(null)    // still /clear-able, as the notice says
+  expect(w.state.get('context-vigil-mod.pending')).toMatchObject({ path: expect.any(String) })    // still /clear-able, as the notice says
   const before = w.submits.length
   w.sessionId.value = 's2'
   const ss = await $.classic.SessionStart({ source: 'clear' } as never)

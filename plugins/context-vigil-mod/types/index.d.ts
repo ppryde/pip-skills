@@ -1,6 +1,10 @@
 export type Window = 'seven_day' | 'spend_limit'
 export type RcAnswer = 'unanswered' | 'yes' | 'no'
 
+// The values an override may set, field by field (core/overrides.ts); settings hold the fallbacks.
+export type OverrideValues = { nudgeAt: number; step: number; lastLightAt: number }
+export type Override = { model?: string; window?: number } & Partial<OverrideValues>
+
 export type Settings = {
   nudgeAt: number
   step: number
@@ -13,6 +17,9 @@ export type Settings = {
   limitPct: number
   limitWindows: Window[]
   rcAutoClear: RcAnswer
+  // 0.1.3's per-model table, carried untouched until it has moved into overrides.json, so a
+  // settings save before then cannot lose it.
+  modelThresholds?: unknown
 }
 
 export type Who = 'human' | 'agent' | 'headless'
@@ -94,6 +101,8 @@ declare module 'claude-code' {
     'context-vigil-mod': {
       mode: Mode
       contextPct: number | null
+      contextWindow: number | null
+      contextModel: string | null
       lastNudged: number | null
       baselinePct: number | null
       barShown: boolean

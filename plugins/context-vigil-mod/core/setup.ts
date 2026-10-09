@@ -2,14 +2,17 @@ import type { Settings, StepId, Window } from '../types'
 
 export const TELL = 'Tell me more'
 
+// One $.ui.ask: labels only. AskUserQuestion draws a description on a line of its
+// own under its label, so the recommendation rides in the label instead.
 export type Question = {
   header: string
   question: string
   multiSelect: boolean
-  options: { label: string; description: string }[]
+  options: string[]
 }
 
-type Opt = { label: string; description: string; apply: (s: Settings) => Settings }
+const REC = ' (Recommended)'
+type Opt = { label: string; apply: (s: Settings) => Settings }
 type Step = {
   header: string
   question: string
@@ -21,10 +24,16 @@ type Step = {
 }
 
 const pctOpts = (key: 'nudgeAt' | 'lastLightAt', values: number[], rec: number): Opt[] =>
-  values.map(n => ({ label: `${n}%`, description: n === rec ? 'Recommended' : '', apply: s => ({ ...s, [key]: n }) }))
+  values.map(n => ({ label: n === rec ? `${n}%${REC}` : `${n}%`, apply: s => ({ ...s, [key]: n }) }))
+const pctOther = (key: 'nudgeAt' | 'lastLightAt' | 'limitPct') => (s: Settings, text: string): Settings | null => {
+  // A whole number only: parseInt would take 98.9 as 98 and 95abc as 95.
+  const t = text.trim().replace(/%$/, '')
+  const n = /^\d+$/.test(t) ? Number(t) : NaN
+  return Number.isFinite(n) && n >= 1 && n <= 100 ? { ...s, [key]: n } : null
+}
 const onOff = (key: 'bar' | 'auto' | 'lastLight' | 'limits', recommendOn: boolean, onFirst: boolean): Opt[] => {
-  const on: Opt = { label: 'On', description: recommendOn ? 'Recommended' : '', apply: s => ({ ...s, [key]: true }) }
-  const off: Opt = { label: 'Off', description: recommendOn ? '' : 'Recommended', apply: s => ({ ...s, [key]: false }) }
+  const on: Opt = { label: recommendOn ? `On${REC}` : 'On', apply: s => ({ ...s, [key]: true }) }
+  const off: Opt = { label: recommendOn ? 'Off' : `Off${REC}`, apply: s => ({ ...s, [key]: false }) }
   return onFirst ? [on, off] : [off, on]
 }
 const always = () => true
@@ -33,8 +42,8 @@ const WINDOW_LABEL: Record<Window, string> = { seven_day: 'Weekly (seven_day)', 
 export const STEPS: Record<StepId, Step> = {
   nudge: {
     header: '🎚️ Nudge at', question: 'Big contexts get slower and pricier. At what % should I suggest a handover?',
-    explain: 'The vigil bar shows in the terminal when context reaches this level, and again every +5%. Lower means earlier, smaller handovers. Terminal only. Default 35%.',
-    options: pctOpts('nudgeAt', [25, 35, 50], 35), askIf: always,
+    explain: 'The vigil bar shows in the terminal when context reaches this level, and again every +5%. Lower means earlier, smaller handovers. This is the fallback: /vigil-overrides sets thresholds for a model, a window size or both (by default a 200k window starts at 70%). Terminal only. Type any whole number under Other. Default 35%.',
+    options: pctOpts('nudgeAt', [25, 35, 50], 35), other: pctOther('nudgeAt'), askIf: always,
   },
   bar: {
     header: '🎛️ The bar', question: "Show a one-line bar above the prompt when it's time to hand over?",
@@ -48,8 +57,8 @@ export const STEPS: Record<StepId, Step> = {
   },
   idle: {
     header: '⏱️ Idle time', question: "Auto handovers pause while you're interacting. How long without a message from you before I treat the session as unattended?",
-    explain: 'Messages, slash commands and typing in the terminal all count as you being here. Pick longer if you flit between windows. Default 30 min.',
-    options: [15, 30, 60].map(n => ({ label: `${n} min`, description: { 15: 'You step away properly when you leave', 30: 'Recommended', 60: 'You flit between windows and come back later' }[n] ?? '', apply: (s: Settings) => ({ ...s, idleMin: n }) })),
+    explain: 'Messages, slash commands and typing in the terminal all count as you being here. 15 min suits stepping away properly when you leave; 60 min suits flitting between windows and coming back later. Default 30 min.',
+    options: [15, 30, 60].map(n => ({ label: n === 30 ? `${n} min${REC}` : `${n} min`, apply: (s: Settings) => ({ ...s, idleMin: n }) })),
     askIf: s => s.auto,
   },
   last_light: {
@@ -58,9 +67,9 @@ export const STEPS: Record<StepId, Step> = {
     options: onOff('lastLight', false, false), askIf: always,
   },
   last_light_at: {
-    header: '🌅 Threshold', question: 'Only bother when context is at least…?',
-    explain: 'Below this, a cold cache is cheap enough not to bother. Default 25%.',
-    options: pctOpts('lastLightAt', [25, 35, 50], 25), askIf: s => s.lastLight,
+    header: '🌅 Min ctx %', question: 'Last light: only write the before-the-cache-expires handover when context is at least what %?',
+    explain: 'This is last light\'s own threshold, separate from the nudge: below it, re-reading a small context from a cold cache costs little, so I let the cache expire without writing a handover. Type any whole number under Other. Default 25%.',
+    options: pctOpts('lastLightAt', [25, 35, 50], 25), other: pctOther('lastLightAt'), askIf: s => s.lastLight,
   },
   limits: {
     header: '⏳ Limits', question: 'Near a 7-day or spend limit, stop early with a handover so no work is lost?',
@@ -70,25 +79,22 @@ export const STEPS: Record<StepId, Step> = {
   limit_pct: {
     header: '⏳ Trigger %', question: 'Stop at what % of the limit?',
     explain: 'Higher squeezes more work in; lower leaves more room for the handover itself. Type any whole number under Other. Default 95%.',
-    options: [90, 95, 98].map(n => ({ label: n === 95 ? '95% (Recommended)' : `${n}%`, description: '', apply: (s: Settings) => ({ ...s, limitPct: n }) })),
-    other: (s, text) => {
-      const n = Number.parseInt(text, 10)
-      return Number.isFinite(n) && n >= 1 && n <= 100 ? { ...s, limitPct: n } : null
-    },
+    options: [90, 95, 98].map(n => ({ label: n === 95 ? `95%${REC}` : `${n}%`, apply: (s: Settings) => ({ ...s, limitPct: n }) })),
+    other: pctOther('limitPct'),
     askIf: s => s.limits,
   },
   limit_windows: {
     header: '⏳ Windows', question: 'Which limits should I watch?',
     explain: 'seven_day is the weekly window; spend_limit is a gateway or monthly spend cap. Pick either or both. Default both.',
-    options: (['seven_day', 'spend_limit'] as Window[]).map(w => ({ label: WINDOW_LABEL[w], description: '', apply: (s: Settings) => s })),
+    options: (['seven_day', 'spend_limit'] as Window[]).map(w => ({ label: WINDOW_LABEL[w], apply: (s: Settings) => s })),
     multiSelect: true, askIf: s => s.limits,
   },
   rc: {
     header: '📱 RC clear', question: "I can't see you typing on the phone, so a clear could land mid-message. Allow auto-clear in phone sessions?",
     explain: 'Your phone\'s typing is invisible to me, so a clear could land while you write. With Yes, a 30-second countdown runs first (send anything to cancel) and I never clear within 2 minutes of your last phone message. Default No.',
     options: [
-      { label: 'No', description: 'Recommended', apply: s => ({ ...s, rcAutoClear: 'no' }) },
-      { label: 'Yes', description: 'With countdown and holdback', apply: s => ({ ...s, rcAutoClear: 'yes' }) },
+      { label: `No${REC}`, apply: s => ({ ...s, rcAutoClear: 'no' }) },
+      { label: 'Yes', apply: s => ({ ...s, rcAutoClear: 'yes' }) },
     ],
     askIf: () => false,
   },
@@ -107,7 +113,7 @@ export function questionFor(id: StepId, explain = false): Question {
     header: st.header,
     question: explain ? `${st.explain}\n\n${st.question}` : st.question,
     multiSelect: st.multiSelect === true,
-    options: [...st.options.map(o => ({ label: o.label, description: o.description })), { label: TELL, description: 'Explain this step, then ask again' }],
+    options: [...st.options.map(o => o.label), TELL],
   }
 }
 
@@ -150,10 +156,6 @@ export function extractAnswers(input: unknown, result: unknown): Record<string, 
   return pick(res?.answers) ?? {}
 }
 
-export function stepForQuestion(text: string): StepId | undefined {
-  return (Object.keys(STEPS) as StepId[]).find(id => text === STEPS[id].question || text.endsWith(`\n\n${STEPS[id].question}`))
-}
-
 export function applyAnswers(s: Settings, pairs: { step: StepId; answer: string }[]): { settings: Settings; retell: StepId[] } {
   let out: Settings = { ...s, limitWindows: [...s.limitWindows] }
   const retell: StepId[] = []
@@ -163,7 +165,10 @@ export function applyAnswers(s: Settings, pairs: { step: StepId; answer: string 
       const picked = answer.split(',').map(x => x.trim()).filter(Boolean)
       if (picked.length === 0 || picked.includes(TELL)) { retell.push(step); continue }
       const order: Window[] = ['seven_day', 'spend_limit']
-      out = { ...out, limitWindows: order.filter(w => picked.includes(w) || picked.includes(WINDOW_LABEL[w])) }
+      const windows = order.filter(w => picked.includes(w) || picked.includes(WINDOW_LABEL[w]))
+      // An "Other" naming no window would store "watch nothing": re-ask instead.
+      if (windows.length === 0) { retell.push(step); continue }
+      out = { ...out, limitWindows: windows }
       continue
     }
     if (answer === TELL) { retell.push(step); continue }

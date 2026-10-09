@@ -6,7 +6,7 @@ terminal half driven by a script, phone half by the owner. Phone results marked
 
 ## 1. Notice reaching the phone
 Observed: toast → terminal not captured (transient), phone **pending**; ui.log line → terminal yes (`⏺ cvm-probe: 🧪 probe log line …` in the transcript), phone: shows and resolves there — the Mods Field Notes record "ui.ask can be answered on the phone and resolves with the label (verified 2026-10-04)", and an open ask raises Remote Control's "action required" push (this probe's original "phone pending" was an unanswered dialog, not a non-resolving one).
-Decision: notify() uses both `ui.toast` and `ui.log` until the phone result narrows it.
+Decision: notify() uses both `ui.toast` and `ui.log` for the terminal; neither is a phone-delivery mechanism (phone result below), so phone-relevant notices remain pending owner approval.
 
 Phone result (owner on the Claude Android app, 2026-10-04, CC 2.1.289): **neither reaches the phone** — not from a command handler, not from an idle `$.clock` timer. Also not: `$.session.append` `system` (stored as an `informational` row) or `user` (stored `isMeta`). Reaches the phone: a plugin prompt (`$.prompt.submit`, shown as "The <plugin> plugin sent a message: …", starts a model turn), a slash command's reply `{ text }` (grey `<plugin>: …` line), model output / tools / the model's AskUserQuestion. A `ui.render` observer saw only `terminal` asks — never `mobile`, no `session.attach` — so mod UI (panes, bars) does not draw on the phone today. Live consequence: the RC countdown notice was never seen on the phone (smoke #4, two runs).
 Decision (pending owner approval): in phone sessions, also send phone-relevant notices as a plugin prompt; start the countdown after it lands.
@@ -24,11 +24,11 @@ Observed: source `clear` (new session id); injected context reached the model (H
 
 ## 5. tool.call result `context` reaches the model
 Observed: OSPREY yes.
-Decision: setup follow-up cards ride `context` on the AskUserQuestion result (Task 15) — keep.
+Decision (superseded 2026-10-05): setup no longer asks through the model at all — see §6. `context` on a tool result still reaches the model; nothing in setup uses it now.
 
 ## 6. $.ui.ask
-Observed: terminal → resolved to `Resume from handover` (dialog headed "Plugin", our options plus "Type something." / "Chat about this"); phone **pending**. The live `$.ui.ask` did NOT pass through the mod's own `tool.call` hook (no `AskUserQuestion` event logged for it).
-Decision: last-light return question (Task 13) keeps `$.ui.ask` and awaits its label. The test world may still answer `$.ui.ask` through its AskUserQuestion stub; the shell must not depend on seeing its own `$.ui.ask` in `tool.call`.
+Observed: terminal → resolved to `Resume from handover` (dialog headed "Plugin", our options plus "Type something." / "Chat about this"); phone: answerable there and resolves with the label (verified 2026-10-04, §1), and an open ask raises Remote Control's "action required" push. The live `$.ui.ask` did NOT pass through the mod's own `tool.call` hook (no `AskUserQuestion` event logged for it).
+Decision: last-light return question (Task 13) keeps `$.ui.ask` and awaits its label. Setup (`/vigil-setup`, and the first-arm RC question) moved to `$.ui.ask` too, one step per dialog (2026-10-05): the old route submitted a prompt asking the model to call AskUserQuestion, which showed a "Prompt from the context-vigil-mod plugin" row and cost a turn, and option descriptions drew on a second line, so options are labels only. Because the mod never sees its own ask in `tool.call`, it applies the answer and observes the person (`human-command`) when the `$.ui.ask` promise resolves. The test world may still answer `$.ui.ask` through its AskUserQuestion stub; the shell must not depend on seeing its own `$.ui.ask` in `tool.call`.
 
 ## 7. Plugin prompt origin and { drop }
 Observed: human prompts reach hooks with origin `{ kind: 'composer' }`; `{ drop }` held the prompt yes; re-submit arrived yes (`held prompt re-sent "hello there"`, and the model answered it). The mod's own `$.prompt.submit` prompts (the probe_echo ask, the AskUserQuestion ask, the held re-send) never reached the mod's own `prompt.submit` hook — every logged origin is `composer`; the transcript shows them as "Prompt from the cvm-probe plugin".

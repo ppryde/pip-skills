@@ -4,22 +4,57 @@ Context handover as a Claude Code **mod**: a pure-TypeScript set of function hoo
 
 ## Side by side with classic
 
-It is a second implementation of context-vigil, run beside the classic one so the two can be compared on real work: **personal account = mod, work account = classic**. Classic is untouched. Distinct names everywhere (`/vho` not `/ho`, `vigil_handover`, files under `context-vigil-mod/`), and a temporary interlock (below) makes the mod stand down wherever classic is installed.
+It is a second implementation of context-vigil (the "classic" tmux + status-line plugin). Classic is untouched. Distinct names everywhere (`/vho` not `/ho`, `vigil_handover`, files under `context-vigil-mod/`), and a temporary interlock (below) makes the mod stand down wherever classic is installed.
 
 ## Install
 
+Load it **one way only**, never both:
+
 ```bash
+# from the marketplace, in a Claude Code session
+/plugin marketplace add ppryde/pip-skills
+/plugin install context-vigil-mod@pip-skills
+
+# or straight from a checkout
 bash plugins/context-vigil-mod/scripts/install.sh install     # also: status | uninstall
 ```
 
-Run it in the account you are switching. **Uninstall classic's hooks from that account first** (classic's own uninstall) -- the script refuses otherwise. It lists this folder in `env.CLAUDE_CODE_PLUGIN_DIRS` in that account's own `settings.json` (`$CLAUDE_CONFIG_DIR`, else `~/.claude`), never a repo's. Then start a **new session** and run `/vsetup`.
+**Uninstall classic's hooks first** (classic's own uninstall) -- the script refuses otherwise. It lists this folder in `env.CLAUDE_CODE_PLUGIN_DIRS` in your user `settings.json` (`$CLAUDE_CONFIG_DIR`, else `~/.claude`), never a repo's. Then start a **new session** and run `/vigil-setup`.
 
 ## Commands
 
-- `/vho`, `/vhandoff` -- hand over now (the same command twice).
-- `/vsetup [nudge|bar|auto|last-light|limits|rc]` -- the whole setup flow, or one step. `limits` covers on/off, trigger % and windows together.
+- `/vigil-handover`, or `/vho` for short -- hand over now.
+- `/vigil-overrides [add|rm|check]` -- thresholds per model, window size or both. Bare (or `check`) lists the overrides in the order they are tried, what this session gets and from which override, and any faults or ambiguity; `add` asks for an override for the session you are in; `rm model=… window=…` (either or both) takes one out. See **Overrides** below.
+- `/vigil-setup [nudge|bar|auto|last-light|limits|rc]` -- the whole setup flow, or one step. `limits` covers on/off, trigger % and windows together. The mod asks each step itself in a dialog (`$.ui.ask`), one at a time: nothing is sent to the model and no prompt appears in the conversation. Options are labels only, the recommended one marked `(Recommended)`; **Tell me more** re-asks the step with its explanation. Dismissing a dialog stops setup and keeps what was already answered.
 
-Settings are per account (`$.store`). Defaults: nudge 35% (+5% steps), bar On, auto Off, idle window 30 min, last light Off (threshold 25%), limits On (95%, `seven_day` + `spend_limit`), RC auto-clear unanswered (treated as No).
+## Overrides
+
+Per-model and per-window thresholds live in `<config dir>/context-vigil-mod/overrides.json`, yours to edit by hand or through `/vigil-overrides add`. When the file is missing it is written with the default override, so it is there to see:
+
+```json
+{
+  "overrides": [
+    { "window": 200000, "nudgeAt": 70 },
+    { "model": "opus", "window": 1000000, "nudgeAt": 25, "step": 10 },
+    { "model": "haiku", "nudgeAt": 80, "lastLightAt": 50 }
+  ]
+}
+```
+
+An override has a `model`, a `window` or both, and sets any of `nudgeAt`, `step` and `lastLightAt`. Each value comes from the most specific matching override that sets it, field by field; `/vigil-setup` values are the fallback beneath them all. Most specific first:
+
+1. `model` and `window` -- the longer model pattern first (`opus5.5` before `opus`)
+2. `window` only -- any model on that window
+3. `model` only -- that model on any window
+4. the `/vigil-setup` values
+
+A model pattern is a family and at most a version: `opus` takes every Opus, `opus5` every Opus 5, `opus5.5` (or `opus-5-5`) only Opus 5.5. A window is a whole number of tokens, matched exactly. When a window override and a model override both match a session and both set the same field (whatever their values), the window wins and a notice says so once per session, naming the model+window override that would settle it. The file is checked whenever a threshold is decided: a fault in an override (an unknown key, a bad pattern, a duplicate key) is told once, naming the override, and only that override is ignored. A file that is not valid JSON, or not `{ "overrides": [ … ] }`, names no override: it is told once and the last good read stays in force (the default override if there was none).
+
+**From 0.1.3:** overrides set with the old `/vsetup models` (kept in the settings store) move into `overrides.json` at the next session start, once: `[1m]` becomes `window=1M`, a family such as `opus` a model pattern, `opus-5-5[1m]` both. One already in the file for the same key stands; a pattern that has no equivalent here is named in the notice and not carried over.
+
+The threshold reads the main session's own model and context window from the engine's measure, which fires after main-thread turns only: a subagent's tokens and its smaller window never move it, so a subagent cannot trip a handover.
+
+Settings are per account (`$.store`) and re-read before every decision that matters, so a change made in one session reaches the others. Defaults: nudge 35% (+5% steps), with one default override `window=200k → 70%`, bar On, auto Off, idle window 30 min (15, 30 or 60), last light Off (writes its handover only at 25%+ context), limits On (95%, `seven_day` + `spend_limit`), RC auto-clear unanswered (treated as No).
 
 ## Three states
 
@@ -27,11 +62,11 @@ Every moment is in exactly one:
 
 | You | The agent | State | At the context threshold |
 |---|---|---|---|
-| engaged | anything | **attended** | nudge only (bar in the terminal, notice on the phone); never clears |
+| engaged | anything | **attended** | nudge only (bar and notice in the terminal); never clears |
 | idle >= idle window | working | **auto armed** | hands over, clears, resumes by itself |
 | idle | idle | **last-light territory** | no clear; before the cache goes cold, write the handover only |
 
-*Engaged* = a `composer`, `bridge` (Remote Control) or `slack-ping` prompt, a slash command you ran, or a prompt-box edit/draft, within the idle window. *Working* = agent activity within the last 2 min. Auto mode is off until enabled in `/vsetup auto`. `sdk` sessions (`claude -p`) are unattended from the first turn. An `unclassified`, `channel` or `auto-continuation` prompt disarms auto mode but counts for nothing else.
+*Engaged* = a `composer`, `bridge` (Remote Control) or `slack-ping` prompt, a slash command you ran, an answer to one of the mod's questions, a bar button press, or a prompt-box edit/draft, within the idle window. *Working* = agent activity within the last 2 min. Auto mode is off until enabled in `/vigil-setup auto`. `sdk` sessions (`claude -p`) are unattended from the first turn. An `unclassified`, `channel` or `auto-continuation` prompt disarms auto mode but counts for nothing else.
 
 ## The handover
 
@@ -44,33 +79,39 @@ State that must cross a clear (pending handover, limit latch) lives in `$.store`
 ## The vigil bar
 
 Terminal only. Shown from the threshold crossing until you choose or a handover happens:
-`🕯️ context 41% · threshold 35%   📜 Hand over now · ⏰ Remind me at 40% · ✖ Dismiss`, with hotkeys `1`, `2`, `0` on the three buttons (the label names the absolute next step).
+`🕯️ context 41% · threshold 35%   📜 Hand over now · ⏰ Remind me at 45% · ✖ Dismiss`, with hotkeys `1`, `2`, `0` on the three buttons (the label names the absolute next step).
 
 - `1` starts a handover; `2` hides it until the next step; `0` hides it silently until a `/clear`.
 - A bare digit typed into an **empty** prompt box presses a button, so the bar is threshold-only, never always-on.
 - It **yields to the feedback survey** (`hasSurvey`) and returns after it.
-- Off via `/vsetup bar`: a toast and log line (fired from the context measure) still mark the threshold and every step after. Phone sessions get the notice, not the bar.
+- Off via `/vigil-setup bar`: a toast and log line (fired from the context measure) still mark the threshold and every step after. Notices (`ui.toast`/`ui.log`) show in the terminal only: they do not reach Remote Control yet (PROBES.md §1).
 
 ## Guards and failure paths
 
 - Draft guard: a clear waits while the terminal prompt box holds a draft, rechecked every 2 s, with a notice.
-- If the model does not call `vigil_handover`, it is asked once more; then a "couldn't write a handover" notice appears and nothing clears.
+- If the model does not call `vigil_handover`, it is asked once more; then a "couldn't write a handover" notice appears and nothing clears. A request that is lost altogether expires after 10 idle minutes.
+- A handover the model writes without being asked is saved but never cleared into.
+- A second `/vho` while one is in flight is refused with a notice, and a clear is never queued twice. `/vho` says plainly when a handover is already running, the mod is standing down or a limit is latched.
+- Turning auto off, in any session, stops a clear that is waiting.
 - A handover asked for or due while the latch is set waits for it; your next message cancels it. When the latch lifts it runs only if auto mode is on and you are still away, as an unattended handover (attended re-check and RC rules apply); otherwise a notice tells you it was not run. This holds whether the latch landed before or after the handover file was written: a clear the latch parked follows the same rule.
 - Attended guard: an auto-mode (unattended) handover never clears once you are back. The mode is re-checked at the moment of clearing; if you have prompted since it began, the handover is kept, the log says `clear.skipped`, and a notice says to `/vho` or `/clear` when ready. `/vho` and the bar's `1` are attended and unaffected.
 - Baseline guard: an auto-mode threshold handover fires only once context has grown at least one `step` (default 5) above the session's baseline, its first context reading (a /clear starts a new baseline). This stops a session that resumes just under the threshold from handing over again within a turn; the log says `guard.baseline` when it holds one back. Attended nudges are unaffected.
-- A handover still pending when a session restarts is offered at session start with a `/clear` notice.
+- A handover still pending when a session restarts is offered at session start with a `/clear` notice. Parked handovers older than 14 days are pruned.
+- With neither `HOME` nor `CLAUDE_CONFIG_DIR` set, nothing is written anywhere and a handover is refused with a notice.
 
 ## Last light
 
-`/vsetup last-light`. When nothing has come from you since the agent's last turn and the agent is idle, shortly before the 1 h prompt cache lapses (5 min lead; it only works with a 1-hour cache -- just before it would fire, the mod reads the latest cache write from the transcript's last 64 KB and does not fire for a 5-minute cache, or when it finds nothing, so it never warms a cold one). Information only: after the session's first cache-writing response the mod reads the cache type once; for a 5-minute cache it shows a "Last light is off for this session" line above the prompt until your next message (the threshold bar takes precedence), and a model switch's `cache_ttl` updates it, announcing when last light is back on and context is at or past the last-light threshold, the mod **writes the handover only; it never clears**. It fires at most once until a human prompt re-arms it. When you return after the cache has expired, your next prompt is held and the mod asks: resume from the handover (cheap) or carry on (pays the cold cache). Your message is re-sent either way.
+`/vigil-setup last-light`. When nothing has come from you since the agent's last turn, the agent is idle, the 1 h prompt cache is about to lapse (5 min lead) and context is at or past the last-light threshold, the mod **writes the handover only; it never clears**.
+
+It only works with a 1-hour cache: just before it would fire, the mod reads the latest cache write from the transcript's last 64 KB and does not fire for a 5-minute cache, or when it finds nothing, so it never warms a cold one. Separately, for information only: after the session's first cache-writing response the mod reads the cache type once; for a 5-minute cache it shows a "Last light is off for this session" line above the prompt until your next message (the threshold bar takes precedence). A model switch's `cache_ttl` updates it, announcing when last light is back on. It fires at most once until a human prompt re-arms it. When you return after the cache has expired, your next prompt is held and the mod asks: resume from the handover (cheap) or carry on (pays the cold cache). Your message is re-sent either way.
 
 ## Limits
 
-A rate-limit failure or a window at its limit sets an account-wide **latch** with the reset time: no clearing and no prompting until it lifts (notices show `⏳ resumes HH:MM`). **Early stop** (configurable via `/vsetup limits`): when a watched window (`seven_day`, `spend_limit`) reaches the trigger % (default 95), once per window, the mod writes a handover and arranges a resume 5 min after the reset if the session is still open and you have not come back in the meantime (then a notice names the handover instead). The latch is account-wide (`$.store`); early-stop marks are per running session. The 5-hour window is left to Claude Code's own wrap-up and auto-continue.
+A rate-limit failure or a window at its limit sets an account-wide **latch** with the reset time: no clearing and no prompting until it lifts (notices show `⏳ resumes HH:MM`). A full window that reports no reset time latches for an hour at a time. **Early stop** (configurable via `/vigil-setup limits`): when a watched window (`seven_day`, `spend_limit`) reaches the trigger % (default 95), once per window, the mod writes a handover and arranges a resume 5 min after the reset if the session is still open and you have not come back in the meantime (then a notice names the handover instead). The latch is account-wide (`$.store`); early-stop marks are per running session. The 5-hour window is left to Claude Code's own wrap-up and auto-continue.
 
 ## Remote Control
 
-"On the phone" = the last human prompt came from `bridge`. The first time auto mode would arm there, a one-off question asks whether to allow auto-clear in RC sessions (`/vsetup rc` re-asks). The question is a card in the conversation; the agent waits for your answer — until then nothing is cleared, and the question is asked until it is answered — a dismissed card is asked again in a later session. Answering counts as you being here — a handover parked while the question waited is offered, never run. If allowed: a 30 s countdown with Cancel (any message cancels), and no clear within 2 min of the last phone prompt. Otherwise the handover is saved and a notice says why nothing cleared (`/vsetup rc` to enable, or auto-clear is off for RC). The countdown and holdback apply only to unattended clears: `/vho` or the bar's `1` from the phone bypass them. The countdown bar draws even with the bar setting Off.
+"On the phone" = the last human prompt came from `bridge`. The first time auto mode would arm there, a one-off question asks whether to allow auto-clear in RC sessions (`/vigil-setup rc` re-asks). The question is a dialog from the mod (no model turn); an open one raises Remote Control's "action required" push and can be answered on the phone (PROBES.md §1). Until it is answered nothing is cleared, and a dismissed one is asked again in a later session. Answering counts as you being here — a handover parked while the question waited is offered, never run. If allowed: a 30 s countdown with Cancel in the terminal bar (any message cancels; the countdown notice does not reach the phone yet, PROBES.md §1), and no clear within 2 min of the last phone prompt. Otherwise the handover is saved and a notice says why nothing cleared (`/vigil-setup rc` to enable, or auto-clear is off for RC). The countdown and holdback apply only to unattended clears: `/vho` or the bar's `1` from the phone bypass them. The countdown bar draws even with the bar setting Off.
 
 ## Files
 

@@ -4,6 +4,7 @@ import {
   ago,
   attachCommand,
   claudePidsIn,
+  configDirTag,
   grouped,
   headline,
   matchTarget,
@@ -13,6 +14,7 @@ import {
   repoFromGit,
   repoOf,
   repoTabs,
+  resolveConfigDirs,
   sorted,
   strayRows,
   summary,
@@ -24,7 +26,7 @@ import {
 } from '../../plugins/agent-roster/hooks/register'
 
 const DAY = 86_400_000
-const base = { sessionId: '', account: 'personal', cwd: '/r', repo: 'r', kind: 'interactive' }
+const base = { sessionId: '', cwd: '/r', repo: 'r', kind: 'interactive' }
 
 test('the headline counts who needs you, who works and who idles', async () => {
   const rows = [
@@ -108,7 +110,7 @@ test('summarises the roster for the phone in sections, your prompt with its age'
         prompt: 'add demo cards',
         promptAt: now - 2 * DAY,
       },
-      { ...base, pid: 2, account: 'work', repo: 'warehouse', status: 'idle', lastActive: now - 3 * DAY },
+      { ...base, pid: 2, repo: 'warehouse', status: 'idle', lastActive: now - 3 * DAY },
     ],
     now,
   )
@@ -138,13 +140,11 @@ test('reads a registry entry into a row: tmux name, repo, worktree, why it waits
       kind: 'interactive',
       updatedAt: 1000,
     },
-    'personal',
   )
 
   expect(row).toEqual({
     pid: 51438,
     sessionId: 's1',
-    account: 'personal',
     tmux: 'cc-ledger-poc-1',
     cwd: '/Users/me/repos/ledger-poc/.claude/worktrees/w2-demoui',
     repo: 'ledger-poc',
@@ -155,7 +155,7 @@ test('reads a registry entry into a row: tmux name, repo, worktree, why it waits
     lastActive: 1000,
   })
   expect(repoOf('/Users/me/repos/pip-skills')).toEqual({ repo: 'pip-skills' })
-  expect(toRow({ cwd: '/x' }, 'work')).toBe(undefined)
+  expect(toRow({ cwd: '/x' })).toBe(undefined)
 })
 
 test('files transcripts under the cwd with every non-alphanumeric as a dash', async () => {
@@ -177,10 +177,10 @@ test('waiting sessions first, then busy, then the rest by last active', async ()
   expect(ago(0, 3 * DAY)).toBe('3d')
 })
 
-test('a kill target is a tmux name or a pid, and a name on both accounts is two matches', async () => {
+test('a kill target is a tmux name or a pid, and a name on two tmux servers is two matches', async () => {
   const rows = [
     { ...base, pid: 23156, status: 'idle', lastActive: 0, tmux: 'cc-take-home-tasks-2' },
-    { ...base, pid: 83438, status: 'idle', lastActive: 0, account: 'work', tmux: 'cc-take-home-tasks-2' },
+    { ...base, pid: 83438, status: 'idle', lastActive: 0, tmux: 'cc-take-home-tasks-2' },
     { ...base, pid: 75378, status: 'idle', lastActive: 0 },
   ]
 
@@ -191,8 +191,8 @@ test('a kill target is a tmux name or a pid, and a name on both accounts is two 
 })
 
 test('the opener attaches by exact name on the found socket, and refuses unquotable names', async () => {
-  expect(attachCommand('claude-personal', 'cc-pip-skills-10')).toBe(
-    "tmux -L claude-personal attach -t '=cc-pip-skills-10'",
+  expect(attachCommand('default', 'cc-pip-skills-10')).toBe(
+    "tmux -L default attach -t '=cc-pip-skills-10'",
   )
   expect(attachCommand('claude', "x'; rm -rf ~")).toBe(undefined)
   expect(attachCommand('claude', 'a"b')).toBe(undefined)
@@ -200,8 +200,8 @@ test('the opener attaches by exact name on the found socket, and refuses unquota
 
 test('the VS Code link carries socket, exact name and the one-time token, and refuses what it cannot pass', async () => {
   const nonce = '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0'
-  expect(vscodeUri('claude-personal', 'cc-pip-skills-9', nonce)).toBe(
-    `vscode://pip.agent-roster-vscode/attach?socket=claude-personal&name=cc-pip-skills-9&nonce=${nonce}`,
+  expect(vscodeUri('default', 'cc-pip-skills-9', nonce)).toBe(
+    `vscode://pip.agent-roster-vscode/attach?socket=default&name=cc-pip-skills-9&nonce=${nonce}`,
   )
   expect(vscodeUri('claude', 'a&b=c', nonce)).toBe(undefined)
   expect(vscodeUri('claude', 'ok', 'short')).toBe(undefined)
@@ -255,10 +255,10 @@ test('a pane running Claude with no registry entry shows as waiting at a startup
     'cc-pip-skills-9\t48701\t2.1.287\t/Users/me/repos/pip-skills\t1791148000',
     '11\t90605\tzsh\t/Users/me/repos/pip-skills\t1791148000',
   ].join('\n')
-  const rows = strayRows(panes, 'claude-personal', { pids: new Set([48701]), tmuxNames: new Set() })
+  const rows = strayRows(panes, { pids: new Set([48701]), tmuxNames: new Set() })
 
-  expect(rows.map(r => [r.tmux, r.pid, r.status, r.account, r.repo, r.lastActive])).toEqual([
-    ['cc-home-1', 50166, 'waiting', 'personal', 'me', 1791148516000],
+  expect(rows.map(r => [r.tmux, r.pid, r.status, r.repo, r.lastActive])).toEqual([
+    ['cc-home-1', 50166, 'waiting', 'me', 1791148516000],
   ])
   expect(rows[0]?.waitingFor).toContain('startup prompt')
 })
@@ -273,33 +273,92 @@ test('a registry pid counts only while it is still Claude, and never 0 or 1', as
   ].join('\n')
 
   expect([...claudePidsIn(ps)].sort()).toEqual([48701, 52936])
-  expect(toRow({ pid: 0, cwd: '/r' }, 'personal')).toBe(undefined)
-  expect(toRow({ pid: 1.5, cwd: '/r' }, 'personal')).toBe(undefined)
+  expect(toRow({ pid: 0, cwd: '/r' })).toBe(undefined)
+  expect(toRow({ pid: 1.5, cwd: '/r' })).toBe(undefined)
 })
 
 test('kill ends a whole tmux session only when it cannot hold this one', async () => {
-  const target = { tmux: 'cc-a-1', account: 'personal' }
-  const self = { pid: 333, tmux: 'cc-me-1', account: 'personal' }
+  const target = { tmux: 'cc-a-1' }
+  const self = { pid: 333, tmux: 'cc-me-1' }
 
   expect(mayKillTmuxSession(target, [111, 222], self)).toBe(true)
   // This session's Claude sits in one of the target's panes.
   expect(mayKillTmuxSession(target, [111, 333], self)).toBe(false)
   // A shell above Claude hides the pid, but the tmux name still matches.
   expect(mayKillTmuxSession(target, [999], { ...self, tmux: 'cc-a-1' })).toBe(false)
-  // The same name on the other account's socket is a different session.
-  expect(mayKillTmuxSession(target, [999], { ...self, tmux: 'cc-a-1', account: 'work' })).toBe(true)
   // This session unknown: never a whole tmux session.
   expect(mayKillTmuxSession(target, [111], undefined)).toBe(false)
 })
 
 test('a registered session is not listed again as a stray, by pid or by tmux name', async () => {
   const panes = 'cc-pip-skills-9\t90001\t2.1.289\t/Users/me/repos/pip-skills\t1791148000'
-  expect(strayRows(panes, 'claude-personal', { pids: new Set(), tmuxNames: new Set(['personal:cc-pip-skills-9']) })).toEqual([])
-  expect(strayRows(panes, 'claude', { pids: new Set(), tmuxNames: new Set(['personal:cc-pip-skills-9']) })).toHaveLength(1)
-  // On a socket that maps to no account, a registered session of that name on any account counts.
-  expect(strayRows(panes, 'default', { pids: new Set(), tmuxNames: new Set(['work:cc-pip-skills-9']) })).toEqual([])
+  expect(strayRows(panes, { pids: new Set([90001]), tmuxNames: new Set() })).toEqual([])
+  expect(strayRows(panes, { pids: new Set(), tmuxNames: new Set(['cc-pip-skills-9']) })).toEqual([])
+  expect(strayRows(panes, { pids: new Set(), tmuxNames: new Set(['cc-other-1']) })).toHaveLength(1)
 })
 
 test('profile names that would read as flags are left out', async () => {
-  expect(profileNames({ userDataProfiles: [{ name: '--help' }, { name: 'Work' }] })).toEqual(['Work'])
+  expect(profileNames({ userDataProfiles: [{ name: '--help' }, { name: 'Beta' }] })).toEqual(['Beta'])
+})
+
+test('a config dir is tagged by its name: .claude-X is X, else the dot goes', async () => {
+  expect(configDirTag('/home/.claude-personal')).toBe('personal')
+  expect(configDirTag('/home/.claude')).toBe('claude')
+  expect(configDirTag('/srv/accounts/work/')).toBe('work')
+})
+
+test('unset ROSTER_CONFIG_DIRS is the session\'s own dir alone, untagged', async () => {
+  expect(resolveConfigDirs(undefined, '/home', '/home/.claude')).toEqual([{ dir: '/home/.claude' }])
+  expect(resolveConfigDirs('  ', '/home', '/home/.claude')).toEqual([{ dir: '/home/.claude' }])
+})
+
+test('the list expands ~, dedupes by resolved path and leaves the own dir untagged', async () => {
+  expect(
+    resolveConfigDirs('~/.claude:~/.claude-personal:/home/.claude-personal/:/home/./.claude', '/home', '/home/.claude'),
+  ).toEqual([{ dir: '/home/.claude' }, { dir: '/home/.claude-personal', tag: 'personal' }])
+})
+
+test('the list splits on ":" unless an entry starts with a drive letter, then on ";"', async () => {
+  expect(resolveConfigDirs('/a/.claude:/b/.claude-x', '/h', '/a/.claude')).toEqual([
+    { dir: '/a/.claude' },
+    { dir: '/b/.claude-x', tag: 'x' },
+  ])
+  expect(resolveConfigDirs('C:\\u\\.claude;C:\\u\\.claude-work', 'C:\\u', 'C:\\u\\.claude')).toEqual([
+    { dir: 'C:\\u\\.claude' },
+    { dir: 'C:\\u\\.claude-work', tag: 'work' },
+  ])
+})
+
+test('a row from another account carries its tag in the Remote Control text', async () => {
+  const text = summary(
+    [
+      { ...base, pid: 1, repo: 'warehouse', status: 'busy', lastActive: 0, account: 'personal' },
+      { ...base, pid: 2, repo: 'ledger', status: 'busy', lastActive: 0 },
+    ],
+    60_000,
+  )
+
+  expect(text).toContain('• warehouse — pid 1 · warehouse · 1m · personal')
+  expect(text.endsWith('• ledger — pid 2 · ledger · 1m')).toBe(true)
+})
+
+test('a list that omits the own dir still reads it first, untagged', async () => {
+  expect(resolveConfigDirs('/b/.claude-x', '/h', '/h/.claude')).toEqual([
+    { dir: '/h/.claude' },
+    { dir: '/b/.claude-x', tag: 'x' },
+  ])
+})
+
+test('~\\ expands to home too, and a Windows list dedupes without regard to case', async () => {
+  expect(resolveConfigDirs('~\\.claude-work;c:\\U\\.CLAUDE-WORK', 'C:\\U', 'C:\\U\\.claude')).toEqual([
+    { dir: 'C:\\U\\.claude' },
+    { dir: 'C:\\U\\.claude-work', tag: 'work' },
+  ])
+  expect(resolveConfigDirs('C:\\u\\.CLAUDE', 'C:\\u', 'C:\\u\\.claude')).toEqual([{ dir: 'C:\\u\\.claude' }])
+})
+
+test('the Remote Control text warns of dirs that could not be read', async () => {
+  const text = summary([{ ...base, pid: 1, status: 'busy', lastActive: 0 }], 60_000, ['personal: EACCES'])
+
+  expect(text.split('\n').at(-1)).toBe('! could not read personal: EACCES')
 })
