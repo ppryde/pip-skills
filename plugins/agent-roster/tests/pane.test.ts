@@ -295,18 +295,36 @@ test('a session file that lists but cannot be read is a warning for its dir', as
 
 
 // The tmux sweep: a pane with no entry in the dir this session reads.
-function otherAccountsWorld(on: On, listed = '') {
+// `extra`: `shell` adds a pane whose pid is a zsh above a Claude registered in the work account;
+// `reused` adds a pane whose pid has a long-dead work-account record (the pid was reused).
+function otherAccountsWorld(on: On, listed = '', extra: { shell?: boolean; reused?: boolean } = {}) {
+  const now = Date.now()
   const registries: Record<string, Record<string, object>> = {
     '/home/.claude/sessions': { '101.json': { pid: 101, sessionId: 'a', cwd: '/r/mine', tmux: 'cc-own-1:@0.%0', status: 'busy', updatedAt: 0 } },
-    '/home/.claude-work/sessions': { '777.json': { pid: 777, sessionId: 'w', cwd: '/r/work', tmux: 'cc-work-1:@1.%1', status: 'busy', updatedAt: 0 } },
+    '/home/.claude-work/sessions': {
+      '777.json': { pid: 777, sessionId: 'w', cwd: '/r/work', tmux: 'cc-work-1:@1.%1', status: 'busy', updatedAt: 0, startedAt: now - 3_600_000 },
+      ...(extra.shell ? { '951.json': { pid: 951, sessionId: 'sh', cwd: '/r/shell', tmux: 'cc-shell-1:@2.%2', status: 'busy', updatedAt: 0, startedAt: now - 180_000 } } : {}),
+      ...(extra.reused ? { '860.json': { pid: 860, sessionId: 'old', cwd: '/r/old', tmux: 'cc-old:@3.%3', status: 'idle', updatedAt: 0, startedAt: now - 5 * 86_400_000 } } : {}),
+    },
   }
   const calls: string[][] = []
-  const recent = Math.floor(Date.now() / 1000) - 60
+  const recent = Math.floor(now / 1000) - 60
   const panes = [
     `cc-own-1\t101\t2.1.289\t/r/mine\t${recent}`,
     `cc-work-1\t777\t2.1.289\t/r/work\t${recent}`,
     `cc-agents\t800\t2.1.289\t/r/x\t${recent}`,
     `cc-new-1\t900\t2.1.289\t/r/new\t${recent}`,
+    ...(extra.shell ? [`cc-shell-1\t950\t2.1.289\t/r/shell\t${recent}`] : []),
+    ...(extra.reused ? [`cc-reused\t860\t2.1.289\t/r/reused\t${recent}`] : []),
+  ].join('\n')
+  const procs = [
+    '  777     1  01:00:00 /v/2.1.289',
+    '  800     1     10:00 /v/2.1.289 agents',
+    '  900     1     02:00 /v/2.1.289',
+    '  950     1     03:00 -zsh',
+    '  951   950     03:00 /v/2.1.289',
+    '  860     1     00:30 /v/2.1.289',
+    '',
   ].join('\n')
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home' : e.name === 'ROSTER_CONFIG_DIRS' ? listed || undefined : undefined }))
   on('session.id', () => ({ value: 'self' }))
@@ -318,6 +336,7 @@ function otherAccountsWorld(on: On, listed = '') {
     return { value: [] }
   })
   on('fs.read', ($, e) => {
+    calls.push(['fs.read', e.path])
     const at = e.path.lastIndexOf('/')
     return { value: JSON.stringify(registries[e.path.slice(0, at)]?.[e.path.slice(at + 1)]) }
   })
@@ -334,7 +353,7 @@ function otherAccountsWorld(on: On, listed = '') {
     if (bin === 'id') stdout = '501\n'
     else if (bin === 'tmux' && rest.includes('list-panes') && rest.includes('-a')) stdout = panes
     else if (bin === 'ps' && rest[1] === 'pid=,comm=') stdout = '101 /bin/claude\n777 /bin/claude\n'
-    else if (bin === 'ps' && rest[1] === 'pid=,args=') stdout = '777 /v/2.1.289\n800 /v/2.1.289 agents\n900 /v/2.1.289\n'
+    else if (bin === 'ps' && rest.includes('pid=,ppid=,etime=,args=')) stdout = procs
     return { value: { exitCode: bin === 'git' ? 1 : 0, stdout, stderr: '' } as never }
   })
   return calls
@@ -359,13 +378,32 @@ test('a dir already in ROSTER_CONFIG_DIRS is an ordinary row, with no other-acco
   expect(text).toContain('cc-work-1')
 })
 
-test('the sweep asks ps once for all candidate pids, and only for unregistered panes', async ($, on) => {
+const PS_PROCS = ['ps', '-ax', '-o', 'pid=,ppid=,etime=,args=']
+
+test('the sweep asks ps once, for every process (to see under shells); a registered pane is never looked up in another account', async ($, on) => {
   const calls = otherAccountsWorld(on)
   await bridgeText($)
-  const argsCalls = calls.filter(c => c[0] === 'ps' && c[2] === 'pid=,args=' || c.join(' ').includes('pid=,args='))
+  const reads = calls.filter(c => c[0] === 'fs.read').map(c => c[1] ?? '')
 
-  expect(argsCalls).toHaveLength(1)
-  expect(argsCalls[0]!.join(' ')).toContain('777,800,900')
+  expect(calls.filter(c => c.join(' ').includes('pid=,ppid=,etime=,args='))).toEqual([PS_PROCS])
+  expect(reads.some(p => p.includes('.claude-work') && p.endsWith('/101.json'))).toBe(false) // 101 is registered here: not a candidate
+  expect(reads).toContain('/home/.claude-work/sessions/777.json') // 777 is: it was looked for
+})
+
+test('a pane whose pid is a shell above Claude is labelled by the Claude under it, not left as a startup prompt', async ($, on) => {
+  otherAccountsWorld(on, '', { shell: true })
+  const text = await bridgeText($)
+
+  expect(text).toMatch(/cc-shell-1.*running in another account \(work\)/)
+  expect(text.match(/at a startup prompt/g)).toHaveLength(1) // only cc-new-1
+})
+
+test('a work-account record left behind by a dead session does not label an unrelated process that reused its pid', async ($, on) => {
+  otherAccountsWorld(on, '', { reused: true })
+  const text = await bridgeText($)
+
+  expect(text).toMatch(/cc-reused.*at a startup prompt/)
+  expect(text).not.toMatch(/cc-reused.*another account/)
 })
 
 test('no kill is offered for an other-account or agents-view pane', async ($, on) => {

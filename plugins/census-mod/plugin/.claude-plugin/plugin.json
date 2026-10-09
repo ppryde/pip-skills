@@ -1,6 +1,6 @@
 {
   "name": "census-mod",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Census v2 recorded and drawn by a Claude Code mod: records every interactive session into the census store (via census ingest) and draws the status line above the prompt (the band) or below it (under the hint line). No heartbeat; git and gh only when something can have changed.",
   "author": {
     "name": "Pip",

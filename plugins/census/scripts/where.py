@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,8 @@ def _settings(path: Path) -> tuple[bool, bool | None, dict[str, Any]]:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return False, None, {}
+    except UnicodeError:  # there, but not text we can read (not UTF-8): invalid, not a crash
+        return True, False, {}
     try:
         data = json.loads(text)
     except ValueError:
@@ -56,7 +59,8 @@ def _plugin_dir_mentions(settings: dict[str, Any], name: str) -> bool:
     env = settings.get("env")
     if isinstance(env, dict) and isinstance(env.get(PLUGIN_DIRS_ENV), str):
         values.append(env[PLUGIN_DIRS_ENV])
-    return any(name in v for v in values)
+    # A root names the plugin only as a whole path component: `/tmp/census-mod-backup/plugin` is not census-mod.
+    return any(name in re.split(r"[\\/]", root) for v in values for root in re.split(r"[:;]", v))
 
 
 def report() -> dict[str, Any]:

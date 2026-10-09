@@ -1,6 +1,6 @@
 {
   "name": "agent-roster",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "A live /roster pane (the roster as text over Remote Control) listing the Claude sessions registered in the configured config dirs (`ROSTER_CONFIG_DIRS`), plus tmux sessions still at a startup prompt: tmux name, repo and worktree, branch, status, last active and last prompt. A mod.",
   "author": {
     "name": "Pip",

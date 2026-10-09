@@ -135,13 +135,16 @@ longer running (the registry outlives crashed processes). A session held at a st
 prompt (trusting a folder, logging in) has not registered yet, so the roster
 also lists the panes on every tmux server: one running Claude with no
 registry entry shows under *Needs you* as "at a startup prompt" -- unless it is one of
-the following, which the sweep checks first (one `exists` per candidate pid and other
-`$HOME/.claude*` dir, and one batched `ps -o pid=,args=`), and which are listed as
+the following, which the sweep checks first (one batched `ps -ax -o pid=,ppid=,etime=,args=`,
+then one read per candidate and other `$HOME/.claude*` dir), and which are listed as
 quiet idle rows with a note, never a kill button and never counted as needing you:
 
 - **`running in another account (<tag>) — set ROSTER_CONFIG_DIRS to list it`**: the
-  pid has a registry file in another `$HOME/.claude*/sessions/` dir that this
-  mod is not reading, so it is a working session of another account, not a stray.
+  Claude process has a registry file in another `$HOME/.claude*/sessions/` dir that this
+  mod is not reading, so it is a working session of another account, not a stray. A pane
+  whose pid is a shell above Claude is resolved to the Claude under it first, and a
+  record only counts if its `startedAt` agrees with the live process's age (a crashed
+  session's leftover file does not label whatever reused its pid).
   List the dir in `ROSTER_CONFIG_DIRS` and it becomes an ordinary row. A dir already
   listed is never reported this way.
 - **`agents view`**: the pane runs `claude agents`, which never registers.

@@ -19,13 +19,15 @@ never a `census` already on `PATH`, which may be another plugin's launcher. Use
 stands for `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py"` (or the `python`
 form); write the whole thing out each time.
 
-Never build a command from shell variables in braces or with default values
-(a dollar sign, a brace and a colon-dash fallback): Claude Code stops to ask about
-"a variable in braces" even for a read-only check. Every path you need (the config
-dir, the census dir, `settings.json`) comes from `CENSUS where` below.
+Use no shell variables in any command, except `${CLAUDE_PLUGIN_ROOT}`, which Claude
+Code substitutes before you see it. Never compose a config path with a default
+value (a dollar sign, a brace and a colon-dash fallback): Claude Code stops to ask
+about "a variable in braces" even for a read-only check. Every path you need (the
+config dir, the census dir, `settings.json`) comes from `CENSUS where` below.
 To act on another account than the one you are running in, add
-`--config-dir <dir>` to `where`, `install` and `uninstall`; a dry run's first line
-says which account it touches.
+`--config-dir <dir>` to `where`, `install`, `uninstall` and `statusline --preview`
+(so the preview shows that account's limits too); a dry run's first line says
+which account it touches.
 
 ## Steps
 
@@ -48,7 +50,8 @@ says which account it touches.
      launcher, `~/.local/bin/census`, and install refuses a launcher it does
      not own. Do not continue until they have.
 
-2. **Preview.** Run `CENSUS statusline --preview` and show the output. It draws
+2. **Preview.** Run `CENSUS statusline --preview` (for another account the person
+   named: `CENSUS statusline --preview --config-dir <dir>`) and show the output. It draws
    a canned payload (including a canned PR, so the `pr` segment shows) plus the
    live census store (their real rate limits). It does not ingest anything and
    reads nothing from stdin (it may cache git state for the current directory).

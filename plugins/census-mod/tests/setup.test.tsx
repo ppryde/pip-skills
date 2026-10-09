@@ -270,6 +270,19 @@ test('Replace (the recommended answer when the status line feeds census): asks o
   expect(JSON.parse(w.files.get(SETTINGS) ?? '{}')).not.toHaveProperty('statusLine')
 })
 
+test('with CENSUS_MOD_STORE in effect (records to a shadow store) the status line is never removed: the real store still needs it', async ($, on) => {
+  const w = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u', CENSUS_MOD_STORE: '/cfg/census-x' } })
+  doubleWriter(w)
+  await setupRun($, w) // the first answers: Replace, then draw below
+
+  expect(w.files.get(SETTINGS)).toBe(settings())
+  expect(w.files.has(BACKUP)).toBe(false)
+  expect(w.files.get(SCRIPT)).toBe(MARKED)
+  expect(headers(w)).not.toContain('⚠️ Writers')
+  expect(w.logs.join('\n')).toContain('your status line was kept: CENSUS_MOD_STORE makes census-mod record to a shadow store')
+  expect(w.logs.join('\n')).toContain('recording: shadow store /cfg/census-x')
+})
+
 test('a status line that does not feed census is never offered for replacement and never touched', async ($, on) => {
   const w = world(on)
   const own = settings({ statusLine: { type: 'command', command: 'bash ~/my-own-line.sh' } })

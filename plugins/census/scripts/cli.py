@@ -208,6 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
     line.add_argument(
         "--preview", action="store_true", help="draw a canned payload and the live census store; no stdin, no ingest"
     )
+    line.add_argument("--config-dir", help="use this Claude config dir instead of $CLAUDE_CONFIG_DIR, for this run (with --preview)")
     line.set_defaults(func=cmd_statusline)
 
     where = sub.add_parser(

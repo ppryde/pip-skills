@@ -512,15 +512,76 @@ export function isStray(r: SessionRow): boolean {
 const AGENTS_VIEW = 'agents view'
 const inAnotherAccount = (tag: string) => `running in another account (${tag}) — set ROSTER_CONFIG_DIRS to list it`
 
+/** `claude agents`, the agents view, by its args. */
+export const isAgentsViewArgs = (args: string): boolean => /^\S+\s+agents(\s|$)/.test(args)
+
 /** From `ps -o pid=,args=` output: the pids running Claude's agents view (`claude agents`). */
 export function agentsViewPidsIn(psOutput: string): Set<number> {
   const pids = new Set<number>()
   for (const line of psOutput.split('\n')) {
-    const match = /^\s*(\d+)\s+\S+\s+agents(\s|$)/.exec(line)
-    if (match) pids.add(Number(match[1]))
+    const match = /^\s*(\d+)\s+(.*)$/.exec(line)
+    if (match && isAgentsViewArgs(match[2] ?? '')) pids.add(Number(match[1]))
   }
 
   return pids
+}
+
+export type Proc = { ppid: number; etimeMs: number | null; args: string }
+
+/** `ps` elapsed time, `[[dd-]hh:]mm:ss`, in ms; null when it is not that. */
+export function parseEtime(etime: string): number | null {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(etime.trim())
+  if (!m) return null
+  const [, d, h, mm, ss] = m
+
+  return ((Number(d ?? 0) * 24 + Number(h ?? 0)) * 3600 + Number(mm) * 60 + Number(ss)) * 1000
+}
+
+/** From `ps -ax -o pid=,ppid=,etime=,args=`: every process by pid. */
+export function procsIn(psOutput: string): Map<number, Proc> {
+  const procs = new Map<number, Proc>()
+  for (const line of psOutput.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line)
+    if (m) procs.set(Number(m[1]), { ppid: Number(m[2]), etimeMs: parseEtime(m[3] ?? ''), args: m[4] ?? '' })
+  }
+
+  return procs
+}
+
+const isClaudeProc = (p: Proc): boolean => CLAUDE_COMMAND.test((p.args.split(/\s+/)[0] ?? '').split('/').pop() ?? '')
+
+/**
+ * The Claude process for a tmux pane pid. A pane's first process is often a shell above Claude, whose pid no
+ * registry knows: look down the tree for the nearest Claude. A pane that is Claude itself, has none below it,
+ * or is not in `ps` resolves to its own pid.
+ */
+export function claudePidFor(procs: ReadonlyMap<number, Proc>, panePid: number): number {
+  const self = procs.get(panePid)
+  if (self && isClaudeProc(self)) return panePid
+  const children = new Map<number, number[]>()
+  for (const [pid, p] of procs) children.set(p.ppid, [...(children.get(p.ppid) ?? []), pid])
+  const queue = [...(children.get(panePid) ?? [])]
+  for (let seen = 0; queue.length > 0 && seen < 200; seen++) {
+    const pid = queue.shift() as number
+    const p = procs.get(pid)
+    if (p && isClaudeProc(p)) return pid
+    queue.push(...(children.get(pid) ?? []))
+  }
+
+  return panePid
+}
+
+const START_TOLERANCE_MS = 120_000
+
+/**
+ * Does a registry record belong to the live process? Its `startedAt` (epoch ms) should be about `now` minus the
+ * process's elapsed time; a record a crash left behind, whose pid was reused, is days off. Nothing to compare
+ * (no startedAt, no etime) does not disprove it.
+ */
+export function startMatches(startedAt: unknown, etimeMs: number | null, now: number): boolean {
+  if (typeof startedAt !== 'number' || etimeMs === null) return true
+
+  return Math.abs(now - etimeMs - startedAt) <= START_TOLERANCE_MS
 }
 
 /**
@@ -584,31 +645,50 @@ async function strayPanes(
   // Only a pane nothing here lists can be a stray: the rest need no extra look.
   const candidates = [...new Set(sweeps.flatMap(s => strayRows(s, registered).map(r => r.pid)))]
   if (candidates.length === 0) return []
-  const context = { elsewhere: await registeredElsewhere($, candidates, listedDirs), agentsView: await agentsViewPids($, candidates) }
+  // One ps for every process: a pane's pid is often a shell, and the Claude under it is what a registry knows.
+  const ps = await $.process.run(['ps', '-ax', '-o', 'pid=,ppid=,etime=,args=']).catch(() => undefined)
+  const procs = ps?.exitCode === 0 ? procsIn(ps.stdout) : new Map<number, Proc>()
+  const claudeOf = new Map(candidates.map(pid => [pid, claudePidFor(procs, pid)] as const))
+  const context = {
+    elsewhere: await registeredElsewhere($, claudeOf, procs, listedDirs),
+    agentsView: new Set(candidates.filter(pid => isAgentsViewArgs(procs.get(claudeOf.get(pid) ?? pid)?.args ?? ''))),
+  }
 
   return sweeps.flatMap(s => strayRows(s, registered, context))
 }
 
-/** Candidate pids registered in another `.claude*` dir under HOME (one exists per dir and pid), by that dir's tag. */
-async function registeredElsewhere($: EngineInterface, pids: number[], listedDirs: readonly string[]): Promise<Map<number, string>> {
+/**
+ * Panes whose Claude is registered in another `.claude*` dir under HOME, by that dir's tag. The record must be
+ * the live process's own (its start time agrees with the process's), or a dead session's leftover file would
+ * label whatever process reused its pid. Keyed by the pane's pid.
+ */
+async function registeredElsewhere(
+  $: EngineInterface,
+  claudeOf: ReadonlyMap<number, number>,
+  procs: ReadonlyMap<number, Proc>,
+  listedDirs: readonly string[],
+): Promise<Map<number, string>> {
   const found = new Map<number, string>()
   const home = (await $.env.get('HOME')) ?? ''
   if (!home) return found
   const names = (await $.fs.list(home).catch(() => [])).map(e => e.name)
+  const now = Date.now()
   for (const dir of otherClaudeDirs(home, names, listedDirs)) {
-    for (const pid of pids) {
-      if (!found.has(pid) && (await $.fs.exists(`${dir}/sessions/${pid}.json`).catch(() => false))) found.set(pid, configDirTag(dir))
+    for (const [panePid, pid] of claudeOf) {
+      if (found.has(panePid)) continue
+      const text = await $.fs.read(`${dir}/sessions/${pid}.json`).catch(() => undefined)
+      let record: { pid?: unknown; startedAt?: unknown } | undefined
+      try {
+        record = typeof text === 'string' ? (JSON.parse(text) as { pid?: unknown; startedAt?: unknown }) : undefined
+      } catch {
+        record = undefined
+      }
+      if (!record || typeof record !== 'object' || (record.pid !== undefined && record.pid !== pid)) continue
+      if (startMatches(record.startedAt, procs.get(pid)?.etimeMs ?? null, now)) found.set(panePid, configDirTag(dir))
     }
   }
 
   return found
-}
-
-/** Which candidate pids run `claude agents`: one batched `ps` for all of them. */
-async function agentsViewPids($: EngineInterface, pids: number[]): Promise<Set<number>> {
-  const ps = await $.process.run(['ps', '-o', 'pid=,args=', '-p', pids.join(',')]).catch(() => undefined)
-
-  return ps ? agentsViewPidsIn(ps.stdout) : new Set()
 }
 
 // One scan at a time: a slow scan finishing after a newer one would put older rows back.

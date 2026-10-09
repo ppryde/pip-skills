@@ -645,8 +645,12 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   const placement = placementFrom(band.a)
   const drawOn = placement !== null
   await saveAnswer($, placement ? { draw: true, placement } : { draw: false })
+  // CENSUS_MOD_STORE outranks the answer: census-mod records to the shadow store, so the status line is still the
+  // real store's only writer. Removing it would stop that store before the comparison is done.
+  const shadowByEnv = Boolean(rawEnv.CENSUS_MOD_STORE?.trim())
+  const keptForShadow = shadowByEnv && recordMode === 'yes' && d.ingestBlock
   let removed: string | undefined
-  if (recordMode === 'yes' && d.ingestBlock) {
+  if (recordMode === 'yes' && d.ingestBlock && !shadowByEnv) {
     let choice: ReturnType<typeof writersFrom>
     if (replace && drawOn) choice = 'remove'
     else {
@@ -687,10 +691,11 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   setupRun = null
   const hasVitals = d.cliPath ? await $.fs.exists(d.cliPath.replace(/[^/\\]*$/, 'vitals.py')).catch(() => false) : false
   say($, '🧭 census-mod is set up', [
-    `recording: ${recordMode === 'yes' ? 'the real census store' : recordMode === 'shadow' ? `shadow store ${eff.shadowDir ?? ''}` : 'off'}`,
+    `recording: ${eff.record === 'yes' ? 'the real census store' : eff.record === 'shadow' ? `shadow store ${eff.shadowDir ?? ''}` : 'off'}`,
     `band: ${drawOn ? `on, ${eff.placement === 'below' ? 'below the input' : 'above the input'}, ${PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
     `PR segment (gh): ${saved.pr === false ? 'off, gh is never called' : 'on'}`,
     ...(removed ? [`your status line was removed from settings.json; it is backed up in ${removed}`] : []),
+    ...(keptForShadow ? ['your status line was kept: CENSUS_MOD_STORE makes census-mod record to a shadow store, so the status line is still the real store\'s writer. Unset it and run /census-setup again to replace it'] : []),
     'undo any time: /census-setup off (it restores a removed status line exactly), or /census-setup to answer again',
     ...(hasVitals ? ['📊 /census:vitals shows this session on your phone'] : []),
   ])

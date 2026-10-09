@@ -152,6 +152,28 @@ class TestPreview:
         assert sorted(p.name for p in st.census_dir().rglob("*") if "gitcache" not in str(p)) == before
 
 
+class TestPreviewForAnotherAccount:
+    """`statusline --preview --config-dir DIR` previews against that account's live limits, for that run only."""
+
+    def test_the_limits_come_from_the_given_account(self, tmp_path, monkeypatch, capsysbinary):
+        mine, other = tmp_path / "mine", tmp_path / "other"
+        mine.mkdir()
+        other.mkdir()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(mine))
+        monkeypatch.delenv("CENSUS_STORE", raising=False)
+        monkeypatch.setenv("CENSUS_STATUSLINE_COLOR", "never")
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"")))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(other))
+        st.ingest(json.dumps(payload(rate_limits={"seven_day": {"used_percentage": 77, "resets_at": time.time() + 3600}})))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(mine))
+
+        assert cli.main(["statusline", "--preview"]) == 0
+        assert "📅" not in capsysbinary.readouterr().out.decode()
+        assert cli.main(["statusline", "--preview", "--config-dir", str(other)]) == 0
+        assert "📅" in capsysbinary.readouterr().out.decode()
+        assert os.environ["CLAUDE_CONFIG_DIR"] == str(mine)  # restored
+
+
 def test_real_process_end_to_end(tmp_path):
     """The shipped entry point, as Claude Code runs it, with a pinned environment."""
     env = {
