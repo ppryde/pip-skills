@@ -7,7 +7,8 @@ steady-state cost is about zero.
 - **Records** every interactive main session into the census v2 store (the same
   `sessions/<sid>.json` and `limits/` files), by piping a status-line-shaped payload to
   `census ingest`. One writer implementation: census's own. No status line needed.
-- **Draws** the status line in the band above the prompt, with census's segments,
+- **Draws** the status line, your choice of above the input (the band) or below it (under Claude
+  Code's hint line), with census's segments,
   glyphs, colours and thresholds (`plugins/census/scripts/render.py` is the reference).
 - **No heartbeat.** The payload carries `census_mod.{version,pid,proc_start,event,ended}`
   so a reader can tell "open but idle" from "gone" by the session's process. (The reader

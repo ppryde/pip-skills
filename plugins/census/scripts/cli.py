@@ -116,6 +116,14 @@ def cmd_read(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_where(args: argparse.Namespace) -> int:
+    """Read-only: where census and census-mod are, as one JSON object (no shell variables needed)."""
+    from scripts import where as wh
+
+    print(json.dumps(wh.report(), indent=2))
+    return 0
+
+
 def _statusline_path() -> Path:
     return st.config_dir() / "statusline-command.sh"
 
@@ -147,6 +155,11 @@ def _settings_path(args: argparse.Namespace) -> Path:
     return Path(args.settings) if args.settings else st.config_dir() / "settings.json"
 
 
+def _with_account(args: argparse.Namespace, lines: list[str]) -> list[str]:
+    """A dry run names the account it would touch on its first line (always, so it is never a guess)."""
+    return lines if args.yes else [f"config dir: {st.config_dir()}", *lines]
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     shim = Path(args.shim) if args.shim else _default_shim()
     if args.statusline:
@@ -166,7 +179,7 @@ def cmd_install(args: argparse.Namespace) -> int:
             _this_cli(),
             apply=args.yes,
         )
-    print("\n".join(lines))
+    print("\n".join(_with_account(args, lines)))
     return code
 
 
@@ -179,7 +192,7 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
         settings=_settings_path(args),
         census=st.census_dir(),
     )
-    print("\n".join(lines))
+    print("\n".join(_with_account(args, lines)))
     return code
 
 
@@ -196,6 +209,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--preview", action="store_true", help="draw a canned payload and the live census store; no stdin, no ingest"
     )
     line.set_defaults(func=cmd_statusline)
+
+    where = sub.add_parser(
+        "where", help="read-only: the config dir, census dir, plugin installs and whether census-mod is enabled, as JSON"
+    )
+    where.add_argument("--config-dir", help="use this Claude config dir instead of $CLAUDE_CONFIG_DIR, for this run")
+    where.set_defaults(func=cmd_where)
 
     read = sub.add_parser("read", help="print store contents as JSON")
     group = read.add_mutually_exclusive_group()
@@ -225,6 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
     inst.add_argument("--replace", action="store_true", help="with --statusline: back up and replace an existing statusLine")
     inst.add_argument("--segments", help="with --statusline: segment list for env.CENSUS_STATUSLINE_SEGMENTS")
     inst.add_argument("--settings", help="settings file (default $CLAUDE_CONFIG_DIR/settings.json)")
+    inst.add_argument("--config-dir", help="use this Claude config dir instead of $CLAUDE_CONFIG_DIR, for this run")
     inst.set_defaults(func=cmd_install)
 
     uninst = sub.add_parser("uninstall", help="remove the launcher and status-line block")
@@ -233,6 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
     uninst.add_argument("--shim", help="launcher path (default ~/.local/bin/census)")
     uninst.add_argument("--script", help="status-line script (default $CLAUDE_CONFIG_DIR/statusline-command.sh, else ~/.claude/)")
     uninst.add_argument("--settings", help="settings file (default $CLAUDE_CONFIG_DIR/settings.json)")
+    uninst.add_argument("--config-dir", help="use this Claude config dir instead of $CLAUDE_CONFIG_DIR, for this run")
     uninst.set_defaults(func=cmd_uninstall)
 
     return parser
@@ -250,7 +271,20 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--replace, --segments and --settings are only valid with --statusline")
     except SystemExit as exc:
         return 0 if not exc.code else 1
-    result: int = args.func(args)
+    override = getattr(args, "config_dir", None)
+    if not override:
+        result: int = args.func(args)
+        return result
+    # --config-dir: the account for THIS run only; the environment is put back afterwards.
+    previous = os.environ.get(st.CONFIG_DIR_ENV)
+    os.environ[st.CONFIG_DIR_ENV] = override
+    try:
+        result = args.func(args)
+    finally:
+        if previous is None:
+            os.environ.pop(st.CONFIG_DIR_ENV, None)
+        else:
+            os.environ[st.CONFIG_DIR_ENV] = previous
     return result
 
 
