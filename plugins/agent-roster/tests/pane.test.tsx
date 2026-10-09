@@ -366,7 +366,7 @@ test('a pane registered in another account is labelled, the agents view is label
   otherAccountsWorld(on)
   const text = await bridgeText($)
 
-  expect(text).toContain('running in another account (work) — set ROSTER_CONFIG_DIRS to list it')
+  expect(text).toContain('running in another account (work) — run /roster setup to list it')
   expect(text).toMatch(/cc-agents.*agents view/)
   expect(text).toMatch(/cc-new-1.*at a startup prompt/)
   expect(text.match(/at a startup prompt/g)).toHaveLength(1)
