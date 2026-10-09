@@ -209,9 +209,13 @@ async function discover($: EngineInterface): Promise<string | null> {
 }
 
 /** `python3`, `python` or `py -3`, the first that runs `--version`; asked once per process. null: none, said once in the log. */
-async function pythonLauncher($: EngineInterface): Promise<string[] | null> {
+async function pythonLauncher($: EngineInterface, budgetMs = INGEST_TIMEOUT_MS): Promise<string[] | null> {
   if (python !== undefined) return python
-  python = await pickPython(async argv => (await $.process.run(argv, { timeoutMs: 5000 })).exitCode === 0)
+  // Three probes share the hook's budget (a session.end has little): too little left, and the probe waits for a later ingest.
+  const probeMs = Math.min(2000, Math.floor(budgetMs / 6))
+  if (probeMs < 200) return null
+  const found = await pickPython(async argv => (await $.process.run(argv, { timeoutMs: probeMs })).exitCode === 0)
+  python = found
   if (!python) $.ui.log('census-mod found no Python (tried python3, python, py -3): the band is drawn, nothing is recorded')
   return python
 }
@@ -223,14 +227,23 @@ async function hasShell($: EngineInterface): Promise<boolean> {
 }
 
 /** The transcript's text (a file over the engine's read cap reads as nothing): for where there is no sh/tail/grep. */
-const transcriptText = async ($: EngineInterface, path: string): Promise<string> => ((await $.fs.read(path).catch(() => '')) as string) || ''
+let lastRead: { path: string; at: number; text: Promise<string> } | undefined
+const transcriptText = async ($: EngineInterface, path: string): Promise<string> => {
+  // The TTL and the title are read together every turn: one read serves both.
+  const now = await nowMs($)
+  if (lastRead && lastRead.path === path && now - lastRead.at < 2000) return lastRead.text
+  const text = Promise.resolve($.fs.read(path)).then(t => (typeof t === 'string' ? t : ''), () => '')
+  lastRead = { path, at: now, text }
+
+  return text
+}
 
 async function ingest($: EngineInterface, event: Event, endedReason?: string, timeoutMs = INGEST_TIMEOUT_MS, of: Snap | null = snap) {
   if (!of) return
   if (eff.record === 'no') return
   const path = await discover($)
   if (!path) return
-  const py = await pythonLauncher($)
+  const py = await pythonLauncher($, timeoutMs)
   if (!py) return
   const payload = buildPayload(of, await nowMs($), event, endedReason)
   try {
@@ -482,7 +495,7 @@ async function detect($: EngineInterface): Promise<Detection> {
         out.statusLineCommand = command
         if (command) {
           out.ingestBlock = commandIsCensus(command)
-          for (const file of scriptCandidates(command, homeOf(rawEnv) ?? undefined, homeOf(rawEnv) ?? undefined)) {
+          for (const file of scriptCandidates(command, homeOf(rawEnv) ?? undefined, rawEnv.USERPROFILE)) {
             const script = await $.fs.read(file).catch(() => undefined)
             if (typeof script === 'string' && hasIngestBlock(script)) out.ingestBlock = true
           }
@@ -518,21 +531,39 @@ function say($: EngineInterface, headline: string, lines: string[] = []) {
   for (const l of [headline, ...lines]) $.ui.log(l)
 }
 
+/** Remove a file. Windows has no argv-only delete, so there it is emptied, and an empty backup reads as none. */
+const removeFile = async ($: EngineInterface, path: string): Promise<void> => {
+  const argv = removeArgv(path)
+  if (argv) await $.process.run(argv).catch(() => undefined)
+  else await $.fs.write(path, '').catch(() => undefined)
+}
+
+/** The backup's text; an emptied one (Windows) is no backup. */
+const readBackup = async ($: EngineInterface, path: string): Promise<string | null> => {
+  const text = (await $.fs.read(path).catch(() => undefined)) as string | undefined
+
+  return typeof text === 'string' && text.trim() ? text : null
+}
+
 const writeSettings = async ($: EngineInterface, path: string, text: string): Promise<boolean> => {
   // Through a symlink to its target (a dotfiles repo), never replacing the link; a temp file beside the
   // target, started as a copy so the mode survives, then renamed over it: a reader never sees half a file.
   const target = (await $.fs.stat(path, { resolve: true }).catch(() => undefined))?.realPath ?? path
   const tmp = settingsTmp(target)
+  if (!moveArgv(tmp, target)) {
+    // Windows: no shell to rename with (cmd would parse the path), so the file is written in place.
+    return $.fs.write(target, text).then(() => true, () => false)
+  }
   try {
     const copy = copyModeArgv(target, tmp) // keeps the mode on POSIX; a Windows file has none
     if (copy) await $.process.run(copy).catch(() => undefined)
     await $.fs.write(tmp, text)
-    const mv = await $.process.run(moveArgv(tmp, target))
+    const mv = await $.process.run(moveArgv(tmp, target)!)
     if (mv.exitCode === 0) return true
   } catch {
     // fall through to the cleanup
   }
-  await $.process.run(removeArgv(tmp)).catch(() => undefined)
+  await removeFile($, tmp)
   return false
 }
 
@@ -549,7 +580,7 @@ async function removeOwnStatusLine($: EngineInterface): Promise<{ done: boolean;
     return { done: r.reason === 'none' }
   }
   const backup = joinPath(dir, BACKUP_FILE)
-  const existing = ((await $.fs.read(backup).catch(() => undefined)) as string | undefined) ?? null
+  const existing = await readBackup($, backup)
   if (backupBlocks(existing, r.backup)) {
     say($, `🧭 census-setup: the backup already holds a different status line (${backup}), so I left your status line alone`)
     return { done: false }
@@ -574,17 +605,17 @@ async function turnOff($: EngineInterface) {
   const path = settingsPath()
   const dir = realCensusDir()
   const backupPath = dir ? joinPath(dir, BACKUP_FILE) : null
-  const backup = backupPath ? ((await $.fs.read(backupPath).catch(() => undefined)) as string | undefined) ?? null : null
+  const backup = backupPath ? await readBackup($, backupPath) : null
   if (path && backupPath && backup !== null) {
     const text = await $.fs.read(path).catch(() => undefined)
     const r = restoreStatusLine(typeof text === 'string' ? text : '', backup)
     if (r.done === 'restored') {
       if (await writeSettings($, path, r.text)) {
-        await $.process.run(removeArgv(backupPath)).catch(() => undefined)
+        await removeFile($, backupPath)
         lines.push(`your status line is back in ${path}`)
       } else lines.push(`could not write ${path}: your status line is still backed up in ${backupPath}`)
     } else if (r.done === 'already') {
-      await $.process.run(removeArgv(backupPath)).catch(() => undefined)
+      await removeFile($, backupPath)
       lines.push('your status line is already in place')
     } else lines.push(`left ${path} alone (${r.why === 'present' ? 'it has a different status line now' : r.why === 'invalid' ? 'it is not valid JSON' : 'no usable backup'}); the backup stays in ${backupPath}`)
   }

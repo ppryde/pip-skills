@@ -40,7 +40,9 @@ test('trailing separators of either kind go; the root stays', async () => {
   expect(trimSeps('C:/Users/x/')).toBe('C:/Users/x')
   expect(trimSeps('/')).toBe('/')
   expect(trimSeps('C:\\')).toBe('C:\\')
-  expect(trimSeps('C:')).toBe('C:\\')
+  expect(trimSeps('C:')).toBe('C:') // drive-relative, not the root
+  expect(trimSeps('C:/')).toBe('C:/')
+  expect(joinPath('C:', 'x')).toBe('C:x')
   expect(trimSeps('\\\\server\\share\\')).toBe('\\\\server\\share')
 })
 

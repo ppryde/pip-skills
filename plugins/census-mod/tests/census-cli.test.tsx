@@ -23,7 +23,7 @@ test('it never reads a cli.path, a CENSUS_CLI or a sibling plugin folder', async
   expect(w.ingests.at(-1)?.argv[1]).not.toContain('/elsewhere')
   expect(w.ingests.at(-1)?.argv[1]).not.toContain('/opt/other')
   // and it never even LOOKED: no read or probe of a pointer, an override target, or a sibling census plugin
-  const probes = w.lookups.filter(p => /cli\.path|\/elsewhere|\/opt\/other|\/census\/(scripts|[^/]+\/scripts|\.orphaned_at)/.test(p))
+  const probes = w.lookups.filter(p => /cli\.path|\/elsewhere|\/opt\/other|\/census\/([^/]+\/)?(scripts|\.orphaned_at)/.test(p))
   expect(probes).toEqual([])
 })
 

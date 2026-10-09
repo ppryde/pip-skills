@@ -10,9 +10,25 @@ export type Writes = { h1: number; m5: number }
 // prints only each row's `cache_creation` object. Positional args: $1 = transcript path.
 export const TAIL_CMD = 'tail -c 65536 "$1" | grep -o \'"cache_creation":{[^}]*}\''
 
+/** The last `bytes` UTF-8 bytes of the text (as `tail -c` takes them), not the last UTF-16 units: a cut mid-character is dropped. */
+export function tailBytes(text: string, bytes: number): string {
+  let used = 0
+  let i = text.length
+  while (i > 0) {
+    const code = text.charCodeAt(i - 1)
+    const isLow = code >= 0xdc00 && code <= 0xdfff && i > 1
+    const size = isLow ? 4 : code < 0x80 ? 1 : code < 0x800 ? 2 : 3
+    if (used + size > bytes) break
+    used += size
+    i -= isLow ? 2 : 1
+  }
+
+  return text.slice(i)
+}
+
 /** What TAIL_CMD prints, from the file's text: for where there is no sh/tail/grep (Windows). */
 export function cacheLinesFromText(text: string, bytes = 65536): string {
-  return (text.slice(-bytes).match(/"cache_creation":\{[^}]*\}/g) ?? []).join('\n')
+  return (tailBytes(text, bytes).match(/"cache_creation":\{[^}]*\}/g) ?? []).join('\n')
 }
 
 const field = (line: string, key: string): number => {

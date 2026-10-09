@@ -17,6 +17,8 @@ export type SessionRow = {
   /** Why a tmux pane is listed without a registry entry of its own (`agents view`, another account). */
   note?: string
   kind: string
+  /** Epoch ms the registry says the process started; what a Windows kill is checked against. */
+  startedAt?: number
   /** Epoch ms of its last status change. */
   lastActive: number
   /** Its `/rename` title, else the AI-written one. */

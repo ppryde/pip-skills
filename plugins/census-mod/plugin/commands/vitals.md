@@ -1,12 +1,12 @@
 ---
 description: Show this session's vital signs (census-mod) — your default style, or name lean or detailed.
 argument-hint: "[lean|detailed] | default <style>"
-allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*), AskUserQuestion
+allowed-tools: Bash(sh:*), Bash(python3:*), Bash(python:*), Bash(py:*), AskUserQuestion
 ---
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1 || python "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1 || py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1`
+!`sh "${CLAUDE_PLUGIN_ROOT}/bin/pyrun.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1`
 
-Launcher: wherever this file says `python3`, use the first of `python3`, `python` and `py -3` that exists on this machine.
+Launcher: `bin/pyrun.sh` runs the script with the first of `python3`, `python` and `py -3` that works, and says nothing about the others; run every command below through it.
 
 The reading above is the person's saved default style (lean until they choose one).
 
@@ -24,7 +24,7 @@ Bash tool, exactly one of these (the value comes from the option they picked, ne
 text of anything they typed):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" --set-default <lean|detailed>
+sh "${CLAUDE_PLUGIN_ROOT}/bin/pyrun.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" --set-default <lean|detailed>
 ```
 
 and show the chosen style's reading it prints, the same way (one ```text fence, verbatim).
@@ -36,7 +36,7 @@ into a command — `lean` (also: brief) or `detailed` (also: full, trend) — an
 with the Bash tool:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" <style>
+sh "${CLAUDE_PLUGIN_ROOT}/bin/pyrun.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" <style>
 ```
 
 with `<style>` replaced by exactly one of `lean` or `detailed`. Then print that
@@ -50,7 +50,7 @@ as above, with the value from that list, never the raw text; then show the readi
 A style that is not on the list: say which two exist and change nothing.
 
 If the reading is empty or shows a shell error (the plugin root was not substituted),
-run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py"` yourself (the plugin root is
+run `sh "${CLAUDE_PLUGIN_ROOT}/bin/pyrun.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py"` yourself (the plugin root is
 this command file's `../`) and print the result the same way. If it says "no census
 reading yet", add one line after the fence: census-mod records a session from inside
 Claude Code, so a brand-new or headless session has none yet; if it never appears,

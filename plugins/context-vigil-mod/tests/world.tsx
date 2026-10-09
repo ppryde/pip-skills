@@ -77,7 +77,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   })
   on('fs.exists', (_$, e) => ({ value: w.files.has((e as { path: string }).path) }))
   on('process.run', (_$, e) => {
-    if (e.argv[0] === 'sh' && e.argv[2] === 'exit 0') { if (!w.shell.value) throw new Error('spawn sh ENOENT'); return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } }
+    if (e.argv[0] === 'sh' && e.argv[2] === 'exit 0') { w.runs.count++; if (!w.shell.value) throw new Error('spawn sh ENOENT'); return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } }
     if (e.argv[0] === 'sh' && !w.shell.value) throw new Error('spawn sh ENOENT')
     w.runs.count++
     if (e.argv[0] === 'grep') {

@@ -205,9 +205,12 @@ or for one session, `claude --plugin-dir plugins/agent-roster/plugin`.
 ## Windows
 
 The registry listing works on Windows: the config dir is `CLAUDE_CONFIG_DIR`, else `<home>\.claude` (home: `HOME`, else `USERPROFILE`,
-else `HOMEDRIVE`+`HOMEPATH`), `ROSTER_CONFIG_DIRS` takes `;`-separated drive paths and `~\` expands with that home. Liveness comes
-from `tasklist` (if it cannot run, every registry row is trusted), `/roster kill` uses `taskkill /PID <pid> /F`. tmux, `ps` and
-`id` do not exist there, so the stray-pane sweep, `/roster open`, the VS Code helper and its offer are skipped without a message.
+else `HOMEDRIVE`+`HOMEPATH`), `ROSTER_CONFIG_DIRS` takes `;`-separated drive paths and `~\` expands with that home. A row counts as live
+only if PowerShell (`Get-CimInstance Win32_Process`) shows a process whose command line is Claude's own (`claude.exe`, or claude-code's entrypoint: a
+bare `node.exe` or `bun.exe` is not enough); if PowerShell cannot be asked, the registry rows are trusted for display. `/roster kill` runs
+`taskkill /PID <pid> /F` only when that command line matches AND the process's creation time agrees with the registry's `startedAt`; otherwise
+it refuses and ends nothing. tmux, `ps` and `id` do not exist there, so the stray-pane sweep and the VS Code helper and its offer are skipped
+without a message; `/roster open` is unsupported and answers that the session is outside tmux.
 A session that Claude Code did not register is therefore not listed on Windows.
 
 ## Limits
