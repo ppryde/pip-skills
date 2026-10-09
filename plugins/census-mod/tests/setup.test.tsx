@@ -37,6 +37,7 @@ test('/census-setup is a registered command that asks, in order: record, band, l
   expect(saved(w)).toMatchObject({ record: 'yes', draw: true, preset: 'two', pr: true, offered: true })
   expect(w.toasts.at(-1)).toBe('🧭 census-mod is set up')
   expect(w.logs.join('\n')).toContain('undo any time: /census-setup off')
+  expect(w.logs.at(-1)).toBe('📊 /census:vitals shows this session on your phone')
 })
 
 test('the exact questions', async ($, on) => {

@@ -649,6 +649,7 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
     `PR segment (gh): ${saved.pr === false ? 'off, gh is never called' : 'on'}`,
     ...(removed ? [`your status line was removed from settings.json; it is backed up in ${removed}`] : []),
     'undo any time: /census-setup off (it restores a removed status line exactly), or /census-setup to answer again',
+    '📊 /census:vitals shows this session on your phone',
   ])
 }
 
