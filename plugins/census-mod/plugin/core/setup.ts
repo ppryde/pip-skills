@@ -69,14 +69,16 @@ export const commandIsCensus = (command: string): boolean =>
  * The files a status-line command runs, as absolute paths: `bash ~/.claude/line.sh`, `"$HOME/x.sh" --flag`,
  * `/abs/x`, and on Windows `powershell -File "C:\Users\u\my line.ps1"` (quoted, with spaces and backslashes).
  */
-export function scriptCandidates(command: string, home: string | undefined): string[] {
+export function scriptCandidates(command: string, home: string | undefined, userProfile?: string): string[] {
   const out: string[] = []
   const root = home?.replace(/[\\/]+$/, '')
+  const profile = (userProfile ?? home)?.replace(/[\\/]+$/, '') // %USERPROFILE% is its own variable
   for (const m of command.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) {
     const t = m[1] ?? m[2] ?? m[3] ?? ''
     let p = t
     if (root && (t === '~' || /^~[\\/]/.test(t))) p = root + t.slice(1)
-    else if (root && /^(\$HOME|\$\{HOME\}|%USERPROFILE%)[\\/]/.test(t)) p = root + t.slice(t.search(/[\\/]/))
+    else if (profile && /^%USERPROFILE%[\\/]/.test(t)) p = profile + t.slice(t.search(/[\\/]/))
+    else if (root && /^(\$HOME|\$\{HOME\})[\\/]/.test(t)) p = root + t.slice(t.search(/[\\/]/))
     if ((p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\')) && !out.includes(p)) out.push(p)
   }
   return out

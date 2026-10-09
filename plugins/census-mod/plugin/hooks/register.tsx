@@ -21,7 +21,7 @@ import type { Counters, RateLimit, Snap } from '../core/types'
 // session.start (which re-fires on a reload) rebuilds them. Nothing is kept in $.state, so a /clear
 // has nothing to wipe and classic.SessionStart(clear) simply binds the new session.
 
-type Env = CensusEnv & RenderEnv
+type Env = CensusEnv & RenderEnv & { USERPROFILE?: string }
 
 let env: Env = {} // what the mod runs on: the environment, then the answers laid over it
 let rawEnv: Env = {} // the environment alone: it outranks an answer
@@ -65,6 +65,7 @@ async function loadEnv($: EngineInterface): Promise<Env> {
     CENSUS_CLI: await $.env.get('CENSUS_CLI'),
     CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
     HOME: await $.env.get('HOME'),
+    USERPROFILE: await $.env.get('USERPROFILE'),
     CENSUS_STATUSLINE_SEGMENTS: await $.env.get('CENSUS_STATUSLINE_SEGMENTS'),
     CENSUS_STATUSLINE_MASCOT: await $.env.get('CENSUS_STATUSLINE_MASCOT'),
     CLAUDE_COST_BUDGET: await $.env.get('CLAUDE_COST_BUDGET'),
@@ -479,7 +480,7 @@ async function detect($: EngineInterface): Promise<Detection> {
         out.statusLineCommand = command
         if (command) {
           out.ingestBlock = commandIsCensus(command)
-          for (const file of scriptCandidates(command, rawEnv.HOME)) {
+          for (const file of scriptCandidates(command, rawEnv.HOME, rawEnv.USERPROFILE)) {
             const script = await $.fs.read(file).catch(() => undefined)
             if (typeof script === 'string' && hasIngestBlock(script)) out.ingestBlock = true
           }
