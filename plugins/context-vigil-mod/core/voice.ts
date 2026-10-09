@@ -57,6 +57,7 @@ export const V = {
   setupSaved: '⚙️ context-vigil-mod settings saved',
   setupStopped: '⚙️ Setup stopped — what you answered is saved; /vigil-setup to finish',
   handingOver: '📜 Handing over…',
+  handoverRequested: '📜 Handing over — as /vho',
   settingUp: '⚙️ Setting up context-vigil-mod…',
   renameFailed: '🏷️ couldn\'t name the new session — carrying on',
   resumeFailed: (path: string | null, held: string | null) =>

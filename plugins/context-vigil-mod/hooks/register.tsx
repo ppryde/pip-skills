@@ -9,7 +9,7 @@ import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, recor
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, GIT_DIR_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
-import { INPUT_SCHEMA, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
+import { INPUT_SCHEMA, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 import { TAIL_CMD, type CacheTtl, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
 import { clearGate, needsRcQuestion } from '../core/surfaces'
@@ -38,6 +38,8 @@ const transcriptA = atom({ plugin: 'context-vigil-mod', key: 'transcriptPath' } 
 const cacheTtlA = atom({ plugin: 'context-vigil-mod', key: 'cacheTtl' } as const, 'unknown' as CacheTtl)
 const ttlReadA = atom({ plugin: 'context-vigil-mod', key: 'ttlRead' } as const, false)
 const ttlInfoDismissedA = atom({ plugin: 'context-vigil-mod', key: 'ttlInfoDismissed' } as const, false)
+// Did the person's latest message mention a handover at all? Lets the model's tool call count as asked for.
+const handoverMentionedA = atom({ plugin: 'context-vigil-mod', key: 'handoverMentioned' } as const, false)
 const lastApiA = atom({ plugin: 'context-vigil-mod', key: 'lastApiAt' } as const, null)
 const awaitingA = atom({ plugin: 'context-vigil-mod', key: 'awaiting' } as const, null as Awaiting | null)
 const deferredA = atom({ plugin: 'context-vigil-mod', key: 'deferred' } as const, null as Awaiting | null)
@@ -108,6 +110,7 @@ async function nowMs($: EngineInterface): Promise<number> {
 // Appends are serialised through one chain, so a day file's first read-then-append cannot be raced
 // by a second hook (R1-15). A day file that exists but cannot be read is never overwritten.
 let logChain: Promise<void> = Promise.resolve()
+const logWriteFailed = new Set<string>()
 
 async function appendToDayFile($: EngineInterface, path: string, rec: EventRecord) {
   if (dayText[path] === undefined) {
@@ -122,7 +125,12 @@ async function appendToDayFile($: EngineInterface, path: string, rec: EventRecor
     }
   }
   dayText[path] = appendLine(dayText[path] ?? '', rec)
-  await $.fs.write(path, dayText[path] ?? '').catch(() => {})
+  await $.fs.write(path, dayText[path] ?? '').catch(async (err: unknown) => {
+    // A log that cannot be written must not be silent, and must not become a loop: say it once per path.
+    if (logWriteFailed.has(path)) return
+    logWriteFailed.add(path)
+    try { await $.ui.log(`context-vigil-mod: event log not written, ${path}: ${String(err)}`) } catch { /* nowhere left to say it */ }
+  })
 }
 
 async function log($: EngineInterface, kind: EventKind, fields: Record<string, unknown> = {}) {
@@ -143,6 +151,44 @@ async function notify($: EngineInterface, text: string) {
 // Every plugin prompt goes through here: from a timer, never awaited by the hook the turn waits on.
 function submitSoon($: EngineInterface, prompt: { text: string; asUser?: true }, delayMs = 0, onSent?: () => void, onFailed?: () => void) {
   $.clock.after(delayMs, () => { void $.prompt.submit(prompt).then(() => onSent?.(), () => onFailed?.()) })
+}
+
+// A prompt sent right after a clear can be refused while the session is still starting (slow SessionStart
+// hooks). Retry with backoff -- the first attempt after `firstDelayMs`, then 1, 2, 4 and 8 s later -- and
+// give up only after the last. A success ends the chain (never two submits); a human prompt or a newer
+// chain cancels it: the person's own words win. The engine offers no readiness signal, hence the backoff.
+const RETRY_AFTER_MS = [1000, 2000, 4000, 8000]
+let submitGen = 0   // bumped by a human prompt and by every new chain
+
+function sleepMs($: EngineInterface, ms: number): Promise<void> {
+  return new Promise(resolve => { $.clock.after(ms, () => resolve()) })
+}
+
+async function submitWithRetry($: EngineInterface, prompt: { text: string; asUser?: true }, firstDelayMs: number): Promise<'sent' | 'cancelled' | 'failed'> {
+  const gen = ++submitGen
+  const delays = [firstDelayMs, ...RETRY_AFTER_MS]
+  for (let attempt = 1; attempt <= delays.length; attempt++) {
+    await sleepMs($, delays[attempt - 1]!)
+    if (gen !== submitGen) {
+      await log($, 'guard.wait', { reason: 'resume-cancelled', attempt })
+      return 'cancelled'
+    }
+    try {
+      await $.prompt.submit(prompt)
+    } catch (err) {
+      await log($, 'guard.wait', { reason: 'resume-retry', attempt, error: String(err) })
+      continue
+    }
+    await log($, 'resume.sent', { attempt })
+    return 'sent'
+  }
+  return 'failed'
+}
+
+function resumeSoon($: EngineInterface, prompt: { text: string; asUser?: true }, path: string | null, held: string | null) {
+  void submitWithRetry($, prompt, 500)
+    .then(outcome => (outcome === 'failed' ? resumeFailed($, path, held) : undefined))
+    .catch(err => timerFailed($, 'resume-submit', err))
 }
 
 // A resume or held-prompt submit that is refused: say so, with the handover and the held text.
@@ -740,9 +786,13 @@ function hopResume($: EngineInterface, delayMs: number, job: NonNullable<typeof 
       limitResume = null
       return
     }
-    try {
-      await $.prompt.submit({ text: limitResumeText(path) })
-    } catch {
+    const outcome = await submitWithRetry($, { text: limitResumeText(path) }, 0)
+    if (outcome === 'cancelled') {
+      await notify($, V.resumeSkipped(path))
+      limitResume = null
+      return
+    }
+    if (outcome === 'failed') {
       await notify($, V.resumeFailed(path, null))
       await log($, 'guard.wait', { reason: 'submit-rejected' })
       limitResume = null   // R3-05: the chain has ended; the next early stop starts its own job
@@ -952,6 +1002,8 @@ export const register: Register = on => {
   })
 
   on('classic.SessionStart', async ($, e, next) => {
+    // A different conversation begins (a /clear, a /resume, a start): a resume still retrying belongs to the old one.
+    if (e.source !== 'compact') submitGen++
     const r = await next(e)
     const gitDir = await $.process
       .run(GIT_DIR_ARGV, { cwd: await $.session.cwd() })
@@ -1007,14 +1059,20 @@ export const register: Register = on => {
     returnHeldMirror = null
     const apiBefore = lastApiMirror
     lastApiMirror = null   // the new session has run no turn
+    const before = session
     session = await $.session.id()
+    // A slow start can leave the engine still answering the old id: this clear's events then land in the
+    // old session's file. Say so rather than look like a log that went missing.
+    if (session === before) {
+      try { await $.ui.log(`context-vigil-mod: session id not yet rebound after the clear (still ${session}); its events go to that session's log`) } catch { /* nowhere left to say it */ }
+    }
     resetCaches()
     scheduleGit($)
     await resetSessionState($)
     if (activity.lastHumanOrigin !== null) await savePhoneFacts($)   // the wipe took them; a later reload needs them
     if (heldOnClear) await log($, 'last_light.choice', { choice: 'resume', viaClear: true })
     if (!pending) {
-      if (heldOnClear) submitSoon($, { text: heldOnClear, asUser: true }, 500, undefined, () => { void resumeFailed($, null, heldOnClear) })
+      if (heldOnClear) resumeSoon($, { text: heldOnClear, asUser: true }, null, heldOnClear)
       return out
     }
     const follow = [pending.followUp, heldOnClear].filter(Boolean).join('\n\n') || null
@@ -1026,7 +1084,7 @@ export const register: Register = on => {
     // (no turn since it was written) and no latch (R1-10); otherwise a notice says why not.
     let stale = false
     let noResume = false
-    if (follow) submitSoon($, { text: follow, asUser: true }, 500, undefined, () => { void resumeFailed($, pending.path, follow) })
+    if (follow) resumeSoon($, { text: follow, asUser: true }, pending.path, follow)
     else if (pending.resume) {
       if (!fresh(pending, apiBefore, await nowMs($))) {
         stale = true
@@ -1034,7 +1092,7 @@ export const register: Register = on => {
       } else if (await readLatch($)) {
         await notify($, V.resumeLatched(pending.path))
         await log($, 'guard.wait', { reason: 'latched', deferred: 'resume' })
-      } else submitSoon($, { text: resumeText(pending.path) }, 500, undefined, () => { void resumeFailed($, pending.path, null) })
+      } else resumeSoon($, { text: resumeText(pending.path) }, pending.path, null)
     } else {
       // R2-17: a handover that carries no automatic resume (a limit or last-light one) is still
       // injected on a manual /clear; never silently.
@@ -1058,6 +1116,7 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
+    if (classifyOrigin(e.origin.kind) === 'human') submitGen++   // the person's own prompt wins over a resume still retrying
     const now = await nowMs($)
     if (rearm(lastLightArmed, e.origin.kind)) lastLightArmed = true
     const pending = await read($, pendingA)
@@ -1083,6 +1142,15 @@ export const register: Register = on => {
     // R1-20: the "last light is off" line goes away with the person's next message (no hotkey: spec §3).
     if (classifyOrigin(e.origin.kind) === 'human' && (await read($, cacheTtlA)) === '5m') await update($, ttlInfoDismissedA, () => true)
     if (e.origin.kind !== 'plugin') await cancelCountdown($)
+    if (classifyOrigin(e.origin.kind) === 'human') {
+      // A short plain request to hand over runs exactly what /vho runs, not whatever the model improvises.
+      const request = !standDown && isHandoverRequest(e.text)
+      await update($, handoverMentionedA, () => !request && mentionsHandover(e.text))
+      if (request) {
+        $.clock.after(0, () => { void startHandover($, 'request', true).catch(err => timerFailed($, 'handover-request', err)) })
+        return { drop: V.handoverRequested }
+      }
+    }
     return next(e)
   })
 
@@ -1260,10 +1328,14 @@ export const register: Register = on => {
     const awaiting = await read($, awaitingA)
     // Only a handover the mod asked for may end in a clear; a call with no `awaiting` is the
     // model volunteering (or repeating itself): save it, offer it, never clear (R1-01).
-    const requested = awaiting !== null
-    const reason = awaiting?.reason ?? 'request'
-    const resume = awaiting?.resume ?? false
+    // A call after the person mentioned a handover is theirs to have asked for: it runs as /vho does.
+    const mentioned = awaiting === null && !standDown && (await read($, handoverMentionedA))
+    const asked = awaiting ?? (mentioned ? { reason: 'request' as const, resume: true, unattended: false } : null)
+    const requested = asked !== null
+    const reason = asked?.reason ?? 'request'
+    const resume = asked?.resume ?? false
     await update($, awaitingA, () => null)
+    await update($, handoverMentionedA, () => false)   // spent by any valid call, asked for or not
     // No config dir known: a handover written anywhere else would be lost or misplaced; save nothing.
     const at = root
     if (!at) {
@@ -1291,7 +1363,7 @@ export const register: Register = on => {
     const live = await read($, pendingA)
     const shield = !requested && live !== null && live.resume && reusable(live, await read($, lastApiA), now)
     try {
-      if (!shield) await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now, unattended: awaiting?.unattended ?? false })
+      if (!shield) await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now, unattended: asked?.unattended ?? false })
     } catch (err) {
       // R2-15: the file is written but the store refused it: say so, clear nothing.
       await notify($, V.handoverFailed)
@@ -1306,7 +1378,7 @@ export const register: Register = on => {
       return { result: `Saved handover to ${path} (not requested by context-vigil-mod; nothing was cleared)` } as never
     }
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
-    if (reason === 'threshold' || reason === 'request') scheduleClear($, awaiting?.unattended ?? false)
+    if (reason === 'threshold' || reason === 'request') scheduleClear($, asked?.unattended ?? false)
     return { result: `Saved handover to ${path}` } as never
   })
 

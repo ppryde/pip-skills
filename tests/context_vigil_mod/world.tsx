@@ -23,6 +23,8 @@ export type World = {
   toastRefused: { value: boolean }     // makes ui.toast answer { deny }
   clearRefused: { value: boolean }     // makes $.command.run({ command: 'clear' }) reject
   submitRefused: { value: boolean }    // makes $.prompt.submit reject
+  submitFails: { count: number }       // makes the next N $.prompt.submit calls reject (a session still starting)
+  eventsWriteRefused: { value: boolean }   // makes fs.write under /events/ deny
   renameRefused: { value: boolean }    // makes $.command.run({ command: 'rename' }) reject
   renames: string[]                    // args of every rename command run
   titled: Set<string>                  // transcript paths holding a custom-title line
@@ -49,7 +51,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     registered: { tools: [], commands: [] },
     draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined }, model: { value: 'claude-opus-5-5[1m]' },
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '', dir: '/repo/.git' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
-    toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, renames: [],
+    toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, submitFails: { count: 0 }, eventsWriteRefused: { value: false }, renames: [],
     titled: new Set(), grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
     handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, askHold: { held: false, waiting: [] }, asks: [], askReply: { value: null }, promptReadFails: { count: 0 }, onStoreSet: { value: null }, fsRead: { gate: null, error: null },
   }
@@ -68,6 +70,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   })
   on('fs.write', (_$, e) => {
     if (w.handoverWriteRefused.value && e.path.includes('/handovers/')) return { deny: `EACCES ${e.path}` }
+    if (w.eventsWriteRefused.value && e.path.includes('/events/')) return { deny: `EACCES ${e.path}` }
     w.files.set(e.path, e.text)
     return { value: undefined }
   })
@@ -113,7 +116,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('session.repo', () => ({ value: { root: '/repo', remote: null, internal: false, name: 'repo', id: 'r' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000, percent: w.contextPct.value }, rateLimits: w.rateLimits.value } }))
   on('prompt.read', () => { if (w.promptReadFails.count > 0) { w.promptReadFails.count--; throw new Error('prompt.read failed') } return { value: { text: w.draft.value, cursor: w.draft.value.length } } })
-  on('prompt.submit', (_$, e) => { if (w.submitRefused.value) throw new Error('submit refused'); w.submits.push({ text: e.text, origin: e.origin.kind }); return { text: e.text, origin: e.origin } })
+  on('prompt.submit', (_$, e) => { if (w.submitRefused.value) throw new Error('submit refused'); if (w.submitFails.count > 0) { w.submitFails.count--; throw new Error('session not ready') } w.submits.push({ text: e.text, origin: e.origin.kind }); return { text: e.text, origin: e.origin } })
   on('prompt.edit', (_$, e) => ({ text: e.text, cursor: e.cursor }))
   on('command.run', async (_$, e) => {
     if (e.command === 'clear' && w.clearRefused.value) throw new Error('clear refused')
