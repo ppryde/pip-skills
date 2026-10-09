@@ -160,3 +160,9 @@ test('scripts a Windows command runs: drive and UNC paths, quoted with spaces, ~
 test('a backup that is a JSON scalar, array or null is no backup: restore says so instead of throwing', async () => {
   for (const junk of ['42', '"x"', 'null', '[1]', 'true']) expect(restoreStatusLine('{}', junk)).toEqual({ done: 'kept', why: 'no-backup' })
 })
+
+test('%USERPROFILE% expands from USERPROFILE itself, and only falls back to HOME when that is unset', async () => {
+  expect(scriptCandidates('"%USERPROFILE%\\line.cmd"', '/home/u', 'C:\\Users\\u')).toEqual(['C:\\Users\\u\\line.cmd'])
+  expect(scriptCandidates('"%USERPROFILE%\\line.cmd"', 'C:\\Users\\h', undefined)).toEqual(['C:\\Users\\h\\line.cmd'])
+  expect(scriptCandidates('"$HOME/line.sh"', '/home/u', 'C:\\Users\\u')).toEqual(['/home/u/line.sh']) // $HOME stays HOME
+})

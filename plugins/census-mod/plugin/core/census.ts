@@ -11,9 +11,15 @@ const trim = (p: string): string => (p.length > 1 ? p.replace(/\/+$/, '') || '/'
 const asDir = (p: string): string => (p.endsWith('.json') ? trim(p.slice(0, p.lastIndexOf('/')) || '/') : p)
 const expand = (p: string, home?: string): string => (home && (p === '~' || p.startsWith('~/')) ? home.replace(/\/+$/, '') + p.slice(1) : p)
 
-/** Shadow mode: the dir the mod records to instead of census's own, when set. */
+/** Shadow mode: the store value as given (`~` expanded), which census itself reads, `.json` and all. */
+export function shadowStore(env: CensusEnv): string | null {
+  return env.CENSUS_MOD_STORE ? trim(expand(env.CENSUS_MOD_STORE, env.HOME)) : null
+}
+
+/** Shadow mode: the DIR that store lives in, where `cli.path` sits. */
 export function shadowDir(env: CensusEnv): string | null {
-  return env.CENSUS_MOD_STORE ? asDir(trim(expand(env.CENSUS_MOD_STORE, env.HOME))) : null
+  const store = shadowStore(env)
+  return store ? asDir(store) : null
 }
 
 /** The census dir readers use: `CENSUS_STORE`, else `<config dir>/census`. */
@@ -37,8 +43,9 @@ export const ingestArgv = (cli: string): string[] => (cli.endsWith('.py') ? ['py
 
 /** Shadow mode points the child's census at the shadow dir; ingest honours `CENSUS_STORE`. */
 export function ingestEnv(env: CensusEnv): Record<string, string> | undefined {
-  const dir = shadowDir(env)
-  return dir ? { CENSUS_STORE: dir } : undefined
+  // Unchanged, `.json` included: census reads a file-valued store itself; only our pointer lookup wants the parent.
+  const store = shadowStore(env)
+  return store ? { CENSUS_STORE: store } : undefined
 }
 
 export const WHICH_ARGV = ['sh', '-c', 'command -v census'] as const

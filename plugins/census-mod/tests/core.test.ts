@@ -238,3 +238,10 @@ test('registry entries that are not objects are skipped, not fatal', async () =>
 
   expect(findProc(files, 's1')).toEqual({ pid: 9, procStart: 'p' })
 })
+
+test('a .json store override goes to the census child UNCHANGED; only the pointer lookup uses its parent dir', async () => {
+  expect(ingestEnv({ CENSUS_MOD_STORE: '/shadow/status.json' })).toEqual({ CENSUS_STORE: '/shadow/status.json' })
+  expect(ingestEnv({ CENSUS_MOD_STORE: '~/shadow/x.json', HOME: '/home/u' })).toEqual({ CENSUS_STORE: '/home/u/shadow/x.json' })
+  expect(pointerFiles({ CENSUS_MOD_STORE: '/shadow/status.json' })).toContain('/shadow/cli.path')
+  expect(ingestEnv({ CENSUS_MOD_STORE: '/shadow/dir/' })).toEqual({ CENSUS_STORE: '/shadow/dir' })
+})
