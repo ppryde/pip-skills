@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import {
   NO_DETECTION, PRESETS, Q, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
-  removeStatusLine, restoreStatusLine, scriptCandidates, statusLineCommand, writerActive, writersFrom,
+  backupBlocks, removeStatusLine, restoreStatusLine, scriptCandidates, statusLineCommand, writerActive, writersFrom,
 } from '../plugin/core/setup'
 
 const WITH_BLOCK = { ...NO_DETECTION, ingestBlock: true }
@@ -128,4 +128,14 @@ test('restore puts the statusLine back exactly, only into a settings.json that h
   expect(restoreStatusLine('{ nope', removed.backup)).toEqual({ done: 'kept', why: 'invalid' })
   expect(restoreStatusLine('{}', null)).toEqual({ done: 'kept', why: 'no-backup' })
   expect(restoreStatusLine('{}', 'not json')).toEqual({ done: 'kept', why: 'no-backup' })
+})
+
+test('an existing backup blocks a removal only when it holds a different status line', async () => {
+  const mk = (command: string) => JSON.stringify({ statusLine: { type: 'command', command } })
+
+  expect(backupBlocks(null, mk('a'))).toBe(false)
+  expect(backupBlocks(mk('a'), mk('a'))).toBe(false)
+  expect(backupBlocks(mk('a'), mk('b'))).toBe(true)
+  expect(backupBlocks('not json', mk('b'))).toBe(false) // nothing worth keeping
+  expect(backupBlocks('{}', mk('b'))).toBe(false)
 })

@@ -453,3 +453,71 @@ test('setup talks only through $.ui.ask: nothing is submitted to the model', asy
   expect(w.asks.length).toBeGreaterThan(0)
   expect(w.runs.some(x => x.argv.includes('submit'))).toBe(false)
 })
+
+// ---- writing settings.json safely ------------------------------------------------------------------------------------------
+
+test('a settings.json that is a symlink is written through: the temp file sits beside the TARGET and the link stays', async ($, on) => {
+  const w = world(on)
+  w.files.set('/dotfiles/settings.json', settings())
+  w.links.set(SETTINGS, '/dotfiles/settings.json')
+  w.files.set(SCRIPT, MARKED)
+  await setupRun($, w)
+
+  expect(w.links.get(SETTINGS)).toBe('/dotfiles/settings.json') // never replaced by a regular file
+  expect(JSON.parse(w.files.get('/dotfiles/settings.json') ?? '{}')).toEqual({ model: 'opus', env: { A: '1' } })
+  expect(w.runs.some(r => r.argv[0] === 'mv' && r.argv.at(-1) === '/dotfiles/settings.json' && r.argv.at(-2) === '/dotfiles/settings.json.census-mod.tmp')).toBe(true)
+})
+
+test('the original file mode is kept: the temp file starts as a copy that preserves it', async ($, on) => {
+  const w = world(on)
+  doubleWriter(w)
+  await setupRun($, w)
+
+  expect(w.cps).toContainEqual(['cp', '-p', SETTINGS, `${SETTINGS}.census-mod.tmp`])
+})
+
+test('a failed rename leaves no temp file behind, and the status line stays', async ($, on) => {
+  const w = world(on)
+  doubleWriter(w)
+  w.mvFails.value = true
+  await setupRun($, w)
+
+  expect(w.files.has(`${SETTINGS}.census-mod.tmp`)).toBe(false)
+  expect(w.files.get(SETTINGS)).toBe(settings())
+  expect(saved(w)).toMatchObject({ record: 'no' })
+  expect(w.logs.join('\n')).toContain('could not write /cfg/settings.json, so I left your status line alone')
+})
+
+test('an existing backup of a DIFFERENT status line is never overwritten: the removal is refused, naming it', async ($, on) => {
+  const w = world(on)
+  doubleWriter(w)
+  const older = JSON.stringify({ statusLine: { type: 'command', command: 'older.sh' }, removedAt: 'x', from: SETTINGS })
+  w.files.set(BACKUP, older)
+  await setupRun($, w)
+
+  expect(w.files.get(BACKUP)).toBe(older)
+  expect(w.files.get(SETTINGS)).toBe(settings())
+  expect(saved(w)).toMatchObject({ record: 'no' })
+  expect(w.logs.join('\n')).toContain(`already holds a different status line (${BACKUP})`)
+})
+
+test('an existing backup of the SAME status line is fine to refresh', async ($, on) => {
+  const w = world(on)
+  doubleWriter(w)
+  w.files.set(BACKUP, JSON.stringify({ statusLine: STATUS_LINE, removedAt: 'x', from: SETTINGS }))
+  await setupRun($, w)
+
+  expect(JSON.parse(w.files.get(SETTINGS) ?? '{}')).toEqual({ model: 'opus', env: { A: '1' } })
+})
+
+test('a dismissed /census-setup counts as offered: the next session does not offer again', async ($, on) => {
+  const w = world(on)
+  w.store.delete('census-mod:setup')
+  w.answer.value = () => null
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await $.command.run({ command: 'census-setup', args: '', origin: { kind: 'composer' } } as never)
+  for (let i = 0; i < 6; i++) await w.clock.advance(0)
+
+  expect(saved(w).offered).toBe(true)
+})

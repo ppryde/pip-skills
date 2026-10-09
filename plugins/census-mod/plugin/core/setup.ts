@@ -258,3 +258,17 @@ export function restoreStatusLine(text: string, backupText: string | null): Rest
 }
 
 export const settingsTmp = (path: string): string => `${path}.census-mod.tmp`
+
+/** An existing backup holding a DIFFERENT status line than the one about to be removed: keep it, refuse the removal. */
+export function backupBlocks(existing: string | null, newBackup: string): boolean {
+  const statusOf = (t: string): unknown => {
+    try {
+      return (JSON.parse(t) as { statusLine?: unknown }).statusLine
+    } catch {
+      return undefined
+    }
+  }
+  if (existing === null) return false
+  const old = statusOf(existing)
+  return old !== undefined && !same(old, statusOf(newBackup))
+}

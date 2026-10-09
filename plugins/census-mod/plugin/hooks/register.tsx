@@ -10,7 +10,7 @@ import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
 import type { Event } from '../core/payload'
 import { TITLE_ARGV, findProc, lastTitle } from '../core/registry'
 import { TONE_COLOR, draw, fit } from '../core/render'
-import { BACKUP_FILE, L, MIN_CENSUS, NO_DETECTION, PRESETS, Q, SETUP_KEY, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
+import { BACKUP_FILE, backupBlocks, L, MIN_CENSUS, NO_DETECTION, PRESETS, Q, SETUP_KEY, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
 import type { Detection, Effective, Saved } from '../core/setup'
 import type { RenderEnv, RenderInput } from '../core/render'
 import type { Counters, RateLimit, Snap } from '../core/types'
@@ -496,14 +496,20 @@ function say($: EngineInterface, headline: string, lines: string[] = []) {
 }
 
 const writeSettings = async ($: EngineInterface, path: string, text: string): Promise<boolean> => {
-  // temp file, then rename: a reader never sees half a settings.json
+  // Through a symlink to its target (a dotfiles repo), never replacing the link; a temp file beside the
+  // target, started as a copy so the mode survives, then renamed over it: a reader never sees half a file.
+  const target = (await $.fs.stat(path, { resolve: true }).catch(() => undefined))?.realPath ?? path
+  const tmp = settingsTmp(target)
   try {
-    await $.fs.write(settingsTmp(path), text)
-    const mv = await $.process.run(['mv', '-f', settingsTmp(path), path])
-    return mv.exitCode === 0
+    await $.process.run(['cp', '-p', target, tmp]).catch(() => undefined)
+    await $.fs.write(tmp, text)
+    const mv = await $.process.run(['mv', '-f', tmp, target])
+    if (mv.exitCode === 0) return true
   } catch {
-    return false
+    // fall through to the cleanup
   }
+  await $.process.run(['rm', '-f', tmp]).catch(() => undefined)
+  return false
 }
 
 /** Remove this account's statusLine for the band to replace; false (and a message) when it was left alone. */
@@ -519,6 +525,11 @@ async function removeOwnStatusLine($: EngineInterface): Promise<{ done: boolean;
     return { done: r.reason === 'none' }
   }
   const backup = `${dir}/${BACKUP_FILE}`
+  const existing = ((await $.fs.read(backup).catch(() => undefined)) as string | undefined) ?? null
+  if (backupBlocks(existing, r.backup)) {
+    say($, `🧭 census-setup: the backup already holds a different status line (${backup}), so I left your status line alone`)
+    return { done: false }
+  }
   try {
     await $.fs.write(backup, r.backup) // first: the removal is undoable before it happens
   } catch {
@@ -566,6 +577,7 @@ async function askOne($: EngineInterface, run: object, q: { header: string; ques
 
 async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   await loadSetup($)
+  if (!saved.offered) await saveAnswer($, { offered: true }) // asked, so never offered again, whatever the answer
   const stop = async (why: Answer) => {
     if (why === 'dismissed') say($, '🧭 census-setup stopped; what you answered is saved. Run /census-setup to carry on')
     if (setupRun === run) setupRun = null

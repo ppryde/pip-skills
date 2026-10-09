@@ -26,6 +26,9 @@ export type World = {
   /** A census plugin beside this one, answered for WHATEVER folder the plugin sits in (the kit stages it in a temp dir). */
   sibling: { layout: 'repo' | 'cache' | null; versions: Record<string, { orphaned?: boolean; cli?: boolean }> }
   toasts: string[]
+  links: Map<string, string>            // symlink path -> target
+  mvFails: { value: boolean }           // makes `mv` exit 1
+  cps: string[][]                       // argv of every `cp`
   asks: { header: string; question: string; options: string[] }[]
   /** Answers each question: a label, or null to dismiss; the default picks the first option. */
   askGate: { value: Promise<void> | null } // while set, every ask waits on it before answering
@@ -50,18 +53,19 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     git: { status: '# branch.oid abc1234def\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +1 -0\n1 .M N... 100644 100644 100644 a b f.ts\n', dir: '/repo/.git\n/repo\n', exitCode: 0 },
     gh: { stdout: '[]', exitCode: 0, throws: false },
     titles: new Map(), tail: { value: '"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":100}\n' },
-    which: { value: '' }, logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, sibling: { layout: null, versions: {} },
+    which: { value: '' }, logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, sibling: { layout: null, versions: {} },
   }
   w.files.set(`${REGISTRY}/22695.json`, JSON.stringify({ pid: 22695, sessionId: 's1', procStart: 'Sun Oct  4 22:57:51 2026', version: '2.1.289' }))
+  const real = (p: string): string => w.links.get(p) ?? p
   on('store.get', (_$, e) => ({ value: w.store.get(e.key) as never }))
   on('store.set', (_$, e) => { w.store.set(e.key, e.value); return { value: undefined } })
   on('store.delete', (_$, e) => { w.store.delete(e.key); return { value: undefined } })
   on('store.keys', () => ({ value: [...w.store.keys()] }))
   mock.env(on, opts.env ?? { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
-  on('fs.read', (_$, e) => { const t = w.files.get(e.path); return t === undefined ? { deny: `ENOENT ${e.path}` } : { value: t as never } })
+  on('fs.read', (_$, e) => { const t = w.files.get(real(e.path)); return t === undefined ? { deny: `ENOENT ${e.path}` } : { value: t as never } })
   on('fs.exists', (_$, e) => {
     const path = (e as { path: string }).path
-    if (w.files.has(path)) return { value: true }
+    if (w.files.has(real(path))) return { value: true }
     if (w.sibling.layout === 'repo') return { value: /\/census\/scripts\/cli\.py$/.test(path) && !path.startsWith('/cfg') && path !== CLI }
     if (w.sibling.layout === 'cache') {
       const m = /\/census\/([^/]+)\/(\.orphaned_at|scripts\/cli\.py)$/.exec(path)
@@ -92,7 +96,8 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     if (cmd === 'grep') return { value: w.titles.has(e.argv[e.argv.length - 1] ?? '') ? done(0, w.titles.get(e.argv[e.argv.length - 1] ?? '')) : done(1) }
     if (cmd === 'sh' && e.argv[2]?.includes('cache_creation')) return { value: done(0, w.tail.value) }
     if (cmd === 'sh' && e.argv[2]?.includes('command -v census')) return { value: w.which.value ? done(0, `${w.which.value}\n`) : done(1) }
-    if (cmd === 'mv') { const [, , from, to] = e.argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.delete(from ?? ''); w.files.set(to ?? '', t); return { value: done(0) } }
+    if (cmd === 'cp') { w.cps.push([...e.argv]); const [, , from, to] = e.argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.set(to ?? '', t); return { value: done(0) } }
+    if (cmd === 'mv') { if (w.mvFails.value) return { value: done(1) }; const [, , from, to] = e.argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.delete(from ?? ''); w.links.delete(to ?? ''); w.files.set(to ?? '', t); return { value: done(0) } }
     if (cmd === 'rm') { w.files.delete(e.argv[e.argv.length - 1] ?? ''); return { value: done(0) } }
     if (args.includes('ingest')) {
       w.ingests.push({ payload: JSON.parse(init.stdin ?? '{}'), argv: [...e.argv], env: init.env, timeoutMs: init.timeoutMs })
@@ -118,7 +123,8 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
   on('classic.CwdChanged', () => ({}))
   on('classic.PostCompact', () => ({}))
   on('ui.toast', (_$, e) => { w.toasts.push(e.text); return { value: undefined } })
-  on('fs.write', (_$, e) => { w.files.set(e.path, e.text); return { value: undefined } })
+  on('fs.write', (_$, e) => { w.files.set(real(e.path), e.text); return { value: undefined } })
+  on('fs.stat', (_$, e) => ({ value: { kind: 'file' as const, size: 1, mtimeMs: 0, isLink: w.links.has(e.path), realPath: real(e.path) } as never }))
   // $.ui.ask runs as an AskUserQuestion tool call; its answers sit on the result, keyed by question text.
   on('tool.call', async (_$, e) => {
     const input = e as unknown as { tool: string; questions?: { question: string; header?: string; options?: (string | { label: string })[] }[] }
