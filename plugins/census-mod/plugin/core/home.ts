@@ -1,5 +1,5 @@
 // Where "home" and the config dir are, on macOS, Linux and Windows. THE SAME FILE lives in census-mod, context-vigil-mod
-// and agent-roster (plugins share no code); tests/windows/test_home_copies.py fails if the copies differ.
+// and agent-roster (plugins share no code); tests/census/test_home_copies.py fails if the copies differ.
 //
 // Rule: the config dir is CLAUDE_CONFIG_DIR, else <home>/.claude; <home> is HOME, else USERPROFILE, else
 // HOMEDRIVE+HOMEPATH. `~`, `~/x` and `~\x` expand with the same home.
@@ -37,7 +37,8 @@ export const isAbsolute = (p: string): boolean => p.startsWith('/') || p.startsW
  * `C:\Users\x\` -> `C:\Users\x`, `C:\` -> `C:\`.
  */
 export function trimSeps(p: string): string {
-  if (/^[A-Za-z]:[\\/]*$/.test(p)) return `${p.slice(0, 2)}${p.includes('/') ? '/' : '\\'}` // a bare drive is a backslash root
+  if (/^[A-Za-z]:$/.test(p)) return p // `C:` is the drive-relative cwd of C:, not the root `C:\`
+  if (/^[A-Za-z]:[\\/]+$/.test(p)) return `${p.slice(0, 2)}${p.includes('/') ? '/' : '\\'}`
   const t = p.replace(/[\\/]+$/, '')
   return t || (/^[\\/]/.test(p) ? p[0] ?? '/' : p)
 }
@@ -47,7 +48,7 @@ export function joinPath(base: string, ...parts: string[]): string {
   const sep = sepOf(base)
   const root = trimSeps(base)
   const tail = parts.map(p => p.replace(/^[\\/]+|[\\/]+$/g, '')).filter(Boolean).join(sep)
-  const joined = root.endsWith('/') || root.endsWith('\\') ? `${root}${tail}` : `${root}${sep}${tail}`
+  const joined = root.endsWith('/') || root.endsWith('\\') || /^[A-Za-z]:$/.test(root) ? `${root}${tail}` : `${root}${sep}${tail}`
   return tail ? joined.replace(sep === '\\' ? /\//g : /\\/g, sep) : root
 }
 

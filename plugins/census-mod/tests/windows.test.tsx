@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { START, USAGE, classicStart, turn, world } from './world'
+import { BAND, START, USAGE, bandLines, classicStart, turn, world } from './world'
 
 const ingestCount = (w: ReturnType<typeof world>) => w.ingests.length
 
@@ -41,6 +41,10 @@ test('no Python at all: nothing recorded, one log line, and the band still draws
   expect(ingestCount(w)).toBe(0)
   expect(w.logs.filter(l => l.includes('found no Python'))).toHaveLength(1)
   expect(w.logs.find(l => l.includes('found no Python'))).toContain('python3, python, py -3')
+  const ui = await $.ui.mount(BAND())
+  const lines = await bandLines(ui)
+  expect(lines.join('\n')).toContain('9%') // the band still draws, from the session's own readings
+  await ui.unmount()
 })
 
 test('no sh (Windows): the session title and the cache TTL are read from the transcript file', async ($, on) => {
@@ -79,12 +83,12 @@ test('a Windows home (USERPROFILE only): the config dir, settings and backup kee
   w.answer.value = q => q.options.find(o => o.startsWith('Replace')) ?? q.options[0] ?? null
   await winSetup($, w)
 
-  const mv = w.runs.find(r => r.argv[0] === 'cmd' && r.argv[2] === 'move')
-  expect(mv?.argv).toEqual(['cmd', '/c', 'move', '/Y', `${WIN_SETTINGS}.census-mod.tmp`, WIN_SETTINGS])
+  expect(w.runs.filter(r => r.argv[0] === 'cmd')).toEqual([]) // never a cmd line built from a path
   expect(w.cps).toEqual([]) // no cp -p on Windows: a file there has no mode to keep
   expect(JSON.parse(w.files.get(WIN_SETTINGS) ?? '{}').statusLine).toBeUndefined()
   expect([...w.files.keys()].some(k => k.startsWith(`${WIN}\\census\\`) && k.includes('/'))).toBe(false) // no mixed separators
   expect(w.files.has(`${WIN}\\census\\census-mod.statusline.json`)).toBe(true)
+  expect(w.files.has(`${WIN_SETTINGS}.census-mod.tmp`)).toBe(false) // written in place: no temp to leave behind
 })
 
 test('a Windows home from HOMEDRIVE+HOMEPATH alone is found too', async ($, on) => {
@@ -95,4 +99,31 @@ test('a Windows home from HOMEDRIVE+HOMEPATH alone is found too', async ($, on) 
   w.answer.value = q => q.options.find(o => o.startsWith('Replace')) ?? q.options[0] ?? null
   await winSetup($, w)
   expect(w.files.has(`${WIN}\\census\\census-mod.statusline.json`)).toBe(true)
+})
+
+test('a Windows turn-off empties the backup instead of shelling out to delete it, and an empty backup is no backup', async ($, on) => {
+  const w = world(on, { env: { USERPROFILE: 'C:\\Users\\x' }, files: {
+    [WIN_SETTINGS]: JSON.stringify({ statusLine: WIN_LINE }, null, 2) + '\n',
+    [WIN_SCRIPT]: MARKED,
+  } })
+  w.answer.value = q => q.options.find(o => o.startsWith('Replace')) ?? q.options[0] ?? null
+  await winSetup($, w)
+  await $.command.run({ command: 'census-setup', args: 'off', origin: { kind: 'composer' } } as never)
+  for (let i = 0; i < 6; i++) await w.clock.advance(0)
+
+  expect(JSON.parse(w.files.get(WIN_SETTINGS) ?? '{}').statusLine).toEqual(WIN_LINE)
+  expect(w.files.get(`${WIN}\\census\\census-mod.statusline.json`)).toBe('')
+  expect(w.runs.filter(r => ['cmd', 'rm', 'mv', 'cp'].includes(r.argv[0]!))).toEqual([])
+})
+
+test('a pass through with the transcript read twice (title and TTL) reads the file once', async ($, on) => {
+  const w = world(on, { files: { '/cfg/projects/-repo/s1.jsonl': '{"type":"custom-title","customTitle":"x"}\n' } })
+  w.shell.value = false
+  await $.session.start(START)
+  await $.classic.SessionStart(classicStart('startup'))
+  await w.clock.advance(0)
+  await $.turn.complete(turn(USAGE))
+  await w.clock.advance(1_000)
+  const reads = w.lookups.filter(p => p === '/cfg/projects/-repo/s1.jsonl')
+  expect(reads.length).toBeLessThanOrEqual(2) // one for the turn, not one each for title and TTL
 })

@@ -2,7 +2,7 @@
 name: vitals-lean
 description: Show this session's vital signs in three lean lines — context gauge, model and cost; branch, PR and uncommitted work; rate-limit windows (a fourth line only when the reading may not be live). Phone-sized. Use when the user runs /census-mod:vitals-lean or asks for a quick status check.
 disable-model-invocation: true
-allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*)
+allowed-tools: Bash(sh:*), Bash(python3:*), Bash(python:*), Bash(py:*)
 ---
 
 # /census-mod:vitals-lean
@@ -11,9 +11,9 @@ Three lines, emoji gauges, nothing wasted. The one to glance at from a phone.
 
 ## Reading
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style compact --session "${CLAUDE_SESSION_ID}" 2>&1 || python "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style compact --session "${CLAUDE_SESSION_ID}" 2>&1 || py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style compact --session "${CLAUDE_SESSION_ID}" 2>&1`
+!`sh "${CLAUDE_PLUGIN_ROOT}/bin/pyrun.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style compact --session "${CLAUDE_SESSION_ID}" 2>&1`
 
-Launcher: wherever this file says `python3`, use the first of `python3`, `python` and `py -3` that exists on this machine.
+Launcher: `bin/pyrun.sh` runs the script with the first of `python3`, `python` and `py -3` that works, and says nothing about the others; run every command below through it.
 
 ## What to do
 
@@ -26,7 +26,7 @@ substituted), run it yourself from this skill's base directory and print the
 result the same way:
 
 ```bash
-python3 <skill base directory>/../../scripts/vitals.py --style compact
+sh <skill base directory>/../../bin/pyrun.sh <skill base directory>/../../scripts/vitals.py --style compact
 ```
 
 The script is read-only and never fails loudly: a missing source (no census

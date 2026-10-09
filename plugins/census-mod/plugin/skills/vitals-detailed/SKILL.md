@@ -2,7 +2,7 @@
 name: vitals-detailed
 description: Show this session's vital signs in full — context headroom and cache warmth, cost and token totals, git sync and lines changed, tool breakdown, and each rate-limit window with its reset time and a pace forecast. Use when the user runs /census-mod:vitals-detailed or wants the full session analytics.
 disable-model-invocation: true
-allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*)
+allowed-tools: Bash(sh:*), Bash(python3:*), Bash(python:*), Bash(py:*)
 ---
 
 # /census-mod:vitals-detailed
@@ -11,9 +11,9 @@ Sectioned readout with the figures behind the gauges. The rate-limit **pace** li
 
 ## Reading
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style detailed --session "${CLAUDE_SESSION_ID}" 2>&1 || python "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style detailed --session "${CLAUDE_SESSION_ID}" 2>&1 || py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style detailed --session "${CLAUDE_SESSION_ID}" 2>&1`
+!`sh "${CLAUDE_PLUGIN_ROOT}/bin/pyrun.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style detailed --session "${CLAUDE_SESSION_ID}" 2>&1`
 
-Launcher: wherever this file says `python3`, use the first of `python3`, `python` and `py -3` that exists on this machine.
+Launcher: `bin/pyrun.sh` runs the script with the first of `python3`, `python` and `py -3` that works, and says nothing about the others; run every command below through it.
 
 ## What to do
 
@@ -26,7 +26,7 @@ substituted), run it yourself from this skill's base directory and print the
 result the same way:
 
 ```bash
-python3 <skill base directory>/../../scripts/vitals.py --style detailed
+sh <skill base directory>/../../bin/pyrun.sh <skill base directory>/../../scripts/vitals.py --style detailed
 ```
 
 The script is read-only and never fails loudly: a missing source (no census

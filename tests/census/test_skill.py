@@ -126,7 +126,8 @@ def test_an_explicit_default_wins_over_the_first_run_question():
 
 import pytest  # noqa: E402
 
-_ROOTS = [Path(__file__).resolve().parents[2] / "plugins" / "census", Path(__file__).resolve().parents[2] / "plugins" / "census-mod" / "plugin"]
+# census-mod's files go through bin/pyrun.sh instead (tests/census/test_pyrun.py)
+_ROOTS = [Path(__file__).resolve().parents[2] / "plugins" / "census"]
 _FILES = [r / rel for r in _ROOTS for rel in ("commands/vitals.md", "skills/vitals-lean/SKILL.md", "skills/vitals-detailed/SKILL.md")]
 
 

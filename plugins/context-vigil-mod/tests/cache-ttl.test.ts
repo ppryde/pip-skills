@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { transcriptPathFor, ttlFromWrites, parseWrites, TAIL_CMD } from '../plugin/core/cache-ttl'
+import { transcriptPathFor, ttlFromWrites, parseWrites, TAIL_CMD, cacheLinesFromText, tailBytes } from '../plugin/core/cache-ttl'
 
 const row = (h1: number, m5: number) => `{"ephemeral_1h_input_tokens":${h1},"ephemeral_5m_input_tokens":${m5}}`
 
@@ -36,4 +36,13 @@ describe('ttlFromWrites', () => {
 test('transcriptPathFor mirrors how Claude Code names a project folder', () => {
   expect(transcriptPathFor('/cfg', '/Users/p/repos/x.y/.claude/worktrees/w', 'abc'))
     .toBe('/cfg/projects/-Users-p-repos-x-y--claude-worktrees-w/abc.jsonl')
+})
+
+test('the file fallback tails by UTF-8 bytes, as tail -c does, not by UTF-16 units', () => {
+  expect(tailBytes('aé€😀', 4)).toBe('😀')
+  expect(tailBytes('aé€😀', 7)).toBe('€😀')
+  expect(tailBytes('abc', 10)).toBe('abc')
+  const old = '"cache_creation":{"ephemeral_1h_input_tokens":9}'
+  expect(cacheLinesFromText(old + '€'.repeat(30000))).toBe('')
+  expect(cacheLinesFromText(old + '€'.repeat(100))).toBe(old)
 })

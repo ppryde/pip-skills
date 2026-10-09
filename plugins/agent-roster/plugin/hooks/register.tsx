@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { HOME_VARS_CHECKED, configRootOf, expandHome, homeOf, joinPath } from '../core/home'
 import type { HomeEnv } from '../core/home'
-import { claudePidsInTasklist, killArgv, onWindowsPath } from '../core/windows'
+import { isClaudeCommand, killArgv, onWindowsPath, procListArgv, procsInList } from '../core/windows'
 import type { SessionRow } from '../types'
 
 const PANE = 'agent-roster'
@@ -161,6 +161,7 @@ export function toRow(raw: unknown): SessionRow | undefined {
     status: String(d.status ?? 'unknown'),
     waitingFor: typeof d.waitingFor === 'string' ? d.waitingFor : undefined,
     kind: String(d.kind ?? 'interactive'),
+    ...(typeof d.startedAt === 'number' ? { startedAt: d.startedAt } : {}),
     lastActive: Number(d.updatedAt ?? d.statusUpdatedAt ?? 0),
   }
 }
@@ -520,16 +521,32 @@ export function claudePidsIn(psOutput: string): Set<number> {
   return pids
 }
 
+/**
+ * The pids that are Claude Code, asked of the OS (PowerShell): the command line must be Claude's entrypoint (a bare
+ * node.exe or bun.exe is any Node app) and, when `requireStart`, the registry's startedAt must agree with the process's
+ * creation time (a reused pid's does not). null: the OS could not be asked.
+ */
+async function verifiedOnWindows($: EngineInterface, items: readonly { pid: number; startedAt?: number }[], requireStart: boolean): Promise<Set<number> | null> {
+  const argv = procListArgv(items.map(i => i.pid))
+  if (!argv) return new Set()
+  const out = await $.process.run(argv, { timeoutMs: 15_000 }).catch(() => undefined)
+  if (out?.exitCode !== 0) return null
+  const procs = procsInList(out.stdout)
+  const now = Date.now()
+  const ok = new Set<number>()
+  for (const { pid, startedAt } of items) {
+    const proc = procs.get(pid)
+    if (!proc || !isClaudeCommand(proc.command)) continue
+    if (requireStart && !startMatches(startedAt, now - proc.createdMs, now)) continue
+    ok.add(pid)
+  }
+
+  return ok
+}
+
 async function liveClaudePids($: EngineInterface, pids: number[]): Promise<Set<number>> {
   if (pids.length === 0) return new Set()
-  if (await onWindows($)) {
-    const list = await $.process.run(['tasklist', '/FO', 'CSV', '/NH']).catch(() => undefined)
-    // Without a process list nothing can be told dead: the registry stands as it is.
-    if (list?.exitCode !== 0) return new Set(pids)
-    const running = claudePidsInTasklist(list.stdout)
-
-    return new Set(pids.filter(p => running.has(p)))
-  }
+  if (await onWindows($)) return (await verifiedOnWindows($, pids.map(pid => ({ pid })), false)) ?? new Set(pids)
   const ps = await $.process.run(['ps', '-o', 'pid=,comm=', '-p', pids.join(',')])
 
   return claudePidsIn(ps.stdout)
@@ -884,6 +901,14 @@ async function killSession($: EngineInterface, r: SessionRow): Promise<string> {
   if (!(await liveClaudePids($, [r.pid])).has(r.pid)) {
     return `Refused: pid ${r.pid} is no longer a Claude session; refresh and try again.`
   }
+  if (await onWindows($)) {
+    // A force-kill on Windows must be of THIS session's process: Claude's own command line, and a creation time that
+    // agrees with the registry's startedAt. A reused pid fails one or the other; if the OS cannot be asked, refuse.
+    const verified = await verifiedOnWindows($, [{ pid: r.pid, startedAt: r.startedAt }], true)
+    if (!verified?.has(r.pid)) {
+      return `Refused: could not confirm that pid ${r.pid} is ${name}'s Claude process (its command line and start time must match the registry); nothing was ended.`
+    }
+  }
   const socket = await socketOf($, r)
   const panes = socket && r.tmux ? ((await panePids($, socket, r.tmux)) ?? []) : []
   const isWholeSession = Boolean(socket && r.tmux) && mayKillTmuxSession(r, panes, self)
@@ -956,7 +981,9 @@ export function windowFolderFor(
 /** The open VS Code window folder showing this session's repo, if the helper reported one. */
 async function vscodeFolderFor($: EngineInterface, r: SessionRow): Promise<string | undefined> {
   if (await onWindows($)) return undefined // the VS Code helper and `ps` are macOS/Linux
-  const dir = joinPath(await homeDirOf($), VSCODE_WINDOWS_DIR)
+  const home = await homeDirOf($)
+  if (!home) return undefined // no home: nothing to look under (a join would make it `/.cache/...`)
+  const dir = joinPath(home, VSCODE_WINDOWS_DIR)
   const windows: VscodeWindow[] = []
   for (const entry of await $.fs.list(dir).catch(() => [])) {
     if (!entry.name.endsWith('.json')) continue
@@ -1032,10 +1059,12 @@ async function openSession($: EngineInterface, r: SessionRow): Promise<string> {
     }
     // The helper honours only a link carrying the token it finds in this file.
     const home = await homeDirOf($)
-    const isArmed = await $.fs
-      .write(joinPath(home, VSCODE_NONCE_FILE), nonce)
-      .then(() => true)
-      .catch(() => false)
+    const isArmed = home
+      ? await $.fs
+          .write(joinPath(home, VSCODE_NONCE_FILE), nonce)
+          .then(() => true)
+          .catch(() => false)
+      : false
     if (isRaised && isArmed) {
       await $.clock.sleep(800)
       const sent = await $.process.run(['open', uri]).catch(() => ({ exitCode: 1 }))
@@ -1095,6 +1124,7 @@ async function helperInstalled($: EngineInterface, home: string): Promise<boolea
 /** Builds the helper and installs it into Default and every VS Code profile. */
 async function installHelper($: EngineInterface): Promise<string> {
   const home = await homeDirOf($)
+  if (!home) return 'Could not find the VS Code settings: no home dir is set (HOME, USERPROFILE, HOMEDRIVE+HOMEPATH).'
   const storage = await $.fs.read(joinPath(home, VSCODE_STORAGE)).catch(() => undefined)
   let profiles: string[] = []
   try {

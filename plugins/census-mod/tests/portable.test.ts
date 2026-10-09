@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { PYTHON_CANDIDATES, cacheLinesFromText, copyModeArgv, moveArgv, onWindows, pickPython, removeArgv, titleLinesFromText } from '../plugin/core/portable'
+import { PYTHON_CANDIDATES, cacheLinesFromText, copyModeArgv, moveArgv, onWindows, pickPython, removeArgv, tailBytes, titleLinesFromText } from '../plugin/core/portable'
 import { ingestArgv } from '../plugin/core/census'
 
 test('python launchers are tried python3, python, py -3, and the first that runs --version wins', async () => {
@@ -30,9 +30,9 @@ test('move, remove and copy pick the platform from the path', async () => {
   expect(onWindows('\\\\srv\\share\\s.json')).toBe(true)
   expect(onWindows('/home/u/settings.json')).toBe(false)
   expect(moveArgv('/a.tmp', '/a')).toEqual(['mv', '-f', '/a.tmp', '/a'])
-  expect(moveArgv('C:\\a.tmp', 'C:\\a')).toEqual(['cmd', '/c', 'move', '/Y', 'C:\\a.tmp', 'C:\\a'])
+  expect(moveArgv('C:\\a.tmp', 'C:\\a')).toBeNull() // never `cmd /c`: it would parse the path
   expect(removeArgv('/a')).toEqual(['rm', '-f', '/a'])
-  expect(removeArgv('C:\\a')).toEqual(['cmd', '/c', 'del', '/F', '/Q', 'C:\\a'])
+  expect(removeArgv('C:\\a')).toBeNull()
   expect(copyModeArgv('/a', '/b')).toEqual(['cp', '-p', '/a', '/b'])
   expect(copyModeArgv('C:\\a', 'C:\\b')).toBeNull()
 })
@@ -73,4 +73,17 @@ test('POSIX paths are unchanged', async () => {
 test('git paths on Windows: forward-slash drive paths are absolute, and a linked worktree is found', async () => {
   expect(watchPaths({ exitCode: 0, stdout: 'C:/repo/.git\nC:/repo\n' })).toEqual(['C:/repo/.git/HEAD', 'C:/repo/.git/index'])
   expect(worktreeOf({ exitCode: 0, stdout: 'C:/repo/.git/worktrees/w\nC:/wt\n' })).toBe('C:/wt')
+})
+
+test('tail by bytes, not UTF-16 units', async () => {
+  expect(tailBytes('abcdef', 3)).toBe('def')
+  expect(tailBytes('abc', 10)).toBe('abc')
+  expect(tailBytes('aé€😀', 4)).toBe('😀')        // 1+2+3+4 bytes: only the emoji fits
+  expect(tailBytes('aé€😀', 7)).toBe('€😀')
+  expect(tailBytes('aé€😀', 6)).toBe('😀')        // a cut mid-character drops that character
+  expect(tailBytes('😀'.repeat(3), 8)).toBe('😀😀')
+  // a write sitting before 64 KiB of multi-byte text is out of the window, as `tail -c` has it
+  const old = '"cache_creation":{"ephemeral_1h_input_tokens":9}'
+  expect(cacheLinesFromText(old + '€'.repeat(30000))).toBe('') // 90000 bytes after it
+  expect(cacheLinesFromText(old + '€'.repeat(100))).toBe(old)
 })

@@ -137,7 +137,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
   on('classic.PostCompact', () => ({}))
   on('ui.toast', (_$, e) => { w.toasts.push(e.text); return { value: undefined } })
   on('fs.write', (_$, e) => { w.files.set(real(winPath(e.path)), e.text); return { value: undefined } })
-  on('fs.stat', (_$, e) => ({ value: { kind: 'file' as const, size: 1, mtimeMs: 0, isLink: w.links.has(winPath(e.path)), realPath: real(winPath(e.path)) } as never }))
+  on('fs.stat', (_$, e) => { w.lookups.push(e.path); return { value: { kind: 'file' as const, size: 1, mtimeMs: 0, isLink: w.links.has(winPath(e.path)), realPath: real(winPath(e.path)) } as never } })
   // $.ui.ask runs as an AskUserQuestion tool call; its answers sit on the result, keyed by question text.
   on('tool.call', async (_$, e) => {
     const input = e as unknown as { tool: string; questions?: { question: string; header?: string; options?: (string | { label: string })[] }[] }
