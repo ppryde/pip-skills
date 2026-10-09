@@ -144,7 +144,9 @@ quiet idle rows with a note, never a kill button and never counted as needing yo
   mod is not reading, so it is a working session of another account, not a stray. A pane
   whose pid is a shell above Claude is resolved to the Claude under it first, and a
   record only counts if its `startedAt` agrees with the live process's age (a crashed
-  session's leftover file does not label whatever reused its pid).
+  session's leftover file does not label whatever reused its pid). A record with no
+  `startedAt`, or a process whose age `ps` did not give, cannot be checked, so it is not
+  tagged: that pane stays a startup prompt.
   List the dir in `ROSTER_CONFIG_DIRS` and it becomes an ordinary row. A dir already
   listed is never reported this way.
 - **`agents view`**: the pane runs `claude agents`, which never registers.

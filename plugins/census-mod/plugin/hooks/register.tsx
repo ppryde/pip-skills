@@ -463,6 +463,7 @@ async function detect($: EngineInterface): Promise<Detection> {
     out.cliPath = await discover($)
     if (out.cliPath) {
       const root = out.cliPath.replace(/\/scripts\/[^/]+$/, '')
+      out.hasVitals = await $.fs.exists(out.cliPath.replace(/[^/\\]*$/, 'vitals.py')).catch(() => false)
       const meta = await $.fs.read(`${root}/.claude-plugin/plugin.json`).catch(() => undefined)
       try {
         const v = typeof meta === 'string' ? (JSON.parse(meta) as { version?: unknown }).version : undefined
@@ -633,7 +634,7 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   }
   let replace = false
   if (recordMode === null) {
-    const a = await askOne($, run, Q.record(d))
+    const a = await askOne($, run, Q.record(d, Boolean(rawEnv.CENSUS_MOD_STORE?.trim())))
     if (typeof a !== 'object') return stop(a)
     recordMode = recordFrom(a.a) ?? 'no'
     replace = replaceFrom(a.a)
@@ -689,9 +690,9 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   await saveAnswer($, { pr: is(pr.a, L.prYes), answeredAt: await nowMs($), offered: true })
   if (setupRun !== run) return
   setupRun = null
-  const hasVitals = d.cliPath ? await $.fs.exists(d.cliPath.replace(/[^/\\]*$/, 'vitals.py')).catch(() => false) : false
+  const hasVitals = det.hasVitals
   say($, '🧭 census-mod is set up', [
-    `recording: ${eff.record === 'yes' ? 'into census (the real store)' : eff.record === 'shadow' ? `shadow store ${eff.shadowDir ?? ''} — the dashboards and vitals do not read it; run /census-setup and answer Yes to record into census itself` : 'off'}`,
+    `recording: ${!d.cliPath ? 'off — census was not found' : eff.record === 'yes' ? 'into census (the real store)' : eff.record === 'shadow' ? `shadow store ${eff.shadowDir ?? ''} — the dashboards and vitals do not read it; run /census-setup and answer Yes to record into census itself` : 'off'}`,
     `band: ${drawOn ? `on, ${eff.placement === 'below' ? 'below the input' : 'above the input'}, ${PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
     `PR segment (gh): ${saved.pr === false ? 'off, gh is never called' : 'on'}`,
     ...(removed ? [`your status line was removed from settings.json; it is backed up in ${removed}`] : []),

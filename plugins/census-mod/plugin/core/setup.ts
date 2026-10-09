@@ -41,9 +41,11 @@ export type Detection = {
   otherWriter: boolean
   /** settings.json exists but is not valid JSON: it is never edited. */
   settingsInvalid: boolean
+  /** This census ships /census:vitals (vitals.py beside its cli.py). */
+  hasVitals: boolean
 }
 
-export const NO_DETECTION: Detection = { cliPath: null, version: null, statusLineCommand: null, ingestBlock: false, otherWriter: false, settingsInvalid: false }
+export const NO_DETECTION: Detection = { cliPath: null, version: null, statusLineCommand: null, ingestBlock: false, otherWriter: false, settingsInvalid: false, hasVitals: false }
 
 export function versionParts(v: string): number[] {
   return v.split('.').map(p => (/^\d+$/.test(p) ? Number.parseInt(p, 10) : 0))
@@ -152,6 +154,8 @@ export const L = {
   recYes: 'Yes — record into census (dashboards, vitals and liveness use it)',
   recShadow: "Shadow — record into a separate store to compare; dashboards won't see it",
   recNo: "No — don't record (dashboards and vitals won't see this account)",
+  recNoFed: 'No — leave recording to my status line (it keeps feeding census)',
+  recNoOther: "No — don't record (whatever else writes keeps feeding census)",
   drawBelow: "Yes — below the input, under Claude Code's hint line",
   drawAbove: 'Yes — above the input, in the band',
   drawNo: 'No — record only, draw nothing',
@@ -183,25 +187,33 @@ export const Q = {
    * in) and Replace (swap a status line that feeds census for census-mod) are offered only where something already
    * records into the real store.
    */
-  record: (det: Detection): Question => {
-    const OVERSEER = 'the overseer dashboard, /census:vitals and liveness'
+  record: (det: Detection, shadowByEnv = false): Question => {
+    const readers = det.hasVitals ? 'the overseer dashboard, /census:vitals and session liveness' : 'the overseer dashboard and session liveness'
+    const OVERSEER = det.hasVitals ? 'the overseer dashboard, /census:vitals and liveness' : 'the overseer dashboard and liveness'
+    if (det.ingestBlock && shadowByEnv) {
+      return {
+        header: '📝 Record',
+        question: `CENSUS_MOD_STORE is set, so census-mod records into a separate shadow store whatever you answer, and your status line — which records this account's sessions into census, the store ${OVERSEER} read — stays as that store's writer. Unset it and run /census-setup again to replace the status line. Compare in the shadow store, or leave recording to your status line?`,
+        options: [rec(L.recShadow, true), L.recYes, L.recNoFed],
+      }
+    }
     if (det.ingestBlock) {
       return {
         header: '📝 Record',
-        question: `Your status line already records this account's sessions into census — the store ${OVERSEER} read. Replace it with census-mod (records and draws the line; yours is backed up), compare first, or leave recording to your status line?`,
-        options: [rec(L.recReplace, true), L.recShadow, L.recYes, L.recNo],
+        question: `Your status line already records this account's sessions into census — the store ${OVERSEER} read. Replace it with census-mod (records and draws the line; yours is backed up), compare first, or leave recording to your status line (it keeps feeding census)?`,
+        options: [rec(L.recReplace, true), L.recShadow, L.recYes, L.recNoFed],
       }
     }
     if (det.otherWriter) {
       return {
         header: '📝 Record',
         question: `Something has been recording this account's sessions into census in the last few minutes — the store ${OVERSEER} read. Two writers on one store muddle liveness: compare first in a separate store, or record anyway?`,
-        options: [rec(L.recShadow, true), L.recYes, L.recNo],
+        options: [rec(L.recShadow, true), L.recYes, L.recNoOther],
       }
     }
     return {
       header: '📝 Record',
-      question: "Record this account's sessions into census? That's what the overseer dashboard, /census:vitals and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.",
+      question: `Record this account's sessions into census? That's what ${readers} read (context, cost, limits, git, PR) — without it they see nothing from this account.`,
       options: [rec(L.recYes, true), L.recNo],
     }
   },
@@ -238,7 +250,7 @@ export const is = (answer: string, label: string): boolean => strip(answer) === 
 export function recordFrom(answer: string): RecordMode | null {
   if (is(answer, L.recYes) || is(answer, L.recReplace)) return 'yes'
   if (is(answer, L.recShadow)) return 'shadow'
-  if (is(answer, L.recNo)) return 'no'
+  if (is(answer, L.recNo) || is(answer, L.recNoFed) || is(answer, L.recNoOther)) return 'no'
   return null
 }
 /** The record answer that also hands the status line over to census-mod. */

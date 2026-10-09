@@ -45,7 +45,7 @@ test('the exact questions', async ($, on) => {
   await setupRun($, w)
 
   expect(w.asks).toEqual([
-    { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard, /census:vitals and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards, vitals and liveness use it) (Recommended)', "No — don't record (dashboards and vitals won't see this account)"] },
+    { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards, vitals and liveness use it) (Recommended)', "No — don't record (dashboards and vitals won't see this account)"] },
     { header: '🎛️ Draw', question: 'Should census-mod draw your status line, and where?', options: ["Yes — below the input, under Claude Code's hint line (Recommended)", 'Yes — above the input, in the band', 'No — record only, draw nothing'] },
     { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Your two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git'] },
     { header: '🔀 PR', question: "Show the branch's open PR (number, review state) using gh? No means gh is never called.", options: ['Yes (Recommended)', "No — never call gh"] },
@@ -275,7 +275,9 @@ test('Replace (the recommended answer when the status line feeds census): asks o
 test('with CENSUS_MOD_STORE in effect (records to a shadow store) the status line is never removed: the real store still needs it', async ($, on) => {
   const w = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u', CENSUS_MOD_STORE: '/cfg/census-x' } })
   doubleWriter(w)
-  await setupRun($, w) // the first answers: Replace, then draw below
+  w.answer.value = q => (q.header === '📝 Record' ? q.options.find(o => o.startsWith('Yes')) ?? null : q.options[0] ?? null)
+  await setupRun($, w)
+  expect(w.asks.find(a => a.header === '📝 Record')?.options.some(o => o.startsWith('Replace'))).toBe(false)
 
   expect(w.files.get(SETTINGS)).toBe(settings())
   expect(w.files.has(BACKUP)).toBe(false)
@@ -405,6 +407,22 @@ test('no census at all: says so and does not ask about recording', async ($, on)
 
   expect(headers(w)).not.toContain('📝 Record')
   expect(w.logs.join('\n')).toContain('census not found')
+})
+
+test('no census at all: the summary says recording is off, not on', async ($, on) => {
+  const w = world(on)
+  w.files.delete('/cfg/census/cli.path')
+  await setupRun($, w)
+  const log = w.logs.join('\n')
+
+  expect(log).toContain('recording: off — census was not found')
+  expect(log).not.toContain('recording: into census')
+})
+
+test('the question names /census:vitals only when vitals.py sits beside the CLI', async ($, on) => {
+  const withIt = world(on, { files: { '/plugins/census/scripts/vitals.py': '' } })
+  await setupRun($, withIt)
+  expect(withIt.asks.find(a => a.header === '📝 Record')?.question).toContain('/census:vitals')
 })
 
 // ---- the one-time offer ----------------------------------------------------------------------------------------------------
@@ -614,12 +632,12 @@ test('where the status line already feeds census: Replace first, then Shadow, Ye
 
   expect(w.asks.find(a => a.header === '📝 Record')).toEqual({
     header: '📝 Record',
-    question: "Your status line already records this account's sessions into census — the store the overseer dashboard, /census:vitals and liveness read. Replace it with census-mod (records and draws the line; yours is backed up), compare first, or leave recording to your status line?",
+    question: "Your status line already records this account's sessions into census — the store the overseer dashboard and liveness read. Replace it with census-mod (records and draws the line; yours is backed up), compare first, or leave recording to your status line (it keeps feeding census)?",
     options: [
       'Replace my status line — census-mod records and draws it (Recommended)',
       "Shadow — record into a separate store to compare; dashboards won't see it",
       'Yes — record into census (dashboards, vitals and liveness use it)',
-      "No — don't record (dashboards and vitals won't see this account)",
+      'No — leave recording to my status line (it keeps feeding census)',
     ],
   })
 })
