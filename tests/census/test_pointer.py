@@ -28,9 +28,11 @@ def test_ingest_publishes_resolved_cli_path(store_file, monkeypatch):
 def test_same_path_is_not_rewritten(store_file, monkeypatch):
     _ingest(monkeypatch)
     pointer = st.pointer_path()
-    before = pointer.stat().st_mtime_ns
+    replaced = []
+    real = os.replace
+    monkeypatch.setattr(os, "replace", lambda src, dst, *a, **k: (replaced.append(str(dst)), real(src, dst))[1])
     _ingest(monkeypatch)
-    assert pointer.stat().st_mtime_ns == before
+    assert str(pointer) not in replaced  # mtime granularity cannot hide a rewrite from a spy
 
 
 def test_different_recorded_path_is_replaced(store_file, monkeypatch):

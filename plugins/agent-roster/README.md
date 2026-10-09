@@ -119,8 +119,10 @@ NEEDS YOU
 • Demo cards — cc-ledger-2 · ledger · 2m · input needed · personal
 ```
 
-On Windows, separate with `;` (an entry starting `C:\` switches the split to
-`;`). The session's own dir is always read, listed or not.
+On Windows, separate with `;` (an entry starting `C:\` or `\\server` switches the
+split to `;`). The session's own dir is always read, listed or not. If one pid
+is in two registries (a crashed session's file outliving it), only the more
+recently active row is shown.
 
 ## Where the data comes from
 

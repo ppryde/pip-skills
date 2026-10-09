@@ -1,4 +1,8 @@
 import json
+import os
+import shutil
+
+import pytest
 
 from scripts import store as st
 from scripts.resolve import normalise
@@ -30,6 +34,12 @@ class TestLatestForWorktree:
     def test_matches_across_trailing_slash_and_symlink_variants(self, store_file, tmp_path):
         st.ingest(_payload("s1", str(tmp_path)), now=1.0)
         assert st.latest_for_worktree(str(tmp_path) + "/", now=1.0) is not None
+        link = tmp_path.parent / (tmp_path.name + "-link")
+        try:
+            os.symlink(tmp_path, link)
+        except (OSError, NotImplementedError):
+            pytest.skip("cannot create symlinks here (Windows without the privilege)")
+        assert st.latest_for_worktree(str(link), now=1.0) is not None
 
     def test_includes_top_level_limits(self, store_file):
         rate = {"five_hour": {"used_percentage": 30, "resets_at": 1000}}  # future vs now=1.0
@@ -123,6 +133,7 @@ class TestIdleFlag:
         """A bool would coerce to 1.0 and pin the session idle forever; a NaN
         would make every comparison false and pin it non-idle forever."""
         for bad in (True, float("nan"), "700"):
+            shutil.rmtree(st.census_dir(), ignore_errors=True)  # else the first seed's migration shadows the rest
             self._seed(store_file, active_at=bad, updated_at=100.0)
             assert st.for_session("s1", now=100.0 + 60)["idle"] is False, bad
             horizon = 100.0 + st.IDLE_HORIZON_SECONDS + 1

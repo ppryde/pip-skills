@@ -24,8 +24,11 @@ def _spawn_ingest(store_path, sid):
 def test_concurrent_writers_do_not_lose_entries(store_file):
     ids = [f"s{i}" for i in range(24)]
     procs = [_spawn_ingest(store_file, sid) for sid in ids]
-    for proc, payload in procs:
-        proc.communicate(payload, timeout=30)
+    for proc, payload in procs:  # feed every child first, so they really overlap...
+        proc.stdin.write(payload)
+        proc.stdin.close()
+    for proc, _ in procs:  # ...then wait for them all
+        proc.wait(timeout=30)
     for proc, _ in procs:
         assert proc.returncode == 0
 

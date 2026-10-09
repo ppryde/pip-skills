@@ -99,9 +99,18 @@ class TestLimitsFile:
 
 class TestPortable:
     def test_no_census_module_imports_fcntl(self):
-        for path in (PLUGIN / "scripts").glob("*.py"):
-            text = path.read_text()
-            assert "import fcntl" not in text, path.name
+        import ast
+
+        scripts = sorted((PLUGIN / "scripts").glob("*.py"))
+        assert scripts, "the scan must find census's modules"
+        for path in scripts:
+            for node in ast.walk(ast.parse(path.read_text())):
+                names = []
+                if isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    names = [node.module or ""]
+                assert not any(n.split(".")[0] == "fcntl" for n in names), path.name
 
 
 class TestIngestNeverRaises:

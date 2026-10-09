@@ -191,7 +191,7 @@ test('sessions starting a few seconds apart ask the VS Code helper question once
 })
 
 // Two accounts' registries; `unreadable` dirs exist but cannot be listed.
-function accountsWorld(on: On, unreadable: string[] = []) {
+function accountsWorld(on: On, unreadable: string[] = [], unreadableFiles: string[] = []) {
   const dirs: Record<string, object> = {
     '/home/.claude/sessions': { '101.json': { pid: 101, sessionId: 'a', cwd: '/r/mine', tmux: 'cc-own:@0.%0', status: 'busy', updatedAt: 0 } },
     '/home/.claude-personal/sessions': { '202.json': { pid: 202, sessionId: 'b', cwd: '/r/theirs', tmux: 'cc-other:@1.%1', status: 'busy', updatedAt: 0 } },
@@ -212,10 +212,11 @@ function accountsWorld(on: On, unreadable: string[] = []) {
     return { value: Object.keys(reg).map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) }
   })
   on('fs.read', ($, e) => {
+    if (unreadableFiles.includes(e.path)) return { deny: 'EACCES: permission denied' }
     const at = e.path.lastIndexOf('/')
     return { value: JSON.stringify((dirs[e.path.slice(0, at)] as Record<string, object>)?.[e.path.slice(at + 1)]) }
   })
-  on('fs.exists', ($, e) => ({ value: e.path in dirs || unreadable.includes(e.path) }))
+  on('fs.exists', ($, e) => ({ value: e.path in dirs || unreadable.includes(e.path) || unreadableFiles.includes(e.path) }))
   on('ui.open', () => ({ value: { isPlaced: true as const } }))
   on('ui.status', () => ({ value: undefined }))
   on('process.run', ($, e) => ({
@@ -267,10 +268,27 @@ test('the pane shows that warning too', async ($, on) => {
   await ui.unmount()
 })
 
-test('when every dir fails the last good roster stays with the failure banner', async ($, on) => {
-  accountsWorld(on, ['/home/.claude/sessions', '/home/.claude-personal/sessions', '/home/.claude-gone/sessions', '/home/.claude-locked/sessions'])
+test('when every dir fails a refresh, the last good rows stay under the failure banner', async ($, on) => {
+  const failing: string[] = []
+  accountsWorld(on, failing)
   const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: /cc-own/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Last scan failed/ })).toBeUndefined()
+
+  failing.push('/home/.claude/sessions', '/home/.claude-personal/sessions', '/home/.claude-gone/sessions', '/home/.claude-locked/sessions')
+  await ui.press({ key: 'refresh' })
 
   expect(await ui.find({ type: 'Text', text: /Last scan failed.*EACCES/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /cc-own/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /cc-other/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('a session file that lists but cannot be read is a warning for its dir', async ($, on) => {
+  accountsWorld(on, [], ['/home/.claude-personal/sessions/202.json'])
+  const text = await bridgeText($)
+
+  expect(text).toContain('• mine — cc-own')
+  expect(text).not.toContain('cc-other')
+  expect(text.split('\n').at(-1)).toMatch(/^! could not read personal: .*EACCES/)
 })

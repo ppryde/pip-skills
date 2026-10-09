@@ -30,25 +30,38 @@ export function configDirTag(dir: string): string {
 // "." and ".." folded away, trailing separators dropped: two spellings of one dir compare equal.
 function resolved(path: string): string {
   const sep = path.includes('\\') && !path.includes('/') ? '\\' : '/'
+  const parts = path.split(/[\\/]/)
+  // A root the folding must not climb above: "/", "\\\\" (UNC) or "C:\\".
+  let root = ''
+  if (parts[0] === '' && parts[1] === '' && parts.length > 2) {
+    root = sep + sep
+    parts.splice(0, 2)
+  } else if (parts[0] === '' && parts.length > 1) {
+    root = sep
+    parts.shift()
+  } else if (/^[A-Za-z]:$/.test(parts[0]!) && parts.length > 1) {
+    root = parts.shift() + sep
+  }
   const out: string[] = []
-  for (const part of path.split(/[\\/]/)) {
-    if (part === '.' || (part === '' && out.length > 0)) continue
-    if (part === '..' && out.length > 1) out.pop()
-    else out.push(part)
+  for (const part of parts) {
+    if (part === '.' || part === '') continue
+    if (part !== '..') out.push(part)
+    else if (out.length > 0 && out.at(-1) !== '..') out.pop()
+    else if (!root) out.push('..')
   }
 
-  return out.join(sep) || sep
+  return root + out.join(sep) || '.'
 }
 
 /**
  * The config dirs to read, from `ROSTER_CONFIG_DIRS`. The mod cannot see the
  * platform, so it splits on ":" unless an entry starts with a drive letter
- * (`C:\`), then on ";". `~` (or `~/`, `~\`) is HOME. Deduped by resolved path; the session's
+ * (`C:\`) or is a UNC path (`\\server\share`), then on ";". `~` (or `~/`, `~\`) is HOME. Deduped by resolved path; the session's
  * own dir is always read, first and untagged, listed or not. Unset or blank: the own dir alone.
  */
 export function resolveConfigDirs(raw: string | undefined, home: string, own: string): ConfigDir[] {
   if (!raw?.trim()) return [{ dir: own }]
-  const separator = /(^|;)[A-Za-z]:[\\/]/.test(raw) ? ';' : ':'
+  const separator = /(^|;)([A-Za-z]:[\\/]|\\\\)/.test(raw) ? ';' : ':'
   // Windows paths ignore case: "C:\\U" and "c:\\u" are one dir.
   const key = (dir: string) => (separator === ';' ? dir.toLowerCase() : dir)
   const seen = new Set<string>([key(resolved(own))])
@@ -370,6 +383,21 @@ export async function listRegistry($: EngineInterface, dir: string) {
   }
 }
 
+/**
+ * One pid in two registries means one of them is stale (pids are unique on a
+ * host, and a crashed session's file outlives it): the live process keeps
+ * touching its own, so the most recently active row wins, the earlier dir on a tie.
+ */
+export function newestPerPid<T extends { row: SessionRow }>(found: T[]): T[] {
+  const newest = new Map<number, T>()
+  for (const f of found) {
+    const held = newest.get(f.row.pid)
+    if (!held || f.row.lastActive > held.row.lastActive) newest.set(f.row.pid, f)
+  }
+
+  return found.filter(f => newest.get(f.row.pid) === f)
+}
+
 async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings: string[] }> {
   const dirs = resolveConfigDirs(
     (await $.env.get('ROSTER_CONFIG_DIRS')) || undefined,
@@ -378,18 +406,31 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
   )
   const found: { row: SessionRow; configDir: string }[] = []
   const warnings: string[] = []
+  const unlisted = new Set<string>()
   for (const { dir: configDir, tag } of dirs) {
+    const name = tag ?? 'own dir'
     let entries: Awaited<ReturnType<typeof listRegistry>>
     try {
       entries = await listRegistry($, `${configDir}/sessions`)
     } catch (err) {
       // One unreadable dir must not hide the others' sessions.
-      warnings.push(`${tag ?? 'own dir'}: ${String(err).slice(0, 120)}`)
+      warnings.push(`${name}: ${String(err).slice(0, 120)}`)
+      unlisted.add(configDir)
       continue
     }
     for (const entry of entries) {
       if (!entry.name.endsWith('.json')) continue
-      const text = await $.fs.read(`${configDir}/sessions/${entry.name}`).catch(() => undefined)
+      const file = `${configDir}/sessions/${entry.name}`
+      let text: unknown
+      try {
+        text = await $.fs.read(file)
+      } catch (err) {
+        // Gone since the listing (a session ended) is routine; anything else is worth a warning.
+        if ((await $.fs.exists(file).catch(() => true)) && !warnings.some(w => w.startsWith(`${name}: `))) {
+          warnings.push(`${name}: ${String(err).slice(0, 120)}`)
+        }
+        continue
+      }
       if (typeof text !== 'string') continue
       try {
         const row = toRow(JSON.parse(text))
@@ -402,12 +443,12 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
   // The registry outlives crashed processes, and their pids get reused: keep
   // only pids still running Claude.
   // Every dir failing is a failed scan: the last good roster stays up with the reason.
-  if (warnings.length === dirs.length) throw new Error(warnings.join('; '))
+  if (unlisted.size === dirs.length) throw new Error(warnings.join('; '))
   const alive = await liveClaudePids(
     $,
     found.map(f => f.row.pid),
   )
-  const live = found.filter(f => alive.has(f.row.pid))
+  const live = newestPerPid(found.filter(f => alive.has(f.row.pid)))
 
   const registered = await Promise.all(
     live.map(async ({ row, configDir }) => {

@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from scripts.resolve import normalise, worktree_cwd
 
 
@@ -29,6 +31,13 @@ class TestWorktreeCwd:
             "cwd": str(tmp_path),
         }
         assert worktree_cwd(payload) == normalise(str(tmp_path))
+        odd = {"worktree": {"path": 7}, "workspace": {"current_dir": {"x": 1}}, "cwd": str(tmp_path)}
+        assert worktree_cwd(odd) == normalise(str(tmp_path))
+
+    def test_an_unresolvable_candidate_falls_through_to_the_next(self, tmp_path):
+        payload = {"worktree": {"path": "bad\0path"}, "cwd": str(tmp_path)}
+        assert worktree_cwd(payload) == normalise(str(tmp_path))
+        assert worktree_cwd({"cwd": "bad\0path"}) is None
 
     def test_trailing_slash_collapses(self, tmp_path):
         with_slash = worktree_cwd({"cwd": str(tmp_path) + "/"})
@@ -39,5 +48,8 @@ class TestWorktreeCwd:
         real = tmp_path / "real"
         real.mkdir()
         link = tmp_path / "link"
-        os.symlink(real, link)
+        try:
+            os.symlink(real, link)
+        except (OSError, NotImplementedError):
+            pytest.skip("cannot create symlinks here (Windows without the privilege)")
         assert worktree_cwd({"cwd": str(link)}) == worktree_cwd({"cwd": str(real)})
