@@ -17,7 +17,7 @@ export function procListArgv(pids: readonly number[]): string[] | null {
   const filter = ok.map(p => `ProcessId=${p}`).join(' OR ')
   const script =
     `Get-CimInstance Win32_Process -Filter '${filter}' | ForEach-Object { ` +
-    '"$($_.ProcessId)`t$([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds())`t$($_.CommandLine)" }'
+    '"$($_.ProcessId)`t$(([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds())`t$($_.CommandLine)" }'
 
   return ['powershell', '-NoProfile', '-NonInteractive', '-Command', script]
 }

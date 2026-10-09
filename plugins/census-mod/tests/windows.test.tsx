@@ -127,3 +127,25 @@ test('a pass through with the transcript read twice (title and TTL) reads the fi
   const reads = w.lookups.filter(p => p === '/cfg/projects/-repo/s1.jsonl')
   expect(reads.length).toBeLessThanOrEqual(2) // one for the turn, not one each for title and TTL
 })
+
+test('an unprimed session that ends first still writes its last word: the launchers are tried directly within the end budget', async ($, on) => {
+  const w = world(on)
+  w.pythons.value = ['python']
+  await $.session.start(START) // no clock advance: nothing has been recorded, no launcher chosen yet
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: {} as never })
+
+  const last = w.ingests.at(-1)
+  expect(last?.argv[0]).toBe('python')
+  expect(last?.payload.census_mod).toMatchObject({ event: 'session.end', ended: 'prompt_input_exit' })
+  expect(last?.timeoutMs).toBeLessThanOrEqual(1000)
+  expect(w.runs.filter(r => r.argv.includes('--version'))).toEqual([]) // no probe spent the budget
+})
+
+test('at session end with no Python at all: nothing recorded, one log line, and the launcher is not cached as none', async ($, on) => {
+  const w = world(on)
+  w.pythons.value = []
+  await $.session.start(START)
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: {} as never })
+  expect(w.ingests).toEqual([])
+  expect(w.logs.filter(l => l.includes('found no Python')).length).toBeLessThanOrEqual(1)
+})

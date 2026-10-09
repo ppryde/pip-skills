@@ -157,3 +157,27 @@ test('Windows kill refuses when the OS cannot be asked', async ($, on) => {
   expect(await kill($)).toContain('Refused')
   expect(w.killed).toEqual([])
 })
+
+test('the PowerShell script is exactly this, with the method call inside the subexpression', () => {
+  expect(procListArgv([1234, 99])).toEqual([
+    'powershell', '-NoProfile', '-NonInteractive', '-Command',
+    "Get-CimInstance Win32_Process -Filter 'ProcessId=1234 OR ProcessId=99' | ForEach-Object { " +
+      '"$($_.ProcessId)`t$(([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds())`t$($_.CommandLine)" }',
+  ])
+})
+
+test('output of that script parses to numbers; a non-numeric timestamp parses to nothing, so a kill is refused', () => {
+  const good = procsInList('1234\t1791000000123\t"C:\\bin\\claude.exe" --x\r\n')
+  expect(good.get(1234)?.createdMs).toBe(1791000000123)
+  expect(Number.isFinite(good.get(1234)?.createdMs)).toBe(true)
+  expect(procsInList('1234\tSystem.Object[]\tclaude.exe\r\n').size).toBe(0)
+  expect(procsInList('1234\t\tclaude.exe\r\n').size).toBe(0)
+})
+
+test('Windows kill refuses when the creation time comes back non-numeric', async ($, on) => {
+  const w = windowsMachine(on, { USERPROFILE: 'C:\\Users\\x' })
+  w.psOut.value = '4321\tSystem.Object[]\t"C:\\bin\\claude.exe"\r\n'
+  await bridge($)
+  expect(await kill($)).not.toContain('Ended')
+  expect(w.killed).toEqual([])
+})

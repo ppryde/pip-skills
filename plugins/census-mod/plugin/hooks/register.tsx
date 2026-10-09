@@ -7,7 +7,7 @@ import type { GhEntry, Why } from '../core/gh'
 import { COALESCE_MS as GIT_COALESCE_MS, GIT_DIR_ARGV, GIT_STATUS_ARGV, parseStatus, touchesGit, watchPaths, worktreeOf } from '../core/git'
 import { homeOf, joinPath } from '../core/home'
 import { configRoot, transcriptPathFor } from '../core/name'
-import { cacheLinesFromText, copyModeArgv, moveArgv, pickPython, removeArgv, titleLinesFromText } from '../core/portable'
+import { PYTHON_CANDIDATES, cacheLinesFromText, copyModeArgv, moveArgv, pickPython, removeArgv, titleLinesFromText } from '../core/portable'
 import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
 import type { Event } from '../core/payload'
 import { TITLE_ARGV, TITLE_TAIL_CMD, findProc, lastTitle } from '../core/registry'
@@ -244,10 +244,23 @@ async function ingest($: EngineInterface, event: Event, endedReason?: string, ti
   const path = await discover($)
   if (!path) return
   const py = await pythonLauncher($, timeoutMs)
-  if (!py) return
   const payload = buildPayload(of, await nowMs($), event, endedReason)
+  const run = (launcher: readonly string[]) => $.process.run(ingestArgv(path, launcher), { stdin: JSON.stringify(payload), env: ingestEnv(env), timeoutMs })
   try {
-    const out = await $.process.run(ingestArgv(path, py), { stdin: JSON.stringify(payload), env: ingestEnv(env), timeoutMs })
+    if (!py) {
+      // Not chosen yet and too little budget to probe (a session.end has about a second, and no later ingest): run the
+      // ingest itself through each launcher in turn. One that cannot be spawned (or is missing: 127, 9009) is skipped.
+      if (python !== undefined) return
+      for (const candidate of PYTHON_CANDIDATES) {
+        const out = await run(candidate).catch(() => undefined)
+        if (!out || out.exitCode === 127 || out.exitCode === 9009) continue
+        python = [...candidate]
+        if (out.exitCode !== 0) cli = undefined
+        return
+      }
+      return
+    }
+    const out = await run(py)
     if (out.exitCode !== 0) cli = undefined // the bundle moved or broke: look again next time
   } catch {
     cli = undefined
