@@ -40,7 +40,7 @@ _CODES = {
     "white": "97",  # bright white: the track ahead of Pac-Man
     "red": "31",
     "orange": "38;5;208",
-    "claude": "38;2;217;119;87",  # #D97757, the asterisk's own orange (truecolor)
+    "claude": "1;38;2;217;119;87",  # bold #D97757, the asterisk's own orange (truecolor)
 }
 
 # A canned payload for `census statusline --preview`.
@@ -296,7 +296,9 @@ def _model(payload: Mapping[str, Any]) -> str:
 
 def seg_model(c: Ctx) -> list[str]:
     custom = c.env.get(MASCOT_ENV)
-    glyph = custom if custom else c.pal.paint("claude", DEFAULT_MASCOT)  # an override is drawn as given
+    # The default takes a two-column slot like an emoji (the ✻ plus one extra space), so the model name lines
+    # up with the emoji-led segments above it; an override is drawn as given.
+    glyph = custom if custom else c.pal.paint("claude", DEFAULT_MASCOT) + " "
     return [f"{glyph} {c.pal.paint('cyan', _model(c.payload))}"]
 
 

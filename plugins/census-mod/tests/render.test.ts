@@ -26,7 +26,7 @@ test('the default band is render.py\'s two lines, glyph for glyph', async () => 
   expect(text(FULL)).toBe(
     [
       '🧠 ••••ᗧ••••• 42% │ 🎯 93% ⟳ 50m │ ⏳ ••••••••ᗧ• 78% ⟳ 2h10m │ 📅 ••ᗧ••••••• 24% ⟳ 3d4h │ 💸 ••ᗧ$$$$$$$ $3.10 │ 🐌 $1.72/hr',
-      '✻ Opus 5.5 │ 🌿 feat/x │ 📁 …/philip.pryde/repos/pip-skills │ ✏️ 3  ⬆️ 2',
+      '✻  Opus 5.5 │ 🌿 feat/x │ 📁 …/philip.pryde/repos/pip-skills │ ✏️ 3  ⬆️ 2',
     ].join('\n'),
   )
 })
@@ -36,7 +36,7 @@ test('CENSUS_STATUSLINE_SEGMENTS: "," joins on a line, "/" starts the next, unkn
   expect(layout(undefined)).toEqual([['context', 'cache', 'limits', 'cost'], ['model', 'git', 'dir', 'changes', 'pr']])
   expect(layout('  ')[0]).toContain('context')
   expect(text({ ...FULL, env: { ...FULL.env, CENSUS_STATUSLINE_SEGMENTS: 'context,model/limits,git' } })).toBe(
-    ['🧠 ••••ᗧ••••• 42% │ ✻ Opus 5.5', '⏳ ••••••••ᗧ• 78% ⟳ 2h10m │ 📅 ••ᗧ••••••• 24% ⟳ 3d4h │ 🌿 feat/x'].join('\n'),
+    ['🧠 ••••ᗧ••••• 42% │ ✻  Opus 5.5', '⏳ ••••••••ᗧ• 78% ⟳ 2h10m │ 📅 ••ᗧ••••••• 24% ⟳ 3d4h │ 🌿 feat/x'].join('\n'),
   )
 })
 
@@ -46,7 +46,7 @@ test('hot figures turn red, a cold cache is a 🧊 with its misses, a runaway bu
     costUsd: 30, durationMs: 3_600_000, git: { branch: 'main', uncommitted: 0, ahead: 0, hasUpstream: false }, cwd: '/a/b', env: {},
   }
 
-  expect(text(hot)).toBe(['🧠 •••••••••ᗧ 95% │ 🧊 50% ✗2 │ 💸 •••••••••ᗧ $30.00 │ 🚀 $30.00/hr', '✻ Opus 5.5 │ 🌿 main │ 📁 /a/b │ ✏️ 0'].join('\n'))
+  expect(text(hot)).toBe(['🧠 •••••••••ᗧ 95% │ 🧊 50% ✗2 │ 💸 •••••••••ᗧ $30.00 │ 🚀 $30.00/hr', '✻  Opus 5.5 │ 🌿 main │ 📁 /a/b │ ✏️ 0'].join('\n'))
   expect(draw(hot)[0]?.find(r => r.t === '95%')?.tone).toBe('red')
   expect(draw(hot)[0]?.find(r => r.t === '50%')?.tone).toBe('red') // the inverted ramp: low is bad
 })
@@ -121,8 +121,8 @@ test('a joined emoji (a ZWJ sequence) is one glyph wide, not one per part', asyn
 test('the mascot is a ✻ in Claude\'s orange, as its own coloured run; an override is plain text', async () => {
   const head = (env: RenderInput['env']) => draw({ ...FULL, env }).at(1)?.slice(0, 2)
 
-  expect(head({})).toEqual([{ t: '✻', tone: 'claude' }, { t: ' ' }])
-  expect(head({ CLAUDE_CONFIG_DIR: '/h/.claude-personal', CLAUDE_PROFILE: 'personal' })).toEqual([{ t: '✻', tone: 'claude' }, { t: ' ' }]) // the account no longer picks it
+  expect(head({})).toEqual([{ t: '✻ ', tone: 'claude', bold: true }, { t: ' ' }]) // bold, and a two-column slot like an emoji
+  expect(head({ CLAUDE_CONFIG_DIR: '/h/.claude-personal', CLAUDE_PROFILE: 'personal' })).toEqual([{ t: '✻ ', tone: 'claude', bold: true }, { t: ' ' }]) // the account no longer picks it
   expect(head({ CENSUS_STATUSLINE_MASCOT: '🐙' })).toEqual([{ t: '🐙 ' }, { t: 'Opus 5.5', tone: 'cyan' }])
   expect(TONE_COLOR.claude).toBe('#D97757')
 })
@@ -138,4 +138,9 @@ test('the PR segment ends line two by default: 🔀 #N and the review state, gre
   expect(plain(lineTwo({ number: 7, url: 'u' }))).toMatch(/🔀 #7$/)
   expect(text({ ...FULL, pr: null })).not.toContain('🔀')
   expect(plain(lineTwo(PR, { ...FULL.env, CENSUS_STATUSLINE_SEGMENTS: 'model,git' }))).not.toContain('🔀')
+})
+
+test('the ✻ slot is two columns wide, so the model name lines up under emoji-led segments', async () => {
+  expect(displayWidth('✻ ')).toBe(2)
+  expect(displayWidth('✻  Opus')).toBe(displayWidth('🦾 Opus'))
 })

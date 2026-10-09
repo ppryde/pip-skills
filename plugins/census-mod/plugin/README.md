@@ -108,8 +108,8 @@ measurable from a mod and is left out.
 
 Same segments as `census statusline`, in `CENSUS_STATUSLINE_SEGMENTS` syntax (`,` joins on
 a line, `/` starts the next; default `context,cache,limits,cost/model,git,dir,changes,pr`).
-Also read: `CENSUS_STATUSLINE_MASCOT` (any string, drawn as given; the default is a ✻ in
-Claude's orange, `#D97757`), `CLAUDE_COST_BUDGET`. `NO_COLOR`/`CENSUS_STATUSLINE_COLOR` are not read: the terminal's
+Also read: `CENSUS_STATUSLINE_MASCOT` (any string, drawn as given; the default is a bold ✻ in
+Claude's orange, `#D97757`, in a two-column slot like an emoji), `CLAUDE_COST_BUDGET`. `NO_COLOR`/`CENSUS_STATUSLINE_COLOR` are not read: the terminal's
 theme and the surface decide colour.
 
 **Placement.** `/census-setup` asks where the status line goes (`CENSUS_MOD_PLACEMENT=above|below`

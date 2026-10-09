@@ -3,7 +3,7 @@
 import type { GitState, Pr } from './types'
 
 export type Tone = 'grey' | 'cyan' | 'green' | 'yellow' | 'magenta' | 'pac' | 'white' | 'red' | 'orange' | 'claude'
-export type Run = { t: string; tone?: Tone }
+export type Run = { t: string; tone?: Tone; bold?: boolean }
 export type Line = Run[]
 
 /** render.py's ANSI palette as Text colours (names the surface's chalk-style colours accept; orange is 256-colour 208). */
@@ -141,7 +141,7 @@ export const mascot = (env: RenderEnv): string => env.CENSUS_STATUSLINE_MASCOT |
 function segModel(i: RenderInput): Line[] {
   const custom = i.env.CENSUS_STATUSLINE_MASCOT
   // The default is a coloured run of its own; an override is drawn as given.
-  const glyph: Run = custom ? { t: `${custom} ` } : { t: DEFAULT_MASCOT, tone: 'claude' }
+  const glyph: Run = custom ? { t: `${custom} ` } : { t: `${DEFAULT_MASCOT} `, tone: 'claude', bold: true } // bold, and the glyph plus one space: a two-column slot like an emoji
   return [[glyph, ...(custom ? [] : [sp]), { t: i.modelName || 'Claude', tone: 'cyan' }]]
 }
 

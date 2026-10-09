@@ -24,7 +24,7 @@ test('the band draws census\'s two lines from live engine figures', async ($, on
   expect(lines).toHaveLength(2)
   expect(lines[0]).toMatch(/^🧠 •ᗧ•••••••• 9% │ 🎯 90% ⟳ 59m │ ⏳ ••••••••ᗧ• 78% ⟳ 2h9m │/)
   expect(lines[0]).toContain('📅 ••ᗧ••••••• 24% ⟳ 3d3h │ 💸')
-  expect(lines[1]).toMatch(/^✻ Opus 5\.5 │ 🌿 main │ 📁 \/repo │ ✏️ 1  ⬆️ 1$/)
+  expect(lines[1]).toMatch(/^✻  Opus 5\.5 │ 🌿 main │ 📁 \/repo │ ✏️ 1  ⬆️ 1$/)
   await ui.unmount()
 })
 
@@ -34,7 +34,7 @@ test('CENSUS_STATUSLINE_SEGMENTS reorders and splits lines with "/" just as cens
   await w.clock.advance(0)
   const ui = await $.ui.mount(BAND())
 
-  expect(await bandLines(ui)).toEqual(['✻ Opus 5.5 │ 🌿 main', '🧠 •ᗧ•••••••• 9%'])
+  expect(await bandLines(ui)).toEqual(['✻  Opus 5.5 │ 🌿 main', '🧠 •ᗧ•••••••• 9%'])
   await ui.unmount()
 })
 
@@ -131,7 +131,7 @@ test('below: the engine\'s line first, our two rows under it, and the band above
   expect(rows).toHaveLength(3)
   expect(rows[0]).toBe('⏸ manual mode on · ? for shortcuts') // never on the pill's line
   expect(rows[1]).toMatch(/^🧠 /)
-  expect(rows[2]).toMatch(/^✻ Opus 5\.5 │ 🌿 main/)
+  expect(rows[2]).toMatch(/^✻  Opus 5\.5 │ 🌿 main/)
   await hint.unmount()
 
   const above = await $.ui.mount(BAND())

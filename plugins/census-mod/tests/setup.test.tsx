@@ -134,7 +134,7 @@ test('CENSUS_STATUSLINE_SEGMENTS outranks a stored layout', async ($, on) => {
   await w.clock.advance(0)
   const ui = await $.ui.mount(BAND())
 
-  expect(await bandLines(ui)).toEqual(['✻ Opus 5.5'])
+  expect(await bandLines(ui)).toEqual(['✻  Opus 5.5'])
   await ui.unmount()
 })
 

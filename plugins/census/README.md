@@ -221,7 +221,7 @@ right (green below 75, orange from 75, red from 90; the cost bar eats `$`).
 
 ```
 🧠 ••••ᗧ••••• 42% │ 🎯 93% ⟳ 50m │ ⏳ ••ᗧ••••••• 23% ⟳ 2h10m │ 📅 ᗧ••••••••• 4% ⟳ 3d4h │ 💸 ••ᗧ$$$$$$$ $3.10 │ 🐌 $1.55/hr
-✻ Opus 5.5 │ 🌿 feat/x │ 📁 …/pip/repos/pip-skills │ ✏️ 3  ⬆️ 1 │ 🔀 #12 approved
+✻  Opus 5.5 │ 🌿 feat/x │ 📁 …/pip/repos/pip-skills │ ✏️ 3  ⬆️ 1 │ 🔀 #12 approved
 ```
 
 | Segment | Shows |
@@ -230,7 +230,7 @@ right (green below 75, orange from 75, red from 90; the cost bar eats `$`).
 | `cache` 🎯/🧊 | `prompt_cache` hit rate, `⟳` expiry while warm, `✗N` misses; hidden with no requests |
 | `limits` ⏳ 📅 | this account's census limits (5h, 7d), live windows only, each its own segment |
 | `cost` 💸 🐌/🔥/🚀 | `cost.total_cost_usd` against the budget, and `$`/hour (🔥 from 8, 🚀 from 20) |
-| `model` | the mascot, a ✻ in Claude's orange (`#D97757`, truecolor; plain with colour off), and `model.display_name` |
+| `model` | the mascot, a bold ✻ in Claude's orange (`#D97757`, truecolor; plain with colour off) in a two-column slot like an emoji, and `model.display_name` |
 | `git` 🌿 | branch (short SHA when detached) |
 | `dir` 📁 | the last three path components, with a leading `…` |
 | `changes` | ✏️ uncommitted (always shown), ⬆️ unpushed (when an upstream exists) |

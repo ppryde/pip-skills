@@ -197,7 +197,7 @@ class TestCost:
 class TestLine2:
     def test_model_branch_dir_changes_in_order(self):
         l2 = lines(p=payload(workspace={"current_dir": "/a/b"}))[1]
-        assert l2 == "✻ Opus 5.5 │ 🌿 feat/x │ 📁 /a/b │ ✏️ 3  ⬆️ 1"
+        assert l2 == "✻  Opus 5.5 │ 🌿 feat/x │ 📁 /a/b │ ✏️ 3  ⬆️ 1"
 
     def test_dir_is_last_three_components_with_ellipsis(self):
         assert "📁 …/pip/repos/pip-skills" in lines()[1]
@@ -226,16 +226,16 @@ class TestLine2:
 
 class TestMascot:
     def test_default_is_the_asterisk_whatever_the_account(self):
-        assert lines()[1].startswith("✻ ")
-        assert lines(env={"CLAUDE_CONFIG_DIR": "/h/.claude-personal"})[1].startswith("✻ ")
-        assert lines(env={"CLAUDE_PROFILE": "personal"})[1].startswith("✻ ")
+        assert lines()[1].startswith("✻  Opus")  # a two-column slot, like an emoji: the text lines up
+        assert lines(env={"CLAUDE_CONFIG_DIR": "/h/.claude-personal"})[1].startswith("✻  Opus")
+        assert lines(env={"CLAUDE_PROFILE": "personal"})[1].startswith("✻  Opus")
 
-    def test_default_is_claudes_orange_in_truecolor(self):
+    def test_default_is_bold_claude_orange_in_truecolor(self):
         out = draw(env={"CENSUS_STATUSLINE_COLOR": "always"}).split("\n")[1]
-        assert out.startswith("\x1b[38;2;217;119;87m✻\x1b[0m ")
+        assert out.startswith("\x1b[1;38;2;217;119;87m✻\x1b[0m  ")
 
     def test_no_colour_is_the_plain_glyph(self):
-        assert lines()[1].startswith("✻ Opus") and "\x1b" not in draw()
+        assert lines()[1].startswith("✻  Opus") and "\x1b" not in draw()
 
     def test_override(self):
         assert lines(env={"CENSUS_STATUSLINE_MASCOT": "🐙"})[1].startswith("🐙 ")
@@ -283,11 +283,11 @@ class TestSegments:
 
     def test_unknown_names_ignored(self):
         out = draw(env={"CENSUS_STATUSLINE_SEGMENTS": "bogus, model ,nope"})
-        assert out == "✻ Opus 5.5"
+        assert out == "✻  Opus 5.5"
 
     def test_empty_line_dropped(self):
         out = draw(env={"CENSUS_STATUSLINE_SEGMENTS": "cache/model"})
-        assert out == "✻ Opus 5.5"
+        assert out == "✻  Opus 5.5"
 
     def test_blank_setting_means_default(self):
         assert len(lines(env={"CENSUS_STATUSLINE_SEGMENTS": "  "})) == 2
@@ -329,7 +329,7 @@ class TestSample:
         lim = {"five_hour": {"used_percentage": 23.0, "resets_at": NOW + 2 * 3600 + 600}}
         l1, l2 = lines(p=p, limits=lim)
         assert l1 == "🧠 ••••ᗧ••••• 42% │ 🎯 93% ⟳ 50m │ ⏳ ••ᗧ••••••• 23% ⟳ 2h10m │ 💸 ••ᗧ$$$$$$$ $3.10 │ 🐌 $1.55/hr"
-        assert l2 == "✻ Opus 5.5 │ 🌿 feat/x │ 📁 …/pip/repos/pip-skills │ ✏️ 3  ⬆️ 1"
+        assert l2 == "✻  Opus 5.5 │ 🌿 feat/x │ 📁 …/pip/repos/pip-skills │ ✏️ 3  ⬆️ 1"
 
 
 class TestFallback:

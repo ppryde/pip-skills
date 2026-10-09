@@ -742,7 +742,7 @@ function statusRows($: EngineInterface, e: Parameters<typeof $.ui.resolve>[0], l
   return lines.map((line, i) => (
     <Box key={`census-${i}`}>
       {line.map((run, j) => (
-        <Text key={`r${j}`} color={run.tone ? TONE_COLOR[run.tone] : undefined} wrap="truncate-end">
+        <Text key={`r${j}`} color={run.tone ? TONE_COLOR[run.tone] : undefined} bold={run.bold} wrap="truncate-end">
           {run.t}
         </Text>
       ))}
