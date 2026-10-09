@@ -1,7 +1,7 @@
 {
   "name": "census-mod",
   "version": "0.3.0",
-  "description": "Census v2 recorded and drawn by a Claude Code mod: records every interactive session into the census store (via census ingest) and draws the status line in the band above the prompt. No heartbeat; git and gh only when something can have changed.",
+  "description": "Census v2 recorded and drawn by a Claude Code mod: records every interactive session into the census store (via census ingest) and draws the status line above the prompt (the band) or below it (under the hint line). No heartbeat; git and gh only when something can have changed.",
   "author": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
