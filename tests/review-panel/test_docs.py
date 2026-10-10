@@ -5,7 +5,7 @@ from scripts.discovery import discover_builtin_reviewers
 from scripts.doclint import required_sections, lint_doc
 from scripts.config import load_config, resolve_profile
 
-PLUGIN = Path(__file__).resolve().parents[1]
+PLUGIN = Path(__file__).resolve().parents[2] / "plugins" / "review-panel"
 STRATEGIES = PLUGIN / "skills" / "strategies"
 REVIEWERS = PLUGIN / "skills" / "reviewers"
 SHIPPED_CONFIG = PLUGIN / "templates" / "config.yml"

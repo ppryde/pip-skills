@@ -23,4 +23,11 @@ How this reviewer grades error vs warning vs info.
 Tone. Default: neutral, professional, direct. No persona flavour.
 
 ## Allowed exceptions
-Finding ids (or patterns) this reviewer lets go under `pragmatic` strictness.
+One sentence: which rules this reviewer lets go under `pragmatic` strictness
+(capped at `warning`), and why. Exactly one block; one rule id from the table
+above per line, optional `# reason`. Blank lines and `#` comment lines are not
+entries, so an empty block means "none".
+
+```allowed-exceptions
+# XXX-002   # example: reason the rule is excused
+```

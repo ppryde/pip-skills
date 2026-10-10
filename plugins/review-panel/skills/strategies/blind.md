@@ -19,7 +19,7 @@ spec, or architecture notes.
    prompted with diff + acceptance criteria only. Output: the finding contract.
 
 ## Reconciliation
-Same as committee: collate, then apply strictness/decisions.
+Run `reconcile` (SKILL Step 5). No verdict stage, so every finding is kept.
 
 ## Cost
 Baseline; often faster because less context is loaded per reviewer.
