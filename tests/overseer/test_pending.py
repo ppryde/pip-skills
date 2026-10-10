@@ -91,7 +91,7 @@ class TestCli:
         run(repo, "new-card", "--title", "T")
         capsys.readouterr()
         assert run(repo, "set-section", "WF-001", "--section", "Plan") == 1
-        assert "one of the arguments --file --text is required" in capsys.readouterr().err
+        assert "one of the arguments --file/--text-file --text is required" in capsys.readouterr().err
         capsys.readouterr()
         assert run(repo, "set-section", "WF-001", "--section", "Plan",
                    "--file", "x", "--text", "y") == 1

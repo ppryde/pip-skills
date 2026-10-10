@@ -23,7 +23,18 @@ from typing import cast
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import bundle, config, db, gitops, guard, liveness, report_hook
+from scripts import (
+    bundle,
+    config,
+    db,
+    gitops,
+    guard,
+    hookfast,
+    liveness,
+    marker,
+    report_hook,
+    store,
+)
 from scripts.calibration import BANDS, calibrate
 from scripts.conflicts import find_conflicts
 from scripts.dispatch import ROLES
@@ -150,10 +161,10 @@ def _report_quarantined(quarantined: list[Path]) -> None:
 
 
 def _vigil_cli() -> Path | None:
-    """Best-effort locate the sibling vigil plugin's CLI (soft dependency)."""
-    here = Path(__file__).resolve()  # plugins/overseer/scripts/cli.py
-    candidate = here.parent.parent.parent / "vigil" / "scripts" / "cli.py"
-    return candidate if candidate.exists() else None
+    """Locate the sibling vigil plugin's CLI (soft dependency): the newest
+    manifest-verified install under the plugin dirs the guard trusts (a repo
+    ``plugins/`` folder or the marketplace cache — WF-265)."""
+    return guard.find_sibling_cli("vigil")
 
 
 def _vigil_context(repo_root: Path) -> str | None:
@@ -212,9 +223,12 @@ def _census_session_live(session_id: str) -> bool:
 
 
 def _sync(repo_root: Path, card: Card) -> None:
-    """Persist the card, then reconcile: surface any quarantined cards. No
-    ledger is written (WF-072 retired ``ledger.md``; board.db is the sole
-    source of truth).
+    """Persist the card on the process's one cached connection. No ledger is
+    written (WF-072 retired ``ledger.md``; board.db is the sole source of
+    truth) and nothing is reconciled here any more (WF-265 OL-8): the old
+    ``rebuild_index`` opened a SECOND connection and re-parsed every live card
+    after each write just to unlink a file that no longer exists. Quarantined
+    cards are still surfaced by ``resume``, ``board`` and ``rebuild-index``.
 
     Known multi-session limitation (spec-accepted YAGNI, no locking):
     ``save_card`` upserts the whole card row, so a hook racing another
@@ -222,8 +236,6 @@ def _sync(repo_root: Path, card: Card) -> None:
     *entire* card, not just checklist rows.
     """
     db.save_card(_conn(repo_root), card)
-    quarantined = rebuild_index(repo_root, repo_root.resolve().name, _now())
-    _report_quarantined(quarantined)
 
 
 def _load(repo_root: Path, card_id: str) -> Card:
@@ -244,10 +256,28 @@ def _stamp_orchestrator(repo_root: Path, card_id: str) -> None:
     session_id = os.environ.get(SESSION_ENV)
     if session_id:
         db.stamp_orchestrator(_conn(repo_root), card_id, session_id, _now())
+        try:  # the marker is only the hook's cheap "guarded?" hint: never fail a verb on it
+            marker.write_marker(session_id, _board_of(repo_root))
+            marker.sweep()
+        except OSError as exc:
+            print(f"warning: could not write the guard marker: {exc}", file=sys.stderr)
+
+
+def _board_of(repo_root: Path) -> marker.Board:
+    return marker.Board(
+        db=db.board_db_path(repo_root),
+        repo=derive_repo_root(repo_root) or repo_root,
+        state=state_root(repo_root),
+    )
 
 
 def _release_orchestrator(repo_root: Path, card_id: str) -> None:
-    db.clear_orchestrator(_conn(repo_root), card_id)
+    ended = db.clear_orchestrator(_conn(repo_root), card_id)
+    if ended:  # that session orchestrates nothing else: drop its guard marker
+        try:
+            marker.remove_marker(ended)
+        except OSError:
+            pass
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -301,6 +331,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     local_config = {"central_dir": central_explicit} if central_explicit else {}
     (base / "config.local.json").write_text(
         json.dumps(local_config, indent=2))
+    store.memo_reset()  # these files change what central_root resolves to
 
     # `base.parent` is the same canonical root `base` itself was resolved
     # against — never a linked worktree's own root — so the gitignore line
@@ -444,7 +475,6 @@ def _create_card(args: argparse.Namespace) -> Card:
     # mint/target the same id both pass the check and one silently
     # overwrites the other. `create_card` raises on the PK collision instead.
     db.create_card(conn, card)
-    _report_quarantined(rebuild_index(args.root, args.root.resolve().name, _now()))
     return card
 
 
@@ -476,6 +506,15 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     if not args.card and not args.title:
         print("error: bootstrap needs --title (new card) or --card (existing)", file=sys.stderr)
         return 1
+    if args.brief_file and args.brief is not None:
+        print("error: pass --brief or --brief-file, not both", file=sys.stderr)
+        return 1
+    # Read the brief up front: a bad path or stdin must fail BEFORE the card
+    # and worktree are created.
+    if args.brief_file:
+        args.brief = Path(args.brief_file).read_text().rstrip("\n")
+    elif args.brief == "-":
+        args.brief = sys.stdin.read().rstrip("\n")
     try:
         card = _load(args.root, args.card) if args.card else _create_card(args)
     except sqlite3.IntegrityError:
@@ -539,7 +578,6 @@ def _close(args: argparse.Namespace, verb: str) -> int:
     card.complete(_now()) if verb == "done" else card.abandon(_now())
     db.archive_card(_conn(args.root), card)
     _release_orchestrator(args.root, card.id)
-    rebuild_index(args.root, args.root.resolve().name, _now())
     print(f"{card.id} {card.status}, archived")
     return 0
 
@@ -671,9 +709,6 @@ def cmd_reorder(args: argparse.Namespace) -> int:
     for position, card in enumerate(cards):
         card.order = (position + 1) * 10
         db.save_card(conn, card)
-    # One index rebuild for the whole lane, not one per card — `_sync` is
-    # per-card by design and would re-walk the tree len(ids) times here.
-    _report_quarantined(rebuild_index(args.root, args.root.resolve().name, _now()))
     print(f"reordered {len(cards)} cards")
     return 0
 
@@ -1015,9 +1050,7 @@ def cmd_pull_children(args: argparse.Namespace) -> int:
 
     Archived cards (done/abandoned) never appear in `load_live_cards`, so
     they're skipped without any special-casing. Batches the writes (one
-    `db.save_card` per child) and runs a single `rebuild_index` at the end
-    rather than looping `_sync`, since a naive per-child `_sync` would
-    rebuild the index N times for one logical move.
+    `db.save_card` per child) rather than looping `_sync`.
     """
     parent = _load(args.root, args.card_id)
     cards, _ = db.load_live_cards(_conn(args.root))
@@ -1038,8 +1071,6 @@ def cmd_pull_children(args: argparse.Namespace) -> int:
             child.blocked_on = parent.blocked_on if child.status == "blocked" else None
             child.updated = now
         db.save_card(_conn(args.root), child)
-    quarantined = rebuild_index(args.root, args.root.resolve().name, now)
-    _report_quarantined(quarantined)
     print(f"pulled {len(children)} children into {parent.id}")
     return 0
 
@@ -1117,7 +1148,6 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-    _report_quarantined(rebuild_index(args.root, args.root.resolve().name, now))
     if note:
         print(note)
     print(f"{card.id} claimed by {args.session}")
@@ -1285,32 +1315,21 @@ GUARD_ENV = "OVERSEER_GUARD"
 
 
 def cmd_pretool_hook(args: argparse.Namespace) -> int:
-    """PreToolUse backend — scripts/guard.py. Fails open: any error means no
-    output, which Claude Code treats as "no opinion"."""
+    """PreToolUse backend, kept as a thin wrapper over ``scripts/hookfast.py``
+    (the hook's real entry point since WF-265): it resolves the board the old
+    way (``--root`` / payload ``cwd`` -> central folder) and asks the same
+    ``hookfast.evaluate``. This is also the path ``pretool.sh`` takes under
+    ``OVERSEER_REMOTE``, where the call is forwarded to the host. Fails open:
+    any error means no output, which Claude Code treats as "no opinion"."""
     try:
         payload = _read_hook_payload()
         repo_root = _hook_root(payload, args)
         state = state_root(repo_root)
         if not state.is_dir():
             return 0
-        cfg = config.load_config(repo_root)
-        cards: list[Card] = []
-        session_id = payload.get("session_id")
-        guard_on = (
-            os.environ.get(GUARD_ENV, "").lower() != "off" and cfg.get("guard", True) is not False
+        output = hookfast.evaluate(
+            payload, _board_of(repo_root), config_repo=derive_repo_root(repo_root) or repo_root
         )
-        if guard_on and isinstance(session_id, str) and session_id:
-            cards = db.orchestrated_cards(_conn(repo_root), session_id)
-        roots = guard.allowed_roots(
-            state, Path(__file__).resolve().parent.parent, config._config_dir()
-        )
-        limit = cfg.get("read_limit", guard.READ_LIMIT_DEFAULT)
-        verdict = guard.decide(
-            payload, cards, roots,
-            read_limit=limit if isinstance(limit, int) else guard.READ_LIMIT_DEFAULT,
-            repo_root=repo_root,
-        )
-        output = guard.hook_output(verdict)
         if output:
             print(json.dumps(output))
     except Exception:  # noqa: BLE001 — a failing PreToolUse hook must never block a tool call
@@ -1358,7 +1377,9 @@ def cmd_append_body(args: argparse.Namespace) -> int:
     """
     card = _load(args.root, args.card_id)
     text = args.text
-    if text == "-":
+    if args.text_file:
+        text = Path(args.text_file).read_text()
+    elif text == "-":
         text = sys.stdin.read()
     text = text.rstrip("\n")
     card.append_section(args.section, text, _now())
@@ -1483,9 +1504,12 @@ def cmd_rebuild_index(args: argparse.Namespace) -> int:
     """``ledger.md`` is retired (WF-072) — board.db is the source of truth
     and the CLI/dashboard/resume all read it directly. This verb now just
     reconciles: it surfaces quarantined (corrupt) cards and removes any
-    stale ``ledger.md`` left over from before the retirement."""
+    stale ``ledger.md`` left over from before the retirement. Deprecated
+    (WF-265): no write verb needs it any more, so it is only kept for one
+    release for scripts that still call it."""
     quarantined = rebuild_index(args.root, args.root.resolve().name, _now())
     _report_quarantined(quarantined)
+    print("rebuild-index is deprecated: no verb calls it any more", file=sys.stderr)
     print("reconciled — quarantined cards (if any) reported above")
     return 0
 
@@ -1516,6 +1540,49 @@ def cmd_conflicts(args: argparse.Namespace) -> int:
     for a, b, paths in conflicts:
         print(f"{a} ~ {b}: {', '.join(paths)}")
     return 0
+
+
+VIGIL_ABSENT = (
+    "vigil is not installed — tell the user once that installing the vigil plugin "
+    "enables in-session /clear handover; carrying on without it"
+)
+
+
+def _run_vigil(repo_root: Path, vigil_args: list[str], stdin: str | None = None) -> int:
+    """Run the sibling vigil CLI (stdout/stderr pass straight through). Absent
+    vigil is not an error: say so once and exit 0 so the pipeline carries on."""
+    cli = _vigil_cli()
+    if cli is None:
+        print(VIGIL_ABSENT)
+        return 0
+    result = subprocess.run(
+        [sys.executable, str(cli), "--root", str(repo_root), *vigil_args],
+        input=stdin, text=True, check=False,
+    )
+    return result.returncode
+
+
+def cmd_vigil(args: argparse.Namespace) -> int:
+    """``vigil <begin|context|pause|resume>`` — passthrough to the vigil CLI,
+    located by ``_vigil_cli`` rather than by a repo-relative path, so the one
+    ledger-CLI form the guard allows is enough to drive the watch."""
+    return _run_vigil(args.root, [args.vigil_verb])
+
+
+def cmd_handover(args: argparse.Namespace) -> int:
+    """``handover`` = ``handoff | vigil handover --no-snapshot --content-file -``
+    without a shell pipe, so the guard sees one ledger-CLI call."""
+    data = handoff_data(args.root)
+    for path in data["quarantined"]:
+        print(f"QUARANTINED: {path}", file=sys.stderr)
+    if _vigil_cli() is None:
+        print(VIGIL_ABSENT)
+        return 0
+    text = handoff_report(args.root, data) + _context_footer(args.root)
+    extra = ["--notes", args.notes] if args.notes else []
+    return _run_vigil(
+        args.root, ["handover", "--no-snapshot", "--content-file", "-", *extra], stdin=text
+    )
 
 
 def cmd_handoff(args: argparse.Namespace) -> int:
@@ -1912,7 +1979,12 @@ def cmd_set_section(args: argparse.Namespace) -> int:
     plan and verification text never transits the orchestrator that way) or
     from ``--text`` directly (the orchestrator's own S-card/--brief path,
     short enough not to need a temp file)."""
-    content = args.text if args.text is not None else Path(args.file).read_text()
+    if args.text == "-":
+        content = sys.stdin.read()
+    elif args.text is not None:
+        content = args.text
+    else:
+        content = Path(args.file).read_text()
     card = _load(args.root, args.card_id)
     card.set_section(f"## {args.section}", content, _now())
     card.ack_claim()  # work verb — design spec §3 ack list
@@ -2043,7 +2115,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--type", default="feat")
     p.add_argument("--slug")
     p.add_argument("--brief", help="S-card shortcut: writes ## Plan directly and "
-                                    "lands at implementation, skipping the planner dispatch")
+                                    "lands at implementation, skipping the planner dispatch; "
+                                    "'-' reads the brief from stdin")
+    p.add_argument("--brief-file", dest="brief_file",
+                   help="like --brief, reading the brief from this file")
     p.set_defaults(func=cmd_bootstrap)
 
     p = sub.add_parser("set-stage")
@@ -2086,7 +2161,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("append-body")
     p.add_argument("card_id")
     p.add_argument("section", help="heading text, e.g. Decisions or '## Decisions'")
-    p.add_argument("--text", required=True, help="text to append; '-' reads it from stdin")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--text", help="text to append; '-' reads it from stdin")
+    src.add_argument("--text-file", dest="text_file", help="read the text to append from this file")
     p.set_defaults(func=cmd_append_body)
 
     p = sub.add_parser("reorder")
@@ -2210,6 +2287,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_handoff)
 
+    p = sub.add_parser("vigil", help="passthrough to the vigil plugin's CLI")
+    p.add_argument("vigil_verb", choices=["begin", "context", "pause", "resume"])
+    p.set_defaults(func=cmd_vigil)
+
+    p = sub.add_parser(
+        "handover", help="hand the ledger rollup to vigil (handoff | vigil handover), no pipe"
+    )
+    p.add_argument("--notes", help="extra prose for the handover")
+    p.set_defaults(func=cmd_handover)
+
     p = sub.add_parser("board")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_board)
@@ -2288,8 +2375,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("card_id")
     p.add_argument("--section", required=True, choices=SECTION_NAMES)
     src = p.add_mutually_exclusive_group(required=True)
-    src.add_argument("--file")
-    src.add_argument("--text")
+    src.add_argument("--file", "--text-file", dest="file", help="read the text from this file")
+    src.add_argument("--text", help="the text; '-' reads it from stdin")
     p.set_defaults(func=cmd_set_section)
 
     p = sub.add_parser("accept-fact")
@@ -2387,6 +2474,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if not exc.code else 1
     if getattr(args, "remote", None):
         return _run_remote(args.remote, raw, args.root)
+    store.memo_begin()
     try:
         result: int = args.func(args)
         return result
@@ -2400,6 +2488,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     finally:
         _close_conns()
+        store.memo_end()
 
 
 if __name__ == "__main__":

@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.store import state_root
-
 ROLES = ("planner", "implementer", "reviewer", "fixer", "verifier")
 
 
@@ -39,4 +37,6 @@ def is_hub_agent(agent_type: object) -> bool:
 
 
 def dispatch_dir(repo_root: Path, card_id: str, stage: str) -> Path:
+    from scripts.store import state_root  # lazy: store pulls in the card model (PyYAML)
+
     return state_root(repo_root) / "dispatch" / card_id / stage

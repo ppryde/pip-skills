@@ -21,6 +21,7 @@ import os
 import sqlite3
 from pathlib import Path
 
+from scripts import store
 from scripts.store import derive_repo_label, derive_repo_root, slugify
 
 CENTRAL_ENV = "OVERSEER_CENTRAL"
@@ -65,6 +66,7 @@ def save_machine_config(data: dict) -> Path:
     path = machine_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")
+    store.memo_reset()
     return path
 
 
@@ -200,6 +202,17 @@ def central_root(repo_root: Path) -> Path:
     env = os.environ.get(CENTRAL_ENV)
     if env:
         return Path(env)
+    memo = store.memo()
+    if memo is None:
+        return _central_root(repo_root)
+    key = ("central-root", str(repo_root.resolve()), os.environ.get(CONFIG_DIR_ENV),
+           os.environ.get(CLAUDE_DIRS_ENV))
+    if key not in memo:
+        memo[key] = _central_root(repo_root)
+    return memo[key]  # type: ignore[return-value]
+
+
+def _central_root(repo_root: Path) -> Path:
     cfg = load_config(repo_root)
     if cfg.get("central_dir"):
         return Path(cfg["central_dir"])

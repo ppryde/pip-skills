@@ -80,11 +80,20 @@ def board_db_path(repo_root: Path) -> Path:
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
+    """Create/upgrade the schema. Fast path (WF-265 OL-7): once a board has
+    been through a full pass it carries ``PRAGMA user_version`` ==
+    ``SCHEMA_VERSION``, and every later connect skips the DDL script, the
+    column-migration probe and the ``schema_version`` meta read. The stamp is
+    set lazily and harmlessly -- older code ignores ``user_version`` and
+    re-runs its (idempotent) pass."""
+    if conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION:
+        return
     conn.executescript(_SCHEMA)
     _migrate_columns(conn)
     if get_meta(conn, "schema_version") is None:
         set_meta(conn, "schema_version", str(SCHEMA_VERSION))
     conn.commit()
+    conn.execute(f"PRAGMA user_version = {int(SCHEMA_VERSION)}")
 
 
 def _migrate_columns(conn: sqlite3.Connection) -> None:
@@ -493,9 +502,20 @@ def stamp_orchestrator(conn: sqlite3.Connection, card_id: str, session_id: str, 
     conn.commit()
 
 
-def clear_orchestrator(conn: sqlite3.Connection, card_id: str) -> None:
+def clear_orchestrator(conn: sqlite3.Connection, card_id: str) -> str | None:
+    """Forget ``card_id``'s orchestrator. Returns that session's id when it no
+    longer orchestrates ANY card (so its guard marker can go), else None."""
+    row = conn.execute(
+        "SELECT session_id FROM orchestrators WHERE card_id = ?", (card_id,)
+    ).fetchone()
     conn.execute("DELETE FROM orchestrators WHERE card_id = ?", (card_id,))
     conn.commit()
+    if row is None:
+        return None
+    left = conn.execute(
+        "SELECT 1 FROM orchestrators WHERE session_id = ? LIMIT 1", (row[0],)
+    ).fetchone()
+    return None if left else str(row[0])
 
 
 def orchestrated_cards(conn: sqlite3.Connection, session_id: str) -> list[Card]:

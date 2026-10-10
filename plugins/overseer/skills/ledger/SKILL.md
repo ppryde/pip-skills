@@ -95,7 +95,7 @@ python .../cli.py --root . resume
   `append-body <id> Decisions --text "- chose X over Y"` (heading given
   bare or as `## Decisions`, both work). Appends server-side, so you never
   read-modify-write the whole body: pass `--text -` to
-  pipe multi-line content from stdin instead. A missing section is created
+  pipe multi-line content from stdin, or `--text-file <path>`, instead. A missing section is created
   at the end of the body.
 - **Amending a goal:** never silently rewrite a card's goal — confirm the new
   wording with the user first. The goal is one of the by-hand fields under the

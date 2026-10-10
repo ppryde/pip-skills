@@ -9,11 +9,16 @@ from pathlib import Path
 import pytest
 from factories import make_card
 
+from scripts import guard
 from scripts.cli import main
 from scripts.guard import Verdict, allowed_roots, bash_allowed, decide, hook_output
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[2] / "plugins" / "overseer"
+REPO = Path(__file__).resolve().parents[2]
+PLUGIN_ROOT = REPO / "plugins" / "overseer"
+OWN_CLI = PLUGIN_ROOT / "scripts" / "cli.py"
+CWD = str(REPO)  # relative `plugins/overseer/scripts/cli.py` resolves against the payload cwd
 BASH = shutil.which("bash") or "/bin/bash"
+PRETOOL_MATCHER = "Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Agent|mcp__.*"
 ROOTS = [Path("/state"), Path("/plugins"), Path("/cfg")]
 CARD = make_card("WF-012")
 
@@ -25,21 +30,28 @@ def _p(tool, tool_input=None, **extra):
 class TestBashAllowed:
     @pytest.mark.parametrize("command", [
         "python plugins/overseer/scripts/cli.py --root . resume",
-        "/Users/x/.venv/bin/python ~/.claude/plugins/cache/pip-skills/overseer/0.23.0/scripts/cli.py show WF-1",
         'python "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" set-stage WF-1 planning',
+        # the SKILL's mandated form: `<base directory>/../../scripts/cli.py` (WF-265 OR-1)
+        f'python3 "{PLUGIN_ROOT}/skills/orchestrate/../../scripts/cli.py" --root . resume',
+        "python plugins/overseer/scripts/cli.py --root . handover",
+        "python plugins/overseer/scripts/cli.py --root . vigil context",
+        # dev layout: the sibling vigil sits next to overseer under plugins/
         "python plugins/overseer/scripts/cli.py --root . handoff | python plugins/vigil/scripts/cli.py --root . handover --no-snapshot --content-file -",
         'python plugins/overseer/scripts/cli.py log-progress WF-1 --note "a; b && c" --tokens 0',
         "git status && git log --oneline -3",
         "git -C /tmp/wt push -u origin feat/WF-1-x",
         "cd /repo && gh pr create --title t --body b",
         "OVERSEER_DB=/x python plugins/overseer/scripts/cli.py board",
-        "echo 'unbalanced",  # unparseable: fails open
-        "python3 /plugins/overseer/scripts/cli.py --root . --help",
-        "python3 /plugins/overseer/scripts/cli.py set-field --help && python3 /plugins/overseer/scripts/cli.py log-progress --help",
-        'cd "/repo" && python plugins/overseer/scripts/cli.py --root . show WF-1',
+        f"python3 {OWN_CLI} --root . --help",
+        f"python3 {OWN_CLI} set-field --help && python3 {OWN_CLI} log-progress --help",
+        f'cd "{REPO}" && python plugins/overseer/scripts/cli.py --root . show WF-1',
+        "python -u plugins/overseer/scripts/cli.py --root . show WF-1",
+        "python plugins/overseer/scripts/cli.py --root . show WF-1 2>&1",
+        "python plugins/overseer/scripts/cli.py --root . show WF-1 2>/dev/null",
+        "python plugins/overseer/scripts/cli.py --root . show WF-1 > /tmp/out.txt",
     ])
     def test_allowed(self, command):
-        assert bash_allowed(command)
+        assert bash_allowed(command, cwd=CWD)
 
     @pytest.mark.parametrize("command", [
         "pytest -q",
@@ -50,9 +62,11 @@ class TestBashAllowed:
         "python -m pytest",
         "python scripts/other.py",
         "snowsql -q 'select 1'",
+        "echo 'unbalanced",  # unbalanced quote: fails CLOSED now (verdict change 1)
+        "python3 /plugins/overseer/scripts/cli.py --root . --help",  # nonexistent: cli not found
     ])
     def test_denied(self, command):
-        assert not bash_allowed(command)
+        assert not bash_allowed(command, cwd=CWD)
 
     @pytest.mark.parametrize("command", [
         "grep -n foo /plugins/overseer/scripts/cli.py",
@@ -193,7 +207,7 @@ class TestDecideOrchestrator:
         _p("Read", {"file_path": "/plugins/overseer/skills/orchestrate/SKILL.md"}),
         _p("Glob", {"pattern": "*.md", "path": "/cfg/skills"}),
         _p("Bash", {"command": "git status"}),
-        _p("Bash", {"command": "python3 /plugins/overseer/scripts/cli.py --root . --help"}),
+        _p("Bash", {"command": f"python3 {OWN_CLI} --root . --help"}),
         _p("Bash", {"command": "grep -n foo /plugins/overseer/scripts/cli.py"}),
         _p("Bash", {"command": "cat > /tmp/brief.md << 'EOF'\nbody\nEOF"}),
         _p("Bash", {"command": "cat > /state/brief.md << 'EOF'\nbody\nEOF"}),
@@ -346,4 +360,15 @@ def test_hooks_json_registers_pretool_for_all_tools():
     hooks = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text())["hooks"]
     entries = [e for e in hooks["PreToolUse"]
                if any(h["command"].endswith("/hooks/pretool.sh") for h in e["hooks"])]
-    assert [e["matcher"] for e in entries] == [".*"]
+    assert [e["matcher"] for e in entries] == [PRETOOL_MATCHER]
+    # the narrowed alternation must still cover every tool the guard acts on
+    # (verdict change 6) and nothing else needs the hook
+    tools = set(PRETOOL_MATCHER.split("|"))
+    assert tools >= {"Bash", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Grep",
+                     "Glob", "Agent", "mcp__.*"}
+    assert guard._HARD_DENY_WRITE_TOOLS <= tools
+    assert guard._PATH_TOOLS <= tools
+    assert "Read" in tools  # `_limited_read`
+    # the prepush snapshot rides pretool.sh now: no second hook entry
+    assert all("prepush-snapshot" not in h["command"]
+               for e in hooks["PreToolUse"] for h in e["hooks"])

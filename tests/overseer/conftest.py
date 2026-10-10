@@ -56,6 +56,7 @@ def _no_ambient_task_env(tmp_path, monkeypatch):
     # on (or records) the developer's live session.
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.delenv("OVERSEER_GUARD", raising=False)
+    monkeypatch.delenv("OVERSEER_REMOTE", raising=False)  # the guard hook forwards when set
     # Multi-account: `config.claude_dirs()` (and so `central_root`) also reads
     # this list of EXTRA config dirs. A developer building that very feature
     # plausibly has it set — left ambient, tests would search (and write)

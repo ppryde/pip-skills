@@ -27,7 +27,14 @@ python3 "<base directory>/../../scripts/cli.py" --root . <verb> [flags]
 file). This is the ONLY lookup you need — never `find`, `locate`, `which`, or
 any other filesystem search for `cli.py`: that is a slow, denied guess at
 something this file already told you, and a real run has paid a 120-second
-`find /` timeout for it.
+`find /` timeout for it. The guard checks the *real path* of that file, so
+this exact form (with its `../..`) is accepted.
+
+**Free text** (a brief, a plan, a note) never goes inline in a double-quoted
+argument that holds backticks or `$(...)`: the guard denies live command
+substitution. Write it with a quoted heredoc to a scratch file and pass
+`--brief-file` / `--text-file`, or pipe it: `... --brief - <<'EOF' ... EOF`
+(a single-quoted or quoted-heredoc body is inert data).
 
 You are the orchestrator: the main session, the single writer of the card in
 `board.db` (the per-repo SQLite store shared across worktrees) and of the
@@ -61,10 +68,10 @@ denial, unrelated). `<id>` is a card id (`WF-123`).
 | Verb | Signature | Notes |
 |---|---|---|
 | `resume` | `resume [--json]` | In-flight cards for this repo. Run first, every session. |
-| `bootstrap` | `bootstrap (--title "<t>" \| --card <id>) [--complexity S\|M\|L\|XL] [--labels a,b] [--goal "<g>"] [--jira K\|--linear K] [--type feat\|fix\|...] [--slug s] [--brief "<text>"]` | New card + worktree + branch, in one call. Plain: lands at `planning`. With `--brief`: writes `## Plan` from the text and lands at `implementation` directly — the whole S-card shortcut. |
+| `bootstrap` | `bootstrap (--title "<t>" \| --card <id>) [--complexity S\|M\|L\|XL] [--labels a,b] [--goal "<g>"] [--jira K\|--linear K] [--type feat\|fix\|...] [--slug s] [--brief "<text>" \| --brief - \| --brief-file <path>]` | New card + worktree + branch, in one call. Plain: lands at `planning`. With `--brief`: writes `## Plan` from the text and lands at `implementation` directly — the whole S-card shortcut. `--brief -` reads stdin; `--brief-file` reads a file. |
 | `dispatch-prep` | `dispatch-prep <id> --stage <s> --role planner\|implementer\|reviewer\|fixer\|verifier [--round n] [--slot A] [--chunk n] [--lens l] [--var k=v ...] [--advance]` | Prints ONLY the bundle path — that path is the agent's whole prompt. `--chunk` defaults to `1` for `--role implementer`. `--advance` runs `set-stage <id> <s>` first, in the same call — a stage transition and its first dispatch in one Bash call. |
 | `set-stage` | `set-stage <id> <stage>` | A bare stage transition with no dispatch (PLAN GATE approval, PR raised). Prefer `dispatch-prep --advance` when a dispatch follows immediately. |
-| `set-section` | `set-section <id> --section Plan\|Verification\|Decisions (--file <path> \| --text "<t>")` | `--text` for a short brief (no temp file); `--file` for anything longer. |
+| `set-section` | `set-section <id> --section Plan\|Verification\|Decisions (--text-file <path> \| --text "<t>" \| --text -)` | `--text` for a short plain text; `--text-file` (alias `--file`) or `--text -` (stdin) for anything with backticks, quotes or several lines. |
 | `set-field` | `set-field <id> [--branch b] [--worktree w] [--pr url] [--touches t] [--labels a,b] [--parent id] [--priority P0..P4] [--title t] [--body md] [--complexity S\|M\|L\|XL] [--estimate 400k]` | Any card metadata field; an empty string clears a clearable one. |
 | `block` / `unblock` | `block <id> --reason "..."` / `unblock <id>` | A real blocker, with a reason. |
 | `park` / `unpark` | `park <id>` / `unpark <id>` | Shelve without a blocker; resumable, preserves stage/branch/worktree. |
@@ -75,7 +82,9 @@ denial, unrelated). `<id>` is a card id (`WF-123`).
 | `facts --pending` | `facts --pending [--card <id>]` | List pending Learned facts at a stage boundary. |
 | `accept-fact` / `reject-fact` | `accept-fact <P-id>` / `reject-fact <P-id> --reason "..."` | Adjudicate one pending fact — one call per decision. |
 | `conflicts` | `conflicts [--sprint s] [--json]` | Cross-card conflicts, run at the PLAN GATE. |
-| `handoff` | `handoff [--json]` | Ledger rollup; pipe into vigil's `handover` (Context stewardship). |
+| `handoff` | `handoff [--json]` | Ledger rollup, printed. To hand over, use `handover` below. |
+| `handover` | `handover [--notes "<t>"]` | The ledger rollup handed to vigil's `handover --no-snapshot` in one call (no shell pipe). Absent vigil: prints a one-line notice, exit 0. |
+| `vigil` | `vigil begin\|context\|pause\|resume` | Passthrough to the vigil plugin's CLI, located for you. Absent vigil: notice, exit 0. |
 | `usage` | `usage [--card <id>] [--json]` | Token spend; warns on unparsed reports. |
 
 ## On invocation
@@ -298,11 +307,10 @@ gets one bounce (the hook's own `decision: block`, bounded by
 `usage [--card <id>]` warns about it. Full rationale: `references/telemetry.md`.
 
 ## Context stewardship
-Context handover is provided by the **`vigil`** plugin (a soft dependency). Begin
-the watch with `python plugins/vigil/scripts/cli.py --root . begin`; check
-`python plugins/vigil/scripts/cli.py --root . context` at stage boundaries; hand over by piping your ledger rollup into vigil (`python
-plugins/overseer/scripts/cli.py --root . handoff | python
-plugins/vigil/scripts/cli.py --root . handover --no-snapshot --content-file -`)
+Context handover is provided by the **`vigil`** plugin (a soft dependency),
+driven through the ledger CLI. Begin the watch with `vigil begin`; check
+`vigil context` at stage boundaries; hand over with `handover` (your ledger
+rollup, handed to vigil in one call)
 **at every stage boundary** once the stage is recorded in the ledger (nothing in
 your context is needed after that — the ledger holds it), when a card
 completes, when over threshold, or on command. If `vigil` isn't installed, tell the user once that it enables
