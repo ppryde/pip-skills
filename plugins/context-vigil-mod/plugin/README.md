@@ -56,7 +56,7 @@ A model pattern is a family and at most a version: `opus` takes every Opus, `opu
 
 The threshold reads the main session's own model and context window from the engine's measure, which fires after main-thread turns only: a subagent's tokens and its smaller window never move it, so a subagent cannot trip a handover.
 
-Settings are per account (`$.store`) and re-read before every decision that matters, so a change made in one session reaches the others. Defaults: nudge 35% (+5% steps), with one default override `window=200k → 70%`, bar On, auto Off, idle window 30 min (15, 30 or 60), last light Off (writes its handover only at 25%+ context), limits On (95%, `seven_day` + `spend_limit`), RC auto-clear unanswered (treated as No).
+Settings are per account (`$.store`) and re-read before every decision that matters, so a change made in one session reaches the others. Defaults: nudge 35% (+5% steps), with one default override `window=200k → 70%`, bar On, auto Off, idle window 30 min (15, 30 or 60), last light Off (writes its handover only at 25%+ context), limits On (95%, `seven_day` + `spend_limit`), RC auto-clear unanswered (follows auto mode, with the phone safeguards: a 30 s countdown first, nothing within 2 min of your last phone message).
 
 ## Three states
 

@@ -33,7 +33,7 @@ describe('steps fit $.ui.ask', () => {
     expect(questionFor('nudge').options).toEqual(['25%', '35% (Recommended)', '50%', TELL])
     expect(questionFor('bar').options).toEqual(['On (Recommended)', 'Off', TELL])
     expect(questionFor('auto').options).toEqual(['Off (Recommended)', 'On', TELL])
-    expect(questionFor('rc').options).toEqual(['No (Recommended)', 'Yes', TELL])
+    expect(questionFor('rc').options).toEqual(['Yes (Recommended)', 'No', TELL])
   })
   test('last light says it needs a 1-hour cache and stays off for a 5-minute one', () => {
     const t = STEPS.last_light.explain
@@ -50,7 +50,7 @@ describe('steps fit $.ui.ask', () => {
     // The hints that were option descriptions now live in Tell me more.
     expect(STEPS.idle.explain).toContain('15 min suits stepping away properly when you leave')
     expect(STEPS.idle.explain).toContain('60 min suits flitting between windows and coming back later')
-    expect(STEPS.rc.explain).toContain('never clear within 2 minutes')
+    expect(STEPS.rc.explain).toContain('never within 2 minutes')
     expect(STEPS.last_light.question).toBe('When we\'re both idle, write a handover just before the 1-hour cache expires, so coming back is cheap?')
     expect(STEPS.last_light.explain).toContain('Works only with a 1-hour prompt cache')
     expect(STEPS.last_light_at.question).toBe('Last light: only write the before-the-cache-expires handover when context is at least what %?')
@@ -126,7 +126,7 @@ describe('applyAnswers', () => {
   test('labels apply', () => {
     const r = applyAnswers(DEFAULTS, [
       { step: 'nudge', answer: '25%' }, { step: 'bar', answer: 'Off' }, { step: 'auto', answer: 'On' }, { step: 'idle', answer: '60 min' },
-      { step: 'last_light', answer: 'On' }, { step: 'last_light_at', answer: '50%' }, { step: 'limits', answer: 'Off' }, { step: 'rc', answer: 'Yes' },
+      { step: 'last_light', answer: 'On' }, { step: 'last_light_at', answer: '50%' }, { step: 'limits', answer: 'Off' }, { step: 'rc', answer: 'Yes (Recommended)' },
     ])
     expect(r.retell).toEqual([])
     expect(r.settings).toEqual({ ...DEFAULTS, nudgeAt: 25, bar: false, auto: true, idleMin: 60, lastLight: true, lastLightAt: 50, limits: false, rcAutoClear: 'yes' })

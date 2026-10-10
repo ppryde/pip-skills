@@ -72,8 +72,8 @@ let resumeChain: { cancel: () => void } | null = null
 let resumeGen = 0
 // The timer that lifts the account latch for this process: one, replaced never stacked (R2-04).
 let latchTimer: { cancel: () => void } | null = null
-// The first-RC question is asked once per process: a clear wipes $.state, so it cannot live there.
-// A new session (bindSession) starts it fresh; resetCaches leaves it alone.
+// The RC hint is shown once per session: a clear wipes $.state, so it cannot live there.
+// A new session (bindSession) resets it; resetCaches leaves it alone.
 let rcHinted = false
 
 // Module caches: rebuilt at session.start / after a hot reload.

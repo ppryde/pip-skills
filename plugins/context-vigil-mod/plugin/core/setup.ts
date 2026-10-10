@@ -91,10 +91,10 @@ export const STEPS: Record<StepId, Step> = {
   },
   rc: {
     header: '📱 RC clear', question: "I can't see you typing on the phone, so a clear could land mid-message. Allow auto-clear in phone sessions?",
-    explain: 'Your phone\'s typing is invisible to me, so a clear could land while you write. With Yes, a 30-second countdown runs first (send anything to cancel) and I never clear within 2 minutes of your last phone message. Default No.',
+    explain: 'Your phone\'s typing is invisible to me, so a clear could land while you write. Send anything during the countdown to cancel. Default: follows auto mode (Yes), with a 30-second countdown first and never within 2 minutes of your last phone message.',
     options: [
-      { label: `No${REC}`, apply: s => ({ ...s, rcAutoClear: 'no' }) },
-      { label: 'Yes', apply: s => ({ ...s, rcAutoClear: 'yes' }) },
+      { label: `Yes${REC}`, apply: s => ({ ...s, rcAutoClear: 'yes' }) },
+      { label: 'No', apply: s => ({ ...s, rcAutoClear: 'no' }) },
     ],
     askIf: s => s.auto,
   },

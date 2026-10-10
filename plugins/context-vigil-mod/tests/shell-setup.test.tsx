@@ -16,7 +16,7 @@ const pluginSubmits = (w: ReturnType<typeof world>) => w.submits.filter(x => x.o
 test('/vigil-setup asks each step itself, one dialog at a time, with no prompt to the model', async ($, on) => {
   const w = world(on)
   w.askReply.value = byHeader({
-    [STEPS.nudge.header]: '50%', [STEPS.bar.header]: 'Off', [STEPS.auto.header]: 'On', [STEPS.idle.header]: '15 min', [STEPS.rc.header]: 'No (Recommended)',
+    [STEPS.nudge.header]: '50%', [STEPS.bar.header]: 'Off', [STEPS.auto.header]: 'On', [STEPS.idle.header]: '15 min', [STEPS.rc.header]: 'No',
     [STEPS.last_light.header]: 'Off (Recommended)', [STEPS.limits.header]: 'On (Recommended)',
     [STEPS.limit_pct.header]: '97', [STEPS.limit_windows.header]: 'Weekly (seven_day)',
   })
@@ -174,7 +174,7 @@ test('RC answered Yes in setup: no hint, and the unattended clear on the phone g
 
 test('/vigil-setup rc still asks the phone question explicitly, and saves it', async ($, on) => {
   const w = world(on)
-  w.askReply.value = byHeader({ [STEPS.rc.header]: 'Yes' })
+  w.askReply.value = byHeader({ [STEPS.rc.header]: 'Yes (Recommended)' })
   await $.session.start(START)
   await $.command.run(setup('rc'))
   await w.clock.settle()
