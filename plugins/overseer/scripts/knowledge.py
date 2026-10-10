@@ -1,6 +1,7 @@
 """Knowledge base: Fact parse/serialise, staleness, store ops, index."""
 from __future__ import annotations
 
+import glob
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -9,7 +10,7 @@ from pathlib import Path
 import yaml
 
 from scripts.models import CardParseError, split_frontmatter
-from scripts.store import _uniquify, slugify, state_root
+from scripts.store import _uniquify, check_id, slugify, state_root
 
 FACT_STATUSES = {"active", "stale", "retired"}
 STALE_DAYS = 90
@@ -120,7 +121,8 @@ def fact_path(kb: Path, fact: Fact) -> Path:
 
 
 def find_fact_path(kb: Path, fact_id: str) -> Path:
-    matches = sorted((kb / "facts").glob(f"{fact_id}-*.md"))
+    check_id(fact_id, "fact id")
+    matches = sorted((kb / "facts").glob(f"{glob.escape(fact_id)}-*.md"))
     if not matches:
         raise FileNotFoundError(f"no live fact with id {fact_id}")
     return matches[0]

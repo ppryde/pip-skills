@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from scripts import db
-from scripts.dispatch import role_of
+from scripts.dispatch import dispatch_dir, role_of
 from scripts.models import Card
 from scripts.pending import add_pending
 from scripts.schemas import (
@@ -80,9 +80,24 @@ def _implementer_line(r: ImplementerReport) -> str:
     return f"{r.status} tests {r.tests_passed}/{r.tests_total} {sha} → {r.detail}"
 
 
-def _detail_text(report: Report) -> tuple[str, str | None]:
+MAX_DETAIL_BYTES = 1_000_000
+
+
+def _detail_text(report: Report, repo_root: Path) -> tuple[str, str | None]:
+    """Read the report's detail file, only from inside its own dispatch
+    directory: no symlinks, no escape via resolution, bounded size."""
+    detail = report.detail
     try:
-        return report.detail.read_text(), None
+        if detail.is_symlink():
+            return "", "detail path is a symlink"
+        allowed = dispatch_dir(repo_root, report.card, report.stage).resolve()
+        if not detail.resolve().is_relative_to(allowed):
+            return "", "detail path is outside the dispatch directory"
+        with detail.open("rb") as fh:
+            data = fh.read(MAX_DETAIL_BYTES + 1)
+        if len(data) > MAX_DETAIL_BYTES:
+            return "", "detail file too large"
+        return data.decode("utf-8", errors="replace"), None
     except OSError:
         return "", "detail file missing"
 
@@ -136,7 +151,7 @@ def handle(payload: dict[str, object], repo_root: Path, now: str) -> dict[str, o
         append_usage(root, entry)
         return None
     entry.update(card=report.card, stage=report.stage, round=getattr(report, "round", None))
-    detail, detail_error = _detail_text(report)
+    detail, detail_error = _detail_text(report, repo_root)
     if detail_error:
         entry["error"] = detail_error
     spend = budget_tokens(totals)

@@ -14,7 +14,7 @@ Deps are installed ad hoc into the shared repo-root `.venv` (this subtree has
 no root-level dependency of its own):
 
 ```bash
-.venv/bin/pip install fastapi "uvicorn[standard]" httpx
+.venv/bin/pip install fastapi==0.141.1 "uvicorn[standard]==0.52.1" httpx==0.28.1
 ```
 
 ## Run the tests

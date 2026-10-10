@@ -14,6 +14,14 @@ _MIGRATE_SKIP_TOP = {"ledger.md", "cards"}  # DB owns cards; ledger.md is retire
 _MIGRATE_SKIP_PATHS = {("archive", "cards")}  # DB owns archived cards too
 
 
+def check_id(value: str, what: str = "id") -> str:
+    """Refuse an id that could escape its folder when used in a path:
+    empty, NUL, a path separator or any ``..``. Returns the value."""
+    if not value or "\0" in value or "/" in value or "\\" in value or ".." in value:
+        raise ValueError(f"invalid {what}: {value!r}")
+    return value
+
+
 def workflow_root(repo_root: Path) -> Path:
     return repo_root / WORKFLOW_DIRNAME
 
