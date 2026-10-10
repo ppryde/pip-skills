@@ -154,7 +154,10 @@ def _complete_lines(chunk: bytes, offset: int) -> tuple[list[str], int]:
     if last_nl < 0:
         return [], offset
     complete = chunk[: last_nl + 1]
-    return complete.decode("utf-8", errors="replace").splitlines(), offset + len(complete)
+    # Split on b"\n" only: str.splitlines() also cuts on U+0085/2028/2029, which
+    # JSON.stringify leaves raw inside a record, fragmenting it into bad JSON.
+    pieces = complete.split(b"\n")[:-1]
+    return [p.decode("utf-8", errors="replace") for p in pieces], offset + len(complete)
 
 
 def _cursor(conn: sqlite3.Connection, path: Path | str) -> int:
