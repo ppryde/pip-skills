@@ -170,7 +170,7 @@ _QUERY_KEYS = frozenset({"ref", "per_page", "page"})
 _STATES = frozenset({"open", "closed", "merged", "all"})
 
 # jq expressions that can read the process environment or other host state.
-_JQ_DENY = re.compile(r"\$ENV\b|(?<![\w.])env\b|input_filename|\$__loc__", re.ASCII)
+_JQ_DENY = re.compile(r"\$\s*ENV\b|(?<![\w.])env\b|input_filename|\$__loc__|\b(?:import|include)\b", re.ASCII)
 
 
 def _dotty(v: str) -> bool:

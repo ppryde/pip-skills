@@ -94,7 +94,7 @@ When two reviewers suggest incompatible fixes for the same code location, Reckon
 
 ## Auto-approve hook
 
-The plugin ships a `PreToolUse` hook (`hooks/allow_gh.py`) that pre-approves the exact `gh` commands Reckoning runs, so a triage does not stop at a permission prompt for every read. It only ever *allows*; for anything it does not recognise it stays silent and you get the normal prompt (your own allow and deny rules are untouched).
+The plugin ships a `PreToolUse` hook (`hooks/allow_gh.py`) that pre-approves the exact `gh` commands Reckoning runs, so a triage does not stop at a permission prompt for every read. It only ever *allows*; for anything it does not recognise it stays silent and you get the normal prompt. The hook never emits deny or ask; per Claude Code's documented behaviour, deny rules take precedence over a hook's allow. A live smoke of that precedence (a settings `deny` for `Bash(gh pr checkout:*)` against this hook) is still outstanding.
 
 **Policy**
 
@@ -106,11 +106,10 @@ The plugin ships a `PreToolUse` hook (`hooks/allow_gh.py`) that pre-approves the
 
 **Requirements.** `python3` must be on `PATH`. Without it (for example on Windows) the hook exits silently and every command simply prompts as usual.
 
-**Fallback.** If you disable the hook, these read-only rules in `permissions.allow` cover most of a triage (the resolve mutation will then prompt, which is fine). Prefix rules cannot constrain flags, so they are a weaker policy than the hook:
+**Fallback.** If you disable the hook, these rules in `permissions.allow` cover part of a triage (the REST `gh api` reads and the resolve mutation will then prompt). Prefix rules cannot constrain flags (for example `--web`), so they are plainly weaker than the hook and not strictly read-only:
 
 ```json
-"Bash(gh auth status)", "Bash(gh repo view:*)", "Bash(gh pr view:*)", "Bash(gh pr list:*)",
-"Bash(gh api repos/:*)"
+"Bash(gh auth status)", "Bash(gh repo view:*)", "Bash(gh pr view:*)", "Bash(gh pr list:*)"
 ```
 
 The hook's tests live in `tests/tribunal` and include a differential check of the tokeniser against real bash and zsh.

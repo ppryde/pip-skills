@@ -341,7 +341,7 @@ def test_ordinary_jq_is_allowed(expr: str) -> None:
 
 @pytest.mark.parametrize(
     "expr",
-    ["$ENV", "$ENV.X", "env", "env.X", "[env]", "{a: env}", "(env)", "\\(env)", "input_filename", "$__loc__", " env "],
+    ["$ENV", "$ENV.X", "env", "env.X", "[env]", "{a: env}", "(env)", "\\(env)", "input_filename", "$__loc__", " env ", "$ ENV", "$ ENV.X", 'import \"a\" as $x; .', 'include \"a\"; .'],
 )
 def test_jq_environment_reads_are_denied(expr: str) -> None:
     assert not allowed(f"gh pr view 1 --json number --jq '{expr}'")
