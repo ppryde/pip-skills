@@ -48,21 +48,29 @@ The whole method is: **measure, classify, fix, prove, re-measure.** The order ma
 Before measuring anything, confirm the working tree is current:
 
 ```bash
-git rev-list --left-right --count HEAD...origin/main   # right-hand number must be 0
+git fetch origin
+base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
+git rev-list --left-right --count HEAD...$base   # right-hand number must be 0
 ```
+
+The right-hand number (commits you are behind) must be 0. A non-zero left-hand number means HEAD is ahead of the base, so you are measuring local changes; say so in the report.
 
 This costs a second and it is not optional. A stale checkout produces *plausible* numbers — nothing in the output announces itself as stale — and every conclusion drawn from them is wrong in ways you won't notice. Measure in a worktree freshly branched from the main branch.
 
 If there is no remote (`git remote` is empty — a scratch repo, a fresh clone-less checkout), the check does not apply. Note that you couldn't verify freshness and carry on; don't burn turns trying to make it work.
 
+Next, inspect `addopts` and the installed plugins. Run serially without coverage or randomisation where they are installed (`-p no:randomly -p no:cacheprovider`; `--no-cov` only if pytest-cov is present), or record the `-n` setting if the suite runs under xdist. Take true wall time with `time`; the script below reports *summed test time*, which exceeds wall time under xdist.
+
 Then capture per-test timing:
 
 ```bash
-pytest -q --durations=0 --junitxml=/tmp/junit-before.xml > /tmp/pytest-before.log 2>&1
+time pytest -q -rsx --durations=0 --durations-min=0 -o junit_family=xunit1 --junitxml=/tmp/junit-before.xml > /tmp/pytest-before.log 2>&1
 python scripts/aggregate_junit.py /tmp/junit-before.xml
 ```
 
-`scripts/aggregate_junit.py` (bundled) gives per-directory and per-file totals, ms/test, the slowest individual tests, and — most useful — **concentration**: how many files hold 50% / 80% / 90% of wall-clock.
+`--durations=0` alone hides rows under 0.005s; `--durations-min=0` (pytest 6.2+; `-vv` is the alternative) lists every row, which the Phase 2 means depend on. `junit_family=xunit1` makes pytest write a `file=` attribute so per-file totals are exact for class-based suites. `-rsx` keeps skip and xfail reasons in the log for the skip inventory below. Cross-check the log totals against the JUnit sum.
+
+`scripts/aggregate_junit.py` (bundled) gives per-directory and per-file totals, ms/test, the slowest individual tests, and — most useful — **concentration**: how many files hold 50% / 80% / 90% of summed test time.
 
 **Measure the whole suite, not the part the user named.** This is the single highest-value habit here. A request to "speed up the integration tests" is a description of a symptom, not a diagnosis. Profile everything; the biggest item is often outside the frame of the question.
 
@@ -71,7 +79,7 @@ python scripts/aggregate_junit.py /tmp/junit-before.xml
 A baseline is not just "how long" — it is also **what actually executed**. Every skipped test is free wall-clock that looks like coverage on the dashboard, so establish the skip inventory now, before any of it becomes your baseline.
 
 ```bash
-pytest -q -rs 2>&1 | tail -40          # every skip, with its reason
+grep -E '^(SKIPPED|XFAIL)' /tmp/pytest-before.log     # every skip, with its reason (from the baseline run)
 ```
 
 For each skip, **evaluate the predicate rather than reading the reason string.** A `reason=` is prose written by someone who believed it; the condition is what runs.
@@ -239,6 +247,8 @@ plainly in the report that you chose not to and why.
 
 Give the numbers as measured, and record predictions before measuring so they can be shown wrong — a prediction that was off is information about where the cost really was.
 
+Take the wall-clock row from `time` around the pytest run, not from the script, which sums per-test time.
+
 ```
                     before     after
 wall-clock          506.0s   →  220.1s   (−56.5%)
@@ -267,7 +277,7 @@ The reason it's harder: speed has an oracle (the clock) and a safety net (identi
 
 ```bash
 # fixtures defined in many places
-rg -A1 '^@pytest\.fixture' tests | rg -o 'def ([a-z_0-9]+)\(' -r '$1' | sort | uniq -c | sort -rn | head -20
+rg -U -I -o '@pytest\.fixture(?:\([^)]*\))?[^\n]*\n(?:\s*[@#][^\n]*\n)*\s*(?:async )?def (\w+)' -r '$1' tests | sort | uniq -c | sort -rn | head -20
 
 # how much parametrisation is actually in use
 echo "$(rg -c 'pytest.mark.parametrize' tests | awk -F: '{s+=$2} END {print s}') decorators / $(rg -l 'def test_' tests | wc -l) files"
@@ -310,10 +320,10 @@ The rest live only here:
 
 **Never put a grep-derived count in prose.** Counts drift and greps miss cases. "22 files reference X" was really 29; "117 tests" was really 122. If a number goes in a commit message or PR body, re-derive it at the moment of writing.
 
-**A session-scoped TEMP table is bound to the physical connection that created it.** On a pooled engine the connection a session fixture borrows need not be the one a later test checks out, so the table intermittently "does not exist" — passing when the suite is run against one directory and failing across a full run, purely on connection churn. An ordinary committed table has no such coupling. This cost one investigation a day of hunting for the interleaving; the fix is to remove the coupling, not to find the schedule that triggers it.
+**(Postgres/SQLAlchemy) A session-scoped TEMP table is bound to the physical connection that created it.** On a pooled engine the connection a session fixture borrows need not be the one a later test checks out, so the table intermittently "does not exist" — passing when the suite is run against one directory and failing across a full run, purely on connection churn. An ordinary committed table has no such coupling. This cost one investigation a day of hunting for the interleaving; the fix is to remove the coupling, not to find the schedule that triggers it.
 
-**A guard that needs a pristine database will fail in a suite that commits.** If any test commits for real, no later test can assume empty tables — from any connection. Do that kind of derivation at session setup, the one moment the database is clean.
+**(Postgres/SQLAlchemy) A guard that needs a pristine database will fail in a suite that commits.** If any test commits for real, no later test can assume empty tables — from any connection. Do that kind of derivation at session setup, the one moment the database is clean.
 
-**`pg_stat_xact_user_tables` is not a dependable oracle on a pooled connection.** It reported tables the operation never touched. Prefer comparing content you captured yourself.
+**(Postgres) `pg_stat_xact_user_tables` is not a dependable oracle on a pooled connection.** It reported tables the operation never touched. Prefer comparing content you captured yourself.
 
 **Re-derive your own justification, not just your numbers.** An item carded as important can become unimportant because of a fix you already shipped. Before doing work that was queued earlier, re-check that the reason still holds — one item's prize fell from ~45s to ~4s while it sat in the queue, and doing it would have been busywork.

@@ -25,10 +25,10 @@
   },
   {
     "id": "WRITE-009",
-    "severity_internal": "critical",
-    "tier_displayed": "critical",
+    "severity_internal": "medium",
+    "tier_displayed": "medium",
     "location_pattern": "target.py:30",
     "savings_basis": "unknown",
-    "signals_caveat": true
+    "signals_caveat": false
   }
 ]

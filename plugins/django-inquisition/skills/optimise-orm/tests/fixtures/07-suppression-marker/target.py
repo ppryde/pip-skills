@@ -1,7 +1,7 @@
 """
 Suppression marker fixture.
 
-WRITE-006 on line 16 is suppressed with: # noqa: optimise-orm WRITE-006
+WRITE-006 on line 17 is suppressed with: # noqa: optimise-orm WRITE-006
 The skill should:
   - NOT emit WRITE-006 as a finding in the body
   - Count it in the report frontmatter suppressed: 1

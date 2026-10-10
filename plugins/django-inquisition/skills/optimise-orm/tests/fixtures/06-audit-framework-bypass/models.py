@@ -8,5 +8,9 @@ class Invoice(models.Model):
     issued_at = models.DateTimeField(null=True)
     voided = models.BooleanField(default=False)
 
+    def delete(self, *args, **kwargs):
+        # Custom logic that QuerySet.delete() skips (WRITE-009).
+        return super().delete(*args, **kwargs)
+
     class Meta:
         app_label = "fixture06"

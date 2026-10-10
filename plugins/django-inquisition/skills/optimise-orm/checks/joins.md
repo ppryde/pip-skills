@@ -12,7 +12,7 @@ checks:
     title: Multi-condition relation filter done in Python
     severity_base: medium
   - id: JOIN-011
-    title: FilteredRelation would unify Q + select_related + annotate
+    title: FilteredRelation for one conditioned relation (never several on one multi-valued relation)
     severity_base: low
 ---
 
@@ -22,7 +22,7 @@ checks:
 
 ### JOIN-001
 
-**Signature:** Two separate `.filter()` calls on the same M2M relation in a chain: `.filter(<m2m>__a=...).filter(<m2m>__b=...)`. Each `.filter()` generates a new JOIN, producing a row explosion. A single `.filter(Q(<m2m>__a=...) & Q(<m2m>__b=...))` or `__`-chained filter uses one JOIN.
+**Signature:** Two separate `.filter()` calls on the same M2M relation in a chain: `.filter(<m2m>__a=...).filter(<m2m>__b=...)`. Each `.filter()` on a multi-valued relation generates its own JOIN, so the chain means "has *a* related row matching a AND has *a (possibly different)* related row matching b" and multiplies the intermediate row set. This is **not** equivalent to a single `.filter(Q(<m2m>__a=...) & Q(<m2m>__b=...))` or `.filter(<m2m>__a=..., <m2m>__b=...)`, which requires ONE related row to match both conditions (and returns nothing for e.g. `tags__name="python"` AND `tags__name="django"`). Chained filters are therefore often intentional; only flag when the chain is a performance concern, and never present a single `Q &` as an equivalent rewrite. The Count/`Exists` form below is the performance alternative that preserves AND-across-rows semantics.
 
 **Grep / AST hints:**
 ```regex
@@ -41,10 +41,11 @@ Follow-up: confirm both filter calls reference the same M2M relation prefix (e.g
 
 **Suggested fix template:**
 ```python
-# Before — two JOINs on the same M2M table; multiplies rows
+# Before — two JOINs on the same M2M table (AND across separate rows); multiplies rows
 articles = Article.objects.filter(tags__name="python").filter(tags__name="django")
 
-# After — one JOIN, AND-across-rows via annotation + Count
+# After — one JOIN, same AND-across-rows semantics via annotation + Count
+# (assumes each tag appears once per article)
 from django.db.models import Count, Q
 
 articles = (
@@ -151,38 +152,42 @@ for author in authors:
 
 ### JOIN-011
 
-**Signature:** Multiple annotations on the same relation using different filters, where `FilteredRelation` would allow a single JOIN with a condition, replacing repeated conditional annotations.
+**Signature:** A **single** conditioned relation is expressed with a `Q`-filtered join (`.filter(rel__a=..., rel__b=...)` split across calls, or filtering the parent on a condition that should only restrict the joined rows) where `FilteredRelation` would put the condition in the JOIN's `ON` clause and let you filter/annotate/`select_related` through the alias. This is a clarity/semantics improvement, not a JOIN-count reduction.
+
+> Do NOT recommend several `FilteredRelation`s on the **same multi-valued relation** combined with `Count(...)`. Each alias is its own JOIN, so two aliases on one multi-valued relation produce a cross product and inflate every `Count` unless `distinct=True`. For several conditional counts over one relation, keep conditional aggregation (`Count("items", filter=Q(...))`) — it uses one JOIN.
 
 **Grep / AST hints:**
 ```regex
 \.annotate\(
 ```
-Follow-up: look for two or more `.annotate()` calls that reference the same relation with different Q conditions (e.g. `Subquery(..., filter(status="a"))` and `Subquery(..., filter(status="b"))`). `FilteredRelation` unifies these.
+Follow-up: look for one relation filtered by a condition in `.filter(...)` where the same condition must also restrict the rows used by a later annotation or `select_related`. Skip multiple conditional `Count(..., filter=Q(...))` annotations on one relation — that form is already optimal.
 
 **Confidence rules:**
-- High: Two+ annotations on the same relation with different filter conditions confirmed.
-- Medium: Multiple annotations on same relation found, filter conditions not fully confirmed.
-- Low: Multiple annotations found, relation overlap inferred.
+- High: single conditioned relation, the condition is repeated in both a filter and an annotation on the same relation.
+- Medium: conditioned relation found, interaction with later annotations not fully confirmed.
+- Low: relation overlap inferred.
 
 **Savings formula:**
-- Reduces JOIN count. Impact depends on annotation frequency.
-- Mark `savings_basis: static`, low severity.
+- No JOIN reduction expected; benefit is correct row restriction and readability.
+- Mark `savings_basis: unknown`, low severity.
 
 **Suggested fix template:**
 ```python
-# Before — two separate annotations on same relation
-orders = Order.objects.annotate(
-    shipped_count=Count("items", filter=Q(items__status="shipped")),
-    pending_count=Count("items", filter=Q(items__status="pending")),
+# Before — the condition has to be repeated for the filter and the annotation
+restaurants = (
+    Restaurant.objects
+    .filter(pizzas__vegetarian=True, pizzas__name__icontains="mozzarella")
+    .annotate(veg_pizza_count=Count("pizzas", filter=Q(pizzas__vegetarian=True)))
 )
 
-# After — FilteredRelation for multi-condition annotation on same table
+# After — one FilteredRelation alias carries the condition for both uses
 from django.db.models import FilteredRelation, Q, Count
-orders = Order.objects.annotate(
-    shipped_items=FilteredRelation("items", condition=Q(items__status="shipped")),
-    pending_items=FilteredRelation("items", condition=Q(items__status="pending")),
-).annotate(
-    shipped_count=Count("shipped_items"),
-    pending_count=Count("pending_items"),
+restaurants = (
+    Restaurant.objects
+    .annotate(veg_pizzas=FilteredRelation("pizzas", condition=Q(pizzas__vegetarian=True)))
+    .filter(veg_pizzas__name__icontains="mozzarella")
+    .annotate(veg_pizza_count=Count("veg_pizzas"))
 )
+# Do NOT add a second FilteredRelation("pizzas", ...) alongside it and Count both
+# without distinct=True: two joins on one multi-valued relation multiply rows.
 ```

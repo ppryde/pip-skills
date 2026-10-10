@@ -2,7 +2,8 @@
 Async views — sync ORM in async context (PAT-050, Django >= 4.1).
 
 order_detail_view: async def view calling sync .get() — blocks event loop.
-order_list_view: async def view calling sync .filter() — blocks event loop.
+order_list_view: async def view evaluating a queryset with list(qs) — blocks event loop
+(the lazy .filter() alone would not be flagged).
 order_create_view: async def view calling sync .save() — blocks event loop.
 
 correct_async_view: uses aget() correctly — should NOT trigger PAT-050.
@@ -20,7 +21,7 @@ async def order_detail_view(request, pk):
 
 
 async def order_list_view(request):
-    """PAT-050: sync .filter() inside async view — blocks event loop."""
+    """PAT-050: list(qs) evaluates the queryset synchronously inside async view — blocks event loop."""
     orders = list(Order.objects.filter(status="open"))
     return JsonResponse({"orders": [o.id for o in orders]})
 
