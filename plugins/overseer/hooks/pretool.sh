@@ -22,8 +22,10 @@
 # Separately, a Bash command that looks like `git push` runs the snapshot
 # script, whose own scanner decides whether it really is one.
 #
-# Prints the decision JSON; on any failure prints nothing and exits 0 (fail
-# open).
+# Prints the decision JSON. On a failure it prints nothing and exits 0 (fail
+# open), EXCEPT when python itself fails for a session that orchestrates (live
+# marker, or no session id to check): then a mutating/guarded tool is denied
+# with "overseer guard unavailable".
 trap 'exit 0' EXIT
 
 input="$(cat)"
@@ -84,7 +86,20 @@ elif [ "$tool" = "Read" ] && [[ $input =~ $agent_re ]]; then
 fi
 
 if [ "$slow" = 1 ]; then
-  out="$(printf '%s' "$input" | "$py" "${plugin_root}/scripts/hookfast.py")" || out=""
+  out="$(printf '%s' "$input" | "$py" "${plugin_root}/scripts/hookfast.py")"; rc=$?
+  if [ "$rc" != 0 ]; then
+    # The interpreter is missing, or hookfast died without deciding (import
+    # error, crash): fail CLOSED for a guarded tool when this session
+    # orchestrates (live marker) or the marker check cannot run (no session id).
+    out=""
+    guarded=0
+    case "$tool" in Bash|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__*) guarded=1 ;; esac
+    mcp_re='"tool_name"[[:space:]]*:[[:space:]]*"mcp__'
+    if [[ $input =~ $mcp_re ]]; then guarded=1; fi
+    if [ "$guarded" = 1 ] && { [ -z "$sid" ] || [ -e "$marker_dir/$sid" ]; }; then
+      out='{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "overseer guard unavailable"}}'
+    fi
+  fi
   if [ -n "$out" ]; then
     printf '%s\n' "$out"
     case "$out" in *'"permissionDecision": "deny"'*|*'"permissionDecision":"deny"'*) denied=1 ;; esac

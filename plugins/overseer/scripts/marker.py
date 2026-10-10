@@ -127,23 +127,65 @@ def remove_marker(session_id: str, db: Path | None = None) -> None:
         _store(session_id, [b for b in _read_raw(session_id) if b.db != db])
 
 
-def find_boards_for_session(session_id: str) -> list[Board]:
-    """Boards on which ``session_id`` has a live orchestrated card, found with
-    read-only opens and no git: ``OVERSEER_DB`` if set, else every
-    ``<config dir>/overseer/*/board.db``. Used once PER SESSION (the
-    ``.checked-<id>`` sentinel), so sessions already orchestrating at upgrade
-    time are each picked up, and whenever the marker dir cannot be written."""
-    candidates: list[Path] = []
+def load_repo_config(repo: Path | None) -> dict[str, object]:
+    """``<repo>/.overseer/config.json`` then ``config.local.json`` (local
+    wins) — the same precedence as ``config.load_config`` without its git
+    lookup: the caller already holds the canonical root."""
+    merged: dict[str, object] = {}
+    if repo is None:
+        return merged
+    for name in ("config.json", "config.local.json"):
+        try:
+            data = json.loads((repo / ".overseer" / name).read_text() or "{}")
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            merged.update(data)
+    return merged
+
+
+def _candidate_dbs(cwd: Path | None) -> list[Path]:
+    """Every board file this session could be orchestrating on, in the order
+    ``db.board_db_path`` would resolve them: ``OVERSEER_DB`` (an override that
+    excludes the rest), else ``$OVERSEER_CENTRAL/board.db``, the payload
+    cwd's ``central_dir`` from ``.overseer/config*.json``, and every
+    ``<config dir>/overseer/*/board.db``."""
     override = os.environ.get("OVERSEER_DB")
     if override:
-        candidates.append(Path(override))
-    else:
-        base = config_dir() / "overseer"
-        if base.is_dir():
-            candidates.extend(sorted(base.glob("*/board.db")))
-    found: list[Board] = []
+        return [Path(override)]
+    candidates: list[Path] = []
+    central = os.environ.get("OVERSEER_CENTRAL")
+    if central:
+        candidates.append(Path(central) / "board.db")
+    cfg_central = load_repo_config(cwd).get("central_dir")
+    if isinstance(cfg_central, str) and cfg_central:
+        candidates.append(Path(cfg_central) / "board.db")
+    base = config_dir() / "overseer"
+    if base.is_dir():
+        candidates.extend(sorted(base.glob("*/board.db")))
+    seen: set[Path] = set()
+    unique: list[Path] = []
     for db in candidates:
+        key = db.resolve()
+        if key not in seen:
+            seen.add(key)
+            unique.append(db)
+    return unique
+
+
+def lookup_boards(session_id: str, cwd: Path | None = None) -> tuple[list[Board], bool]:
+    """Boards on which ``session_id`` has a live orchestrated card, found with
+    read-only opens and no git, plus whether the lookup was COMPLETE: False
+    when some candidate board file exists but could not be read (locked,
+    unreadable), so the caller must not record the session as checked."""
+    found: list[Board] = []
+    complete = True
+    for db in _candidate_dbs(cwd):
         cards = live_cards(db, session_id)
+        if cards is None:
+            if db.is_file():
+                complete = False
+            continue
         if not cards:
             continue
         repo = db.parent
@@ -159,7 +201,15 @@ def find_boards_for_session(session_id: str) -> list[Board]:
             pass
         state = Path(os.environ["OVERSEER_CENTRAL"]) if os.environ.get("OVERSEER_CENTRAL") else db.parent
         found.append(Board(db, repo, state))
-    return found
+    return found, complete
+
+
+def find_boards_for_session(session_id: str, cwd: Path | None = None) -> list[Board]:
+    """``lookup_boards`` without the completeness flag. Used once PER SESSION
+    (the ``.checked-<id>`` sentinel), so sessions already orchestrating at
+    upgrade time are each picked up, and whenever the marker dir cannot be
+    written."""
+    return lookup_boards(session_id, cwd)[0]
 
 
 def live_cards(db: Path, session_id: str) -> list[GuardCard] | None:
@@ -188,6 +238,30 @@ def live_cards(db: Path, session_id: str) -> list[GuardCard] | None:
     return [GuardCard(r[0], r[1], r[2], r[3] or 0) for r in rows]
 
 
+SWEEP_STAMP = ".last-sweep"
+SWEEP_EVERY_SECONDS = 3600
+STALE_TMP_SECONDS = 3600
+
+
+def sweep_if_due(now: float | None = None) -> int:
+    """``sweep`` at most once an hour, rate-limited by a timestamp file in
+    the marker dir (cheap enough for the first-call path)."""
+    current = time.time() if now is None else now
+    stamp = marker_dir() / SWEEP_STAMP
+    try:
+        if current - stamp.stat().st_mtime < SWEEP_EVERY_SECONDS:
+            return 0
+    except OSError:
+        pass
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.touch()
+        os.utime(stamp, (current, current))
+    except OSError:
+        return 0
+    return sweep(current)
+
+
 def sweep(now: float | None = None) -> int:
     """Delete markers older than a week whose session has no live card.
     Best effort; returns how many were removed."""
@@ -198,7 +272,12 @@ def sweep(now: float | None = None) -> int:
     removed = 0
     for path in directory.iterdir():
         try:
-            if path.stat().st_mtime > cutoff:
+            mtime = path.stat().st_mtime
+            if path.name.startswith(".") and path.name.endswith(".tmp"):
+                if mtime <= (time.time() if now is None else now) - STALE_TMP_SECONDS:
+                    path.unlink(missing_ok=True)  # a crashed _store's leftover
+                continue
+            if mtime > cutoff:
                 continue
             if path.name.startswith(CHECKED_PREFIX):
                 path.unlink(missing_ok=True)  # the session simply looks again

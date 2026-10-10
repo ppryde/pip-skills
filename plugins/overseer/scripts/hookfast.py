@@ -12,12 +12,14 @@ needs one interpreter start (not up to three) to decide whether to act.
 
 Contract: print a JSON decision, or nothing. An internal error exits 0 with no
 output (fail open) EXCEPT for a Bash call from an orchestrating session, which
-is denied with a reason (fail closed).
+is denied with a reason (fail closed); an import failure at load time is
+caught the same way (see ``main``).
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -25,7 +27,12 @@ from pathlib import Path
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import guard, marker, shellscan
+try:
+    from scripts import guard, marker, shellscan
+    _IMPORT_ERROR: BaseException | None = None
+except Exception as _exc:  # noqa: BLE001 -- a half-upgraded tree: main() turns this into a deny
+    guard = marker = shellscan = None  # type: ignore[assignment]
+    _IMPORT_ERROR = _exc
 
 GUARD_ENV = "OVERSEER_GUARD"
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
@@ -35,17 +42,7 @@ def load_config(repo: Path | None) -> dict[str, object]:
     """``<repo>/.overseer/config.json`` then ``config.local.json`` (local
     wins) — the same precedence as ``config.load_config`` without its git
     lookup: the caller already holds the canonical root."""
-    merged: dict[str, object] = {}
-    if repo is None:
-        return merged
-    for name in ("config.json", "config.local.json"):
-        try:
-            data = json.loads((repo / ".overseer" / name).read_text() or "{}")
-        except (OSError, ValueError):
-            continue
-        if isinstance(data, dict):
-            merged.update(data)
-    return merged
+    return marker.load_repo_config(repo)
 
 
 def evaluate(
@@ -118,7 +115,9 @@ def run(raw: str) -> dict[str, object] | None:
         # shell had no marker to trust, so ask the boards themselves
         # (read-only, no git), leave a marker behind if there is something to
         # guard, and remember that this session has been looked up.
-        boards = marker.find_boards_for_session(sid)
+        cwd = payload.get("cwd")
+        boards, complete = marker.lookup_boards(
+            sid, Path(cwd) if isinstance(cwd, str) and cwd else None)
         for board in boards:
             try:
                 marker.write_marker(sid, board)
@@ -126,8 +125,13 @@ def run(raw: str) -> dict[str, object] | None:
                 print(f"overseer: cannot write the guard marker in {directory}: {exc}; "
                       "the full guard runs on every tool call until it is writable",
                       file=sys.stderr)
+        if complete:  # a locked/unreadable board means "look again next call"
+            try:
+                marker.mark_checked(sid)
+            except OSError:
+                pass
         try:
-            marker.mark_checked(sid)
+            marker.sweep_if_due()
         except OSError:
             pass
     return evaluate(payload, boards)
@@ -182,20 +186,32 @@ def _deny_json(reason: str) -> str:
     }})
 
 
+_GUARDED_TOOLS = {"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "Agent", "Task"}
+_SAFE_SID = re.compile(r"[A-Za-z0-9_-]+\Z")
+
+
 def _crash_decision(raw: str) -> str | None:
-    """After an internal error: a Bash call from a session that orchestrates
-    (it has a marker) is DENIED with a reason, never waved through — the
-    guard may not fail open on the one tool that can do anything. Anything
-    else stays fail-open (a hook crash must not wedge ordinary sessions)."""
+    """After an internal error: a mutating or guarded tool call from a session
+    that orchestrates (it has a marker) is DENIED with a reason, never waved
+    through — the guard may not fail open on the tools that can do anything.
+    Self-contained (stdlib only: it must work when the package imports
+    failed). Anything else stays fail-open (a hook crash must not wedge
+    ordinary sessions)."""
     try:
         payload = json.loads(raw)
-        if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
+        if not isinstance(payload, dict):
+            return None
+        tool = payload.get("tool_name")
+        if not isinstance(tool, str) or not (tool in _GUARDED_TOOLS or tool.startswith("mcp__")):
             return None
         sid = payload.get("session_id")
-        path = marker.marker_path(sid) if isinstance(sid, str) else None
-        if path is not None and path.exists():
+        if not isinstance(sid, str) or not _SAFE_SID.match(sid):
+            return None
+        override = os.environ.get("CLAUDE_CONFIG_DIR")
+        base = Path(override) if override else Path.home() / ".claude"
+        if (base / "overseer" / ".orchestrating" / sid).exists():
             return _deny_json(
-                "GUARD: internal error while judging this Bash command (denied, fail closed). "
+                f"GUARD: internal error while judging this {tool} call (denied, fail closed). "
                 "Escape hatch: `release <card>`, \"guard\": false in .overseer/config.json, "
                 "or OVERSEER_GUARD=off"
             )
@@ -209,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
     raw = ""
     try:
         raw = sys.stdin.read()
+        if _IMPORT_ERROR is not None:
+            raise _IMPORT_ERROR
         if args[:1] == ["--push-probe"]:
             out = push_probe(raw)
             if out:
