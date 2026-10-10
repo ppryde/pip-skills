@@ -353,8 +353,7 @@ def decide(argv: list[str], threads_tokens: object = _UNSET) -> bool:
             }  # fmt: skip
             parsed = parse_flags(a[2:], spec)
             return parsed is not None and not parsed[0]
-        if a[1] == "checkout":
-            return len(a) == 3 and v_num(a[2])
+        # `gh pr checkout` changes the working tree, so it is never pre-approved.
         return False
 
     if a[0] == "api" and len(a) >= 2:
