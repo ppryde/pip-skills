@@ -22,7 +22,7 @@ def test_retired_instructions_gone():
 
 
 def test_version_bumped():
-    assert json.loads((OVERSEER / ".claude-plugin" / "plugin.json").read_text())["version"] == "0.25.0"
+    assert json.loads((OVERSEER / ".claude-plugin" / "plugin.json").read_text())["version"] == "0.25.1"
 
 
 def test_cli_location_and_cheat_sheet_present():

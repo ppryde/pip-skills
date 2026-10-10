@@ -396,12 +396,14 @@ def row_to_card(row: sqlite3.Row) -> Card:
     )
 
 
-def _upsert(conn: sqlite3.Connection, card: Card, archived: int, *, commit: bool = True) -> None:
+def _upsert(conn: sqlite3.Connection, card: Card, archived: int, *, commit: bool = True,
+            update_archived: bool = True) -> None:
     params = card_to_params(card)
     params["archived"] = archived
     cols = ", ".join(f'"{c}"' for c in params)
     ph = ", ".join(f":{c}" for c in params)
-    updates = ", ".join(f'"{c}" = excluded."{c}"' for c in params if c != "id")
+    skip = {"id"} if update_archived else {"id", "archived"}
+    updates = ", ".join(f'"{c}" = excluded."{c}"' for c in params if c not in skip)
     conn.execute(
         f"INSERT INTO cards ({cols}) VALUES ({ph}) "
         f"ON CONFLICT(id) DO UPDATE SET {updates}",
@@ -412,7 +414,10 @@ def _upsert(conn: sqlite3.Connection, card: Card, archived: int, *, commit: bool
 
 
 def save_card(conn: sqlite3.Connection, card: Card) -> None:
-    _upsert(conn, card, archived=0)
+    """Insert or update a card. A new row is live (archived=0); an existing
+    row keeps its archived flag, so editing a done/abandoned card does not
+    un-archive it (use ``archive_card`` to archive)."""
+    _upsert(conn, card, archived=0, update_archived=False)
 
 
 def create_card(conn: sqlite3.Connection, card: Card) -> None:

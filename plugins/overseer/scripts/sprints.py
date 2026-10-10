@@ -110,7 +110,9 @@ def retro_rollup(sprint: Sprint, cards: list[Card]) -> Sprint:
 
 
 def sprint_path(root: Path, sprint_id: str) -> Path:
-    return root / "sprints" / f"{sprint_id}.md"
+    from scripts.store import check_id
+
+    return root / "sprints" / f"{check_id(sprint_id, 'sprint id')}.md"
 
 
 def load_sprint(path: Path) -> Sprint:
@@ -119,6 +121,7 @@ def load_sprint(path: Path) -> Sprint:
 
 def save_sprint(root: Path, sprint: Sprint) -> Path:
     path = sprint_path(root, sprint.id)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(sprint.to_text())
     return path
 

@@ -6,8 +6,8 @@ description: >
   a piece of tracked work, when the user asks "what's in flight", "resume where
   we left off", "start a new card/task", "log progress", to record or recall a
   durable fact, or at the start of any session in a repo already tracked by
-  overseer (a `board.db` entry for cards, sprints, usage and knowledge, all
-  under the central per-repo folder). The state layer beneath the orchestrate
+  overseer (a `board.db` entry for cards, with sprints, usage and knowledge
+  as files, all under the central per-repo folder). The state layer beneath the orchestrate
   skill; drive it through the overseer CLI, never by editing files.
 effort: medium
 ---
@@ -32,7 +32,9 @@ python plugins/overseer/scripts/cli.py --root <repo-root> <command> ...
 ```
 
 (When overseer is installed as a plugin, the scripts live under the plugin
-root instead — locate `cli.py` relative to this SKILL.md.)
+root instead — locate `cli.py` relative to this SKILL.md.) The CLI needs
+Python 3.11+ with the packages in `requirements.txt` (PyYAML, httpx); hooks use
+`OVERSEER_PYTHON` or a repo `.venv` when set.
 
 ## On invocation — always check for in-flight work first
 
@@ -42,8 +44,10 @@ python .../cli.py --root . resume
 
 - If cards are in flight, report them to the user and offer per card:
   **resume / park / block / abandon**. Never silently start fresh.
-- Resuming a card: read it back via the CLI (`show <id>`), re-enter at the
-  recorded stage — never earlier, never assume later. If the report shows
+- `resume` lists only in-flight and blocked cards.
+- Resuming a card: read it back via the CLI (`show <id> --json` for the plan
+  and decisions; plain `show <id>` prints only the title and section
+  headings), re-enter at the recorded stage — never earlier, never assume later. If the report shows
   `(MISSING)` next to the worktree, recreate it from the recorded branch
   before continuing.
 - If no state root exists yet and the user wants tracked work: run `init`.
@@ -96,8 +100,10 @@ python .../cli.py --root . resume
 - **Amending a goal:** never silently rewrite a card's goal — confirm the new
   wording with the user first. The goal is one of the by-hand fields under the
   prose exception, so it gets extra care.
-- **Corrupt cards suspected:** run `rebuild-index` — reconciles against
-  `board.db` (cards are the truth) and reports any quarantined cards.
+- **Corrupt cards suspected:** `rebuild-index` only removes the retired
+  `ledger.md` and repairs nothing. A malformed card row raises a parse error
+  naming the card; fix that card with `set-field`/`set-section` or inspect it
+  with `show <id> --json`.
 
 ## Relationships (epics, dependencies, parking)
 - **Epics are emergent.** Set a card's `parent` with `set-field <id> --parent
@@ -119,9 +125,13 @@ python .../cli.py --root . resume
 ## Finishing
 
 - `done <id>` when merged (archives the card); `abandon <id>` otherwise.
-- The verification stage requires evidence in the card's `## Verification`
-  section: test output, mypy/ruff results, end-to-end observation. A card
-  with an empty Verification section does not pass `awaiting-merge`.
+- The verification stage expects evidence in the card's `## Verification`
+  section: test output, mypy/ruff results, end-to-end observation. This is a
+  convention the orchestrator checks before moving a card to `awaiting-merge`;
+  the CLI does not enforce it.
+- Token accounting: `log-usage <id> --role <role>` records usage, `usage
+  [--card <id>] [--json]` summarises it and `calibration [--json]` compares
+  estimates with actuals.
 
 ## Sprints
 
