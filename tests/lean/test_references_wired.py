@@ -87,3 +87,21 @@ def test_dangling_checked_in_references_and_commands(tmp_path, monkeypatch):
                     {"a.md": "then references/gone.md\n"}, command="load references/missing.md\n")
     _, dangling = lc.reachable_references(skill)
     assert sorted(t for _, t in dangling) == ["references/gone.md", "references/missing.md"]
+
+
+def test_dot_relative_links_between_references(tmp_path, monkeypatch):
+    lc, skill = _mk(tmp_path, monkeypatch, "references/a.md\n", {"a.md": "see ./b.md and ../references/sub/c.md.\n"})
+    (skill / "references" / "sub").mkdir()
+    (skill / "references" / "sub" / "c.md").write_text("x\n")
+    (skill / "references" / "sub" / "d.md").write_text("link ../b2.md\n")
+    (skill / "references" / "b.md").write_text("x\n")
+    (skill / "references" / "b2.md").write_text("orphan\n")
+    reached, _ = lc.reachable_references(skill)
+    assert {p.name for p in reached} == {"a.md", "b.md", "c.md"}
+
+
+def test_bare_name_resolves_only_in_the_sources_directory(tmp_path, monkeypatch):
+    lc, skill = _mk(tmp_path, monkeypatch, "references/a.md\n", {"a.md": "see b.md\n"})
+    (skill / "references" / "sub").mkdir()
+    (skill / "references" / "sub" / "b.md").write_text("other dir\n")
+    assert {p.name for p in lc.reachable_references(skill)[0]} == {"a.md"}

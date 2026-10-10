@@ -169,3 +169,23 @@ def test_folded_scalar_in_frontmatter_is_rejected(tmp_path):
     raw = GROUP.format(body="x").replace("title: One", "title: >\n      folded")
     r = run("optimise-orm", "--root", str(_scratch(tmp_path, raw)))
     assert r.returncode == 2 and "folded" in r.stderr
+
+
+def test_backtick_opener_with_backtick_in_info_string_is_not_a_fence():
+    assert _heading_texts("## A\n``` python extra`\n### H\n") == ["A", "H"]
+    assert _heading_texts("## A\n```x``` text\n### H\n") == ["A", "H"]
+    assert _heading_texts("## A\n~~~ a`b\n### H\n~~~\n### B\n") == ["A", "B"]
+
+
+def test_empty_value_with_indented_continuation_is_rejected(tmp_path):
+    raw = GROUP.format(body="x").replace("title: One", "title:\n      continued")
+    r = run("optimise-orm", "--root", str(_scratch(tmp_path, raw)))
+    assert r.returncode == 2 and "multi-line" in r.stderr
+
+
+def test_trailing_comment_stripped_from_unquoted_values(tmp_path):
+    raw = GROUP.format(body="x").replace("title: One", "title: One # note").replace("title: Two", 'title: "Two # kept"')
+    root = _scratch(tmp_path, raw)
+    assert run("optimise-orm", "--root", str(root)).returncode == 0
+    text = (root / SOURCES["optimise-orm"] / "INDEX.md").read_text()
+    assert "| One |" in text and "Two # kept" in text and "note" not in text

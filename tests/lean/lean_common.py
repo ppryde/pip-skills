@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -72,13 +73,21 @@ def reachable_references(skill_dir: Path) -> tuple[set[Path], list[tuple[Path, s
     if root is not None and (root / "commands").is_dir():
         seeds += sorted((root / "commands").glob("*.md"))
 
-    def named_in(ref: Path, text: str, src_is_reference: bool) -> bool:
-        """`references/<rel>` on a word boundary; reference-to-reference links may use the bare name."""
-        rel = ref.relative_to(refs_dir).as_posix()
-        forms = [f"references/{rel}"]
-        if src_is_reference:
-            forms += [rel, ref.name]
-        return any(re.search(r"(?<![\w./-])" + re.escape(f) + r"(?![\w-]|\.\w)", text) for f in forms)
+    token_re = re.compile(r"(?<![\w./-])((?:\.{1,2}/)*(?:[\w-]+/)*[\w-]+(?:\.[\w-]+)+)(?![\w-]|\.\w)")
+
+    def mentioned(src: Path, text: str, src_is_reference: bool) -> set[Path]:
+        """Reference files named in text. Seeds (SKILL.md, commands) must use `references/<rel>`;
+        a reference links to its siblings relative to its own directory (`b.md`, `./b.md`, `../x/b.md`)."""
+        out: set[Path] = set()
+        for tok in token_re.findall(text):
+            if tok.startswith("references/"):
+                target = skill_dir / tok
+            elif src_is_reference:
+                target = src.parent / tok
+            else:
+                continue
+            out.add(Path(os.path.normpath(target)))
+        return out
 
     def exists(src: Path, mention: str) -> bool:
         if (skill_dir / mention).exists():
@@ -97,10 +106,11 @@ def reachable_references(skill_dir: Path) -> tuple[set[Path], list[tuple[Path, s
         for m in re.finditer(r"references/[A-Za-z0-9_./-]*[A-Za-z0-9_]\.[A-Za-z0-9]+", text):
             if not exists(src, m.group(0)):
                 dangling.append((src, m.group(0)))
+        hits = mentioned(src, text, is_ref)
         for ref in all_refs:
             if ref in reached:
                 continue
-            if named_in(ref, text, is_ref):
+            if Path(os.path.normpath(ref)) in hits:
                 reached.add(ref)
                 if ref not in seen_src and ref.suffix == ".md":
                     seen_src.add(ref)

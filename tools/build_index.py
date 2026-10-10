@@ -70,7 +70,10 @@ def headings(lines: list[str]) -> list[tuple[int, int, str]]:
         if m:
             char, length, rest = m.group(1)[0], len(m.group(1)), m.group(2)
             if fence is None:
-                fence = (char, length)
+                if char == "`" and "`" in rest:
+                    pass  # inline code such as ```x``` text, not a fence opener
+                else:
+                    fence = (char, length)
             elif char == fence[0] and length >= fence[1] and not rest.strip():
                 fence = None
             continue
@@ -103,6 +106,7 @@ def parse_frontmatter(text: str, path: Path) -> tuple[str, list[dict[str, str]]]
     name = ""
     checks: list[dict[str, str]] = []
     in_checks = False
+    pending: tuple[str, int] | None = None
     for raw in lines[1:end]:
         if re.match(r"checks:\s*$", raw):
             in_checks = True
@@ -116,13 +120,23 @@ def parse_frontmatter(text: str, path: Path) -> tuple[str, list[dict[str, str]]]
         if m:
             checks.append({"id": m.group(1).strip().strip("'\"")})
             continue
-        m = re.match(r"\s+(\w+):\s*(.*)$", raw)
+        if pending is not None and raw.strip():
+            if len(raw) - len(raw.lstrip()) > pending[1]:
+                raise SourceError(f"{path}: {pending[0]}: multi-line values are not supported; use a one-line value")
+            pending = None
+        m = re.match(r"(\s+)(\w+):\s*(.*)$", raw)
         if m and checks:
-            value = m.group(2).strip()
+            key, value = m.group(2), m.group(3).strip()
             if value[:1] in (">", "|"):
                 raise SourceError(
-                    f"{path}: {checks[-1]['id']}.{m.group(1)}: folded/literal scalars ({value[:1]}) are not supported; use a one-line value")
-            checks[-1][m.group(1)] = value.strip("'\"")
+                    f"{path}: {checks[-1]['id']}.{key}: folded/literal scalars ({value[:1]}) are not supported; use a one-line value")
+            if value[:1] in ("'", '"'):
+                value = value.strip("'\"")
+            else:
+                value = re.sub(r"\s+#.*$", "", value)  # trailing ` # comment` on unquoted values
+            if not value:
+                pending = (f"{checks[-1]['id']}.{key}", len(m.group(1)))
+            checks[-1][key] = value
     return name, checks
 
 
