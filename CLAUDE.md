@@ -63,6 +63,10 @@ Always use dedicated tools — not Bash — for these operations:
 
 Using Bash for these triggers permission prompts on every call. Dedicated tools are pre-approved and render more clearly in the UI.
 
+## Lean skills
+
+SKILL.md <= 10 KB target; procedures for one mode or phase go in `references/` with an explicit read instruction, and big rule corpora get a generated compact INDEX (`tools/build_index.py`, see `tools/README.md`; generators live in `tools/`, the generated file is committed inside the plugin). `tests/lean/` enforces per-file budgets (`budgets.json`), reference wiring and index drift; budgets only ratchet down.
+
 ## Test isolation — clean up after yourself
 
 Tests (and any test runner) MUST NOT touch real user state. Anything that
