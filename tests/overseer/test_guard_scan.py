@@ -426,3 +426,105 @@ class TestCliIdentity:
 
     def test_find_sibling_cli_none_when_absent(self, cache):
         assert guard.find_sibling_cli("nonesuch") is None
+
+
+class TestRoundOneCdAndVariables:
+    """Review round 1: cd tracking, $ expansion, zsh/bash 3.2, git braces."""
+
+    @pytest.fixture
+    def plug(self, tmp_path):
+        """A directory whose ./scripts/cli.py is NOT the real CLI (repo code)."""
+        (tmp_path / "scripts").mkdir()
+        (tmp_path / "scripts" / "cli.py").write_text("print('pwned')\n")
+        return tmp_path
+
+    @pytest.mark.parametrize("template", [
+        "git status || cd {d}; python3 scripts/cli.py show WF-1",
+        "git status | cd {d}; python3 scripts/cli.py show WF-1",
+        "git rev-parse --git-dir && cd {d}; python3 scripts/cli.py show WF-1",
+        "cd /nonexistent && cd {d}; python3 scripts/cli.py show WF-1",
+        "git status & cd {d}; python3 scripts/cli.py show WF-1",
+        "cd /nonexistent; python3 scripts/cli.py show WF-1",
+        "cd {d} &\npython3 scripts/cli.py show WF-1",
+        "cd {d} || true; python3 scripts/cli.py show WF-1",
+        "cd {d} | cat; python3 scripts/cli.py show WF-1",
+    ])
+    def test_cd_that_may_not_run_leaves_the_cwd_unknown(self, plug, template):
+        denied(template.format(d=plug))
+
+    def test_a_failed_cd_does_not_move_the_cwd(self, tmp_path):
+        denied("cd /nonexistent && python3 plugins/overseer/scripts/cli.py resume")
+
+    def test_unconditional_cd_still_tracked(self):
+        allowed(f"cd {REPO}; python3 plugins/overseer/scripts/cli.py resume", cwd="/elsewhere")
+        allowed(f"git status\ncd {REPO} && python3 plugins/overseer/scripts/cli.py resume",
+                cwd="/elsewhere")
+
+    @pytest.mark.parametrize("command", [
+        f"CLAUDE_PLUGIN_ROOT={REPO}; python3 $CLAUDE_PLUGIN_ROOT/scripts/cli.py show WF-1",
+        f"CLAUDE_PLUGIN_ROOT={REPO} python3 ${{CLAUDE_PLUGIN_ROOT}}/scripts/cli.py show",
+        f"PATH=/tmp:$PATH {CLI} show WF-1",
+        f"HOME=/tmp {CLI} show WF-1",
+        f"python3 {REPO}/$SUB/scripts/cli.py show",
+        f"python3 {REPO}/`echo x`/cli.py show",
+    ])
+    def test_variables_in_cli_words_and_tainting_assignments_denied(self, command):
+        denied(command)
+
+    @pytest.mark.parametrize("command", [
+        "X=../../repo/x; echo hi > /tmp/$X",
+        "cd /tmp; D=/repo/x; echo hi > $D",
+        "echo hi > $TMPDIR/x",
+        'echo hi > "/tmp/$X"',
+        f"{CLI} show WF-1 > /tmp/$X",
+    ])
+    def test_variables_in_redirect_targets_denied(self, command):
+        denied(command, "$variables")
+
+    def test_variables_in_path_like_words_of_read_only_and_scratch_denied(self):
+        denied("cat /plugins/$X/scripts/cli.py", "$variables", roots=ROOTS)
+        denied("grep foo $HOME/.claude/x", "$variables", roots=ROOTS)
+        denied("cat > /tmp/x.md /tmp/$Y", "$variables")
+
+    def test_plain_dollar_words_that_are_not_paths_are_fine(self):
+        allowed("echo $HOME > /tmp/x.txt")
+        allowed(f'{CLI} log-progress WF-1 --note "cost $5" --tokens 0')
+
+    def test_overseer_env_assignment_still_fine(self):
+        allowed(f"OVERSEER_DB=/x {CLI} board")
+
+    @pytest.mark.parametrize("command", [
+        "cd /tmp; echo hi >!/etc/zz",
+        "cd /tmp; echo hi >>!/etc/zz",
+        "cd /tmp; echo hi >&!/etc/zz",
+        "cd /tmp; echo hi &>!/etc/zz",
+        "cd /tmp; echo hi >&'\\/etc/zz'",
+        "cd /tmp; echo hi >& \\/etc/zz",
+    ])
+    def test_zsh_clobber_and_bash32_quirks_fail_closed(self, command):
+        denied(command, "cannot parse")
+
+    @pytest.mark.parametrize("command", [
+        "git rev-parse --abbrev-ref @{u}",
+        "git rev-parse HEAD@{upstream}",
+        "git log @{u}..HEAD --oneline",
+        "git stash show stash@{0}",
+        "git diff HEAD@{1}",
+        "git show HEAD^{commit}",
+        "git show main^{}",
+        "git diff @{-1}",
+    ])
+    def test_git_revision_braces_allowed_again(self, command):
+        allowed(command)
+
+    @pytest.mark.parametrize("command", [
+        "git log {a,b}",
+        "git log x{a,b}",
+        "git log x{1..3}",
+        "git log @{1..3}",
+        "git log { a",
+        "git log x{a b}",
+        "git log x{$(y)}",
+    ])
+    def test_expanding_or_malformed_brace_groups_still_fail_closed(self, command):
+        denied(command)

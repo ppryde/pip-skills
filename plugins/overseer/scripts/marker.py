@@ -53,32 +53,92 @@ def marker_path(session_id: str) -> Path | None:
     return marker_dir() / session_id if _SAFE_SESSION.match(session_id) else None
 
 
-def write_marker(session_id: str, board: Board) -> None:
+def _read_raw(session_id: str) -> list[Board]:
+    path = marker_path(session_id)
+    if path is None:
+        return []
+    try:
+        data = json.loads(path.read_text())
+        entries = data["boards"] if "boards" in data else [data]  # legacy: one board
+        return [Board(Path(e["db"]), Path(e["repo"]), Path(e["state"])) for e in entries]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
+def _store(session_id: str, boards: list[Board]) -> None:
     path = marker_path(session_id)
     if path is None:
         return
+    if not boards:
+        path.unlink(missing_ok=True)
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"db": str(board.db), "repo": str(board.repo), "state": str(board.state)}
+    payload = {"boards": [
+        {"db": str(b.db), "repo": str(b.repo), "state": str(b.state)} for b in boards
+    ]}
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(payload))
     os.replace(tmp, path)
 
 
+def write_marker(session_id: str, board: Board) -> None:
+    """Add ``board`` to the session's marker (one session may orchestrate on
+    several boards; the marker lists them all, keyed by board file)."""
+    boards = [b for b in _read_raw(session_id) if b.db != board.db]
+    _store(session_id, [*boards, board])
+
+
+def read_boards(session_id: str) -> list[Board]:
+    return _read_raw(session_id)
+
+
 def read_marker(session_id: str) -> Board | None:
-    path = marker_path(session_id)
-    if path is None:
-        return None
-    try:
-        data = json.loads(path.read_text())
-        return Board(Path(data["db"]), Path(data["repo"]), Path(data["state"]))
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
+    boards = _read_raw(session_id)
+    return boards[0] if boards else None
 
 
-def remove_marker(session_id: str) -> None:
-    path = marker_path(session_id)
-    if path is not None:
-        path.unlink(missing_ok=True)
+def remove_marker(session_id: str, db: Path | None = None) -> None:
+    """Drop the marker, or only ``db``'s entry when given (the file goes when
+    its last board does)."""
+    if db is None:
+        _store(session_id, [])
+    else:
+        _store(session_id, [b for b in _read_raw(session_id) if b.db != db])
+
+
+def find_boards_for_session(session_id: str) -> list[Board]:
+    """Boards on which ``session_id`` has a live orchestrated card, found with
+    read-only opens and no git: ``OVERSEER_DB`` if set, else every
+    ``<config dir>/overseer/*/board.db``. Used once, when the marker dir is
+    first created (sessions already orchestrating at upgrade time) or cannot
+    be written."""
+    candidates: list[Path] = []
+    override = os.environ.get("OVERSEER_DB")
+    if override:
+        candidates.append(Path(override))
+    else:
+        base = config_dir() / "overseer"
+        if base.is_dir():
+            candidates.extend(sorted(base.glob("*/board.db")))
+    found: list[Board] = []
+    for db in candidates:
+        cards = live_cards(db, session_id)
+        if not cards:
+            continue
+        repo = db.parent
+        try:
+            conn = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=1.0)
+            try:
+                row = conn.execute("SELECT value FROM meta WHERE key = 'repo_root'").fetchone()
+            finally:
+                conn.close()
+            if row and row[0]:
+                repo = Path(row[0])
+        except sqlite3.Error:
+            pass
+        state = Path(os.environ["OVERSEER_CENTRAL"]) if os.environ.get("OVERSEER_CENTRAL") else db.parent
+        found.append(Board(db, repo, state))
+    return found
 
 
 def live_cards(db: Path, session_id: str) -> list[GuardCard] | None:
@@ -121,10 +181,9 @@ def sweep(now: float | None = None) -> int:
                 continue
         except OSError:
             continue
-        board = read_marker(path.name)
-        missing = board is None or not board.db.is_file()
-        cards = [] if missing else live_cards(board.db, path.name)  # type: ignore[union-attr]
-        if cards is None or cards:
+        boards = [b for b in read_boards(path.name) if b.db.is_file()]
+        results = [live_cards(b.db, path.name) for b in boards]
+        if any(r is None or r for r in results):
             continue
         path.unlink(missing_ok=True)
         removed += 1

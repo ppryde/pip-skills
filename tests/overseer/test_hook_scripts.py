@@ -156,6 +156,48 @@ class TestRemoteMode:
         assert (result.returncode, result.stdout) == (0, "")
 
 
+class TestRoundOneHookFixes:
+    def test_namespaced_overseer_agent_read_gets_the_limit(self, tmp_path, stub_python, marker_dir):
+        stub, log = stub_python
+        run_hook(tmp_path, stub, payload(tool_name="Read", agent_id="a1",
+                                         agent_type="plugin:overseer-reviewer",
+                                         tool_input={"file_path": "/x/y.py"}))
+        run_hook(tmp_path, stub, payload(tool_name="Read", agent_id="a1",
+                                         agent_type="overseer-reviewer",
+                                         tool_input={"file_path": "/x/y.py"}))
+        assert len(calls(log)) == 2
+        run_hook(tmp_path, stub, payload(tool_name="Read", agent_id="a1",
+                                         agent_type="overseerish",
+                                         tool_input={"file_path": "/x/y.py"}))
+        assert len(calls(log)) == 2
+
+    def test_unwritable_marker_dir_enters_python(self, tmp_path, stub_python, marker_dir):
+        stub, log = stub_python
+        os.chmod(marker_dir, 0o500)
+        try:
+            run_hook(tmp_path, stub, payload())
+        finally:
+            os.chmod(marker_dir, 0o700)
+        if os.geteuid() != 0:
+            assert len(calls(log)) == 1
+
+    def test_remote_mode_still_runs_the_push_snapshot(self, tmp_path, stub_python, marker_dir):
+        stub, _log = stub_python
+        hooks = tmp_path / "hooks"
+        hooks.mkdir()
+        shutil.copy(PLUGIN / "hooks" / "pretool.sh", hooks / "pretool.sh")
+        snap = tmp_path / "snap.log"
+        script = hooks / "prepush-snapshot.sh"
+        script.write_text(f"#!/bin/sh\ncat >> {snap}\n")
+        script.chmod(script.stat().st_mode | stat.S_IEXEC)
+        env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(PLUGIN), "OVERSEER_PYTHON": str(stub),
+               "OVERSEER_REMOTE": "http://127.0.0.1:9"}
+        subprocess.run([BASH, str(hooks / "pretool.sh")],
+                       input=json.dumps(payload(tool_name="Bash", tool_input={"command": "git push"})),
+                       capture_output=True, text=True, check=False, env=env)
+        assert "git push" in snap.read_text()
+
+
 class TestPushSnapshotRidesTheSameHook:
     @pytest.fixture
     def hooks_copy(self, tmp_path):

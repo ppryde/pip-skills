@@ -27,6 +27,9 @@ Rules (verdict changes 1-4):
   newline still separates).
 * ``<<<`` is a here-string: its operand is an ordinary word, not a heredoc.
 
+Target shells are bash (including macOS 3.2) and zsh; where they differ the
+scanner denies (zsh `>!` clobber targets, quoted `>&` targets).
+
 Words come back dequoted, with a per-word flag for an unquoted glob character
 (``*``, ``?``, ``[``). Redirects are returned separately from words.
 """
@@ -108,6 +111,16 @@ class _State:
             self.globs.append(glob)
             return
         self.pending = None
+        if word.startswith("!") and op not in ("<<", "<<-", "<<<"):
+            # zsh clobber operators (`>!`, `>>!`, `>&!`, `&>!`): the shell the
+            # tool runs may parse `!target` as the real path
+            self.fail("redirect target starting with '!' (zsh clobber syntax)")
+            return
+        if op in (">&", "<&") and quoted and not (_FD_DIGITS.fullmatch(word) or word == "-"):
+            # bash 3.2 strips a backslash from a `>&` target: our dequoted
+            # word may differ from the file the shell opens
+            self.fail("quoted target after >& / <&")
+            return
         if op in ("<<", "<<-"):
             self.heredocs.append((word, op == "<<-", quoted))
         elif op == "<<<":
@@ -177,12 +190,14 @@ def _run(st: _State) -> None:
             st.i += 1
         elif c == "$":
             _dollar(st)
+        elif c == "{" and st.in_word and not st.live and _literal_brace(st):
+            pass  # `@{u}`, `stash@{0}`, `HEAD^{commit}`: consumed as literal text
         elif c in "(){}":
             if st.live:  # already denied for substitution; keep scanning for push detection
                 st.add(c)
                 st.i += 1
             else:
-                st.fail(f"unmodelled shell syntax {c!r}")
+                st.fail(f"unmodelled shell syntax {c!r} (quote it if it is literal)")
         elif c in "*?[":
             st.add(c, glob=True)
             st.i += 1
@@ -196,6 +211,25 @@ def _run(st: _State) -> None:
         st.fail("unterminated heredoc")
         return
     st.end_command("")
+
+
+_LITERAL_BRACE_BODY = re.compile(r"[A-Za-z0-9_@^~:/+\-.]*")
+
+
+def _literal_brace(st: _State) -> bool:
+    """A `{...}` glued to a word that bash does NOT brace-expand: no `,` and
+    no `..` inside (git revision syntax). Anything that would expand
+    (`{a,b}`, `{1..3}`), nest, or hold spaces/quotes/`$` still fails closed."""
+    s, i = st.s, st.i
+    end = s.find("}", i + 1)
+    if end < 0:
+        return False
+    body = s[i + 1:end]
+    if ".." in body or _LITERAL_BRACE_BODY.fullmatch(body) is None:
+        return False
+    st.add(s[i:end + 1])
+    st.i = end + 1
+    return True
 
 
 def _backslash(st: _State) -> None:

@@ -33,47 +33,57 @@ if [ -z "${OVERSEER_PYTHON:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${
 fi
 
 slow=0
+denied=0
+push_check() {
+  # Pre-push board snapshot: only for a Bash call whose command mentions a push.
+  if [ "$denied" = 0 ] && [ "$tool" = "Bash" ]; then
+    case "$input" in
+      *git*push*) printf '%s' "$input" | "$here/prepush-snapshot.sh" >/dev/null 2>&1 || true ;;
+    esac
+  fi
+}
+tool=""
+tool_re='"tool_name"[[:space:]]*:[[:space:]]*"([A-Za-z_]+)"'
+if [[ $input =~ $tool_re ]]; then tool="${BASH_REMATCH[1]}"; fi
+
 if [ -n "${OVERSEER_REMOTE:-}" ]; then
-  # Remote: forward through the CLI (old path), never short-circuit.
-  printf '%s' "$input" \
-    | "$py" "${plugin_root}/scripts/cli.py" pretool-hook 2>/dev/null || true
+  # Remote: forward through the CLI (old path), never short-circuit; the push
+  # snapshot still runs afterwards.
+  out="$(printf '%s' "$input" | "$py" "${plugin_root}/scripts/cli.py" pretool-hook 2>/dev/null)" || out=""
+  if [ -n "$out" ]; then
+    printf '%s\n' "$out"
+    case "$out" in *'"permissionDecision": "deny"'*|*'"permissionDecision":"deny"'*) denied=1 ;; esac
+  fi
+  push_check
   exit 0
 fi
 
 # Tolerant sniffs (the payload is JSON, not guaranteed compact).
 sid_re='"session_id"[[:space:]]*:[[:space:]]*"([A-Za-z0-9_-]+)"'
-tool_re='"tool_name"[[:space:]]*:[[:space:]]*"([A-Za-z_]+)"'
-agent_re='"agent_type"[[:space:]]*:[[:space:]]*"overseer'
+agent_re='"agent_type"[[:space:]]*:[[:space:]]*"([^"]*:)?overseer-'
 sid=""
-tool=""
 if [[ $input =~ $sid_re ]]; then sid="${BASH_REMATCH[1]}"; fi
-if [[ $input =~ $tool_re ]]; then tool="${BASH_REMATCH[1]}"; fi
 
 marker_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/overseer/.orchestrating"
 if [ -z "$sid" ]; then
   slow=1                                   # unknown shape -> python decides
-elif [ ! -d "$marker_dir" ]; then
-  slow=1                                   # first call: hookfast creates the dir
+elif [ ! -d "$marker_dir" ] || [ ! -w "$marker_dir" ]; then
+  slow=1                                   # first call (hookfast creates the dir and looks the
+                                           # session up once) or an unwritable dir: full guard
 elif [ -e "$marker_dir/$sid" ]; then
   slow=1                                   # this session orchestrates a card
 elif [ "$tool" = "Read" ] && [[ $input =~ $agent_re ]]; then
   slow=1                                   # an overseer agent's Read limit
 fi
 
-denied=0
 if [ "$slow" = 1 ]; then
-  out="$(printf '%s' "$input" | "$py" "${plugin_root}/scripts/hookfast.py" 2>/dev/null)" || out=""
+  out="$(printf '%s' "$input" | "$py" "${plugin_root}/scripts/hookfast.py")" || out=""
   if [ -n "$out" ]; then
     printf '%s\n' "$out"
     case "$out" in *'"permissionDecision": "deny"'*|*'"permissionDecision":"deny"'*) denied=1 ;; esac
   fi
 fi
 
-# Pre-push board snapshot: only for a Bash call whose command mentions a push.
-if [ "$denied" = 0 ] && [ "$tool" = "Bash" ]; then
-  case "$input" in
-    *git*push*) printf '%s' "$input" | "$here/prepush-snapshot.sh" >/dev/null 2>&1 || true ;;
-  esac
-fi
+push_check
 
 exit 0

@@ -61,6 +61,12 @@ _MSG_SUBSTITUTION = (
     "heredoc, or single-quote it"
 )
 _MSG_GLOBS = "GUARD: no globs in a read-only or scratch-write command — name the file"
+_MSG_VARS = (
+    "GUARD: no $variables in a path (a redirect target, CLI script or read-only/scratch path) — "
+    "write the literal path"
+)
+# Assigning any of these changes what the guard's own expansion means.
+_TAINTING_VARS = {"CLAUDE_PLUGIN_ROOT", "PATH", "HOME", "PYTHONPATH", "TMPDIR"}
 
 
 @dataclass(frozen=True)
@@ -195,7 +201,7 @@ def _cli_denial(words: list[str], cwd: object) -> str | None:
     if i >= len(words) or words[i].startswith("-"):
         return "GUARD: not a ledger CLI (python -c / -m / no script)"
     script = _expand_cli_word(words[i])
-    if "$" in script:
+    if "$" in script or "`" in script:
         return f"GUARD: not a ledger CLI (cannot resolve {script!r})"
     if not os.path.isabs(script):
         if not isinstance(cwd, str) or not cwd:
@@ -358,6 +364,8 @@ def _redirect_denial(
             continue
         if r.glob:
             return _MSG_GLOBS
+        if "$" in r.target:
+            return _MSG_VARS
         if r.writes:
             if not _word_is_scratch(r.target, cwd, scratch, protected):
                 return f"GUARD: redirect to {r.target} — output may only go to scratch or /dev/null"
@@ -393,20 +401,30 @@ def bash_check(
     if scanned.error:
         return False, f"GUARD: cannot parse command ({scanned.error})"
     cur_cwd = cwd
+    prev_sep = ";"  # what preceded the current command ("start" behaves like ";")
     for cmd in scanned.commands:
+        before, prev_sep = prev_sep, cmd.sep
         denial = _redirect_denial(cmd, cur_cwd, roots, protected)
         if denial:
             return False, denial
         words, globs = list(cmd.words), list(cmd.globs)
         while words and _ASSIGNMENT.match(words[0]):
+            name = words[0].split("=", 1)[0]
+            if name in _TAINTING_VARS:
+                return False, f"GUARD: assignment to {name} is not allowed"
             words, globs = words[1:], globs[1:]
         if not words:
             continue
         head = Path(words[0]).name
-        keeps_cwd = cmd.sep in shellscan.SEPARATORS_KEEPING_CWD or not cmd.sep
         if head in {"cd", "pwd"} and len(words) <= 2:
             if head == "cd":
-                cur_cwd = _cd_target(words, globs, cur_cwd) if keeps_cwd else None
+                # A cd only takes effect in the shell when it runs unconditionally
+                # and in the main shell: preceded by nothing/`;`/newline AND
+                # followed by `;`/newline/`&&`/nothing. Anything else (`A || cd`,
+                # `A && cd`, `A | cd`, `cd &`) may or may not run, so the cwd is
+                # unknowable and relative CLI paths are denied.
+                trusted = before in (";", "\n") and cmd.sep in (";", "\n", "&&", "")
+                cur_cwd = _cd_target(words, globs, cur_cwd) if trusted else None
             continue
         if head == "git":
             rest = words[1:]
@@ -425,6 +443,8 @@ def bash_check(
         if head in _READ_ONLY_INSPECT or head in _SCRATCH_WRITE_HEADS:
             if any(globs):
                 return False, _MSG_GLOBS
+            if any("$" in w and _is_path_like(w) for w in words[1:]):
+                return False, _MSG_VARS
             if head in _READ_ONLY_INSPECT and _read_only_allowed(
                 cmd, words, cur_cwd, roots, protected
             ):
@@ -450,7 +470,7 @@ def _cd_target(words: list[str], globs: list[bool], cwd: object) -> str | None:
         if not isinstance(cwd, str):
             return None
         path = Path(cwd) / path
-    return str(path)
+    return str(path) if path.is_dir() else None  # a failed cd never moves the shell
 
 
 def bash_allowed(

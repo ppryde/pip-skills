@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
@@ -48,43 +49,51 @@ def load_config(repo: Path | None) -> dict[str, object]:
 
 def evaluate(
     payload: dict[str, object],
-    board: marker.Board | None,
+    boards: marker.Board | Sequence[marker.Board] | None,
     *,
     config_repo: Path | None = None,
 ) -> dict[str, object] | None:
     """The hook decision for ``payload`` as hook JSON, or None.
 
-    ``board`` is the board the session orchestrates on (from its marker, or
-    resolved by the CLI wrapper); None means "no known orchestration" — only
+    ``boards`` are the boards the session orchestrates on (from its marker, or
+    resolved by the CLI wrapper); none means "no known orchestration" -- only
     the Read limit can apply. ``config_repo`` overrides where the guard config
-    is read from (defaults to the board's repo, else the payload ``cwd``).
+    is read from (defaults to the first board's repo, else the payload ``cwd``).
     """
+    board_list: list[marker.Board] = (
+        [] if boards is None else [boards] if isinstance(boards, marker.Board) else list(boards)
+    )
     session_id = payload.get("session_id")
     cwd = payload.get("cwd")
     cwd_path = Path(cwd) if isinstance(cwd, str) and cwd else None
-    cfg = load_config(config_repo or (board.repo if board else cwd_path))
+    cfg = load_config(config_repo or (board_list[0].repo if board_list else cwd_path))
     guard_on = (
         os.environ.get(GUARD_ENV, "").lower() != "off" and cfg.get("guard", True) is not False
     )
     cards: list[guard.GuardCard] = []
-    if board is not None and guard_on and isinstance(session_id, str) and session_id:
-        found = marker.live_cards(board.db, session_id)
-        if found is not None:
-            cards = found
-            if not cards:  # nothing live for this session: the marker is stale
-                marker.remove_marker(session_id)
-    state = board.state if board is not None else marker.config_dir()
+    if board_list and guard_on and isinstance(session_id, str) and session_id:
+        for board in board_list:
+            found = marker.live_cards(board.db, session_id)
+            if found is None:
+                continue
+            cards.extend(found)
+            if not found:  # nothing live on this board: drop it from the marker
+                try:
+                    marker.remove_marker(session_id, board.db)
+                except OSError:
+                    pass
+    state = board_list[0].state if board_list else marker.config_dir()
     roots = guard.allowed_roots(state, _PLUGIN_ROOT, marker.config_dir())
     limit = cfg.get("read_limit", guard.READ_LIMIT_DEFAULT)
     # Protected roots = the payload cwd (what the orchestrator is standing in)
-    # AND the marker's canonical root (verdict change 11), plus every live
-    # card's worktree (added by ``guard.decide``).
+    # AND every marker board's canonical root (verdict change 11), plus every
+    # live card's worktree (added by ``guard.decide``).
     verdict = guard.decide(
         payload, cards, roots,
         read_limit=limit if isinstance(limit, int) and not isinstance(limit, bool)
         else guard.READ_LIMIT_DEFAULT,
         repo_root=cwd_path,
-        extra_protected=[board.repo] if board is not None else [],
+        extra_protected=[b.repo for b in board_list],
     )
     return guard.hook_output(verdict)
 
@@ -94,9 +103,27 @@ def run(raw: str) -> dict[str, object] | None:
     if not isinstance(payload, dict):
         return None
     session_id = payload.get("session_id")
-    board = marker.read_marker(session_id) if isinstance(session_id, str) and session_id else None
-    marker.marker_dir().mkdir(parents=True, exist_ok=True)  # next call takes the shell fast path
-    return evaluate(payload, board)
+    sid = session_id if isinstance(session_id, str) and session_id else None
+    directory = marker.marker_dir()
+    existed = directory.is_dir()
+    try:
+        directory.mkdir(parents=True, exist_ok=True)  # next call takes the shell fast path
+    except OSError:
+        pass
+    boards = marker.read_boards(sid) if sid else []
+    if sid and not boards and (not existed or not os.access(directory, os.W_OK)):
+        # Upgrade window / unwritable marker dir: the shell had no marker to
+        # trust, so ask the boards themselves (read-only, no git) once, and
+        # leave a marker behind if there is something to guard.
+        boards = marker.find_boards_for_session(sid)
+        for board in boards:
+            try:
+                marker.write_marker(sid, board)
+            except OSError as exc:
+                print(f"overseer: cannot write the guard marker in {directory}: {exc}; "
+                      "the full guard runs on every tool call until it is writable",
+                      file=sys.stderr)
+    return evaluate(payload, boards)
 
 
 def is_git_push(command: str) -> bool:

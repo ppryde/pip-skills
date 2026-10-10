@@ -46,7 +46,7 @@ class TestMarkerLifecycle:
         assert board.state == Path(os.environ["OVERSEER_CENTRAL"])
         assert board.repo == repo  # no git here: the root itself
         raw = json.loads((marker.marker_dir() / SESSION).read_text())
-        assert set(raw) == {"db", "repo", "state"}
+        assert set(raw) == {"boards"} and set(raw["boards"][0]) == {"db", "repo", "state"}
 
     def test_marker_lives_under_the_config_dir(self, repo):
         assert marker.marker_dir() == Path(os.environ["CLAUDE_CONFIG_DIR"]) / "overseer" / ".orchestrating"
@@ -295,12 +295,14 @@ class TestReadOnlyOpenAgainstALiveWalWriter:
 
     def test_missing_database_fails_open(self, repo, tmp_path):
         board = marker.Board(tmp_path / "gone.db", repo, tmp_path)
+        marker.remove_marker(SESSION)
         marker.write_marker(SESSION, board)
         assert hookfast.run(json.dumps(payload(cwd=str(repo)))) is None
 
     def test_garbage_database_fails_open(self, repo, tmp_path):
         junk = tmp_path / "junk.db"
         junk.write_text("this is not sqlite")
+        marker.remove_marker(SESSION)
         marker.write_marker(SESSION, marker.Board(junk, repo, tmp_path))
         assert hookfast.run(json.dumps(payload(cwd=str(repo)))) is None
 
@@ -341,3 +343,72 @@ class TestPushProbe:
         raw = json.dumps({"tool_input": {"command": "git push"}, "cwd": "/w"})
         assert hookfast.push_probe(raw) == "PUSH\n/w"
         assert hookfast.push_probe(json.dumps({"tool_input": {"command": "ls"}})) == ""
+
+
+class TestUpgradeWindowAndMultiBoard:
+    """Review round 1 (B2): markers are a hint, never the only way in."""
+
+    def test_session_already_orchestrating_at_upgrade_is_guarded_and_gets_a_marker(self, repo):
+        marker.remove_marker(SESSION)
+        import shutil
+
+        shutil.rmtree(marker.marker_dir())  # an upgraded install: no marker dir yet
+        out = hookfast.run(json.dumps(payload(cwd=str(repo))))
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert marker.read_marker(SESSION) is not None  # left behind for the shell fast path
+
+    def test_missing_marker_in_an_existing_dir_is_not_searched_again(self, repo):
+        marker.remove_marker(SESSION)
+        assert hookfast.run(json.dumps(payload(cwd=str(repo)))) is None  # dir existed: no scan
+
+    def test_unwritable_marker_dir_falls_back_to_the_full_guard_loudly(self, repo, capsys):
+        marker.remove_marker(SESSION)
+        os.chmod(marker.marker_dir(), 0o500)
+        try:
+            out = hookfast.run(json.dumps(payload(cwd=str(repo))))
+        finally:
+            os.chmod(marker.marker_dir(), 0o700)
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        if os.geteuid() != 0:
+            assert "cannot write the guard marker" in capsys.readouterr().err
+
+    def test_stamp_failure_is_loud(self, repo, monkeypatch, capsys):
+        def boom(*a, **k):
+            raise OSError("disk full")
+        monkeypatch.setattr(marker, "write_marker", boom)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)
+        assert main(["--root", str(repo), "log-progress", "WF-001", "--note", "x", "--tokens", "0"]) == 0
+        err = capsys.readouterr().err
+        assert "WARNING" in err and "disk full" in err
+
+    def test_one_session_on_two_boards_keeps_its_marker_until_both_release(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)
+        roots = []
+        for name in ("a", "b"):
+            root = tmp_path / name
+            root.mkdir()
+            monkeypatch.setenv("OVERSEER_DB", str(tmp_path / f"{name}.db"))
+            monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / f"{name}-state"))
+            assert main(["--root", str(root), "init"]) == 0
+            assert main(["--root", str(root), "new-card", "--title", "T"]) == 0
+            assert main(["--root", str(root), "set-stage", "WF-001", "implementation"]) == 0
+            roots.append(root)
+        assert len(marker.read_boards(SESSION)) == 2
+        # release on board b: board a is still guarded
+        monkeypatch.setenv("OVERSEER_DB", str(tmp_path / "b.db"))
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / "b-state"))
+        assert main(["--root", str(roots[1]), "release", "WF-001"]) == 0
+        boards = marker.read_boards(SESSION)
+        assert [b.db for b in boards] == [tmp_path / "a.db"]
+        out = hookfast.run(json.dumps(payload(cwd=str(roots[0]))))
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        monkeypatch.setenv("OVERSEER_DB", str(tmp_path / "a.db"))
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / "a-state"))
+        assert main(["--root", str(roots[0]), "release", "WF-001"]) == 0
+        assert marker.read_marker(SESSION) is None
+
+    def test_legacy_single_board_marker_is_still_read(self, repo):
+        board = marker.read_marker(SESSION)
+        (marker.marker_dir() / SESSION).write_text(json.dumps(
+            {"db": str(board.db), "repo": str(board.repo), "state": str(board.state)}))
+        assert marker.read_marker(SESSION) == board

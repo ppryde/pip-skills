@@ -260,7 +260,11 @@ def _stamp_orchestrator(repo_root: Path, card_id: str) -> None:
             marker.write_marker(session_id, _board_of(repo_root))
             marker.sweep()
         except OSError as exc:
-            print(f"warning: could not write the guard marker: {exc}", file=sys.stderr)
+            print(
+                f"WARNING: could not write the guard marker ({exc}); the PreToolUse hook "
+                "falls back to its slower full guard until the marker dir is writable",
+                file=sys.stderr,
+            )
 
 
 def _board_of(repo_root: Path) -> marker.Board:
@@ -273,9 +277,9 @@ def _board_of(repo_root: Path) -> marker.Board:
 
 def _release_orchestrator(repo_root: Path, card_id: str) -> None:
     ended = db.clear_orchestrator(_conn(repo_root), card_id)
-    if ended:  # that session orchestrates nothing else: drop its guard marker
+    if ended:  # that session orchestrates nothing else on THIS board: drop its entry
         try:
-            marker.remove_marker(ended)
+            marker.remove_marker(ended, db.board_db_path(repo_root))
         except OSError:
             pass
 
