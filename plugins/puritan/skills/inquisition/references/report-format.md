@@ -44,7 +44,7 @@ Next steps:
 
 ## Subagent span check
 
-Paste into each subagent prompt: "The first line of your Read range must be `## Applicable Directories`. If it is not (the INDEX row is stale), locate that heading and read from there through `## Allowed Exceptions`, and report `span_relocated: true`."
+Paste into each subagent prompt: "The first line of your Read range must be `## Applicable Directories`, and the line after its end must be the next `## ` heading or EOF, with the range ending at the end of `## Allowed Exceptions`. If either fails (the INDEX row is stale), locate `## Applicable Directories` and read from there through the end of `## Allowed Exceptions`, and report `span_relocated: true`."
 
 ## Subagent JSON contract
 
