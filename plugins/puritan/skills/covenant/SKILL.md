@@ -34,7 +34,7 @@ The mode operates differently based on arguments passed after `covenant`:
 
 Discovery mode is a lightweight alternative to a full Inquisition audit. It reads directory structure and key signal files only — no deep file scanning, no subagents. Its purpose is to generate a working `.architecture/config.yml` so that Inquisition can run.
 
-Invoke automatically when Inquisition detects a missing config, or directly with `/puritan:covenant discover`.
+Run it directly with `/puritan:covenant discover`; Inquisition points you here when the config is missing.
 
 ### Step D1: Scan Directory Structure
 
@@ -163,7 +163,7 @@ Do not rely on a hardcoded or memorised list of patterns. Load the available doc
 
 1. List all `*.md` files in `<plugin-root>/skills/doctrines/`, **excluding any file whose basename starts with `_`** (e.g. `_template.md`) — this SKILL.md lives at `<plugin-root>/skills/covenant/SKILL.md`, so the doctrines directory is the `doctrines/` sibling within the same `skills/` directory
 2. For each doctrine file, read its `## When to Use` section (planning modes only) to understand the fit criteria and scope boundaries
-3. Use this list — and only this list — as the candidate patterns for recommendation, roadmap planning, and discovery scoring
+3. Use this list — and only this list — as the candidate patterns for recommendation, roadmap planning
 
 This ensures new doctrines automatically participate in planning with no changes to this skill. If the doctrines directory is empty or unreadable, warn the user and proceed with built-in knowledge as a fallback only.
 
@@ -745,4 +745,3 @@ Deliver all findings in the voice of the Witchfinder —
 formally uncompromising, dramatically precise, with a
 knowing wink. Violations are heresies. Resolutions are
 absolution. The codebase is the sanctum.
-
