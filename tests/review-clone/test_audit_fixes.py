@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -67,7 +68,7 @@ def test_alias_validation_rejects_unsafe(bad, tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         pio.validate_alias(bad)
     with pytest.raises(ValueError):
-        pio.persona_dir(bad)
+        pio.check_alias(bad, tmp_path)
     with pytest.raises(ValueError):
         collect_mod.run_collect(alias=bad, handles=["j"], repo="o/r", months=6,
                                 paths=[], extensions=[], since=None)
@@ -87,3 +88,77 @@ def test_command_template_description_is_quoted():
     desc = next(ln for ln in tmpl.splitlines() if ln.startswith("description:"))
     value = desc[len("description:"):].strip()
     assert value.startswith('"') and value.endswith('"')
+
+
+def test_legacy_alias_still_usable_but_new_alias_strict(tmp_path, monkeypatch):
+    import scripts.collect as collect_mod
+    import scripts.persona_io as pio
+
+    monkeypatch.setattr(pio, "PERSONA_ROOT", tmp_path)
+    monkeypatch.setattr(collect_mod, "PERSONA_ROOT", tmp_path)
+    legacy = tmp_path / "Old_Jen.v2"
+    legacy.mkdir()
+    (legacy / "PERSONA.md").write_text("x")
+    assert pio.list_personas() == ["Old_Jen.v2"]
+    assert pio.persona_exists("Old_Jen.v2") is True
+    assert pio.persona_dir("Old_Jen.v2") == legacy
+    assert pio.check_alias("Old_Jen.v2", tmp_path) == "Old_Jen.v2"
+    with pytest.raises(ValueError):  # creating a new one is strict
+        pio.check_alias("New_Jen", tmp_path)
+
+
+@pytest.mark.parametrize("bad", ["..", "../x", "a/b", "/abs", "", "a\\b"])
+def test_persona_exists_false_and_traversal_refused(bad, tmp_path, monkeypatch):
+    import scripts.persona_io as pio
+
+    monkeypatch.setattr(pio, "PERSONA_ROOT", tmp_path)
+    assert pio.persona_exists(bad) is False
+    with pytest.raises(ValueError):
+        pio.persona_dir(bad)
+    with pytest.raises(ValueError):
+        pio.check_alias(bad, tmp_path)
+
+
+def test_persona_exists_false_for_invalid_new_name(tmp_path, monkeypatch):
+    import scripts.persona_io as pio
+
+    monkeypatch.setattr(pio, "PERSONA_ROOT", tmp_path)
+    assert pio.persona_exists("Jen") is False
+
+
+def test_collect_rejects_bad_repo(tmp_path, monkeypatch):
+    import scripts.collect as collect_mod
+
+    monkeypatch.setattr(collect_mod, "PERSONA_ROOT", tmp_path)
+    assert collect_mod.main(["--alias", "jen", "--handles", "j", "--repo", 'o/"r']) == 2
+
+
+def test_gh_get_slurp_failure_names_min_version(capsys):
+    import scripts.collect as collect_mod
+
+    err = subprocess.CalledProcessError(1, ["gh"], stderr="unknown flag: --slurp")
+    with patch.object(collect_mod.subprocess, "run", side_effect=err), \
+            pytest.raises(SystemExit):
+        collect_mod._gh_get("/repos/o/r/pulls/1/comments", paginate=True)
+    assert "2.48" in capsys.readouterr().err
+
+
+_GH_PR_VIEW_FIELDS = {
+    "number", "url", "baseRefName", "headRefName", "headRepository",
+    "headRepositoryOwner", "isCrossRepository", "state", "title", "body",
+}
+
+
+def test_skill_gh_pr_view_fields_are_valid():
+    import re
+
+    root = Path(__file__).resolve().parents[2] / "plugins/review-clone/skills"
+    for skill in root.glob("*/SKILL.md"):
+        for m in re.finditer(r"gh pr view[^\n`]*--json ([A-Za-z,]+)", skill.read_text()):
+            assert set(m.group(1).split(",")) <= _GH_PR_VIEW_FIELDS, m.group(0)
+
+
+def test_skill_has_no_double_quoted_untrusted_placeholders():
+    skill = (Path(__file__).resolve().parents[2]
+             / "plugins/review-clone/skills/review-as/SKILL.md").read_text()
+    assert '"<path>"' not in skill and '"<last_scanned_at>"' not in skill

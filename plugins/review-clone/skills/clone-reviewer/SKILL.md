@@ -175,6 +175,8 @@ The template's `description` field encodes the persona summary so it shows up in
 | `{{WINDOW_MONTHS}}` | Step 1.6 |
 | `{{LAST_SCANNED_AT}}` | the ISO timestamp written into PERSONA frontmatter in Step 6 |
 
+The description sits inside a double-quoted YAML string, so substituted values must not contain `"`, `\` or newlines: `{{ALIAS}}` is a validated slug, `{{REPO}}` must match `owner/name` (letters, digits, `.`, `_`, `-`), the counts are integers. If any value fails, stop and ask rather than escaping it.
+
 All placeholders are required — do not leave any unsubstituted, and do not invent extra fields. If `{{RULE_COUNT}}` is 0, the persona is unusable; surface that as a warning before writing the file rather than emitting a zero-rule description.
 
 ### Step 8 — Final summary

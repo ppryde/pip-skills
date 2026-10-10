@@ -28,9 +28,34 @@ def validate_alias(alias: str) -> str:
     return alias
 
 
+def safe_alias(alias: str) -> str:
+    """Return the alias unchanged, or raise ValueError if it could escape the persona root.
+
+    Looser than validate_alias: legacy personas (uppercase, underscores, dots,
+    long names) keep working; only traversal, separators and absolute paths are refused.
+    """
+    if (
+        not isinstance(alias, str)
+        or not alias
+        or alias in {".", ".."}
+        or any(c in alias for c in ("/", "\\", "\0", "\n", "\r"))
+        or Path(alias).is_absolute()
+    ):
+        raise ValueError(f"unsafe alias {alias!r}")
+    return alias
+
+
+def check_alias(alias: str, root: Path) -> str:
+    """Traversal-only check for an existing persona; strict slug rules for a new one."""
+    safe_alias(alias)
+    if (root / alias).is_dir():
+        return alias
+    return validate_alias(alias)
+
+
 def persona_dir(alias: str) -> Path:
-    """Return the directory holding a persona's files."""
-    return PERSONA_ROOT / validate_alias(alias)
+    """Return the directory holding a persona's files (existing legacy aliases allowed)."""
+    return PERSONA_ROOT / safe_alias(alias)
 
 
 def persona_path(alias: str) -> Path:
@@ -40,7 +65,10 @@ def persona_path(alias: str) -> Path:
 
 def persona_exists(alias: str) -> bool:
     """Return True if a PERSONA.md exists for the alias."""
-    return persona_path(alias).exists()
+    try:
+        return persona_path(alias).exists()
+    except ValueError:
+        return False
 
 
 def list_personas() -> list[str]:

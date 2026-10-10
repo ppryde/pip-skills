@@ -49,8 +49,10 @@ Filter to files matching the persona's `filters.paths` OR `filters.extensions`. 
 ### 2 — For each in-scope changed file
 
 ```bash
-git diff origin/<base>...HEAD -- "<path>"
+git diff origin/<base>...HEAD -- '<path>'
 ```
+
+**Quoting untrusted values.** Changed file paths, handles and `last_scanned_at` come from a branch or PERSONA.md, so treat them as hostile. Always put them in **single quotes**, escaping any embedded `'` as `'\''`; never in double quotes (those still run `$(...)` and backticks), and never in an unquoted heredoc. If a value contains a newline or NUL, skip it and say so.
 
 Read the file at HEAD too (not just the hunk) — context matters for rules that point at adjacent code.
 
@@ -118,10 +120,10 @@ Only when the selected output is `post-inline-pr`. Every message posted to the P
 **1 — Resolve the PR.** 
 
 ```bash
-gh pr view --json number,baseRepository
+gh pr view --json number,url
 ```
 
-`baseRepository` is the repo the PR targets (not the head fork); use its owner and name below.
+The PR `url` (`https://github.com/<owner>/<repo>/pull/<n>`) is on the repo the PR targets (the base repo, not the head fork); take `<owner>` and `<repo>` from it below.
 
 If there is no open PR for the branch, do NOT post:
 
@@ -137,7 +139,7 @@ Then emit via 6a and stop.
 
 On "no" → fall back to 6a, do not post.
 
-**4 — Post one batched review.** Build each comment body as `[From <alias>]: <severity> — <comment>` followed by a blank line and `Citation: <url>`. **Never interpolate finding text into a shell string** (backticks and `$(...)` would be executed): write the review payload to a temporary JSON file with Python's `json.dump`, then submit it with `--input`:
+**4 — Post one batched review.** Build each comment body as `[From <alias>]: <severity> — <comment>` followed by a blank line and `Citation: <url>`. **Never interpolate finding text into a shell string** (backticks and `$(...)` would be executed): create a temp path by running `mktemp -t review-as.XXXXXX` on its own, then write the review payload (valid JSON, finding text as JSON strings) to that path with the **Write tool**, never via a bash heredoc, `echo`, or `python -c` with the text inline. Submit it with `--input`:
 
 ```bash
 gh api repos/<owner>/<repo>/pulls/<n>/reviews --input <payload.json>
@@ -145,7 +147,7 @@ gh api repos/<owner>/<repo>/pulls/<n>/reviews --input <payload.json>
 
 Payload shape: `{"event": "COMMENT", "body": "<summary>", "comments": [{"path": ..., "line": <number>, "side": "RIGHT"|"LEFT", "body": ...}, ...]}`. `line` is a number; for `LEFT` it is the line in the old file.
 
-**5 — Un-anchorable findings.** Bundle them into the review's summary `body` (also prefixed `[From <alias>]:`) in the same payload. If there are *no* anchorable findings, write the bundled text to a temporary file and post it as a single general comment:
+**5 — Un-anchorable findings.** Bundle them into the review's summary `body` (also prefixed `[From <alias>]:`) in the same payload. If there are *no* anchorable findings, create another temp path with `mktemp -t review-as.XXXXXX` (run on its own), write the bundled text there with the **Write tool**, and post it as a single general comment:
 
 ```bash
 gh pr comment <n> --body-file <body.md>
@@ -173,16 +175,16 @@ Then call the `Agent` tool with `subagent_type: "general-purpose"`, `model: "hai
 
 ```bash
 python3 <plugin>/scripts/collect.py \
-  --alias "<alias>" \
-  --handles "<handles from frontmatter, joined with commas>" \
-  --repo "<repo>" \
+  --alias '<alias>' \
+  --handles '<handles from frontmatter, joined with commas>' \
+  --repo '<repo>' \
   --months <months> \
-  --paths="<paths>" \
-  --extensions="<extensions>" \
-  --since "<last_scanned_at>"
+  --paths='<paths>' \
+  --extensions='<extensions>' \
+  --since '<last_scanned_at>'
 ```
 
-Pass `--paths=""` / `--extensions=""` (empty strings) when the persona has no filter. The subagent's reply is the snapshot JSON. Parse it (or re-read `~/.claude/review-clone/<alias>/snapshot.json`) and continue from Step 2.
+Single-quote every value as above (escape embedded `'` as `'\''`). Pass `--paths=''` / `--extensions=''` (empty strings) when the persona has no filter. The subagent's reply is the snapshot JSON. Parse it (or re-read `~/.claude/review-clone/<alias>/snapshot.json`) and continue from Step 2.
 
 ### 2 — Pre-extract gate
 

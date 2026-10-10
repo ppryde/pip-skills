@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -20,9 +21,9 @@ PERSONA_ROOT = Path(
 WINDOW_CAP_MONTHS = 6
 
 try:  # imported as a package (tests)
-    from .persona_io import validate_alias
+    from .persona_io import check_alias
 except ImportError:  # run as a script: scripts/ is on sys.path
-    from persona_io import validate_alias
+    from persona_io import check_alias
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -85,6 +86,16 @@ def discover_prs(repo: str, handles: list[str], since: str) -> list[int]:
     return sorted(seen)
 
 
+_REPO_RE = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
+
+
+def _check_repo(repo: str) -> str:
+    """Return repo unchanged, or raise ValueError if it is not an owner/name slug."""
+    if not _REPO_RE.fullmatch(repo or ""):
+        raise ValueError(f"invalid repo {repo!r}: expected owner/name")
+    return repo
+
+
 def _gh_get(api_path: str, paginate: bool = False) -> Any:
     """Call `gh api <path>` and return parsed JSON.
 
@@ -95,7 +106,17 @@ def _gh_get(api_path: str, paginate: bool = False) -> Any:
     if paginate:
         sep = "&" if "?" in api_path else "?"
         cmd = ["gh", "api", f"{api_path}{sep}per_page=100", "--paginate", "--slurp"]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as exc:
+        if paginate:
+            print(
+                "error: `gh api --paginate --slurp` failed; review-clone needs "
+                f"gh >= 2.48 (upgrade gh and retry). gh said: {exc.stderr or exc}",
+                file=sys.stderr,
+            )
+            raise SystemExit(2) from exc
+        raise
     if not result.stdout.strip():
         return []
     data = json.loads(result.stdout)
@@ -227,7 +248,8 @@ def run_collect(
     since: str | None,
 ) -> dict:
     """Full scrape pipeline. Writes raw/ + snapshot.json. Returns the snapshot dict."""
-    validate_alias(alias)
+    check_alias(alias, PERSONA_ROOT)
+    _check_repo(repo)
     since = since or _compute_since(months)
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -278,7 +300,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        validate_alias(args.alias)
+        check_alias(args.alias, PERSONA_ROOT)
+        _check_repo(args.repo)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
