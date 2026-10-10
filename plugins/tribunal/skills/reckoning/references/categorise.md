@@ -11,11 +11,7 @@ For each comment, classify across two dimensions:
 
 #### Known Agent Usernames
 
-Classify the following as `agent` sources automatically:
-
-- `github-actions`, `dependabot`, `renovate`, `codecov`, `sonarcloud`, `coderabbitai`
-- `codeclimate`, `snyk-bot`, `lgtm-com`, `imgbot`, `greenkeeper`, `copilot`, `cubic`, `augment`
-- Any username ending in `[bot]`, `-bot`, or `_bot` (requires a separator before `bot` to avoid misclassifying human usernames like `abbot`), or starting with `cubic-` or `augment-` (case-insensitive)
+The list lives in `references/fetch.md` (section "Known Agent Usernames", used by the Step 2 bot check); apply it here unchanged.
 
 ### Type
 

@@ -21,7 +21,7 @@ For each comment targeting a specific file and line:
 
 For PR-level comments without a specific code reference, skip validation and mark as "not assessed".
 
-A `path` (or `old_path`/`new_path`) is only put into a shell command (git diff, git log, or the contents endpoint of gh api) after the validation in `references/commands.md`; if it fails there, skip the command and mark validity "Not assessed — path contains characters unsafe for a shell", and surface the path as a suspicious item. Reading the file with the Read tool takes the path as a tool argument and proceeds for any path.
+A `path` (or `old_path`/`new_path`) is only put into a shell command (git diff, git log, or the contents endpoint of gh api) after the validation in `references/commands.md`; if it fails there, skip only the shell-backed checks (the stale-comment diff, the rename check, the git log check and the contents fallback), flag the item "stale check not run — unsafe path", and surface the path as a suspicious item. The Read-based validity assessment still runs: the Read tool takes the path as a tool argument and proceeds for any path.
 
 If the referenced file no longer exists or the line number is beyond the file's current length, first check for renames: `git diff <commit_id>..HEAD --diff-filter=R --name-status` to detect if the file was renamed rather than deleted. If a rename is detected, validate against the new file path at the corresponding line and append "— renamed from `old_path` to `new_path`" to the file reference. If truly deleted, mark validity as "Likely invalid" with the reason "referenced file/line no longer exists in the current branch." Still present the comment to the user — it may indicate an issue that was resolved by deletion.
 

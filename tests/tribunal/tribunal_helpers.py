@@ -131,7 +131,6 @@ ALLOW_CORPUS = [
     "gh pr list --head 'feature/x' --json number,title,url",
     "gh pr list --state open --limit 30 --json number",
     "gh pr list -R octo/repo --head=feature/x",
-    "gh pr checkout 12",
     f"gh api repos/octo/repo/commits/{SHA}/check-runs -q '.check_runs[]' --paginate",
     "gh api repos/octo/repo/pulls/12/comments --paginate --jq '.[] | {id, node_id, user: .user.login, body}'",
     "gh api repos/octo/repo/issues/12/comments --paginate --jq '.[] | {id, user: .user.login}'",

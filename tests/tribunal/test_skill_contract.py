@@ -12,9 +12,10 @@ from tribunal_helpers import REPO, SHA, SKILL, THREADS_GRAPHQL, allow_gh, allowe
 
 SKILL_FILES = [SKILL, *sorted((SKILL.parent / "references").glob("*.md"))]
 
-# WF-264 PR 2 drained the regression window: every `gh` command the skill emits is approved.
+# WF-264 PR 2 drained the regression window. The one deliberate prompt: `gh pr checkout`
+# changes the working tree, so the hook never approves it (the skill asks the user first).
 # A new entry here needs a reason in review; the assertion below keeps the set honest.
-EXPECTED_PROMPT: set[str] = set()
+EXPECTED_PROMPT: set[str] = {"gh pr checkout 12"}
 
 # Prose, not commands: a bare command family name or an instruction to the human.
 NOT_RUN = {"gh api", "gh auth login"}
@@ -90,8 +91,9 @@ def test_expected_prompt_entries_really_prompt_and_are_still_in_the_skill() -> N
         assert argv is None or not allow_gh.decide(argv), cmd
 
 
-def test_expected_prompt_set_is_empty() -> None:
-    assert EXPECTED_PROMPT == set()
+def test_expected_prompt_set_is_only_checkout() -> None:
+    assert EXPECTED_PROMPT == {"gh pr checkout 12"}
+    assert not allowed("gh pr checkout 12")
 
 
 def test_free_form_placeholders_are_single_quoted() -> None:

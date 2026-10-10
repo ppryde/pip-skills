@@ -1,6 +1,6 @@
 ---
 name: reckoning
-description: Use when the user wants to triage, validate, action or resolve review comments already posted on a GitHub pull request (bots or humans) — their current branch's PR by default, or any PR URL — or wants a progress report across review rounds. Must use for 'check my PR comments', 'triage PR feedback', 'what did the bot say', 'PR progress report', 'show all review rounds', 'resolve threads', 'action PR comments', 'what's been fixed so far', 'bot review status'. Not for writing a code review of a PR.
+description: Use when the user wants to triage, validate, action or resolve review comments already posted on a GitHub pull request (bots or humans) — their current branch's PR by default, or any PR URL — or wants a progress report across review rounds. Must use for 'check my PR comments', 'triage PR feedback', 'what did the bot say', 'PR progress report', 'show all review rounds', 'resolve threads', 'action PR comments', 'full PR history', 'what's been fixed so far', 'PR progress summary', 'bot review status'. Not for writing a code review of a PR.
 ---
 
 # PR Comment Review Skill

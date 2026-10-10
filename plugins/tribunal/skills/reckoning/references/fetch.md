@@ -29,7 +29,7 @@ Get the head SHA with:
 
 Command: `references/commands.md`, section "Step 2: head SHA".
 
-Filter check runs to identify review-generating bots: compare each check run's `app.slug` or `app.name` against the known agent list in Step 4 (e.g., slugs containing "coderabbit", "cubic", "augment", "copilot"). Ignore CI, deploy, and security checks — they don't produce review comments. If you cannot determine whether a check produces review comments, include it with a caveat: "(may not produce review comments)."
+Filter check runs to identify review-generating bots: compare each check run's `app.slug` or `app.name` against the known agent list (section "Known Agent Usernames" below) (e.g., slugs containing "coderabbit", "cubic", "augment", "copilot"). Ignore CI, deploy, and security checks — they don't produce review comments. If you cannot determine whether a check produces review comments, include it with a caveat: "(may not produce review comments)."
 
 Some bots report through the commit-status API rather than as check runs. Also run the commit-status command (`references/commands.md`, section "Step 2: commit statuses"); on a best-effort basis, treat a `state: pending` status whose `context` matches a known agent as a review still running, with the same caveat for contexts you cannot attribute.
 
@@ -87,9 +87,17 @@ Before categorising, strip noise from comment bodies:
 
 If the user specifies a particular reviewer (e.g., "show me Cubic's comments", "what did @augmentcode say"), filter comments after Step 3 to include only those from the specified author(s). Match informal names against all fetched comment authors using substring/prefix matching (e.g., "cubic" matches "cubic-dev-ai", "cubic[bot]"). If multiple authors match, list them and ask the user to clarify. If no authors match, list all unique comment authors found. Still show total comment count and review status from all reviewers in the Step 7 header, but present detailed items only for the requested reviewer(s).
 
+#### Known Agent Usernames
+
+Classify the following as `agent` sources automatically:
+
+- `github-actions`, `dependabot`, `renovate`, `codecov`, `sonarcloud`, `coderabbitai`
+- `codeclimate`, `snyk-bot`, `lgtm-com`, `imgbot`, `greenkeeper`, `copilot`, `cubic`, `augment`
+- Any username ending in `[bot]`, `-bot`, or `_bot` (requires a separator before `bot` to avoid misclassifying human usernames like `abbot`), or starting with `cubic-` or `augment-` (case-insensitive)
+
 ## Large PRs and common mistakes
 
-- **Large PRs**: If >100 comments, keep only the `--jq` projections from Step 3 rather than holding raw API output in context (never redirect `gh` output in the shell); if the projected comment list is still too large to hold, write it to a temporary file with the Write tool (path from `mktemp`). Process comments in batches by file or priority tier. In Step 7, present only Critical and High items by default and offer to expand Medium/Low on request. The >50 threshold in Step 5 still applies for validation batching
+- **Large PRs**: If >100 comments, keep only the `--jq` projections from Step 3 rather than holding raw API output in context (never redirect `gh` output in the shell). Process comments in batches by file or priority tier. In Step 7, present only Critical and High items by default and offer to expand Medium/Low on request. The >50 threshold in Step 5 still applies for validation batching
 
 | Mistake | Fix |
 |---------|-----|

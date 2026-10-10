@@ -1,6 +1,8 @@
 ## PR Progress Summary (explicit request only)
 
-This is **not** the default mode — only triggered by the phrases listed in [Mode Selection](#mode-selection). This mode has higher token usage as it covers all review iterations, not just the latest unresolved comments.
+This is **not** the default mode — only triggered by the phrases listed in the Mode Selection section of `SKILL.md`. This mode has higher token usage as it covers all review iterations, not just the latest unresolved comments.
+
+Priority tiers, as used in the round tables: Critical = `blocking` or `security`; High = `logic` or `tests`; Medium = `style` or `docs`; Low = `suggestion`, `question`, `praise`. The full definitions are in `references/present.md`.
 
 Produce a round-by-round table showing the full lifecycle of PR review feedback.
 
