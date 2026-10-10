@@ -23,7 +23,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PYTHON:-$ROOT/.venv/bin/python}"
 [ -x "$PY" ] || PY="python"
 
-SUITES=(overseer census vigil review-clone chronicle almoner)
+SUITES=(overseer census vigil review-clone chronicle almoner tribunal)
 FAIL=0
 
 for p in "${SUITES[@]}"; do

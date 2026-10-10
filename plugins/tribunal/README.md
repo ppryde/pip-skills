@@ -92,6 +92,28 @@ When two reviewers suggest incompatible fixes for the same code location, Reckon
 
 ---
 
+## Auto-approve hook
+
+The plugin ships a `PreToolUse` hook (`hooks/allow_gh.py`) that pre-approves the exact `gh` commands Reckoning runs, so a triage does not stop at a permission prompt for every read. It only ever *allows*; for anything it does not recognise it stays silent and you get the normal prompt. The hook never emits deny or ask; per Claude Code's documented behaviour, deny rules take precedence over a hook's allow. A live smoke of that precedence (a settings `deny` for `Bash(gh pr checkout:*)` against this hook) is still outstanding.
+
+**Policy**
+
+- The command is parsed, not pattern-matched: a strict shell-word subset (plain words and simple quotes only) is tokenised, and the resulting argv must match an allowlisted `gh` shape. Pipes, `;`, `&&`, redirects, `$(...)`, backticks, globs and anything else shell-like are declined.
+- Allowed: `gh auth status`; `gh repo view`, `gh pr view`, `gh pr list` with a short list of read-only flags (`--json`, `-q`/`--jq`, `-R`/`--repo`, `--head`, `--state`, `--limit`); `gh pr checkout <number>` (digits only, no flags); and `gh api` for read-only GETs of `repos/{owner}/{repo}/{pulls,issues,commits,contents}/...` (no `-X`, `-f`, `-F`, `-d`, `--input`, `-H` or `--hostname`).
+- Two exact GraphQL documents are allowed: the review-thread query (`hooks/queries/threads.graphql`) and the single-thread `resolveReviewThread` mutation. Documents are compared token by token, so spacing does not matter but an extra field, alias or second mutation does.
+- Unknown flags, `--`, flag-like values, `--web`, `--show-token` and `--jq` expressions that read the environment (`$ENV`, `env`, `input_filename`, `$__loc__`) are declined.
+- `git` commands are never auto-approved.
+
+**Requirements.** `python3` must be on `PATH`. Without it (for example on Windows) the hook exits silently and every command simply prompts as usual.
+
+**Fallback.** If you disable the hook, these rules in `permissions.allow` cover part of a triage (the REST `gh api` reads and the resolve mutation will then prompt). Prefix rules cannot constrain flags (for example `--web`), so they are plainly weaker than the hook and not strictly read-only:
+
+```json
+"Bash(gh auth status)", "Bash(gh repo view:*)", "Bash(gh pr view:*)", "Bash(gh pr list:*)"
+```
+
+The hook's tests live in `tests/tribunal` and include a differential check of the tokeniser against real bash and zsh.
+
 ## Voice
 
 The Witchfinder presides over the review with formal precision and a knowing wink. PR comments are testimonies. Fixes are penance. A fully resolved PR means the soul is clean.
