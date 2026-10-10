@@ -169,7 +169,8 @@ def test_subagent_prompt_carries_the_guard_and_names_the_tools():
 
 def test_scribe_save_stays_in_the_repo_and_never_overwrites():
     t = text(skill_md("scribe"))
-    assert "resolve under the repo root" in t and "Never overwrite" in t
+    assert "savepath" in t and "`ok`" in t and "outside-repo" in t and "never overwrite" in t
+    assert "containing `..` or starting with `/`" in t
 
 
 def test_scribe_always_lines_restore_what_no_rule_covers():

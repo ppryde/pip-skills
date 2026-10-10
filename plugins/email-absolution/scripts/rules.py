@@ -10,8 +10,9 @@ Subcommands
   show ID [ID...]        the full rule block(s), with file:line
   constraints ...        Scribe view: binding statements only (honours gen=no)
   scan --files F... ...  Phase 1 for a config: file:line | id | matched line for every active
-                         regex rule (line by line; binary and >2 MiB files are listed as skipped;
+                         regex rule (line by line; binary, >2 MiB, symlinked and outside-repo files are listed as skipped;
                          5 s per-file timer on POSIX; matched lines cut to 200 characters)
+  savepath PATH          ok | exists | outside-repo for a save target (exit 0 | 3 | 4); symlinks resolved
   fire FILE...           first hit per regex rule, ignoring config (used by the golden test)
 
 The doctrine markdown stays canonical. This script only parses it. `--doctrines-dir`
@@ -25,6 +26,7 @@ import os
 import re
 import signal
 import stat
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -729,8 +731,28 @@ def resolve_overrides(overrides: dict, docs):
 MAX_SCAN_BYTES = 2 * 1024 * 1024
 
 
+def repo_root() -> str:
+    """Realpath of the git toplevel of the cwd, or of the cwd when there is no repository."""
+    cwd = os.getcwd()
+    try:
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                             timeout=10, cwd=cwd)
+        top = out.stdout.strip()
+        if out.returncode == 0 and top:
+            return os.path.realpath(top)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return os.path.realpath(cwd)
+
+
+def inside_repo(path) -> bool:
+    root = repo_root()
+    real = os.path.realpath(path)
+    return real == root or real.startswith(root.rstrip(os.sep) + os.sep)
+
+
 def read_scannable(path: Path):
-    """(text, skipped_reason). Symlinks, non-regular files, binary (NUL in the first 8 KB) and >2 MiB files are skipped, never silently.
+    """(text, skipped_reason). Symlinks, paths resolving outside the repo, non-regular files, binary (NUL in the first 8 KB) and >2 MiB files are skipped, never silently.
 
     A scanned path may come from an untrusted branch, so it is never followed (a symlink to
     /dev/zero or ~/.ssh/id_rsa) and st_size is never trusted: at most cap+1 bytes are read
@@ -742,6 +764,8 @@ def read_scannable(path: Path):
             return "", "symlink"
         if not stat.S_ISREG(st.st_mode):
             return "", "not a regular file"
+        if not inside_repo(path):
+            return "", "outside repo"
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
         with os.fdopen(fd, "rb") as fh:
             if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
@@ -897,6 +921,22 @@ def render_scan(docs, cfg: Config, files) -> str:
     return "\n".join(out) + "\n"
 
 
+# --------------------------------------------------------------------------- savepath
+
+SAVE_OK, SAVE_EXISTS, SAVE_OUTSIDE = "ok", "exists", "outside-repo"
+SAVE_CODES = {SAVE_OK: 0, SAVE_EXISTS: 3, SAVE_OUTSIDE: 4}
+
+
+def save_status(path: str) -> str:
+    """'outside-repo' if the target (symlinks resolved, even through a missing tail) leaves the repo root,
+    'exists' if something is already there (a dangling symlink counts), else 'ok'. Outside wins."""
+    if not inside_repo(path):
+        return SAVE_OUTSIDE
+    if os.path.lexists(path):
+        return SAVE_EXISTS
+    return SAVE_OK
+
+
 # --------------------------------------------------------------------------- index
 
 LETTER = {"mortal": "M", "venial": "V", "counsel": "C"}
@@ -982,6 +1022,8 @@ def main(argv=None) -> int:
     sc.add_argument("--files", nargs="+", required=True)
     s = sub.add_parser("show")
     s.add_argument("ids", nargs="+")
+    sp = sub.add_parser("savepath", help="ok | exists | outside-repo for a Scribe save target (exit 0 | 3 | 4)")
+    sp.add_argument("path")
     f = sub.add_parser("fire")
     f.add_argument("files", nargs="+")
     a = ap.parse_args(argv)
@@ -1009,6 +1051,10 @@ def main(argv=None) -> int:
         docs, _ = load(ddir)
         print(f"lint: ok ({len(all_rules(docs))} rules, {len(docs)} doctrines)")
         return 0
+    if a.cmd == "savepath":
+        status = save_status(a.path)
+        print(status)
+        return SAVE_CODES[status]
     docs, problems = load(ddir)
     if problems:
         for name, line, msg in problems:

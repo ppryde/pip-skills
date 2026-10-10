@@ -13,6 +13,12 @@ from conftest import DOCTRINES, SCRIPTS
 CFG = dict(email_type="marketing", esp="", templating="html", targets=())
 
 
+@pytest.fixture(autouse=True)
+def _cwd_is_tmp(tmp_path, monkeypatch):
+    """The repo root is the cwd's git toplevel (or the cwd): pin it to tmp_path so scanned tmp files are inside it."""
+    monkeypatch.chdir(tmp_path)
+
+
 def cfg(R, **kw):
     return R.Config(**{**CFG, **kw})
 
@@ -144,7 +150,7 @@ def test_scan_warns_like_select(R, docs, tmp_path):
 def test_cli_scan_runs_and_requires_files(tmp_path):
     f = write(tmp_path, "a.html", "<img src=\"a.png\">\n")
     base = [sys.executable, str(SCRIPTS / "rules.py"), "scan", "--email-type", "marketing", "--templating", "html"]
-    ok = subprocess.run(base + ["--files", str(f)], capture_output=True, text=True)
+    ok = subprocess.run(base + ["--files", str(f)], capture_output=True, text=True, cwd=tmp_path)
     assert ok.returncode == 0 and "| ACCESS-001 |" in ok.stdout
     missing = subprocess.run(base, capture_output=True, text=True)
     assert missing.returncode == 2
@@ -162,7 +168,7 @@ def test_cli_scan_on_unparseable_doctrines_exits_3(tmp_path):
 
 def test_fire_still_works(tmp_path):
     f = write(tmp_path, "a.html", "<img src=\"a.png\">\n")
-    r = subprocess.run([sys.executable, str(SCRIPTS / "rules.py"), "fire", str(f)], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, str(SCRIPTS / "rules.py"), "fire", str(f)], capture_output=True, text=True, cwd=tmp_path)
     assert r.returncode == 0 and f"{f}:1 | ACCESS-001" in r.stdout
 
 
@@ -175,13 +181,14 @@ def test_hostile_long_line_is_bounded_by_the_line_and_the_timer(R, docs, tmp_pat
 
 # ---- hostile paths (review round 1, B1): a scanned path may come from an untrusted branch
 
-def test_symlinks_are_skipped_never_followed(R, docs, tmp_path):
+def test_symlinks_are_skipped_never_followed(R, docs, tmp_path, monkeypatch):
     outside = tmp_path / "outside"
     outside.mkdir()
     secret = outside / "secret.html"
     secret.write_text("<img src=x>\n", encoding="utf-8")
     repo = tmp_path / "repo"
     repo.mkdir()
+    monkeypatch.chdir(repo)
     to_secret = repo / "x.html"
     to_secret.symlink_to(secret)
     zero = repo / "zero.html"
@@ -228,3 +235,68 @@ def test_exactly_the_cap_is_still_scanned(R, tmp_path):
     f.write_bytes(b"a" * R.MAX_SCAN_BYTES)
     text, why = R.read_scannable(f)
     assert why == "" and len(text) == R.MAX_SCAN_BYTES
+
+
+def test_a_directory_symlink_leaving_the_repo_is_refused_as_outside_repo(R, docs, tmp_path, monkeypatch):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.html").write_text("<img src=x>\n", encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "link").symlink_to(outside, target_is_directory=True)
+    (repo / "real").mkdir()
+    ok = write(repo / "real", "ok.html", "<img src=x>\n")
+    monkeypatch.chdir(repo)
+    via_link = repo / "link" / "secret.html"
+    out = scan(R, docs, [via_link, ok])
+    assert f"skipped: {via_link} (outside repo)" in out
+    assert "secret.html:1" not in out and f"{ok}:1 | ACCESS-001" in out
+    assert ", 1 skipped, 0 timed out" in out
+    assert R.read_scannable(via_link) == ("", "outside repo")
+
+
+def test_a_path_outside_the_repo_is_refused_and_the_git_toplevel_is_the_root(R, tmp_path, monkeypatch):
+    import subprocess as sp
+    repo = tmp_path / "repo"
+    (repo / "sub").mkdir(parents=True)
+    sp.run(["git", "init", "-q", str(repo)], check=True)
+    inner = write(repo / "sub", "a.html", "<img src=x>\n")
+    outer = write(tmp_path, "o.html", "<img src=x>\n")
+    monkeypatch.chdir(repo / "sub")
+    assert R.read_scannable(inner)[1] == ""
+    assert R.read_scannable(repo / "sub" / ".." / "sub" / "a.html")[1] == ""
+    assert R.read_scannable(outer) == ("", "outside repo")
+
+
+# ---- savepath (review round 2): the Scribe's confinement, checked by code not prose
+
+def run_savepath(path, cwd):
+    return subprocess.run([sys.executable, str(SCRIPTS / "rules.py"), "savepath", str(path)],
+                          capture_output=True, text=True, cwd=cwd)
+
+
+def test_savepath_ok_exists_and_outside(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "emails").mkdir(parents=True)
+    (repo / "emails" / "old.html").write_text("x")
+    ok = run_savepath(repo / "emails" / "new.html", repo)
+    assert (ok.stdout.strip(), ok.returncode) == ("ok", 0)
+    ex = run_savepath(repo / "emails" / "old.html", repo)
+    assert (ex.stdout.strip(), ex.returncode) == ("exists", 3)
+    out = run_savepath(tmp_path / "elsewhere.html", repo)
+    assert (out.stdout.strip(), out.returncode) == ("outside-repo", 4)
+    dots = run_savepath(repo / ".." / "x.html", repo)
+    assert (dots.stdout.strip(), dots.returncode) == ("outside-repo", 4)
+
+
+def test_savepath_refuses_a_symlinked_email_paths_directory_leaving_the_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (repo / "emails").symlink_to(outside, target_is_directory=True)
+    r = run_savepath(repo / "emails" / "welcome.html", repo)
+    assert (r.stdout.strip(), r.returncode) == ("outside-repo", 4)
+    (repo / "dangling.html").symlink_to(outside / "nowhere.html")
+    d = run_savepath(repo / "dangling.html", repo)
+    assert d.returncode in (3, 4)

@@ -19,7 +19,7 @@ edits; `--diff-filter=ACMR` drops deleted files.
 Filter to files matching `email_paths` patterns and known email extensions
 (`.html`, `.mjml`, `.hbs`, `.liquid`, `.tsx`, `.jsx`, `.njk`).
 
-**Full mode:** All files under `email_paths` matching email extensions, excluding `exclude` patterns.
+**Full mode:** All files under `email_paths` matching email extensions, excluding `exclude` patterns. Do not descend into symlinked directories.
 
 **Single file:** The named file only.
 

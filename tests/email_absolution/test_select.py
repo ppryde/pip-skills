@@ -72,7 +72,8 @@ def test_unknown_doctrine_warns(R, docs):
     assert "warning: unknown doctrine" in R.render_select(docs, R.Config(email_type="marketing", doctrine="x"))
 
 
-def test_fire_skips_binary_and_oversized_files_and_tolerates_bad_utf8(R, tmp_path):
+def test_fire_skips_binary_and_oversized_files_and_tolerates_bad_utf8(R, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     b = tmp_path / "a.bin"
     b.write_bytes(b"<html\0\0\0")
     assert R.read_scannable(b) == ("", "binary")

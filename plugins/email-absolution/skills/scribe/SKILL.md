@@ -74,7 +74,7 @@ Offer:
 > Elder examine it immediately to confirm no heresy crept in during generation?
 > `/email-absolution:elder <generated-file>` will run the full Inquisition."
 
-and offer to save it to `<first email_paths entry>/<slug>.<ext>` (slug `^[a-z0-9-]+$`; `.liquid`, `.hbs`, `.mjml`, `.tsx` or `.html` by templating; ask for a directory if `email_paths` is not set). The save stays inside the repo: the directory must resolve under the repo root (no `..`, no absolute path or symlink leaving it); anything else is refused and you ask for another directory. Never overwrite: if the file exists, say so and ask for another slug. Write nothing without the caller's yes; after a save, point at `/email-absolution:elder <path>`.
+and offer to save it to `<first email_paths entry>/<slug>.<ext>` (slug `^[a-z0-9-]+$`; `.liquid`, `.hbs`, `.mjml`, `.tsx` or `.html` by templating; ask for a directory if `email_paths` is not set). Refuse a path containing `..` or starting with `/`. Before `Write`, run `python3 '<rules.py>' savepath '<path>'` (quoted): write only on `ok`; `outside-repo` (exit 4, symlink leaving the repo) or `exists` (exit 3, never overwrite) means ask for another directory or slug. Write nothing without the caller's yes; after a save, point at `/email-absolution:elder <path>`.
 
 ## Hard Rules
 
