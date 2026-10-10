@@ -152,9 +152,12 @@ def test_reconcile_rejects_bad_strictness_and_bad_json(tmp_path):
 
 def test_report_renders_refuted_section_and_writes_relative_file(tmp_path):
     payloads = _write(tmp_path / "f.json", [{"reviewer": "general", "findings": [
-        _raw(1), _raw(2, verdict="refuted", reason="not real")]}])
+        _raw(1), _raw(2)]}])
+    parsed = _write(tmp_path / "p.json", j(tmp_path, "parse", "--findings", payloads))
+    fp2 = json.loads(parsed.read_text())["findings"][1]["fingerprint"]
+    verdicts = _write(tmp_path / "v.json", {fp2: {"verdict": "refuted", "reason": "not real"}})
     rec = tmp_path / "rec.json"
-    run(tmp_path, "reconcile", "--findings", payloads, "--out", rec)
+    run(tmp_path, "reconcile", "--findings", parsed, "--verdicts", verdicts, "--out", rec)
     p = run(tmp_path, "report", "--reconciled", rec, "--strategy", "adversarial",
             "--scope", "changed", "--out", ".review-panel/last-review.md")
     assert "## Refuted (dropped by critic)" in p.stdout and "not real" in p.stdout

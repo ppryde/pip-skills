@@ -30,9 +30,12 @@ def test_agreed_keeps_a_and_higher_severity_and_confirms():
 def test_same_rule_or_category_required():
     other = _f(10, id_="GEN-004", rule_id="GEN-004", category="security")
     assert not match([_f(10)], [other]).agreed
-    # different rule id, same category: pairs
+    # both rule ids present and different: never pairs, even in one category
     same_cat = _f(10, id_="GEN-002", rule_id="GEN-002")
-    assert len(match([_f(10)], [same_cat]).agreed) == 1
+    assert not match([_f(10)], [same_cat]).agreed
+    # a missing rule id falls back to category
+    no_id = _f(10, id_="free", rule_id=None)
+    assert len(match([_f(10)], [no_id]).agreed) == 1
     # same rule id, different category: pairs
     same_rule = _f(10, category="other")
     assert len(match([_f(10)], [same_rule]).agreed) == 1

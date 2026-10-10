@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-from scripts.contract import Finding, apply_verdicts, assign_fingerprints
+from scripts.contract import Finding, apply_verdicts, assign_fingerprints, norm
 from scripts.strictness import apply_decisions, apply_strictness
 
 
@@ -45,6 +45,44 @@ def merge_verdicts(
     return out, notes
 
 
+_TWIN_WINDOW = 3
+
+
+def _rule_key(f: Finding) -> str:
+    return f.rule_id or norm(f.rule)
+
+
+def _is_twin(a: Finding, b: Finding) -> bool:
+    if (a.reviewer, a.file, _rule_key(a)) != (b.reviewer, b.file, _rule_key(b)):
+        return False
+    if a.line is None or b.line is None:
+        return a.line is None and b.line is None
+    return abs(a.line - b.line) <= _TWIN_WINDOW
+
+
+def propagate_twin_verdicts(
+    findings: list[Finding], verdict_fps: set[str]
+) -> tuple[list[Finding], list[str]]:
+    """Give a verdict-less finding the verdict of its twin (same reviewer,
+    file and rule, lines within 3). Adversarial Stage 2 sends only one of a
+    set of duplicates to the critic; the others inherit its verdict here, and
+    each inheritance is recorded in the notes. Only a verdict from the
+    verdicts file (`verdict_fps`) is inherited, never a code-set one."""
+    sources = [f for f in findings if f.verdict is not None and f.fingerprint in verdict_fps]
+    notes: list[str] = []
+    out: list[Finding] = []
+    for f in findings:
+        if f.verdict is None:
+            twins = [s for s in sources if _is_twin(f, s)]
+            if twins:
+                src = min(twins, key=lambda s: abs((f.line or 0) - (s.line or 0)))
+                f = replace(f, verdict=src.verdict, reason=src.reason)
+                notes.append(f"verdict propagated: {f.fingerprint or f.id} "
+                             f"from {src.fingerprint or src.id}")
+        out.append(f)
+    return out, notes
+
+
 def reconcile(
     findings: list[Finding],
     *,
@@ -58,6 +96,8 @@ def reconcile(
     findings = assign_fingerprints(list(findings))
     findings, merge_notes = merge_verdicts(findings, verdicts)
     notes += merge_notes
+    findings, twin_notes = propagate_twin_verdicts(findings, set(verdicts or {}))
+    notes += twin_notes
     vr = apply_verdicts(findings, require=require_verdicts)
     notes += vr.notes
     kept = apply_strictness(vr.kept, strictness or {}, exceptions)

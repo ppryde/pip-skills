@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass, fields, replace
 
 VALID_SEVERITY = ("error", "warning", "info")
 _REQUIRED = ("id", "file", "rule", "actual", "severity", "category", "suggestion")
+# Tolerant parse defaults a missing category/suggestion instead of rejecting.
+_REQUIRED_TOLERANT = ("id", "file", "rule", "actual", "severity")
 
 # The one definition of a rule id ("GEN-001"). A *prefix* match on a finding's
 # `id`, so a per-run suffix such as "GEN-001-2" still resolves to "GEN-001".
@@ -19,8 +21,8 @@ _LOWER = {"error": "warning", "warning": "info", "info": "info"}
 
 # Tolerant-parse severity synonyms (reviewers drift from the exact words).
 _SEVERITY_SYNONYMS = {
-    "critical": "error", "high": "error",
-    "medium": "warning", "moderate": "warning",
+    "critical": "error", "high": "error", "blocker": "error", "major": "error",
+    "medium": "warning", "moderate": "warning", "warn": "warning",
     "low": "info", "minor": "info", "nit": "info",
 }
 
@@ -155,10 +157,26 @@ def _coerce_line(value: object) -> tuple[int | None, bool]:
         return None, False
 
 
-def _parse_one(reviewer: str, raw: dict, strict: bool, notes: list[str], label: str) -> Finding:
-    missing = [k for k in _REQUIRED if k not in raw]
+def _as_list(value: object) -> list:
+    """A string becomes a one-item list; None/empty becomes []."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return list(value) if isinstance(value, (list, tuple)) else [str(value)]
+
+
+def _parse_one(reviewer: str, raw: dict, strict: bool, notes: list[str], label: str,
+               trusted: bool = False) -> Finding:
+    required = _REQUIRED if strict else _REQUIRED_TOLERANT
+    missing = [k for k in required if k not in raw]
     if missing:
         raise ContractError(f"finding missing {missing} in {raw!r}")
+    if not strict:
+        for key, default in (("category", "general"), ("suggestion", "")):
+            if key not in raw:
+                notes.append(f"{key} missing, defaulted: {label}")
+                raw = {**raw, key: default}
     severity = raw["severity"]
     if severity not in VALID_SEVERITY:
         mapped = None if strict else _SEVERITY_SYNONYMS.get(str(severity).strip().lower())
@@ -177,22 +195,26 @@ def _parse_one(reviewer: str, raw: dict, strict: bool, notes: list[str], label: 
     rule_id = raw.get("rule_id")
     if not isinstance(rule_id, str) or rule_id_of(rule_id) != rule_id:
         rule_id = None if str(raw["id"]).startswith("CLONE-") else rule_id_of(raw["id"])
-    fp = raw.get("fingerprint")
+    # verdict / reason / severity_before / fingerprint are set by the critic,
+    # the arbiter, the verdicts file and assign_fingerprints, never by a
+    # reviewer: only our own parse/match output (trusted) may carry them.
+    fp = raw.get("fingerprint") if trusted else None
     return Finding(
         reviewer=reviewer,
         id=raw["id"], file=raw["file"], rule=raw["rule"],
         actual=raw["actual"], severity=severity,
         category=raw["category"], suggestion=raw["suggestion"],
         line=line, citation=raw.get("citation"),
-        verdict=raw.get("verdict"), reason=raw.get("reason"),
+        verdict=raw.get("verdict") if trusted else None,
+        reason=raw.get("reason") if trusted else None,
         rule_id=rule_id,
-        severity_before=raw.get("severity_before"),
+        severity_before=raw.get("severity_before") if trusted else None,
         fingerprint=fp if isinstance(fp, str) and fp else None,
     )
 
 
 def parse_reviewer_result(
-    payload: dict, strict: bool = False
+    payload: dict, strict: bool = False, trusted: bool = False
 ) -> tuple[list[Finding], list[str], list[str]]:
     """Parse one reviewer payload into (findings, clean_files, notes).
 
@@ -200,7 +222,9 @@ def parse_reviewer_result(
     `REJECTED <id|index>: <reason>` note and the valid ones are kept (the
     caller re-asks that reviewer once for only the rejected ones). A payload
     with no `reviewer` always raises. `strict=True` raises on the first bad
-    finding."""
+    finding. A reviewer's own `verdict`, `reason`, `severity_before` and
+    `fingerprint` are ignored; `trusted=True` (our own parse/match output
+    only) keeps them."""
     reviewer = payload.get("reviewer")
     if not reviewer:
         raise ContractError("payload missing 'reviewer'")
@@ -214,13 +238,13 @@ def parse_reviewer_result(
             notes_out.append(f"REJECTED {label}: not an object")
             continue
         try:
-            findings.append(_parse_one(reviewer, raw, strict, notes_out, label))
+            findings.append(_parse_one(reviewer, raw, strict, notes_out, label, trusted))
         except ContractError as exc:
             if strict:
                 raise
             notes_out.append(f"REJECTED {label}: {exc}")
-    clean = list(payload.get("clean_files", []) or [])
-    notes = list(payload.get("notes", []) or []) + notes_out
+    clean = _as_list(payload.get("clean_files"))
+    notes = _as_list(payload.get("notes")) + notes_out
     return findings, clean, notes
 
 

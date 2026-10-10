@@ -15,8 +15,9 @@ class MatchResult:
 
 
 def _same_kind(a: Finding, b: Finding) -> bool:
-    if a.rule_id and b.rule_id and a.rule_id == b.rule_id:
-        return True
+    if a.rule_id and b.rule_id:
+        # Two distinct rules never auto-confirm each other, even in one category.
+        return a.rule_id == b.rule_id
     return _norm(a.category) == _norm(b.category)
 
 

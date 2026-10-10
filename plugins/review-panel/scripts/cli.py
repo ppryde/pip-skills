@@ -65,7 +65,7 @@ from scripts.config import (  # noqa: E402
     ConfigError, load_config, resolve_adhoc, resolve_profile,
 )
 from scripts.contract import (  # noqa: E402
-    VALID_SEVERITY, ContractError, assign_fingerprints, collate, finding_from_dict,
+    VALID_SEVERITY, ContractError, _as_list, assign_fingerprints, collate, finding_from_dict,
     finding_to_dict, parse_reviewer_result, render_report,
 )
 from scripts.discovery import (  # noqa: E402
@@ -111,14 +111,21 @@ def _load_findings(path: str):
         flat = data.get("findings")
         if not isinstance(flat, list):
             flat = [r for k in ("agreed", "only_a", "only_b") for r in data.get(k) or []]
+        trusted = True  # our own output: fingerprints and verdicts stand
         by_reviewer: dict[str, list] = {}
-        for raw in flat:
-            if isinstance(raw, dict):
-                by_reviewer.setdefault(str(raw.get("reviewer") or ""), []).append(raw)
-        payloads = [{"reviewer": r, "findings": fs} for r, fs in by_reviewer.items() if r]
-        extra_clean = list(data.get("clean_files") or [])
-        extra_notes = list(data.get("notes") or [])
+        skipped: list[str] = []
+        for i, raw in enumerate(flat):
+            if not isinstance(raw, dict):
+                skipped.append(f"REJECTED {i}: not an object")
+            elif not raw.get("reviewer"):
+                skipped.append(f"REJECTED {raw.get('id', i)}: missing reviewer")
+            else:
+                by_reviewer.setdefault(str(raw["reviewer"]), []).append(raw)
+        payloads = [{"reviewer": r, "findings": fs} for r, fs in by_reviewer.items()]
+        extra_clean = _as_list(data.get("clean_files"))
+        extra_notes = _as_list(data.get("notes")) + skipped
     else:
+        trusted = False
         payloads = data if isinstance(data, list) else [data]
         extra_clean, extra_notes = [], []
     findings, clean, notes = [], list(extra_clean), list(extra_notes)
@@ -127,7 +134,7 @@ def _load_findings(path: str):
             notes.append("REJECTED payload: not an object")
             continue
         try:
-            fs, cl, nt = parse_reviewer_result(payload)
+            fs, cl, nt = parse_reviewer_result(payload, trusted=trusted)
         except ContractError as exc:
             notes.append(f"REJECTED payload: {exc}")
             continue
@@ -260,8 +267,15 @@ def _safe_relative(path: str) -> Path:
 
 def _write_text(path: str, text: str) -> None:
     p = _safe_relative(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text)
+    cwd = Path.cwd().resolve()
+    parent = (cwd / p).parent.resolve()  # follows symlinks
+    if parent != cwd and cwd not in parent.parents:
+        raise CliError(f"output path resolves outside the repo: {path!r}")
+    parent.mkdir(parents=True, exist_ok=True)
+    target = parent / p.name
+    if target.is_symlink():
+        raise CliError(f"output path is a symlink: {path!r}")
+    target.write_text(text)
 
 
 def cmd_report(args) -> int:
