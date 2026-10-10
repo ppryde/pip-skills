@@ -36,7 +36,7 @@ Load dynamically — do not hardcode the list:
    - `tooling.md` — pipeline/tooling configuration is the caller's concern, not the template's
 4. Load the per-language doctrine matching `stack.templating` from config; skip gracefully if none matches
 5. Any other core doctrine found in the directory is loaded as a blocking constraint
-6. Skip rules whose header reads `` `alias of <ID>` `` (follow the canonical rule), rules whose `applies:` line does not match the config (`esp`, `templating`, `targets`, `type`; an absent config key filters nothing), and rules with `applies: gen=no` (audit-only checks such as SPF, DKIM and DMARC)
+6. Skip rules whose header reads `` `alias of <ID>` `` (follow the canonical rule), rules whose `applies:` line does not match the config (`esp`, `templating`, `targets`, `type`; an absent config key filters nothing, except `esp`: with no `stack.esp`, esp-conditional rules are skipped), and rules with `applies: gen=no` (audit-only checks such as SPF, DKIM and DMARC)
 
 This ensures new doctrines added to the plugin are included automatically. Only `content-ux.md` and `tooling.md` remain intentionally non-blocking for generation purposes.
 

@@ -48,11 +48,42 @@ def test_mjml_html_templating(R, docs):
     assert "RENDER-001" in plain
 
 
-def test_empty_config_filters_nothing_but_aliases(R, docs, rules):
+def test_empty_config_filters_only_aliases_and_esp_conditional_rules(R, docs, rules):
     got, filt, warns = ids_of(R, docs, email_type="marketing")
-    assert len(got) == 248 - 9
-    assert filt["alias"] == 9 and filt["esp"] == filt["targets"] == filt["templating"] == 0
+    esp_rules = {r.id for r in rules if "esp" in r.applies}
+    assert esp_rules == {"HBS-003", "HBS-004", "HBS-017", "LIQ-012", "LIQ-019", "TOOL-008"}
+    assert len(got) == 248 - 9 - 6 and not got & esp_rules
+    assert filt["alias"] == 9 and filt["esp"] == 6 and filt["targets"] == filt["templating"] == 0
     assert not warns
+
+
+def test_missing_esp_skips_esp_conditional_rules_as_on_main(R, docs):
+    """origin/main: 'Apply only when stack.esp in config matches; skip otherwise'."""
+    for blank in ("", None):
+        got, _, _ = ids_of(R, docs, email_type="transactional", esp=blank or "", templating="handlebars")
+        assert not got & {"HBS-003", "HBS-004", "HBS-017", "TOOL-008"}
+    got, _, _ = ids_of(R, docs, email_type="transactional", esp="sendgrid", templating="handlebars")
+    assert "HBS-003" in got and "HBS-004" not in got
+
+
+def test_unknown_doctrine_warns(R, docs):
+    got, _, warns = ids_of(R, docs, email_type="marketing", doctrine="renderin")
+    assert not got and warns and "unknown doctrine 'renderin'" in warns[0]
+    assert "warning: unknown doctrine" in R.render_select(docs, R.Config(email_type="marketing", doctrine="x"))
+
+
+def test_fire_skips_binary_and_oversized_files_and_tolerates_bad_utf8(R, tmp_path):
+    b = tmp_path / "a.bin"
+    b.write_bytes(b"<html\0\0\0")
+    assert R.read_scannable(b) == ("", "binary")
+    big = tmp_path / "big.html"
+    big.write_bytes(b"x" * (R.MAX_SCAN_BYTES + 1))
+    assert R.read_scannable(big)[1].startswith("over")
+    bad = tmp_path / "bad.html"
+    bad.write_bytes(b"<p>caf\xe9</p>")
+    text, skipped = R.read_scannable(bad)
+    assert not skipped and "caf" in text
+    assert R.read_scannable(tmp_path / "missing.html")[1].startswith("unreadable")
 
 
 def test_aliases_and_template_never_emitted(R, docs, rules):

@@ -50,7 +50,7 @@ Guards against HTML and CSS patterns that cause broken or invisible content in m
 
 **[RENDER-009]** `transactional: mortal | marketing: mortal` — All image `src` and `href` attributes must use absolute HTTPS URLs.
 > Relative URLs are not resolved by email clients (there is no base URL context). HTTP URLs may be blocked by corporate security proxies and trigger security warnings in modern clients. Source: standard email rule; Gmail relative URL blocking.
-> `detect: regex` — pattern: `(?:src|href)=["'](?:/|http:)` — relative, protocol-relative and http: URLs
+> `detect: regex` — pattern: `(?i)(?:src|href)=["'](?!https:|mailto:|tel:|cid:|#|\{|<%|\$\{|\[\[|\*\||%%)[^"']+["']` — any src/href that is not https:, mailto:, tel:, cid:, an anchor or a template placeholder: root-relative, plain-relative (`logo.png`, `./a`, `../a`), protocol-relative, `www.`, and http: in any case
 
 **[RENDER-010]** `transactional: mortal | marketing: mortal` — Keep total HTML under 102,400 bytes (102 KB).
 > Gmail clips email HTML at exactly 102 KB and replaces remaining content with a "[Message clipped] View entire message" link. Content after the clip point is invisible unless the user clicks through. Transactional content (order details, CTAs) after the clip is effectively lost. Source: [caniemail.com/features/html-style](https://www.caniemail.com/features/html-style/).

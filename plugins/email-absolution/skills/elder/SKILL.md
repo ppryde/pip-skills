@@ -154,7 +154,7 @@ Before auditing, note which rules are conditionally active based on config:
 - `rendering_targets` governs which Outlook/Gmail/Apple Mail rules fire
 - Disable per-language rules that don't match `stack.templating`
 - Use the severity track that matches `stack.email_type`
-- Honour each rule's `> \`applies: ...\`` line (keys `esp`, `templating`, `targets`, `type`; AND across keys, OR within a key; a config key that is absent or empty filters nothing). A rule with no `applies:` line is always active. Ignore the `gen` key when auditing
+- Honour each rule's `> \`applies: ...\`` line (keys `esp`, `templating`, `targets`, `type`; AND across keys, OR within a key; a config key that is absent or empty filters nothing, except `esp`: with no `stack.esp`, esp-conditional rules are skipped). A rule with no `applies:` line is always active. Ignore the `gen` key when auditing
 
 ### Step 4b: Build Rule Checklist
 

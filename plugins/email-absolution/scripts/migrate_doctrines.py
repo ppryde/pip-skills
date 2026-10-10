@@ -73,7 +73,7 @@ SPECIAL_DETECT = {  # rule id -> new detect line (the ~15 irregular legacy lines
 }
 STAGE1_FLAGS = {  # structural: recorded caveats the old text already carried (EL-1 / multi-line pattern)
     "HTML-001": "verify", "HTML-003": "verify", "HTML-005": "verify", "RENDER-006": "verify",
-    "GOTCHA-020": "multiline",
+    "GOTCHA-020": "multiline", "HTML-006": "multiline",
 }
 
 _GENERIC = re.compile(r"^> `detect: (regex|hybrid)` — pattern: `([^`]+)`(.*)$")
@@ -191,10 +191,13 @@ SEVERITY_REASON = {
 
 # Named exceptions to "every regex survives byte-identical" - each has a test.
 PATTERN_EXCEPTIONS = {
-    "RENDER-009": "extended to (?:src|href)=[\"'](?:/|http:) (GOTCHA-025's fires on every href=\"{{ url }}\")",
+    "RENDER-009": ("merged GOTCHA-025's coverage (plain-relative, ./ ../, www., any-case http:) behind a guard that "
+                   "excludes https:, mailto:, tel:, cid:, # and template delimiters ({{ {% *| %% <% ${ [[), so it no "
+                   "longer fires on href=\"{{ url }}\""),
     "RENDER-008": "keeps both patterns (GOTCHA-009's min-height\\s*: also covers <style> blocks)",
     "RENDER-004": "extended to percentage components (GOTCHA-004's ReDoS pattern dropped)",
-    "HTML-006": "new pattern <a\\s(?![^>]*\\bstyle=)[^>]*href= (RENDER-019's inspected the anchor text, not attributes)",
+    "HTML-006": ("new multiline pattern <a\\s(?![^>]*(?<=\\s)style\\s*=)[^>]*href= (RENDER-019's inspected the "
+                 "anchor text, not attributes; data-style= does not count)"),
     "HTML-010": "narrowed to position only (float moves to GOTCHA-012)",
     "GOTCHA-028": "own contextual detect (its regex was HTML-003's defect)",
     "HBS-002": "[^}] -> [^}{]: linear on a hostile run of '{{{' (was quadratic)",
@@ -204,7 +207,7 @@ PATTERN_EXCEPTIONS = {
 }
 ALIAS_PATTERN_DROPS = {
     "GOTCHA-001": "RENDER-001's url\\s*\\( is a superset",
-    "GOTCHA-025": "fires on every href=\"{{ url }}\"; RENDER-009 extended",
+    "GOTCHA-025": "its coverage is merged into RENDER-009 with a template-delimiter guard",
     "GOTCHA-009": "kept in RENDER-008 patterns",
     "GOTCHA-004": "ReDoS (4.25 s on 20 KB) and fires on comma syntax; RENDER-004 extended",
     "RENDER-007": "identical to ACCESS-003",
@@ -275,8 +278,9 @@ REWRITE = {
     "HTML-006": dict(
         header=(None, None, None),
         rationale=None,
-        detect=("> `detect: regex` — pattern: `<a\\s(?![^>]*\\bstyle=)[^>]*href=` — a linked anchor with no inline "
-                "style attribute at all"),
+        detect=("> `detect: regex` — pattern: `<a\\s(?![^>]*(?<=\\s)style\\s*=)[^>]*href=` — a linked anchor with "
+                "no inline style attribute at all (matched over the whole tag, so wrapped anchors work; "
+                "`data-style=` and `title=\"style=1\"` are not a style attribute)"),
     ),
     "HTML-004": dict(
         header=(None, None,
@@ -295,7 +299,10 @@ REWRITE = {
     "RENDER-009": dict(
         header=(None, None, None),
         rationale=None,
-        detect="> `detect: regex` — pattern: `(?:src|href)=[\"'](?:/|http:)` — relative, protocol-relative and http: URLs",
+        detect=("> `detect: regex` — pattern: `(?i)(?:src|href)=[\"'](?!https:|mailto:|tel:|cid:|#|\\{|<%|\\$\\{|\\[\\[|"
+                "\\*\\||%%)[^\"']+[\"']` — any src/href that is not https:, mailto:, tel:, cid:, an anchor or a "
+                "template placeholder: root-relative, plain-relative (`logo.png`, `./a`, `../a`), protocol-relative, "
+                "`www.`, and http: in any case"),
     ),
     "RENDER-008": dict(
         header=(None, None, None),

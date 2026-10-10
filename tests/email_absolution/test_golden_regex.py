@@ -22,16 +22,16 @@ WHY = {
     "GOTCHA-028": "its regex was HTML-003's defect; the preheader recipe is now a contextual check",
     "RENDER-009": "GOTCHA-025's pattern fired on every href=\"{{ url }}\"; only real relative/http: URLs remain",
     "RENDER-004": "GOTCHA-004's pattern fired on comma syntax with spaces (rgba(26, 86, 219, 1)) and was a ReDoS",
-    "HTML-006": "new pattern reads the style attribute (not the anchor text) and matches multi-line anchors",
+    "HTML-006": "the old pattern nominated every anchor; the new one fires only on anchors with no style attribute",
 }
 DOCUMENTED = {
     "level-1-obvious.liquid": {"lost": {"GOTCHA-028", "HTML-006"}, "gained": set()},
-    "level-2-moderate.liquid": {"lost": {"GOTCHA-028", "RENDER-009"}, "gained": set()},
+    "level-2-moderate.liquid": {"lost": {"GOTCHA-028", "HTML-006", "RENDER-009"}, "gained": set()},
     "level-3-handlebars.hbs": {"lost": {"RENDER-004", "RENDER-009"}, "gained": set()},
-    "level-4-advanced.liquid": {"lost": {"RENDER-004", "RENDER-009"}, "gained": set()},
-    "level-5-gotchas.hbs": {"lost": {"GOTCHA-028", "RENDER-009"}, "gained": {"HTML-006"}},
+    "level-4-advanced.liquid": {"lost": {"HTML-006", "RENDER-004", "RENDER-009"}, "gained": set()},
+    "level-5-gotchas.hbs": {"lost": {"GOTCHA-028", "RENDER-009"}, "gained": set()},
     "level-6-mjml.mjml": {"lost": {"HTML-006", "RENDER-009"}, "gained": set()},
-    "level-7-content.hbs": {"lost": {"RENDER-009"}, "gained": {"HTML-006"}},
+    "level-7-content.hbs": {"lost": {"RENDER-009"}, "gained": set()},
 }
 
 

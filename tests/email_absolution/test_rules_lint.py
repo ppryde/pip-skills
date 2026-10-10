@@ -143,6 +143,17 @@ def test_inverted_tracks_are_rejected(R, tmp_path):
     assert any("weaker than marketing" in m for m in problems(R, d))
 
 
+def test_transactional_weaker_than_marketing_is_a_lint_error(R, tmp_path):
+    for tx, mk in (("counsel", "mortal"), ("counsel", "venial"), ("venial", "mortal")):
+        d = tmp_path / f"{tx}-{mk}"
+        d.mkdir()
+        make = make_dir(d, rule(1, tx=tx, mk=mk))
+        assert any("weaker than marketing" in m for m in problems(R, make)), (tx, mk)
+    ok = tmp_path / "ok"
+    ok.mkdir()
+    assert not problems(R, make_dir(ok, rule(1, tx="mortal", mk="counsel") + rule(2, tx="venial", mk="venial")))
+
+
 def test_unknown_applies_value_and_gen(R, tmp_path):
     d = make_dir(tmp_path, rule(1, extra="> `applies: esp=braze`\n"))
     assert any("unknown esp" in m for m in problems(R, d))

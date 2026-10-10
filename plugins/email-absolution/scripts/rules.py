@@ -501,6 +501,10 @@ def select_rules(docs, cfg: Config):
         warnings.append(
             f"warning: unknown esp {cfg.esp!r} (allowed: {', '.join(VOCAB['esp'])}); "
             "esp-conditional rules are filtered out")
+    if cfg.doctrine and cfg.doctrine not in {d.name for d in docs}:
+        warnings.append(
+            f"warning: unknown doctrine {cfg.doctrine!r} (available: {', '.join(d.name for d in docs)}); "
+            "the checklist below is empty")
     active = []
     for d in docs:
         if cfg.doctrine and d.name != cfg.doctrine:
@@ -514,7 +518,9 @@ def select_rules(docs, cfg: Config):
             ap = dict(r.applies)
             if implicit:
                 ap["templating"] = [implicit]
-            if cfg.esp and "esp" in ap and cfg.esp not in ap["esp"]:
+            # esp-conditional rules need a known esp: with none configured they are skipped
+            # (the behaviour on origin/main), unlike templating/targets/type.
+            if "esp" in ap and cfg.esp not in ap["esp"]:
                 filt["esp"] += 1
                 continue
             if use_templ and "templating" in ap and cfg.templating not in ap["templating"]:
@@ -629,6 +635,23 @@ def resolve_overrides(overrides: dict, docs):
 
 
 # --------------------------------------------------------------------------- scan seed
+
+MAX_SCAN_BYTES = 2 * 1024 * 1024
+
+
+def read_scannable(path: Path):
+    """(text, skipped_reason). Binary (NUL in the first 8 KB) and >2 MiB files are skipped, never silently."""
+    try:
+        size = path.stat().st_size
+        if size > MAX_SCAN_BYTES:
+            return "", f"over {MAX_SCAN_BYTES // (1024 * 1024)} MiB"
+        raw = path.read_bytes()
+    except OSError as e:
+        return "", f"unreadable: {e.strerror or e}"
+    if b"\0" in raw[:8192]:
+        return "", "binary"
+    return raw.decode("utf-8", errors="replace"), ""
+
 
 def fire_ids(rules, text: str) -> dict:
     """{rule id: first matching line number} for regex/hybrid rules, line by line.
@@ -788,7 +811,11 @@ def main(argv=None) -> int:
     if a.cmd == "fire":
         rules = all_rules(docs)
         for fp in a.files:
-            for rid, ln in sorted(fire_ids(rules, Path(fp).read_text(encoding="utf-8")).items()):
+            text, skipped = read_scannable(Path(fp))
+            if skipped:
+                print(f"skipped: {fp} ({skipped})", file=sys.stderr)
+                continue
+            for rid, ln in sorted(fire_ids(rules, text).items()):
                 print(f"{fp}:{ln} | {rid}")
         return 0
     return 2

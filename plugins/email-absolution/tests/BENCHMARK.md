@@ -55,7 +55,7 @@ Each violation is tagged with one or more type labels:
 |------|-----------|------|
 | RENDER-001 | No `<!DOCTYPE>` declaration | `HTML` |
 | ACCESS-004 | No `lang` attribute on `<html>` | `HTML` `ACCESS` |
-| RENDER-009 / GOTCHA-025 | Relative `src="/images/logo.png"` — no base URL in email clients | `HTML` |
+| RENDER-009 / GOTCHA-025 | Relative `src="/images/logo.png"` and `src="images/footer-logo.png"` (no leading slash) — no base URL in email clients | `HTML` |
 | RENDER-009 / GOTCHA-025 | Relative `href="/dashboard"` on CTA — same problem | `HTML` |
 | ACCESS-001 | `<img>` has no `alt` attribute | `ACCESS` |
 | GOTCHA-024 | `var(--bg-color)` and `var(--link-color)` — CSS custom properties unsupported in Outlook and Gmail | `CSS` |

@@ -6,6 +6,10 @@ import time
 
 import pytest
 
+from conftest import PLUGIN
+
+PLANTED = PLUGIN / "tests" / "templates"
+
 
 @pytest.fixture()
 def hits(by_id, R):
@@ -85,11 +89,23 @@ def test_html001_003_005_render006_patterns_are_byte_identical_to_146(by_id):
 
 def test_render009_absolute_urls(hits, R, by_id):
     for bad in ('<img src="/images/logo.png">', '<a href="/login">', '<img src="//cdn.example.com/a.png">',
-                '<a href="http://example.com">', "<a href='http://example.com'>"):
+                '<a href="http://example.com">', "<a href='http://example.com'>", '<a HREF="HTTP://x.com">',
+                '<img src="logo.png">', '<a href="images/a.png">', '<a href="./a">', '<a href="../a">',
+                '<a href="www.x.com">', '<img src="data:image/png;base64,AAA">'):
         assert hits("RENDER-009", bad), bad
-    for ok in ('<a href="{{ url }}">', '<a href="{{cta_url}}">', '<a href="https://example.com/a">',
-               '<a href="mailto:a@b.co">', '<a href="#top">', '<img src="{{ logo }}">'):
+    for ok in ('<a href="{{ url }}">', '<a href="{{cta_url}}">', '<a href="{% url x %}">',
+               '<a href="*|UNSUB|*">', '<a href="%%unsub%%">', '<a href="<%= url %>">',
+               '<a href="https://example.com/a">', '<a href="HTTPS://example.com/a">',
+               '<a href="mailto:a@b.co">', '<a href="tel:+4412345">', '<a href="#top">',
+               '<img src="cid:logo">', '<img src="{{ logo }}">'):
         assert not hits("RENDER-009", ok), ok
+
+
+def test_planted_plain_relative_src_is_caught(by_id):
+    line = next(ln for ln in (PLANTED / "level-1-obvious.liquid").read_text().splitlines()
+                if "images/footer-logo.png" in ln)
+    assert any(re.search(p, line) for p in by_id["RENDER-009"].detect.patterns)
+    assert not re.search(r'src=["\']/', line)  # it is the no-leading-slash form
 
 
 def test_render008_keeps_both_min_height_patterns(by_id):
@@ -109,6 +125,26 @@ def test_html006_both_attribute_orders(hits):
     # the style attribute is read, not the anchor text
     assert hits("HTML-006", '<a href="x">my style=guide</a>')
     assert not hits("HTML-006", '<a href="x" style="color:red">x</a>')
+
+
+def test_html006_wrapped_anchors_data_style_and_title(hits, by_id):
+    assert "multiline" in by_id["HTML-006"].flags
+    wrapped = '<a href="{{ url }}"\n   target="_blank"\n   style="color:#fff; text-decoration:none">x</a>'
+    assert not hits("HTML-006", wrapped)
+    assert hits("HTML-006", '<a href="{{ url }}"\n   target="_blank">x</a>')
+    # data-style / x-style are not the style attribute
+    assert hits("HTML-006", '<a href="x" data-style="a">x</a>')
+    assert hits("HTML-006", '<a data-style="a" href="x">x</a>')
+    # a title that merely contains "style=" is not a style attribute
+    assert hits("HTML-006", '<a href="x" title="style=1">x</a>')
+    assert not hits("HTML-006", '<a href="x" style = "color:red">x</a>')
+    assert not hits("HTML-006", '<a style="color:red" href="x">x</a>')
+
+
+def test_html006_wrapped_anchor_through_fire(R, rules):
+    wrapped = '<a href="{{ u }}"\n   style="color:#fff">x</a>\n'
+    assert "HTML-006" not in R.fire_ids(rules, wrapped)
+    assert "HTML-006" in R.fire_ids(rules, '<a href="{{ u }}"\n   target="_blank">x</a>\n')
 
 
 def test_render004_whitespace_colour_syntax(hits):

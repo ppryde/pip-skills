@@ -41,7 +41,8 @@ Guards against HTML structure and CSS usage patterns that produce broken, unstyl
 
 **[HTML-006]** `transactional: venial | marketing: counsel` — `<a>` elements with custom colours must have `color` and `text-decoration` set via inline style.
 > Outlook.com, older Yahoo, and Gmail may strip `<a>` colour rules from `<style>` blocks. Without inline styles on the `<a>` element itself, link colours revert to the client's default blue underlined style, which breaks branded button colours and link styling in footers and body text.
-> `detect: regex` — pattern: `<a\s(?![^>]*\bstyle=)[^>]*href=` — a linked anchor with no inline style attribute at all
+> `detect: regex` — pattern: `<a\s(?![^>]*(?<=\s)style\s*=)[^>]*href=` — a linked anchor with no inline style attribute at all (matched over the whole tag, so wrapped anchors work; `data-style=` and `title="style=1"` are not a style attribute)
+> `flags: multiline`
 
 **[HTML-007]** `transactional: venial | marketing: counsel` — Do not use `<br>` tags as spacing substitutes between content blocks.
 > `<br>` spacing is inconsistent across clients — some add extra padding, some collapse multiple `<br>` tags. Use table rows with a fixed-height `<td>` (height attribute + font-size: 0) for reliable vertical spacing between content blocks.
