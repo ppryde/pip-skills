@@ -99,7 +99,7 @@ Written to `reports/optimise-orm/apps-orders-views-20260430-143200.md`. Includes
 optimise-orm detects Django signal listeners (`pre_save`, `post_save`, `pre_delete`, `post_delete`) and audit history packages (`easyaudit` (django-easy-audit), `auditlog`, `simple_history`, `reversion`, `pghistory`) before running checks.
 
 - **Signal listeners present:** Write findings (WRITE-001/002/003/020) append a structured caveat listing each bypassed listener, what it does, and 2–3 mitigations. Finding severity stays unchanged — the performance issue is still real.
-- **Audit framework detected:** WRITE-006/007/009 escalate from `medium` → `critical`.
+- **Audit framework detected:** WRITE-006/007 escalate from `medium` → `critical`.
 - **pghistory:** Uses Postgres triggers, not Django signals — marked `signals_safe` and does not trigger escalation.
 
 ---

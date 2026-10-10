@@ -30,7 +30,7 @@
     "severity_internal": "medium",
     "tier_displayed": "medium",
     "location_pattern": "target.py:49",
-    "savings_basis": "static",
+    "savings_basis": "unknown",
     "signals_caveat": false
   }
 ]

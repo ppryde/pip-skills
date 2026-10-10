@@ -18,7 +18,7 @@ checks:
     title: Prefetch() with custom QS would reduce work
     severity_base: medium
   - id: FETCH-012
-    title: Nested prefetch missing to_attr causes silent re-fetch
+    title: Filtered Prefetch without to_attr replaces the unfiltered relation (clarity)
     severity_base: medium
   - id: FETCH-020
     title: Wide column over-fetched and unread by callers
@@ -80,7 +80,7 @@ for order in orders:
 
 ### FETCH-002
 
-**Signature:** `.select_related()` called with no arguments, causing Django to eagerly join every FK relationship on the model regardless of which are actually used.
+**Signature:** `.select_related()` called with no arguments, causing Django to eagerly join every FK relationship it can follow (a bare `select_related()` follows only non-null FKs, and recurses through them with no depth limit) regardless of which are actually used.
 
 **Grep / AST hints:**
 ```regex
@@ -217,7 +217,7 @@ for author in authors:
 
 ### FETCH-012
 
-**Signature:** A `Prefetch()` object is used without `to_attr`, and the same relation is then accessed via `obj.<relation>.all()` in template or calling code — causing Django to silently re-evaluate the relation instead of serving from the prefetch cache.
+**Signature:** A `Prefetch()` with a custom `queryset=` (a filtered subset) is used without `to_attr`, and the same relation is then accessed via `obj.<relation>.all()` in calling code. This does **not** re-query — `obj.<relation>.all()` is served from the prefetch cache. The gotcha is semantic: the relation now holds **only the filtered subset** everywhere that instance is used, and any further `obj.<relation>.filter(...)` / `.count()`-style call that cannot use the cache issues a new query against the unfiltered table. Using `to_attr` keeps the unfiltered relation intact and makes the filtered list's name explicit. This is a clarity/correctness note, not a performance finding.
 
 **Grep / AST hints:**
 ```regex
@@ -231,24 +231,24 @@ Follow-up: confirm `to_attr=` is absent from the `Prefetch(...)` call. Then look
 - Low: Pattern found but downstream access not traceable.
 
 **Savings formula:**
-- Prevents silent re-query; savings = `N × per_query_overhead`.
-- Constants: PG = 2ms, MySQL = 4ms, SQLite = 1ms
+- N/A — no query is saved by `to_attr` (`.all()` is already served from the cache). Mark `savings_basis: unknown`.
 
 **Suggested fix template:**
 ```python
-# Before — re-fetch risk
+# Before — author.books now silently means "recent books only"
 qs = Author.objects.prefetch_related(
     Prefetch("books", queryset=Book.objects.filter(published_year__gte=2020))
 )
 for author in qs:
-    books = author.books.all()  # may re-query
+    books = author.books.all()  # served from the filtered prefetch cache (no re-query)
+    n = author.books.filter(is_published=True).count()  # this DOES re-query
 
 # After — explicit to_attr
 qs = Author.objects.prefetch_related(
     Prefetch("books", queryset=Book.objects.filter(published_year__gte=2020), to_attr="recent_books")
 )
 for author in qs:
-    books = author.recent_books  # list, served from cache
+    books = author.recent_books  # list, served from cache; author.books stays unfiltered
 ```
 
 ---

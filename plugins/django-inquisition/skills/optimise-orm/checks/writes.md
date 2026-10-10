@@ -9,7 +9,7 @@ checks:
     title: Loop of .save() for existing rows → bulk_update
     severity_base: high
   - id: WRITE-003
-    title: get_or_create in loop → bulk_create with update_conflicts
+    title: get_or_create in loop → bulk_create with ignore_conflicts
     severity_base: medium
   - id: WRITE-004
     title: update_or_create in loop → bulk_create with update_conflicts + update_fields
@@ -24,10 +24,10 @@ checks:
     title: Existing bulk_create/bulk_update on model with listeners
     severity_base: medium
   - id: WRITE-008
-    title: Existing .raw() writing to model with listeners
+    title: Existing raw SQL write (cursor.execute) to model with listeners
     severity_base: medium
   - id: WRITE-009
-    title: Existing QuerySet.delete() on model with pre_delete/post_delete listeners
+    title: QuerySet.delete() on model that overrides Model.delete()
     severity_base: medium
   - id: WRITE-010
     title: .save() without update_fields rewrites entire row
@@ -54,7 +54,7 @@ When `signal_dependencies[<Model>]` is non-empty, fix templates for WRITE-001/00
 
 ## Audit-framework escalation
 
-If `easyaudit`, `auditlog`, `simple_history`, or `reversion` is detected in `INSTALLED_APPS` (see PAT-070), WRITE-006/007/009 escalate from `medium` → `critical`. WRITE-008 escalates when the raw SQL touches a table covered by an audit listener. `pghistory` uses Postgres triggers and is tagged `signals_safe=true` — **does not trigger escalation**.
+If `easyaudit`, `auditlog`, `simple_history`, or `reversion` is detected in `INSTALLED_APPS` (see PAT-070), WRITE-006/007 escalate from `medium` → `critical`. (WRITE-009 does not escalate: `QuerySet.delete()` still sends `pre_delete`/`post_delete`, so audit trails keep working.) WRITE-008 escalates when the raw SQL touches a table covered by an audit listener. `pghistory` uses Postgres triggers and is tagged `signals_safe=true` — **does not trigger escalation**.
 
 ## How to scan
 
@@ -143,7 +143,7 @@ Order.objects.bulk_update(orders_to_update, ["status"])
 
 ### WRITE-003
 
-**Signature:** `get_or_create(...)` called inside a loop — each call issues a `SELECT` then potentially an `INSERT`. Django 4.1+ `bulk_create(..., update_conflicts=True)` with `unique_fields` achieves upsert semantics in a single statement.
+**Signature:** `get_or_create(...)` called inside a loop — each call issues a `SELECT` then potentially an `INSERT`. `bulk_create(..., ignore_conflicts=True)` inserts the missing rows in a single statement and silently skips rows that already exist.
 
 **Grep / AST hints:**
 ```regex
@@ -152,8 +152,8 @@ Order.objects.bulk_update(orders_to_update, ["status"])
 Follow-up: confirm the call is inside a loop body.
 
 **Confidence rules:**
-- High: `get_or_create` inside loop, Django ≥ 4.1 (check `django.__version__` or `pyproject.toml`).
-- Medium: `get_or_create` inside loop, Django version not confirmed.
+- High: `get_or_create` inside loop, the lookup fields are covered by a real unique constraint.
+- Medium: `get_or_create` inside loop, unique constraint not confirmed, or the loop needs the returned objects.
 - Low: `get_or_create` inside loop, `update_or_create` variant with complex logic.
 
 **Savings formula:**
@@ -164,24 +164,24 @@ Follow-up: confirm the call is inside a loop body.
 
 **Suggested fix template:**
 ```python
-# Before (Django < 4.1 approach shown for reference)
+# Before
 for row in data:
     Tag.objects.get_or_create(name=row["tag"])
 
-# After (Django 4.1+)
+# After — skip rows that already exist (needs a unique constraint on `name`)
 Tag.objects.bulk_create(
     [Tag(name=row["tag"]) for row in data],
-    update_conflicts=True,
-    unique_fields=["name"],
-    update_fields=[],  # no-op update, just skip duplicates
+    ignore_conflicts=True,
 )
 ```
+
+**Prerequisites:** a real database unique constraint on the lookup fields; backend support for `ignore_conflicts` (all built-in backends except Oracle). With `ignore_conflicts=True` primary keys are not set on the returned objects, and `auto_now`/`auto_now_add`-style fields on existing rows are not refreshed. The loop's return values (`obj, created`) are lost; re-query if you need them.
 
 ---
 
 ### WRITE-004
 
-**Signature:** `update_or_create(...)` called inside a loop — each call issues a `SELECT`, then either an `UPDATE` (existing) or `INSERT` (new). On a 1k-row import this is 2k–3k round trips. Django 4.1+ `bulk_create(..., update_conflicts=True, update_fields=[...])` collapses the loop into a single statement that performs the UPSERT atomically.
+**Signature:** `update_or_create(...)` called inside a loop — each call issues a `SELECT`, then either an `UPDATE` (existing) or `INSERT` (new). On a 1k-row import this is 2k–3k round trips. `bulk_create(..., update_conflicts=True, unique_fields=[...], update_fields=[...])` (Django 4.1+) collapses the loop into a single statement that performs the UPSERT atomically.
 
 **Grep / AST hints:**
 ```regex
@@ -203,7 +203,7 @@ Follow-up: confirm the call is inside a loop body. Locate `defaults={...}` to de
 
 **Suggested fix template:**
 ```python
-# Before (Django < 4.1 approach shown for reference)
+# Before
 for row in data:
     Product.objects.update_or_create(
         sku=row["sku"],
@@ -218,6 +218,8 @@ Product.objects.bulk_create(
     update_fields=["name", "price"],  # the `defaults={...}` keys
 )
 ```
+
+**Prerequisites:** a real unique constraint on `unique_fields`; backend support for `update_conflicts` (PostgreSQL, SQLite 3.24+, MariaDB, MySQL; `unique_fields` is ignored on MySQL/MariaDB). Primary keys may not be populated on the returned objects on some backends, and `auto_now` fields are not refreshed on updated rows (include them explicitly in `update_fields` and set them yourself).
 
 ---
 
@@ -301,12 +303,13 @@ Follow-up: confirm the model matches a key in `signal_dependencies`.
 
 ### WRITE-008
 
-**Signature:** `.raw("UPDATE ...")` or `.raw("INSERT INTO <table>")` writes to a table that backs a model in `signal_dependencies`. Raw SQL entirely bypasses Django's ORM signal machinery.
+**Signature:** `connection.cursor().execute("UPDATE|INSERT|DELETE ...")` writes to a table that backs a model in `signal_dependencies`. Raw SQL entirely bypasses Django's ORM signal machinery. (`Manager.raw()` is for row-returning `SELECT`s; a `.raw("UPDATE ...")` is a misuse and is matched only as a low-confidence hint.)
 
 **Grep / AST hints:**
 ```regex
-\.raw\(\s*['"](UPDATE|INSERT INTO)
+cursor\(\)\.execute\(\s*['"](UPDATE|INSERT|DELETE)
 ```
+Low-confidence hint: `\.raw\(\s*['"](UPDATE|INSERT INTO)`
 
 **Confidence rules:**
 - High: Raw `UPDATE`/`INSERT` with table name matching a model in `signal_dependencies`.
@@ -318,18 +321,21 @@ Follow-up: confirm the model matches a key in `signal_dependencies`.
 **Suggested fix template:**
 ```python
 # Before
-MyModel.objects.raw("UPDATE myapp_mymodel SET status = 'done' WHERE id = %s", [obj_id])
+with connection.cursor() as cursor:
+    cursor.execute("UPDATE myapp_mymodel SET status = 'done' WHERE id = %s", [obj_id])
 
-# After — use ORM to preserve signal behaviour
-MyModel.objects.filter(pk=obj_id).update(status="done")
-# OR call obj.save(update_fields=["status"]) if signals must fire
+# After — obj.save(update_fields=[...]) fires pre_save/post_save
+obj.status = "done"
+obj.save(update_fields=["status"])
+# Note: MyModel.objects.filter(pk=obj_id).update(status="done") is cleaner than raw SQL
+# but still bypasses signals (see WRITE-006).
 ```
 
 ---
 
 ### WRITE-009
 
-**Signature:** `qs.delete()` called on a queryset where `signal_dependencies[<Model>]` includes `pre_delete` or `post_delete` listeners. QuerySet `.delete()` bypasses per-object signals; only `Model.delete()` fires them.
+**Signature:** `qs.delete()` called on a queryset of a model that **overrides `Model.delete()`** with custom logic (soft-delete, file cleanup, audit calls). `QuerySet.delete()` never calls the per-instance `Model.delete()` override, so that custom logic is skipped. Note: `QuerySet.delete()` **does** send `pre_delete`/`post_delete` for every deleted object whenever listeners exist (Django collects the instances instead of using the fast-delete path), so signal-based audit trails keep working and this finding does not escalate with audit frameworks.
 
 **Grep / AST hints:**
 ```regex
@@ -339,27 +345,26 @@ Plus a second pass for **bare variable** `.delete()` calls — `Model.objects.fi
 ```regex
 \b(?!self\.)(?!cls\.)\w+\.delete\(\s*\)
 ```
-For each match of the bare form, walk back over the preceding lines in the same function and check whether the variable was assigned a queryset (`= Model.objects…` or `.filter(...)` / `.exclude(...)` / `.all()` chain) — if yes, treat it as `qs.delete()`. If the variable was assigned a single model instance (`Model.objects.get(...)` or `Model(...)`) it's `instance.delete()`, which DOES fire signals — skip.
+For each match of the bare form, walk back over the preceding lines in the same function and check whether the variable was assigned a queryset (`= Model.objects…` or `.filter(...)` / `.exclude(...)` / `.all()` chain) — if yes, treat it as `qs.delete()`. If the variable was assigned a single model instance (`Model.objects.get(...)` or `Model(...)`) it's `instance.delete()`, which calls the override — skip. Then confirm the model defines `def delete(` in its class body (or a base/mixin); if it does not, there is nothing to bypass — do not emit.
 
 **Confidence rules:**
-- High: `.delete()` on queryset, model has `pre_delete`/`post_delete` registered.
-- Medium: `.delete()` on queryset, listener is on a parent class.
+- High: `.delete()` on queryset, model class defines its own `delete()` method.
+- Medium: `.delete()` on queryset, the `delete()` override lives on a parent class or mixin.
 - Low: `.delete()` call found, model relationship not fully traceable.
 
-**Savings formula:** N/A — correctness finding. Severity escalates to critical when audit framework present.
+**Savings formula:** N/A — correctness finding. Does not escalate with audit frameworks (signals still fire).
 
 **Suggested fix template:**
 ```python
-# Before — bypasses pre_delete/post_delete signals
+# Before — skips Invoice.delete() (custom soft-delete / cleanup logic)
 Order.objects.filter(archived=True).delete()
 
-# After option A — fires signals per object (slower)
+# After option A — call the override per object (slower)
 for order in Order.objects.filter(archived=True):
     order.delete()
 
-# After option B — accept bulk delete, handle cleanup separately
-Order.objects.filter(archived=True).delete()
-# Then manually clean up related data / fire notifications
+# After option B — accept QuerySet.delete(), move the override's logic into
+# pre_delete/post_delete signals (which QuerySet.delete() does send) or a queryset method
 ```
 
 ---
@@ -500,7 +505,7 @@ with transaction.atomic():
 
 ### WRITE-040
 
-**Signature:** A `@receiver(post_save, ...)` handler contains ORM queries (`filter`, `get`, `all`) and the model it targets is also the subject of a bulk-write recommendation (WRITE-001/002). Each bulk-created object will trigger the signal individually, causing an N+1 at the signal layer.
+**Signature:** A `@receiver(post_save, ...)` handler contains ORM queries (`filter`, `get`, `all`) and the model it targets is also the subject of a bulk-write recommendation (WRITE-001/002). Each `save()` in the loop pays for the handler's queries, causing an N+1 at the signal layer; the bulk rewrite (`bulk_create`/`bulk_update`) skips the handler entirely (see WRITE-005/007), so the queries disappear but so does the handler's behaviour.
 
 **Grep / AST hints:**
 ```regex
@@ -517,7 +522,7 @@ Follow-up: inside the handler body, look for any ORM call (`.filter(`, `.get(`, 
 
 **Suggested fix template:**
 ```python
-# Before — N queries from signal on bulk_create of N orders
+# Before — N handler queries from the per-object save() loop (WRITE-001/002)
 @receiver(post_save, sender=Order)
 def update_customer_stats(sender, instance, created, **kwargs):
     if created:

@@ -6,13 +6,13 @@ checks:
     title: Large queryset materialised without .iterator(chunk_size=…)
     severity_base: high
   - id: ITER-002
-    title: iterator() without chunk_size on Postgres
+    title: iterator() caveats — prefetch_related without chunk_size, pooler vs server-side cursors
     severity_base: low
   - id: ITER-010
-    title: Same QuerySet evaluated twice in scope
+    title: Same query re-issued in scope (aggregate/in_bulk after evaluation, repeated filter chains)
     severity_base: medium
   - id: ITER-011
-    title: .all() chained to fresh .filter() thrashes cache
+    title: redundant .all() before .filter() on a QuerySet variable (style)
     severity_base: low
 ---
 
@@ -59,31 +59,38 @@ for event in Event.objects.all().iterator(chunk_size=2000):
 
 ### ITER-002
 
-**Signature:** `.iterator()` called without a `chunk_size` argument on a Postgres-backed project. On Postgres, Django uses server-side cursors when `chunk_size` is provided; without it, the driver fetches all rows at once, defeating the streaming intent.
+**Signature:** `.iterator()` used in a way that hits its real caveats. On PostgreSQL, Django's `iterator()` already streams through a **server-side cursor** regardless of `chunk_size` (`chunk_size` only sets how many rows are fetched per batch, default 2000), so a bare `.iterator()` is not itself a problem. The real caveats:
+
+1. `iterator()` combined with `prefetch_related()` and **no `chunk_size`** — prefetching works per chunk and, `chunk_size` is required: omitting it emits a deprecation warning on Django 4.1/4.2 and raises `ValueError` from Django 5.0.
+2. Server-side cursors misbehave behind a transaction-pooling proxy (pgbouncer in transaction mode) unless `DISABLE_SERVER_SIDE_CURSORS: True` is set in the database `OPTIONS`/settings — the cursor can break or buffer everything client-side.
 
 **Grep / AST hints:**
 ```regex
+\.prefetch_related\([^)]*\)[^\n]*\.iterator\(\s*\)
 \.iterator\(\s*\)
 ```
+Follow-up for caveat 2: look in `settings.py` for `DISABLE_SERVER_SIDE_CURSORS` and for pgbouncer / pooler hints (`CONN_MAX_AGE`, a pooler host or port 6432).
 
 **Confidence rules:**
-- High: Bare `.iterator()` confirmed, `DATABASES` engine is `django.db.backends.postgresql` or `psycopg2`.
-- Medium: Bare `.iterator()` found, engine not determinable from target file.
-- Low: `.iterator()` is in a branch only reached at runtime based on settings.
+- High: `prefetch_related(...)` chained with `.iterator()` without `chunk_size`.
+- Low: bare `.iterator()` on Postgres where settings show a transaction pooler and no `DISABLE_SERVER_SIDE_CURSORS`. Do not emit without that evidence.
 
 **Savings formula:**
-- Minimal on non-PG backends; on PG the difference can be significant for large queries.
+- Not a speed finding; avoids an error or unexpected client-side buffering.
 - Mark `savings_basis: static`, low severity.
 
 **Suggested fix template:**
 ```python
-# Before
-for record in LargeModel.objects.all().iterator():
+# Before — prefetch_related with iterator() and no chunk_size
+for record in LargeModel.objects.prefetch_related("tags").iterator():
     process(record)
 
-# After — Postgres uses server-side cursor with chunk_size
-for record in LargeModel.objects.all().iterator(chunk_size=2000):
+# After — chunk_size makes the prefetch run once per chunk (required from Django 5.0)
+for record in LargeModel.objects.prefetch_related("tags").iterator(chunk_size=2000):
     process(record)
+
+# Behind a transaction-pooling proxy, also set in DATABASES["default"]:
+#   "DISABLE_SERVER_SIDE_CURSORS": True
 ```
 
 ---
@@ -92,19 +99,19 @@ for record in LargeModel.objects.all().iterator(chunk_size=2000):
 
 **Signature:** The same logical query is **re-issued** to the database within one scope. The two patterns that actually re-query:
 
-1. **Cache-bypassing methods on the same variable** — `qs.count()`, `qs.exists()`, `qs.aggregate(...)`, and `qs.in_bulk(...)` each issue their own SQL even after the queryset has been iterated. e.g. `for x in qs:` followed by `qs.count()` is two queries.
+1. **Cache-bypassing methods on the same variable** — `qs.aggregate(...)` and `qs.in_bulk(...)` always issue their own SQL, even after the queryset has been iterated. e.g. `for x in qs:` followed by `qs.aggregate(Sum(...))` is two queries. (`count()` and `exists()` do NOT re-query once the queryset is evaluated: they read the result cache. They only hit the DB on an un-evaluated queryset.)
 2. **Re-derived querysets** — `Model.objects.filter(...)` repeated in two places, or a chain like `qs.filter(...)` after `qs` has been evaluated. The new clone has its own (empty) result cache.
 
-> Note: iterating the **same** QuerySet object twice (`for x in qs: ...; for x in qs: ...`) does **not** re-query — Django caches the result set on first evaluation. Likewise `len(qs)` after iteration uses the populated cache. Only flag the patterns above; do not flag plain re-iteration.
+> Note: iterating the **same** QuerySet object twice (`for x in qs: ...; for x in qs: ...`) does **not** re-query — Django caches the result set on first evaluation. Likewise `len(qs)`, `qs.count()` and `qs.exists()` after iteration use the populated cache. Only flag the patterns above; do not flag plain re-iteration.
 
 **Grep / AST hints:**
 ```regex
-\.(count|exists|aggregate|in_bulk)\(
+\.(aggregate|in_bulk)\(
 ```
 Follow-up: after the cache-bypass call site, scan the surrounding scope for prior or subsequent iteration of the same variable. Also scan for two near-identical `Model.objects.filter(...)` chains assigned to different names — the second clone re-queries.
 
 **Confidence rules:**
-- High: Same `qs` variable used in iteration AND `.count()`/`.exists()`/`.aggregate()` within the same function — confirmed second query.
+- High: Same `qs` variable used in iteration AND `.aggregate()`/`.in_bulk()` within the same function — confirmed second query.
 - Medium: Two near-identical `Model.objects.filter(...)` expressions in the same scope, or a `qs.filter(...)` clone after evaluation.
 - Low: Pattern found across function boundaries — caller may have re-assigned.
 
@@ -114,25 +121,25 @@ Follow-up: after the cache-bypass call site, scan the surrounding scope for prio
 
 **Suggested fix template:**
 ```python
-# Before — qs.count() issues a second SELECT COUNT(*) even though
+# Before — qs.aggregate() issues a second SELECT SUM(...) even though
 # the first loop already populated the qs result cache.
 orders = Order.objects.filter(status="open")
 for order in orders:
     send_reminder(order)
-count = orders.count()  # second query
+total = orders.aggregate(Sum("amount"))["amount__sum"]  # second query
 
-# After — derive the count from the already-fetched cache.
+# After — derive the value from the already-fetched cache.
 orders = list(Order.objects.filter(status="open"))
 for order in orders:
     send_reminder(order)
-count = len(orders)  # zero queries
+total = sum(order.amount for order in orders)  # zero queries
 ```
 
 ---
 
 ### ITER-011
 
-**Signature:** `qs.all().filter(...)` — `.all()` called on an already-realised QuerySet variable, followed by `.filter()`. `.all()` clones the queryset (clearing any existing result cache), so the chain always re-queries. This is a no-op that reads confusingly as if it does something useful; just call `.filter()` directly.
+**Signature:** `qs.all().filter(...)` — `.all()` called on an already-realised QuerySet variable, followed by `.filter()`. Both `.all()` and `.filter()` return fresh clones, so the extra `.all()` adds nothing. This is a style point, not a performance one (`.filter()` on its own clones the same way); just call `.filter()` directly.
 
 **Important:** Manager-origin chains (`Model.objects.all().filter(...)`, `Model._default_manager.all().filter(...)`) are the **canonical** Django idiom for `Manager → QuerySet` and must NOT be flagged. Only the variable-on-QuerySet form is a problem.
 
@@ -154,12 +161,12 @@ Only emit when the leftmost identifier resolves to a previously-assigned QuerySe
 - Low: Pattern found in an expression where the receiver type is ambiguous.
 
 **Savings formula:**
-- Avoids redundant queryset clone and potential cache thrash.
-- Mark `savings_basis: static`, low severity.
+- Style only: no measurable saving (`.filter()` clones the queryset regardless).
+- Mark `savings_basis: unknown`, low severity.
 
 **Suggested fix template:**
 ```python
-# Before — .all() is redundant and clears cache
+# Before — .all() is redundant
 results = qs.all().filter(active=True)
 
 # After

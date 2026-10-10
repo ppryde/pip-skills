@@ -41,7 +41,7 @@
       "id": 6,
       "name": "audit-framework-bypass-easyaudit",
       "prompt": "Audit /django-inquisition:optimise-orm tests/fixtures/06-audit-framework-bypass/target.py — verify audit-aware escalation",
-      "expected_output": "PAT-070 banner detected; WRITE-006/007/009 escalated from medium to 🔥 Critical due to easyaudit in INSTALLED_APPS; signals_caveat blocks present",
+      "expected_output": "PAT-070 banner detected; WRITE-006/007 escalated from medium to 🔥 Critical due to easyaudit in INSTALLED_APPS; WRITE-009 stays medium (QuerySet.delete() still fires signals; flagged only for the Invoice.delete() override); signals_caveat blocks present on WRITE-006/007",
       "files": ["tests/fixtures/06-audit-framework-bypass/"]
     },
     {
@@ -83,7 +83,7 @@
       "id": 12,
       "name": "async-orm-django-4-1",
       "prompt": "Audit /django-inquisition:optimise-orm tests/fixtures/12-async-orm-django-4-1/target.py",
-      "expected_output": "PAT-050 surfaces — sync ORM call inside async def view; suggest aget/afilter (Django ≥ 4.1)",
+      "expected_output": "PAT-050 surfaces — sync ORM call inside async def view; suggest the async counterparts (aget, async for, asave; Django ≥ 4.1)",
       "files": ["tests/fixtures/12-async-orm-django-4-1/"]
     }
   ],
