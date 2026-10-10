@@ -102,7 +102,7 @@ assumption in the verdict.
 
 Do not use a hardcoded list. Discover available doctrines dynamically:
 
-1. List all `*.md` files in `<plugin-root>/doctrines/` (ignore any whose basename starts with `_`) — this SKILL.md lives at `<plugin-root>/skills/elder/SKILL.md`, so the doctrines directory is two levels up from here
+1. List all `*.md` files in `<plugin-root>/doctrines/` (ignore any whose basename starts with `_`, and `INDEX.md`, a generated index) — this SKILL.md lives at `<plugin-root>/skills/elder/SKILL.md`, so the doctrines directory is two levels up from here
 2. Separate the results into two groups:
    - **Per-language doctrines** — files whose basename matches a known templating slug: `liquid`, `handlebars`, `mjml`, `react-email`, `maizzle`
    - **Core doctrines** — all other `.md` files in the directory, except files whose basename starts with `_` (e.g. `_template.md`, an authoring scaffold, never a doctrine)
@@ -154,11 +154,14 @@ Before auditing, note which rules are conditionally active based on config:
 - `rendering_targets` governs which Outlook/Gmail/Apple Mail rules fire
 - Disable per-language rules that don't match `stack.templating`
 - Use the severity track that matches `stack.email_type`
+- Honour each rule's `> \`applies: ...\`` line (keys `esp`, `templating`, `targets`, `type`; AND across keys, OR within a key; a config key that is absent or empty filters nothing, except `esp`: with no `stack.esp`, esp-conditional rules are skipped). A rule with no `applies:` line is always active. Ignore the `gen` key when auditing
 
 ### Step 4b: Build Rule Checklist
 
 Parse all loaded doctrine files to build a complete rule inventory before any
 audit work begins. This must happen before touching any template file.
+
+Skip every rule whose header reads `` `alias of <ID>` `` instead of a severity token: it duplicates a canonical rule, carries no detect line, and is never checked. Report a finding under the canonical id with `also: <alias ids>`.
 
 For each doctrine, scan for entries matching `**[RULE-ID]**` and extract:
 - **Regex rules** — rule ID + pattern(s) from the `detect: regex` line
@@ -187,18 +190,19 @@ to each template file. This includes both pure `regex` rules and the regex
 portion of `hybrid` rules. This pass is mechanical — no LLM judgment required.
 
 **Presence patterns** (a match = violation): apply the pattern; any match is
-a confirmed finding. Where the detect line says "check ..." (for example
-"check for single font"), the pattern only nominates candidates: read the
-matched line and confirm it before recording a finding.
+a confirmed finding. Where the rule carries `` `flags: verify` `` or its detect
+note says "check ..." (for example "check for single font"), the pattern only
+nominates candidates: read the matched line and confirm it before recording a
+finding. A `patterns:` line fires on any of its patterns.
 
-**Absence patterns** (detect lines containing "absence check" or "flag if file
-contains X but not Y"):
+**Absence patterns** (detect lines of the form `absence: trigger=\`X\` require=\`Y\``,
+i.e. flag if the file contains X but not Y):
 - Condition met: file matches the trigger (e.g. contains `<mjml`) AND does NOT
   match the required tag/pattern → flag as violation
 - If trigger condition not met: rule does not apply to this file — skip silently
 
-**Conditional patterns** (detect lines with `when stack.esp = X`):
-- Apply only when `stack.esp` in config matches; skip otherwise
+**Conditional rules** (an `applies:` line, e.g. `esp=klaviyo`):
+- Apply only when the config matches (Step 4); skip otherwise
 
 Collect all regex findings as confirmed violations before starting Phase 2.
 
@@ -245,6 +249,8 @@ overrides:
 Findings with a matching override are downgraded to the override's `severity`
 (`venial` or `counsel`) and annotated inline with `(overridden: <reason>)` —
 not suppressed. An overridden mortal is no longer counted as a mortal sin.
+An override keyed on an alias id applies to its canonical rule; if both an alias and
+its canonical are keyed, the canonical's entry wins and the verdict notes the conflict.
 
 ### Step 7: Output the Verdict
 
@@ -528,7 +534,7 @@ A: Add an override in `.email-absolution/decisions.yml` with your reasoning.
 Documented exceptions are righteous — undocumented ones are not.
 
 **Q: Which rules fire for Klaviyo vs SendGrid?**
-A: Rules with `stack.esp == "klaviyo"` in their detect notes fire only when
+A: Rules with an `applies: esp=klaviyo` line fire only when
 `stack.esp: klaviyo` is set. The Elder respects context.
 
 **Q: Should I run `full` on every commit?**

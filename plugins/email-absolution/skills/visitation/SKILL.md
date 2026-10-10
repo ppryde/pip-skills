@@ -66,7 +66,7 @@ assumption in the verdict.
 
 Same doctrine set as the Elder — full scope, no reduction. Load dynamically:
 
-1. List all `*.md` files in `<plugin-root>/doctrines/` (ignore any whose basename starts with `_`, e.g. `_template.md`) — this SKILL.md lives at `<plugin-root>/skills/visitation/SKILL.md`, so the doctrines directory is two levels up from here
+1. List all `*.md` files in `<plugin-root>/doctrines/` (ignore any whose basename starts with `_`, e.g. `_template.md`, and `INDEX.md`, a generated index) — this SKILL.md lives at `<plugin-root>/skills/visitation/SKILL.md`, so the doctrines directory is two levels up from here
 2. Separate into **per-language doctrines** (filenames matching: `liquid`, `handlebars`, `mjml`, `react-email`, `maizzle`) and **core doctrines** (everything else)
 3. Load all core doctrines
 4. Load the per-language doctrine matching `stack.templating` from config; skip gracefully if none matches
@@ -109,6 +109,8 @@ Identical to the Elder — see Step 4 of the `email-absolution:elder` skill.
 Also apply the email-type severity track: each rule header contains a token of the
 form `` `transactional: <level> | marketing: <level>` `` — extract the level matching
 `stack.email_type` and record it as the rule's active severity.
+Honour each rule's `applies:` line as the Elder does, and skip rules whose header reads
+`` `alias of <ID>` `` — they are never checked; report under the canonical id with `also:`.
 
 ### Step 5: Run Audit
 
