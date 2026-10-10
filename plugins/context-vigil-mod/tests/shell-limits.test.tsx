@@ -281,7 +281,7 @@ test('R1-09: a person who comes back cancels the deferred handover', async ($, o
 })
 
 test('R1-09: a drained request runs as an unattended handover: RC gate, never a bare clear', async ($, on) => {
-  const w = world(on, { now: 1_000_000, store: { settings: { auto: true } } })
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true, rcAutoClear: 'no' } } })
   await latchedVho($, w, 'bridge')
   await w.clock.advance(HOUR + 1000)
   await $.session.measure(measure(lift))
@@ -290,11 +290,11 @@ test('R1-09: a drained request runs as an unattended handover: RC gate, never a 
   await $.tool.call(write)
   await w.clock.settle()
   expect(w.commands).not.toContain('clear')
-  expect(w.notices.some(n => n.includes('not switched on'))).toBe(true)
+  expect(w.notices.some(n => n.includes('auto-clear is off for Remote Control'))).toBe(true)
 })
 
 test('R3-06: a hot reload offers a latch-drained unattended request, it never runs it as an attended clear', async ($, on) => {
-  const w = world(on, { now: 1_000_000, store: { settings: { auto: true } } })
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true, rcAutoClear: 'no' } } })
   await latchedVho($, w, 'bridge')
   await w.clock.advance(HOUR + 1000)
   await $.session.measure(measure(lift))
@@ -302,7 +302,7 @@ test('R3-06: a hot reload offers a latch-drained unattended request, it never ru
   await $.tool.call(write)
   await w.clock.settle()
   expect(w.commands).not.toContain('clear')
-  expect(w.notices.some(n => n.includes('not switched on'))).toBe(true)
+  expect(w.notices.some(n => n.includes('auto-clear is off for Remote Control'))).toBe(true)
   w.notices.length = 0
   await $.session.start(START)   // the hot reload: $.state kept the parked pending, the timers are gone
   await w.clock.settle()

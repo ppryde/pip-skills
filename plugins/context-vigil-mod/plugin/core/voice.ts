@@ -1,13 +1,12 @@
 // Every user-facing string, emoji-led, in one place.
 export type WaitReason =
-  | 'draft' | 'latched' | 'classic' | 'rc-unanswered' | 'rc-declined' | 'rc-holdback'
+  | 'draft' | 'latched' | 'classic' | 'rc-declined' | 'rc-holdback'
   | 'countdown' | 'countdown-start'
 
 const WAIT: Record<WaitReason, string> = {
   'draft': '✍️ Handover waiting — there is a draft in your prompt box',
   'latched': '⏳ Handover waiting — the usage limit is in force',
   'classic': '🕯️ Handover skipped — classic context-vigil is active here',
-  'rc-unanswered': '📱 Handover saved — auto-clear in Remote Control is not switched on (/vigil-setup rc)',
   'rc-declined': '📱 Handover saved — auto-clear is off for Remote Control sessions',
   'rc-holdback': '📱 Handover waiting — you were active on the phone a moment ago',
   'countdown': '🧹 Handover countdown running — send anything to cancel',
@@ -40,7 +39,7 @@ export const V = {
   clearRejected: '🧹 /clear was refused — the handover is still pending; /clear to resume from it',
   countdownLine: (s: number) => `🧹 Handing over in ${s} s — 0 or send anything to cancel`,
   cancel: '✖ Cancel',
-  rcAsk: '📱 First Remote Control session with auto mode — one quick question about auto-clear',
+  rcHint: '📱 Auto-clear also runs on the phone — /vigil-setup rc to change',
   setupUsage: '⚙️ /vigil-setup [nudge|bar|auto|last-light|limits|rc] — that step name is not one of these',
   countdownCancelled: '🧹 Handover countdown cancelled — the handover is saved; /clear to resume from it',
   pendingOffer: (path: string) => `📜 A handover is waiting (${path}) — /clear to resume from it`,
