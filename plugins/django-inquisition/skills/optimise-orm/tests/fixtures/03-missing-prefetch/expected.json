@@ -27,8 +27,8 @@
   },
   {
     "id": "FETCH-012",
-    "severity_internal": "medium",
-    "tier_displayed": "medium",
+    "severity_internal": "low",
+    "tier_displayed": "low",
     "location_pattern": "target.py:49",
     "savings_basis": "unknown",
     "signals_caveat": false

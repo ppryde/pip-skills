@@ -13,7 +13,7 @@ Files are listed in the order the orchestrator walks them.
 | FETCH-003 | low | `select_related` chain > 3 deep across nullable FKs |
 | FETCH-010 | high | Missing `prefetch_related` for reverse/M2M in loop |
 | FETCH-011 | medium | `Prefetch()` with custom QS would reduce work |
-| FETCH-012 | medium | Filtered `Prefetch` without `to_attr` replaces the unfiltered relation (clarity) |
+| FETCH-012 | low | Filtered `Prefetch` without `to_attr` replaces the unfiltered relation (clarity) |
 | FETCH-020 | high | Wide column over-fetched and unread by callers |
 | FETCH-021 | medium | `.values()` / `.values_list(flat=True)` opportunity |
 | FETCH-022 | medium | `.only()` viable: callers read only a subset |

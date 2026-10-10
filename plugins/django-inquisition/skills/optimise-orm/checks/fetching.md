@@ -19,7 +19,7 @@ checks:
     severity_base: medium
   - id: FETCH-012
     title: Filtered Prefetch without to_attr replaces the unfiltered relation (clarity)
-    severity_base: medium
+    severity_base: low
   - id: FETCH-020
     title: Wide column over-fetched and unread by callers
     severity_base: high
@@ -80,7 +80,7 @@ for order in orders:
 
 ### FETCH-002
 
-**Signature:** `.select_related()` called with no arguments, causing Django to eagerly join every FK relationship it can follow (a bare `select_related()` follows only non-null FKs, and recurses through them with no depth limit) regardless of which are actually used.
+**Signature:** `.select_related()` called with no arguments, causing Django to eagerly join every FK relationship it can follow (a bare `select_related()` follows only non-null FKs, and recurses through them up to `Query.max_depth`, which is 5 levels) regardless of which are actually used.
 
 **Grep / AST hints:**
 ```regex
@@ -217,7 +217,7 @@ for author in authors:
 
 ### FETCH-012
 
-**Signature:** A `Prefetch()` with a custom `queryset=` (a filtered subset) is used without `to_attr`, and the same relation is then accessed via `obj.<relation>.all()` in calling code. This does **not** re-query — `obj.<relation>.all()` is served from the prefetch cache. The gotcha is semantic: the relation now holds **only the filtered subset** everywhere that instance is used, and any further `obj.<relation>.filter(...)` / `.count()`-style call that cannot use the cache issues a new query against the unfiltered table. Using `to_attr` keeps the unfiltered relation intact and makes the filtered list's name explicit. This is a clarity/correctness note, not a performance finding.
+**Signature:** A `Prefetch()` with a custom `queryset=` (a filtered subset) is used without `to_attr`, and the same relation is then accessed via `obj.<relation>.all()` in calling code. This does **not** re-query — `obj.<relation>.all()` is served from the prefetch cache. The gotcha is semantic: the relation now holds **only the filtered subset** everywhere that instance is used, and any further `obj.<relation>.filter(...)` / `.exclude(...)` call cannot use the cache and issues a new query against the unfiltered table (`.all()` and `.count()` on the prefetched relation are served from the cache). Using `to_attr` keeps the unfiltered relation intact and makes the filtered list's name explicit. This is a clarity/correctness note, not a performance finding.
 
 **Grep / AST hints:**
 ```regex
@@ -241,7 +241,7 @@ qs = Author.objects.prefetch_related(
 )
 for author in qs:
     books = author.books.all()  # served from the filtered prefetch cache (no re-query)
-    n = author.books.filter(is_published=True).count()  # this DOES re-query
+    n = author.books.filter(is_published=True).count()  # filter() DOES re-query
 
 # After — explicit to_attr
 qs = Author.objects.prefetch_related(

@@ -356,7 +356,7 @@ For each match of the bare form, walk back over the preceding lines in the same 
 
 **Suggested fix template:**
 ```python
-# Before — skips Invoice.delete() (custom soft-delete / cleanup logic)
+# Before — skips Order.delete() (custom soft-delete / cleanup logic)
 Order.objects.filter(archived=True).delete()
 
 # After option A — call the override per object (slower)

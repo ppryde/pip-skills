@@ -100,7 +100,7 @@ Also grep for:
 - `@receiver(pre_save\|post_save\|pre_delete\|post_delete, sender=<Model>)` patterns
 - Custom `Model.save()` and `Model.delete()` overrides
 
-Build a `{model → signal_dependencies}` map. This map is passed to all check groups and affects WRITE-001/002/003/005/006/007/008/009/020 behaviour.
+Build a `{model → signal_dependencies}` map. This map is passed to all check groups and affects WRITE-001/002/003/005/006/007/008/020 behaviour; WRITE-009 instead depends on the model overriding `Model.delete()`.
 
 ### Step 3: Target Intake
 

@@ -61,7 +61,7 @@ for event in Event.objects.all().iterator(chunk_size=2000):
 
 **Signature:** `.iterator()` used in a way that hits its real caveats. On PostgreSQL, Django's `iterator()` already streams through a **server-side cursor** regardless of `chunk_size` (`chunk_size` only sets how many rows are fetched per batch, default 2000), so a bare `.iterator()` is not itself a problem. The real caveats:
 
-1. `iterator()` combined with `prefetch_related()` and **no `chunk_size`** — prefetching works per chunk and, `chunk_size` is required: omitting it emits a deprecation warning on Django 4.1/4.2 and raises `ValueError` from Django 5.0.
+1. `iterator()` combined with `prefetch_related()` and **no `chunk_size`** — prefetching works per chunk, so `chunk_size` is required: omitting it emits a deprecation warning on Django 4.1/4.2 and raises `ValueError` from Django 5.0.
 2. Server-side cursors misbehave behind a transaction-pooling proxy (pgbouncer in transaction mode) unless `DISABLE_SERVER_SIDE_CURSORS: True` is set in the database `OPTIONS`/settings — the cursor can break or buffer everything client-side.
 
 **Grep / AST hints:**
@@ -72,11 +72,11 @@ for event in Event.objects.all().iterator(chunk_size=2000):
 Follow-up for caveat 2: look in `settings.py` for `DISABLE_SERVER_SIDE_CURSORS` and for pgbouncer / pooler hints (`CONN_MAX_AGE`, a pooler host or port 6432).
 
 **Confidence rules:**
-- High: `prefetch_related(...)` chained with `.iterator()` without `chunk_size`.
+- High: `prefetch_related(...)` chained with `.iterator()` without `chunk_size`. On Django 5.0+ this raises `ValueError` (a crash): escalate to `high` severity. On Django 4.1/4.2 it only warns: keep `low`.
 - Low: bare `.iterator()` on Postgres where settings show a transaction pooler and no `DISABLE_SERVER_SIDE_CURSORS`. Do not emit without that evidence.
 
 **Savings formula:**
-- Not a speed finding; avoids an error or unexpected client-side buffering.
+- Not a speed finding; avoids a crash (Django 5.0+ prefetch case) or unexpected client-side buffering.
 - Mark `savings_basis: static`, low severity.
 
 **Suggested fix template:**
