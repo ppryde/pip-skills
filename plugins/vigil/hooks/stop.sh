@@ -57,7 +57,7 @@ if [ "$first_line" = "DISPATCH_CLEAR" ]; then
   (
     sleep "$delay"
     if [ -n "$title" ]; then
-      tmux rename-window -t "${TMUX_PANE:-}" "$title" || true
+      tmux rename-window -t "${TMUX_PANE:-}" -- "$title" || true
     fi
     tmux send-keys -t "${TMUX_PANE:-}" "/clear" Enter || true
   ) >/dev/null 2>&1 </dev/null &

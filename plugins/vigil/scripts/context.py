@@ -22,8 +22,12 @@ def transcript_slug(cwd: Path) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", str(cwd.resolve()))
 
 
-def find_transcript(cwd: Path, home: Path) -> Path | None:
-    proj = home / ".claude" / "projects" / transcript_slug(cwd)
+def find_transcript(
+    cwd: Path, home: Path, config_dir: Path | None = None
+) -> Path | None:
+    """Newest transcript for cwd under `config_dir` (default `home/.claude`)."""
+    base = config_dir if config_dir is not None else home / ".claude"
+    proj = base / "projects" / transcript_slug(cwd)
     if not proj.is_dir():
         return None
     candidates = sorted(
@@ -42,16 +46,42 @@ def _usage_of(line: str) -> dict | None:
     return usage if isinstance(usage, dict) else None
 
 
+_FIRST_CHUNK = 64 * 1024
+
+
+def _tail_text(path: Path, size: int) -> tuple[str, bool]:
+    """Last `size` bytes of path as text, plus whether that is the whole file."""
+    with path.open("rb") as fh:
+        fh.seek(0, 2)
+        total = fh.tell()
+        start = max(0, total - size)
+        fh.seek(start)
+        data = fh.read()
+    return data.decode("utf-8", errors="replace"), start == 0
+
+
+def _latest_usage(path: Path) -> dict | None:
+    """Newest usage record, reading from the end in doubling chunks."""
+    size = _FIRST_CHUNK
+    while True:
+        text, whole = _tail_text(path, size)
+        lines = text.splitlines()
+        if not whole and lines:
+            lines = lines[1:]  # the first line is probably cut mid-record
+        for line in reversed(lines):
+            usage = _usage_of(line)
+            if usage is not None:
+                return usage
+        if whole:
+            return None
+        size *= 2
+
+
 def context_tokens(transcript_path: Path) -> int | None:
     try:
-        text = transcript_path.read_text()
+        latest = _latest_usage(transcript_path)
     except OSError:
         return None
-    latest: dict | None = None
-    for line in text.splitlines():
-        usage = _usage_of(line)
-        if usage is not None:
-            latest = usage
     if latest is None:
         return None
     try:
