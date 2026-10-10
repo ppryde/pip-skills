@@ -17,9 +17,8 @@ Chronicle's number is `tokens x list price`, read from transcripts on disk. The 
 what Anthropic billed. They differ for a small set of reasons, and this skill walks them in the order
 that cost the least to check. Run it by hand; it is deliberately not part of any sync.
 
-Define the CLI once, relative to this skill (`skills/reconcile/` sits two levels under the plugin
-root): `CLI=<plugin root>/scripts/cli.py`, and run every command as `python3.11 "$CLI" <verb>` (every
-verb prints JSON; chronicle needs Python >= 3.10). Use the checkout that has the merged code; an old
+Locate the CLI relative to the plugin root: `python plugins/chronicle/scripts/cli.py <verb>` (every
+verb prints JSON; it needs Python 3.10 or later). Use the checkout that has the merged code; an old
 checkout silently gives old numbers. Read the store with `file:<db>?mode=ro`. Always compare per
 account and per day. The console's days are UTC; chronicle's `by_day` buckets use LOCAL time, so a
 turn near midnight lands on different days and the skew is not bounded by "a few dollars". For a
@@ -37,7 +36,7 @@ like-for-like daily comparison use the UTC variant in `references/queries.md`.
    ```
    Do every experiment on a COPY with a scratch config dir, and keep `sync` away from the network and
    other sources: `env -u CLAUDE_CONFIG_DIRS CLAUDE_CONFIG_DIR=$SCRATCH CHRONICLE_DB=$COPY
-   CHRONICLE_NO_REMOTES=1 CHRONICLE_NO_PRICING_REFRESH=1 python3.11 "$CLI" ...` (`sync` otherwise
+   CHRONICLE_NO_REMOTES=1 CHRONICLE_NO_PRICING_REFRESH=1 python plugins/chronicle/scripts/cli.py ...` (`sync` otherwise
    honours `CLAUDE_CONFIG_DIRS`, configured remotes and volumes, and the daily price refresh). Touch
    the real store only for a step you have already proved on the copy.
 2. **Never delete or rebuild the store.** Claude Code prunes old transcripts and chronicle keeps the
@@ -56,7 +55,7 @@ like-for-like daily comparison use the UTC variant in `references/queries.md`.
 ### 0. Frame the gap
 Get the console figure for the same account and window (Claude Code product only, UTC) and,
 ideally, its daily bars and per-model split. Compute chronicle's for the same window with
-`python3.11 "$CLI" summary --account <uuid> --since <ISO>` (the `since` value must be ISO-8601, not an
+`python plugins/chronicle/scripts/cli.py summary --account <uuid> --since <ISO>` (the `since` value must be ISO-8601, not an
 epoch; the dashboard's `GET /api/chronicle/summary` returns the same JSON). Spend IN the window is
 `sum(by_day[*].cost_usd)`: the window selects sessions, so `totals` and `by_model` are whole-session sums
 and over-count sessions that began before the window. The rest of the skill is explaining that difference.

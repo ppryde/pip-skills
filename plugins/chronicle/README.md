@@ -82,7 +82,7 @@ afterwards keeps it clean. `sync --full` is not required, and either order conve
 
 ## Usage
 
-Requires Python >= 3.10 (`python3.11` or the repo `.venv`); an older interpreter prints a one-line JSON error and exits 2.
+Requires Python 3.10 or later; an older interpreter prints a one-line JSON error and exits 2.
 
 Locate `cli.py` relative to the plugin root (when installed from the marketplace the scripts
 live under `~/.claude/plugins/chronicle/`):

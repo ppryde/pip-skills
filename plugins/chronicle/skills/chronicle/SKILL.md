@@ -14,16 +14,12 @@ description: >
 # Chronicle
 
 The chronicle is a SQLite record of every session's toil, read from the transcripts Claude
-Code already writes. Drive it through the CLI. Every verb prints JSON. It needs Python >= 3.10
-(use `python3.11` or the repo `.venv`; an older interpreter prints a one-line JSON error and
-exits 2).
-
-Define the CLI once, relative to this skill (`skills/chronicle/` sits two levels under the
-plugin root, so `../../scripts/cli.py`), and use it for every verb below:
+Code already writes. Drive it through the CLI (locate `cli.py` relative to this skill; when
+installed as a plugin the scripts live under the plugin root). Every verb prints JSON. It needs
+Python 3.10 or later; an older interpreter prints a one-line JSON error and exits 2.
 
 ```bash
-CHRONICLE_CLI=<plugin root>/scripts/cli.py     # i.e. ../../scripts/cli.py from this skill
-python3.11 "$CHRONICLE_CLI" <verb>
+python .../scripts/cli.py <verb>
 ```
 
 ## Sync first
@@ -71,8 +67,7 @@ If the user works in a dev container whose Claude config lives in a Docker named
 ### Keep the output small
 `sessions` defaults to `--limit 200` and `session <id>` on a long session prints every turn.
 Pass `--limit 10` to `20`, and extract only the keys you need rather than reading the whole
-JSON, for example `python3.11 "$CHRONICLE_CLI" summary --days 7 | python3.11 -c "import json,sys;
-d=json.load(sys.stdin);print(d['totals'],d['by_day'][-7:])"`. Avoid a raw `session <id>` on a
+JSON (for instance, read only `totals` and the last seven `by_day` entries of `summary --days 7`). Avoid a raw `session <id>` on a
 long session; ask for the part you need.
 
 Report numbers as the CLI gives them; say which window and scope you used. "Context
