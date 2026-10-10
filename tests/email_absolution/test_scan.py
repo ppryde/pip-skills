@@ -171,3 +171,60 @@ def test_hostile_long_line_is_bounded_by_the_line_and_the_timer(R, docs, tmp_pat
     f = write(tmp_path, "h.html", "rgb(" + " " * 20000 + "\n" + "<img src=x>\n")
     out = scan(R, docs, [f])
     assert "# scan done:" in out
+
+
+# ---- hostile paths (review round 1, B1): a scanned path may come from an untrusted branch
+
+def test_symlinks_are_skipped_never_followed(R, docs, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.html"
+    secret.write_text("<img src=x>\n", encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    to_secret = repo / "x.html"
+    to_secret.symlink_to(secret)
+    zero = repo / "zero.html"
+    zero.symlink_to("/dev/zero")
+    out = scan(R, docs, [to_secret, zero])
+    assert f"skipped: {to_secret} (symlink)" in out
+    assert f"skipped: {zero} (symlink)" in out
+    assert "ACCESS-001" not in out
+    assert "# scan done: 0 hit(s), 2 skipped, 0 timed out" in out
+
+
+def test_fifo_is_skipped_without_blocking(R, docs, tmp_path):
+    import os
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("no mkfifo")
+    fifo = tmp_path / "pipe.html"
+    os.mkfifo(fifo)
+    out = scan(R, docs, [fifo])
+    assert f"skipped: {fifo} (not a regular file)" in out
+
+
+def test_directory_is_not_a_regular_file(R, docs, tmp_path):
+    d = tmp_path / "dir.html"
+    d.mkdir()
+    assert "(not a regular file)" in scan(R, docs, [d])
+
+
+def test_a_file_over_the_cap_is_skipped_by_content_not_by_st_size(R, tmp_path, monkeypatch):
+    big = tmp_path / "big.html"
+    big.write_bytes(b"a" * (R.MAX_SCAN_BYTES + 1))
+    real = R.os.lstat
+
+    def lying(p, *a, **k):
+        st = real(p, *a, **k)
+        return R.os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink, st.st_uid, st.st_gid, 0,
+                                 int(st.st_atime), int(st.st_mtime), int(st.st_ctime)))
+    monkeypatch.setattr(R.os, "lstat", lying)
+    text, why = R.read_scannable(big)
+    assert text == "" and why.startswith("over ")
+
+
+def test_exactly_the_cap_is_still_scanned(R, tmp_path):
+    f = tmp_path / "edge.html"
+    f.write_bytes(b"a" * R.MAX_SCAN_BYTES)
+    text, why = R.read_scannable(f)
+    assert why == "" and len(text) == R.MAX_SCAN_BYTES

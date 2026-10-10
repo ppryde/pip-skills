@@ -257,3 +257,10 @@ def test_canonical_entry_wins_when_both_are_keyed(R, docs):
 def test_unknown_override_ids_pass_through(R, docs):
     out, notes = R.resolve_overrides({"ZZZ-999": {"severity": "venial"}}, docs)
     assert out == {"ZZZ-999": {"severity": "venial"}} and not notes
+
+
+def test_select_shows_verify_for_a_detect_note_that_says_check(R, docs):
+    """Same marker as scan (review A2): ACCESS-020's note is 'check ...', so it only nominates."""
+    out = R.render_select(docs, R.Config(email_type="marketing", targets=("outlook-2019",)))
+    row = next(ln for ln in out.splitlines() if ln.startswith("ACCESS-020 |"))
+    assert row.split(" | ")[2] == "verify"

@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
 import signal
+import stat
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -655,7 +657,7 @@ def render_select(docs, cfg: Config) -> str:
     out.append("## REGEX   (id | sev | flags | pattern)")
     for r in rx:
         for row in _pattern_rows(r):
-            out.append(f"{r.id} | {r.severity(cfg.email_type)} | {','.join(r.flags) or '-'} | {row}")
+            out.append(f"{r.id} | {r.severity(cfg.email_type)} | {','.join(verify_flags(r)) or '-'} | {row}")
     out.append("## CONTEXTUAL   (id | sev | check)")
     for r in cx:
         tag = " [advisory]" if r.detect.advisory else ""
@@ -728,14 +730,27 @@ MAX_SCAN_BYTES = 2 * 1024 * 1024
 
 
 def read_scannable(path: Path):
-    """(text, skipped_reason). Binary (NUL in the first 8 KB) and >2 MiB files are skipped, never silently."""
+    """(text, skipped_reason). Symlinks, non-regular files, binary (NUL in the first 8 KB) and >2 MiB files are skipped, never silently.
+
+    A scanned path may come from an untrusted branch, so it is never followed (a symlink to
+    /dev/zero or ~/.ssh/id_rsa) and st_size is never trusted: at most cap+1 bytes are read
+    from the opened regular file.
+    """
     try:
-        size = path.stat().st_size
-        if size > MAX_SCAN_BYTES:
-            return "", f"over {MAX_SCAN_BYTES // (1024 * 1024)} MiB"
-        raw = path.read_bytes()
+        st = os.lstat(path)
+        if stat.S_ISLNK(st.st_mode):
+            return "", "symlink"
+        if not stat.S_ISREG(st.st_mode):
+            return "", "not a regular file"
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(fd, "rb") as fh:
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                return "", "not a regular file"
+            raw = fh.read(MAX_SCAN_BYTES + 1)
     except OSError as e:
         return "", f"unreadable: {e.strerror or e}"
+    if len(raw) > MAX_SCAN_BYTES:
+        return "", f"over {MAX_SCAN_BYTES // (1024 * 1024)} MiB"
     if b"\0" in raw[:8192]:
         return "", "binary"
     return raw.decode("utf-8", errors="replace"), ""
@@ -787,6 +802,14 @@ def _short(line: str) -> str:
     return line if len(line) <= SCAN_LINE_CHARS else line[: SCAN_LINE_CHARS - 1] + "…"
 
 
+def verify_flags(r: Rule) -> list:
+    """The rule's flags, plus `verify` when its detect note says "check ..." (the pattern then only nominates)."""
+    flags = list(r.flags)
+    if "verify" not in flags and r.detect is not None and r.detect.note and re.search(r"\bcheck\b", r.detect.note, re.I):
+        flags.append("verify")
+    return flags
+
+
 def scan_text(rules, text: str):
     """Phase 1 over one file's text: [(line, id, matched line, flags)] plus {id: extra hits not listed}.
 
@@ -803,7 +826,7 @@ def scan_text(rules, text: str):
             continue
         d = r.detect
         # a detect note that says "check ..." means the pattern only nominates (as `flags: verify`)
-        flags = ",".join(r.flags) + (",verify" if d.note and re.search(r"\bcheck\b", d.note, re.I) else "")
+        flags = ",".join(verify_flags(r))
         if d.absence:
             if re.search(d.absence[0], text) and not re.search(d.absence[1], text):
                 out.append((1, r.id, "absence: trigger present, required pattern missing", flags))

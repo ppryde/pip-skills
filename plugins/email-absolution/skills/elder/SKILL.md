@@ -10,7 +10,8 @@ is examined against the active doctrines: rendering, HTML and CSS, content and U
 accessibility, deliverability, known afflictions and the per-language doctrine.
 No heresy escapes the Elder's eye.
 
-Read `${CLAUDE_PLUGIN_ROOT}/references/common.md` and `${CLAUDE_PLUGIN_ROOT}/references/audit.md` before Step 1 (they hold the config schema, the `rules.py` commands, the audit passes, overrides and verdict rules).
+Read `${CLAUDE_PLUGIN_ROOT}/references/common.md` and `${CLAUDE_PLUGIN_ROOT}/references/audit.md` before Step 1 (config, `rules.py` commands, audit passes, overrides, verdict rules).
+Scripts: `${CLAUDE_PLUGIN_ROOT}/scripts/rules.py`
 `Bash` only for the `git` commands in `audit.md §Scope` and `rules.py`. `Write` only for doc-mode output (`docs/emails/audits/`), `.email-absolution/decisions.yml`, and scaffolding `.email-absolution/config.yml` when the caller agrees; `Edit` on the audited template only when the caller chooses Fix in interactive mode.
 
 ## Mode Detection

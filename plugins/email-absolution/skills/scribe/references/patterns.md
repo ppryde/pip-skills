@@ -1,6 +1,14 @@
 # Template patterns
 
-Read only the section for `stack.templating` and the section for the email type being generated.
+Read the section for `stack.templating` and the section for the template kind being generated.
+
+## Always
+
+No rule in the doctrines requires these two; they hold for every full template:
+
+- Put a CSS reset block in the `<head>` `<style>` covering the Outlook, Apple Mail and Gmail overrides.
+- Wrap the content in a `max-width: 600px` container.
+
 
 ## Structure by templating language
 
@@ -41,9 +49,9 @@ elements. Confirm `config.production.js` considerations in a comment.
 
 **HTML** — plain table-based HTML with fully inlined styles. No Tailwind, no framework.
 
-## Required sections by email type
+## Required sections by template kind
 
-Wherever a footer below lists an address, the skill's footer rule governs it: a physical address is required for marketing, and for transactional email only when promotional content is present.
+Wherever a footer below lists an address, the skill's footer rule governs it: the address is always included; omitting it from a transactional email without promotional content is venial.
 
 ### Order confirmation
 
@@ -70,3 +78,17 @@ No order data. No marketing content. Plain and fast.
 
 Required sections: header, line items table, totals table (subtotal, tax, total),
 payment method (last 4 digits), billing address, footer.
+
+## Common mistakes
+
+| Mistake | Fix |
+|---------|-----|
+| Using `div` for layout | Table-based structure only: `<table>`, `<tr>`, `<td>` |
+| Omitting `role="presentation"` | Every layout table requires it |
+| CSS shorthand padding on `<td>` | Longhand `padding-top`/`-right`/`-bottom`/`-left` on `<td>` (HTML-008) |
+| Relative `href` values | All URLs must be absolute HTTPS |
+| Omitting default/fallback filters | Every output tag needs a fallback, including URLs and integers |
+| Forgetting the preheader | First element inside `<body>` is the hidden preheader div (six-property recipe, GOTCHA-028) |
+| Omitting the unsubscribe link | Required by CAN-SPAM, GDPR, CASL and Google/Yahoo 2024 |
+| Inline JavaScript | Forbidden in email: stripped, and may trigger spam filters |
+| Layout-critical styles only in a `<head>` `<style>` block | Inline them; keep `@media` and dark-mode rules in `<style>` as an enhancement only (HTML-009) |

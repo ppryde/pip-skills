@@ -4,7 +4,7 @@ Elder, Visitation and Scribe read this file at Step 1. Skills cite a section by 
 
 ## Paths
 
-- Plugin root: `${CLAUDE_PLUGIN_ROOT}`, expanded when the skill loads. If it reaches you unexpanded, the plugin root is two levels above the SKILL.md you are reading.
+- Scripts: the `Scripts:` line of your SKILL.md gives the resolved path of `rules.py` (Claude Code substitutes the plugin-root variable in the SKILL.md body only, never in a file you `Read`). Wherever this file or `audit.md` writes `<rules.py>`, use that path. `<root>` is the plugin root: the directory that holds `scripts/`.
 - Doctrines: `<root>/doctrines/*.md`. Basenames starting with `_` (`_template.md`, an authoring scaffold) and `INDEX.md` (generated) are never doctrines. `rules.py` already skips them.
 - Shared references: `<root>/references/` (this file, `audit.md`). Each skill's own references sit in its `references/`.
 
@@ -39,8 +39,6 @@ exclude:
 
 If `.email-absolution/config.yml` is not found:
 
-If `.email-absolution/config.yml` is not found:
-
 > "The Elder cannot convene without a doctrine manifest. No `.email-absolution/config.yml` was found.
 >
 > Shall I scaffold one? I will ask a few questions about your ESP, templating stack, and email directory paths — then the Inquisition may begin in earnest."
@@ -72,15 +70,17 @@ The values a config key or an `applies:` line may hold. `rules.py` is the source
 Never read the doctrines whole and never hardcode rule ids. Ask `rules.py`. One command shape, run with Bash; do not reshape it:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rules.py select --email-type <marketing|transactional> [--esp <E>] [--templating <L>] [--targets <a,b>] [--doctrine <D>]
+python3 '<rules.py>' select --email-type '<marketing|transactional>' [--esp '<E>'] [--templating '<L>'] [--targets '<a,b>'] [--doctrine '<D>']
 ```
+
+**Quote for the shell.** Every path and every config-derived value goes in single quotes, as above. A value that contains a single quote or a newline, or starts with `-`, is never put in a shell command: report it, and handle that file by hand with `Read` / `Grep` (a config value like that is a malformed config: stop and say so). Config values must also be in the vocabulary below. The same holds for every `git` / `gh` command in `audit.md`: quote `<base>` and each path.
 
 Flags come from the config: `--email-type` always, the others only when the key is set (`--targets` is `stack.rendering_targets` joined with commas). Subcommands share those flags:
 
 | Command | Gives you |
 |---|---|
-| `select` | the active checklist: REGEX `id \| sev \| flags \| pattern` and CONTEXTUAL `id \| sev \| check`, under a header with counts. Severity is already the active track's. Aliases and `_*` files never appear |
-| `scan --files <F...>` | Phase 1 run for you: `file:line \| id \| matched line` for each active regex rule; `[verify]` means read the line before recording a finding. Lists binary and over-2-MiB files under `skipped:` and prints `scan timed out: <file>` for a file that exceeds 5 s: apply Phase 1 to those by hand |
+| `select` | the active checklist: REGEX `id \| sev \| flags \| pattern` and CONTEXTUAL `id \| sev \| check`, under a header with counts. `verify` in flags (or a `check ...` note) means the pattern only nominates. Severity is already the active track's. Aliases and `_*` files never appear |
+| `scan --files <F...>` | Phase 1 run for you: `file:line \| id \| matched line` for each active regex rule; `[verify]` means read the line before recording a finding. Lists binary, over-2-MiB, symlink and non-regular files under `skipped:` (never followed) and prints `scan timed out: <file>` for a file that exceeds 5 s: apply Phase 1 to those by hand |
 | `batches` | the audit split: `batch N \| doctrines \| count \| ids`; pass a batch's ids to `select --ids` / `scan --ids` (`audit.md §Dispatch`) |
 | `constraints` | Scribe's binding rules: statements only, grouped mortal, venial, counsel; honours `gen=no` and skips tooling |
 | `show <ID...>` | the full rule block (rationale, source, detect) and its `file:line`; use it for the reason and fix text of a finding |
