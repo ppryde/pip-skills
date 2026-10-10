@@ -303,7 +303,7 @@ REWRITE = {
                 "[{%$\\[<@]|\\*\\|)[^\"']+[\"']` — any src/href that is not one of: https:, mailto:, tel:, cid:, sms:, geo:, "
                 "webcal:, viber:, an anchor (#), or a template placeholder starting with `{` (Liquid/Handlebars), `%` "
                 "(Mailgun %var%, %%x%%), `$` (`$url`, `${x}`), `[` (`[unsubscribe]`, `[[x]]`), `<` (`<%= %>`, `<?= ?>`, "
-                "`<unsubscribe>`) or `*|` (Mailchimp). Everything else fires: root-relative, plain-relative "
+                "`<unsubscribe>`), `@` (Razor `@Model.Url`) or `*|` (Mailchimp). Everything else fires: root-relative, plain-relative "
                 "(`logo.png`, `./a`, `../a`), protocol-relative, `www.`, http: in any case, javascript:, ftp:, data:"),
     ),
     "RENDER-008": dict(
