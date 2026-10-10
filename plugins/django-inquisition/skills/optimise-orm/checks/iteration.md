@@ -77,7 +77,7 @@ Follow-up for caveat 2: look in `settings.py` for `DISABLE_SERVER_SIDE_CURSORS` 
 
 **Savings formula:**
 - Not a speed finding; avoids a crash (Django 5.0+ prefetch case) or unexpected client-side buffering.
-- Mark `savings_basis: static`, low severity.
+- Mark `savings_basis: static`. Severity: low on Django 4.1/4.2 (warning only) and for the pooler caveat; high on Django 5.0+ for prefetch_related with no `chunk_size` (raises `ValueError`).
 
 **Suggested fix template:**
 ```python

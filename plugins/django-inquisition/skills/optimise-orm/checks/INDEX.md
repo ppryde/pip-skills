@@ -70,7 +70,7 @@ Files are listed in the order the orchestrator walks them.
 | ID | Default Severity | Rule |
 |---|---|---|
 | ITER-001 | high | Large queryset materialised without `.iterator(chunk_size=…)` |
-| ITER-002 | low | `iterator()` caveats: `prefetch_related` without `chunk_size`, server-side cursors behind a pooler |
+| ITER-002 | low (high for prefetch without `chunk_size` on Django 5.0+) | `iterator()` caveats: `prefetch_related` without `chunk_size`, server-side cursors behind a pooler |
 | ITER-010 | medium | Same query re-issued in scope (`aggregate()`/`in_bulk()` after evaluation, repeated `filter()` chains) |
 | ITER-011 | low | redundant `.all()` before `.filter()` on a QuerySet variable (style) |
 
