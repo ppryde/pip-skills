@@ -29,7 +29,7 @@ Get the head SHA with:
 
 Command: `references/commands.md`, section "Step 2: head SHA".
 
-Filter check runs to identify review-generating bots: compare each check run's `app.slug` or `app.name` against the known agent list (section "Known Agent Usernames" below) (e.g., slugs containing "coderabbit", "cubic", "augment", "copilot"). Ignore CI, deploy, and security checks — they don't produce review comments. If you cannot determine whether a check produces review comments, include it with a caveat: "(may not produce review comments)."
+Filter check runs to identify review-generating bots: compare each check run's `app.slug` or `app.name` against the known agent list (section "Known Agent Usernames" below; e.g., slugs containing "coderabbit", "cubic", "augment", "copilot"). Ignore CI, deploy, and security checks — they don't produce review comments. If you cannot determine whether a check produces review comments, include it with a caveat: "(may not produce review comments)."
 
 Some bots report through the commit-status API rather than as check runs. Also run the commit-status command (`references/commands.md`, section "Step 2: commit statuses"); on a best-effort basis, treat a `state: pending` status whose `context` matches a known agent as a review still running, with the same caveat for contexts you cannot attribute.
 

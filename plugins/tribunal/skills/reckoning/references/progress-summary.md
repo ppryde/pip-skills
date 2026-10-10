@@ -2,7 +2,7 @@
 
 This is **not** the default mode — only triggered by the phrases listed in the Mode Selection section of `SKILL.md`. This mode has higher token usage as it covers all review iterations, not just the latest unresolved comments.
 
-Priority tiers, as used in the round tables: Critical = `blocking` or `security`; High = `logic` or `tests`; Medium = `style` or `docs`; Low = `suggestion`, `question`, `praise`. The full definitions are in `references/present.md`.
+Judge each comment's priority directly from its content, using four tiers: Critical = blocks merge or is a security issue; High = a logic error or a missing or wrong test; Medium = style or documentation; Low = a suggestion, question, or praise.
 
 Produce a round-by-round table showing the full lifecycle of PR review feedback.
 
