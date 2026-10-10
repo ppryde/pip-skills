@@ -225,10 +225,10 @@ def sentence_with(paragraph: str, pattern: str) -> str:
     return ""
 
 
-def brief(text: str, limit: int) -> str:
-    """Drop a trailing ` -- explanation`, collapse whitespace, cut at `limit` characters."""
-    flat = re.split(r"\s+[\u2014\u2013-]{1,2}\s+", " ".join(text.split()), maxsplit=1)[0]
-    return flat if len(flat) <= limit else flat[: limit - 1].rstrip() + "\u2026"
+def brief(text: str) -> str:
+    """Drop a trailing ` -- explanation` and collapse whitespace. Never truncates: a cut
+    could land inside a backticked glob or drop an entry that Covenant must match."""
+    return re.split(r"\s+[\u2014\u2013-]{1,2}\s+", " ".join(text.split()), maxsplit=1)[0]
 
 
 def doctrine_entry(path: Path) -> dict:
@@ -318,11 +318,11 @@ def doctrines_index(root: Path) -> tuple[Path, str]:
         out += [
             f"## {e['name']}", "",
             f"- ids: {e['prefix']}-{e['lo']:03d} .. {e['prefix']}-{e['hi']:03d} ({e['rules']} rules)",
-            f"- when: {cell(brief(e['when'], 70))}",
-            *([f"- when not: {cell(brief(e['when_not'], 50))}"] if e["when_not"] else []),
-            f"- dir signals: {cell('; '.join(brief(s, 80) for s in e['dir'][:6])) or 'none'}",
-            f"- file signals: {cell('; '.join(brief(s, 56) for s in e['file_sig'][:3])) or 'none'}",
-            f"- anti-signals: {cell('; '.join(brief(s, 80) for s in e['anti'][:3])) or 'none'}",
+            f"- when: {cell(e['when'])}",
+            *([f"- when not: {cell(e['when_not'])}"] if e["when_not"] else []),
+            f"- dir signals: {cell('; '.join(brief(s) for s in e['dir'])) or 'none'}",
+            f"- file signals: {cell('; '.join(brief(s) for s in e['file_sig'])) or 'none'}",
+            f"- anti-signals: {cell('; '.join(brief(s) for s in e['anti'])) or 'none'}",
             f"- cross-refs: {', '.join(planned) or 'none'}",
             f"- audit: {e['audit']}", "",
         ]

@@ -31,7 +31,7 @@ Use bullet points for concrete benefits:]
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`).
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`).
 Use relative paths without `src/` prefix (e.g. `domain/` not `src/domain/`):
 - `path/to/scan/` — what lives here and why it matters
 - `another/path/` — scoped explanation

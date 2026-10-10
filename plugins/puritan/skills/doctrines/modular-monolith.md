@@ -29,7 +29,7 @@ This pattern is the "Goldilocks" choice for systems with high domain complexity 
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`):
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`):
 - `modules/` — Root directory for functional modules (e.g., `modules/billing/`).
 - `modules/*/api/` — The public interface; the ONLY folder accessible to other modules.
 - `modules/*/internal/` — Private implementation, domain logic, and persistence logic.

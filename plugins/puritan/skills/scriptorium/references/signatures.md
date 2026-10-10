@@ -15,19 +15,19 @@ the codebase without running a full audit.
 Directory signals (counted by Covenant):
 - `specific/sub/path/` — what its presence implies
 - `another/path/` — what its presence implies
-[3–6 entries]
+[typically 3–7 entries]
 
 ### File signals
 File signals (counted by Covenant):
 - Files named `*PatternSpecific.*` in [layer] directories
 - Configuration files: `pattern-config.yml`
-[2–4 entries]
+[typically 2–5 entries]
 
 ### Anti-signals
 Suggest [Pattern] is NOT in use:
 - [Structural absence or alternative structure that rules this out]
 - [Reference to adjacent pattern it might be confused with]
-[2–4 entries]
+[typically 2–4 entries]
 ```
 
 **Rules for writing good signals:**
@@ -35,7 +35,7 @@ Suggest [Pattern] is NOT in use:
 | Rule | Why |
 |------|-----|
 | Use specific sub-paths (`infrastructure/event_store/`), not bare parent dirs (`infrastructure/`) | Parent dirs appear in many patterns; sub-paths discriminate |
-| Put the path first, then ` — meaning`; keep each entry short | The generated INDEX keeps only the path part |
+| Put the path or glob first, in backticks, then ` — meaning`; keep each entry short | The generated INDEX drops everything after the ` — ` and copies the rest of the entry whole (never truncated), so every glob Covenant must match has to sit before the dash |
 | Do not state a count threshold in the preamble | Covenant scores signals (a file signal is stronger than a directory signal); a second threshold here would conflict |
 | Anti-signals must name the pattern they point toward (`leans DDD`, `leans Microservices`) | Lets Covenant present a scored comparison rather than a yes/no |
 | Generic dirs (`services/`, `domain/`, `shared/`) must be qualified with required context | `services/` alone fires on Layered, Microservices and Modular Monolith |

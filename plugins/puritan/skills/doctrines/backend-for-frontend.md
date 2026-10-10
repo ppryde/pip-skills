@@ -29,7 +29,7 @@ Use the BFF pattern when your application supports multiple diverse client types
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`):
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`):
 - `bff/` — Root directory for all specialized backends.
 - `bff/*/api/` — Client-facing endpoint definitions (REST/GraphQL).
 - `bff/*/mappers/` — Logic transforming Core service models into UI-specific DTOs.

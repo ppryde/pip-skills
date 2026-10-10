@@ -36,7 +36,7 @@ Read `.architecture/config.yml` and, if present, `.architecture/decisions.yml` (
 ### Step 2: Discover Doctrines
 For each doctrine in config:
 1. Check `<plugin-root>/skills/doctrines/<name>.md` exists; warn if missing and continue with the others
-2. Find its `audit: L<a>-<b>` line in `doctrines/INDEX.md` (the Violation Catalog span). Read INDEX only; do not read the doctrine files yourself.
+2. Find its `audit: L<a>-<b>` line in `doctrines/INDEX.md`: the audit span, from `## Applicable Directories` through `## Allowed Exceptions`. Read INDEX only; do not read the doctrine files yourself. With no (or a stale) INDEX row, see `../_shared/config.md`: the subagent reads that heading span itself.
 3. If the user asks which doctrines are available, present the discovered list (`../_shared/config.md`)
 
 ### Step 3: Determine Scope
@@ -62,7 +62,7 @@ At or under 100 files proceed silently. In non-interactive report mode, phrase i
 > "⚠ Scope: N files across X directories. Proceeding with audit. Use `targets:` in `.architecture/config.yml` to narrow scope."
 
 ### Step 4: Run Audit
-- **Report mode (parallel):** dispatch one subagent per doctrine, all in one message. Each gets: the doctrine **path and its `audit: L<a>-<b>` range** (never the doctrine content; the subagent reads only that span with `Read(offset=<a>, limit=<b>-<a>+1)`), the files to audit for that doctrine, and the JSON contract (`references/report-format.md`).
+- **Report mode (parallel):** dispatch one subagent per doctrine, all in one message. Each gets: the doctrine **path and its `audit: L<a>-<b>` range** (or the heading names) (never the doctrine content; the subagent reads only that span with `Read(offset=<a>, limit=<b>-<a>+1)`), the files to audit for that doctrine, and the JSON contract. Read `references/report-format.md` now and paste its JSON contract into each subagent prompt.
 - **Interactive mode (sequential):** per doctrine, audit it as above, display each violation, and ask: *Fix this violation / Explain why this matters / Skip for now / Mark as allowed exception*. Act on the answer.
 
 ### Step 5: Collate and Classify

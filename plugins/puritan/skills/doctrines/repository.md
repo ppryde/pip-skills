@@ -36,7 +36,7 @@ Use the Repository pattern in any system with a meaningful separation between bu
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`):
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`):
 - `repositories/` — concrete repository implementations; all database queries live here
 - `infrastructure/persistence/` — alternative to `repositories/` in Hexagonal layouts; adapters implementing repository interfaces
 - `domain/` or `domain/repositories/` — repository interface definitions (abstract contracts, no implementations)

@@ -34,7 +34,7 @@ model the single source of truth for business rules. This means:
 
 ## Applicable Directories
 
-Primary targets (from `.architecture/config.yml` `layers` mapping):
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`):
 - `domain/` layer — ALL files (strictest rules)
 - `application/` layer — dependency direction only
 - `api/` and `infrastructure/` — checked only for inward dependency violations

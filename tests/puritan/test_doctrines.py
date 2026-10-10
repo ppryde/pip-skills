@@ -57,3 +57,37 @@ def test_signal_preambles_carry_no_numeric_threshold(path):
     for sub in ("Directory signals", "File signals"):
         lines = sig.split(f"### {sub}\n", 1)[1].split("\n")
         assert not re.search(r"\d", lines[0]), f"{path.name}: {sub} preamble has a number: {lines[0]}"
+
+
+INDEX = DOCTRINES / "INDEX.md"
+
+
+def sig_items(path, sub):
+    sig = text(path).split("## Detection Signatures", 1)[1]
+    block = sig.split(f"### {sub}\n", 1)[1].split("\n### ", 1)[0].split("\n## ", 1)[0]
+    return [m.group(1) for l in block.split("\n") if (m := re.match(r"-\s+(.*)$", l))]
+
+
+def index_row(name, label):
+    section = text(INDEX).split(f"\n## {name}\n", 1)[1].split("\n## ", 1)[0]
+    return re.search(rf"^- {re.escape(label)}: (.*)$", section, re.M).group(1)
+
+
+@pytest.mark.parametrize("path", FILES, ids=lambda p: p.name)
+@pytest.mark.parametrize("sub,label", [("Directory signals", "dir signals"), ("File signals", "file signals"),
+                                       ("Anti-signals", "anti-signals")])
+def test_index_keeps_every_signal_whole(path, sub, label):
+    items = sig_items(path, sub)
+    row = index_row(path.stem, label)
+    entries = [e.strip() for e in row.split("; ")]
+    assert len(entries) == len(items), f"{path.name} {label}: INDEX has {len(entries)}, doctrine has {len(items)}"
+    assert row.count("`") % 2 == 0, f"{path.name} {label}: unbalanced backticks in INDEX row"
+    assert "…" not in row, f"{path.name} {label}: INDEX row is truncated"
+    for item in items:
+        for token in re.findall(r"`[^`]+`", re.split(r"\s+[—–-]{1,2}\s+", item, maxsplit=1)[0]):
+            assert token in row, f"{path.name} {label}: {token} missing from INDEX"
+
+
+@pytest.mark.parametrize("path", FILES, ids=lambda p: p.name)
+def test_index_when_is_not_truncated(path):
+    assert "…" not in index_row(path.stem, "when")

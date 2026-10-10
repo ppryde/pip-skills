@@ -11,20 +11,20 @@ Each `## <name>` is the file `<name>.md` in this folder. `audit:` is the contigu
 ## backend-for-frontend
 
 - ids: BFF-001 .. BFF-050 (50 rules)
-- when: Use the BFF pattern when your application supports multiple diverse c…
+- when: Use the BFF pattern when your application supports multiple diverse client types that have significantly different data requirements, display constraints, or security profiles.
 - dir signals: `bff/`; `bff/web/`, `bff/mobile/`, `bff/tv/`; `bff/*/api/`; `bff/*/mappers/`; `bff/*/clients/`
-- file signals: Files named `*BffController.*`, `*BffService.*`, or `*B…; Aggregation files that combine multiple upstream servic…; Client-specific DTO or response model files (e.g. `*Mob…
-- anti-signals: Single API layer serving all client types from the same endpoints with no clien…; No client-specific response shaping, aggregation, or transformation layer; No `bff/` directory or client-differentiated backend structure
+- file signals: Files named `*BffController.*`, `*BffService.*`, or `*BffRouter.*`; Aggregation files that combine multiple upstream service responses for a single client type; Client-specific DTO or response model files (e.g. `*MobileResponse.*`, `*WebResponse.*`, `*TvPayload.*`)
+- anti-signals: Single API layer serving all client types from the same endpoints with no client differentiation; No client-specific response shaping, aggregation, or transformation layer; No `bff/` directory or client-differentiated backend structure
 - cross-refs: microservices.md, resilience.md, messaging.md, cqrs.md
 - audit: L30-134
 
 ## cqrs
 
 - ids: CQR-200 .. CQR-264 (35 rules)
-- when: Use CQRS when you have complex domains with different optimization ne…
-- when not: CQRS is overkill for simple CRUD systems and adds…
+- when: Use CQRS when you have complex domains with different optimization needs for reads vs writes, collaborative systems where many users access the same data, task-based UIs that model business processes, or when read/write loads differ significantly.
+- when not: CQRS is overkill for simple CRUD systems and adds risky complexity to most applications ([Fowler warns: "beware that for most systems CQRS adds risky complexity"](https://martinfowler.com/bliki/CQRS.html)).
 - dir signals: `commands/` or `domain/commands/`; `queries/` or `domain/queries/`; `infrastructure/projections/` or `projections/`; `infrastructure/projectors/`; `read-models/` or `write-models/`; `handlers/` alongside both `commands/` and `queries/`
-- file signals: Files named `*Command.*` and `*Query.*` co-existing in…; Files named `*CommandHandler.*` or `*QueryHandler.*`; Files named `*Projection.*` in an infrastructure or rea…
+- file signals: Files named `*Command.*` and `*Query.*` co-existing in the codebase; Files named `*CommandHandler.*` or `*QueryHandler.*`; Files named `*Projection.*` in an infrastructure or read-model directory; Files named `*CommandBus.*` or `*QueryBus.*`
 - anti-signals: Single service class handling both data reads and writes with no separation; No dedicated query, projection, or read-model layer; All API endpoints returning the same mutable model used for write operations
 - cross-refs: event-sourcing.md, ddd.md, saga.md, messaging.md
 - audit: L36-129
@@ -32,10 +32,10 @@ Each `## <name>` is the file `<name>.md` in this folder. `audit:` is the contigu
 ## ddd
 
 - ids: DDD-001 .. DDD-090 (45 rules)
-- when: Use DDD when your domain has significant complexity
-- when not: DDD is overkill for CRUD-heavy applications with…
-- dir signals: `domain/`; `domain/aggregates/`; `domain/entities/`; `domain/value-objects/` or `domain/valueobjects/`; `domain/events/`; `domain/services/`
-- file signals: Files named `*Aggregate.*` anywhere in the domain layer; Files named `*Repository.*` in domain (interface defini…; Files named `*ValueObject.*` or `*VO.*`
+- when: Use DDD when your domain has significant complexity — multiple aggregates with non-trivial business rules, invariants that span state transitions, and terminology that matters to the business.
+- when not: DDD is overkill for CRUD-heavy applications with simple validation, but essential when the cost of getting domain logic wrong is high (financial systems, regulatory compliance, multi-party workflows).
+- dir signals: `domain/`; `domain/aggregates/`; `domain/entities/`; `domain/value-objects/` or `domain/valueobjects/`; `domain/events/`; `domain/services/`; `application/`
+- file signals: Files named `*Aggregate.*` anywhere in the domain layer; Files named `*Repository.*` in domain (interface definitions, not implementations); Files named `*ValueObject.*` or `*VO.*`; Files named `*DomainService.*` or `*DomainEvent.*`; Files named `*AggregateRoot.*`
 - anti-signals: No separation between domain and infrastructure code; Controllers or HTTP handlers directly inside `domain/` directories; Single flat `src/` with no layered structure
 - cross-refs: event-sourcing.md, layer-boundaries.md (planned), cqrs.md
 - audit: L35-164
@@ -43,42 +43,42 @@ Each `## <name>` is the file `<name>.md` in this folder. `audit:` is the contigu
 ## event-sourcing
 
 - ids: EVS-100 .. EVS-175 (48 rules)
-- when: Use event sourcing when you need immutable audit trails, temporal que…
-- when not: Essential for financial systems, regulatory compl…
+- when: Use event sourcing when you need immutable audit trails, temporal queries (what was the state on date X?), retroactive corrections, or complex business flows that benefit from event-driven architecture.
+- when not: Essential for financial systems, regulatory compliance, multi-step workflows with compensations, and systems where "what happened" is as important as "what is." Not recommended for simple CRUD or high-volume sensor data without aggregation.
 - dir signals: `infrastructure/event_store/` or `event-store/` or `eventstore/`; `domain/events/`; `domain/aggregates/`; `infrastructure/projectors/` or `projectors/`; `scripts/rebuild/` or `scripts/migration/`; `snapshots/` or `infrastructure/snapshots/`
-- file signals: Files named `*EventStore.*` or `*EventRepository.*`; Files named `*Snapshot.*` alongside event files; Files named `*Projector.*` or `*ProjectionBuilder.*`
-- anti-signals: Standard mutable ORM models with no event log or append-only store; No event store directory or event persistence layer; Repository classes that update records in place (no append-only pattern visible)
+- file signals: Files named `*EventStore.*` or `*EventRepository.*`; Files named `*Snapshot.*` alongside event files; Files named `*Projector.*` or `*ProjectionBuilder.*`; Files named `*EventStream.*` or `*EventLog.*`; Files named `*Replayer.*` or `*EventReplayer.*`
+- anti-signals: Standard mutable ORM models with no event log or append-only store; No event store directory or event persistence layer; Repository classes that update records in place (no append-only pattern visible); No projection or snapshot infrastructure
 - cross-refs: ddd.md, cqrs.md, saga.md, messaging.md
 - audit: L38-154
 
 ## hexagonal
 
 - ids: HEX-001 .. HEX-042 (23 rules)
-- when: Use Hexagonal Architecture for mid-to-high complexity systems where t…
+- when: Use Hexagonal Architecture for mid-to-high complexity systems where the business logic is the primary asset and infrastructure (DBs, message brokers, external APIs) is likely to evolve or change.
 - dir signals: `ports/`; `adapters/` or `infrastructure/adapters/`; `domain/`; `application/`; `infrastructure/` alongside `domain/` with no direct coupling between them
-- file signals: Files named `*Port.*` defining interface contracts; Files named `*Adapter.*` implementing those contracts; Interface files in `ports/` with corresponding implemen…
-- anti-signals: No `ports/` or `adapters/` directories anywhere in the codebase; Infrastructure imports found directly inside `domain/` layer files; No clear boundary between the application core and external systems
+- file signals: Files named `*Port.*` defining interface contracts; Files named `*Adapter.*` implementing those contracts; Interface files in `ports/` with corresponding implementations in `adapters/` or `infrastructure/`; Files named `*DrivingPort.*`, `*DrivenPort.*`, `*PrimaryPort.*`, or `*SecondaryPort.*`
+- anti-signals: No `ports/` or `adapters/` directories anywhere in the codebase; Infrastructure imports found directly inside `domain/` layer files; No clear boundary between the application core and external systems; Framework annotations (HTTP, ORM) mixed directly into domain classes
 - cross-refs: ddd.md, cqrs.md, testing.md (planned), resilience.md, logging.md (planned), strategy.md, repository.md
 - audit: L29-104
 
 ## layered-n-tier
 
 - ids: LNT-001 .. LNT-038 (38 rules)
-- when: Layered architecture is the standard choice for small to medium-sized…
-- when not: It is ideal for CRUD-heavy applications and proje…
+- when: Layered architecture is the standard choice for small to medium-sized applications where the primary goal is a clean, predictable structure that a team can understand quickly.
+- when not: It is ideal for CRUD-heavy applications and projects where the domain complexity does not yet justify the overhead of **ddd.md** or **hexagonal.md**.
 - dir signals: `presentation/`; `business/`; `persistence/` or `dal/`; `database/`; `common/`
-- file signals: Files named `*DAO.*` or `*DataAccessObject.*` in a pers…; Files named `*Controller.*` in `presentation/` alongsid…; ORM mapping files (`*Mapping.*`, `*OrmEntity.*`) in a `…
-- anti-signals: `domain/aggregates/` or `domain/value-objects/` present → leans DDD, not Layered; `infrastructure/adapters/` or `ports/` present → leans Hexagonal, not Layered; `infrastructure/event_store/` present → leans Event Sourcing, not Layered
+- file signals: Files named `*DAO.*` or `*DataAccessObject.*` in a persistence directory; Files named `*Controller.*` in `presentation/` alongside `*Service.*` in `business/`; ORM mapping files (`*Mapping.*`, `*OrmEntity.*`) in a `persistence/` layer; Files named `*Repository.*` as concrete implementation classes (not interfaces) in `persistence/`
+- anti-signals: `domain/aggregates/` or `domain/value-objects/` present → leans DDD, not Layered; `infrastructure/adapters/` or `ports/` present → leans Hexagonal, not Layered; `infrastructure/event_store/` present → leans Event Sourcing, not Layered; `modules/*/api/` or `modules/*/internal/` present → leans Modular Monolith, not Layered; Multiple independent `Dockerfile` files in separate service directories → leans Microservices, not Layered; No distinct presentation, business/service, and persistence directories all present together
 - cross-refs: ddd.md, hexagonal.md, microservices.md, cqrs.md, resilience.md, repository.md
 - audit: L28-129
 
 ## messaging
 
 - ids: MSG-001 .. MSG-064 (43 rules)
-- when: Use messaging patterns when you need to decouple components, handle a…
-- when not: Not recommended for simple synchronous request-re…
+- when: Use messaging patterns when you need to decouple components, handle async workflows, integrate distributed systems, or scale processing independently.
+- when not: Not recommended for simple synchronous request-response where latency is critical or when strong consistency is required immediately.
 - dir signals: `infrastructure/messaging/`; `workers/` or `consumers/`; `publishers/` or `producers/`; `queues/` or `topics/`; `api/webhooks/`
-- file signals: Files named `*Consumer.*` or `*Subscriber.*`; Files named `*Publisher.*` or `*Producer.*`; Files named `*MessageHandler.*` or `*EventHandler.*`
+- file signals: Files named `*Consumer.*` or `*Subscriber.*`; Files named `*Publisher.*` or `*Producer.*`; Files named `*MessageHandler.*` or `*EventHandler.*`; Broker configuration files: `celery.py`, `kafka_config.*`, `rabbitmq.*`, `sqs_config.*`, `nats_config.*`; Files named `*MessageBus.*` or `*EventBus.*`
 - anti-signals: No message broker configuration files anywhere in the project; All inter-service or inter-component communication via synchronous HTTP only; No consumer, worker, subscriber, or publisher directories
 - cross-refs: event-sourcing.md, cqrs.md, saga.md, resilience.md, monitoring.md (planned), strategy.md
 - audit: L36-140
@@ -86,60 +86,60 @@ Each `## <name>` is the file `<name>.md` in this folder. `audit:` is the contigu
 ## microservices
 
 - ids: MCR-001 .. MCR-045 (45 rules)
-- when: Microservices should be used for large-scale, complex systems where m…
-- dir signals: `services/` containing 3+ distinct named subdirectories each with their own `Do…; `contracts/` or `api-specs/`; `shared-libraries/` or `libs/`
-- file signals: `docker-compose.yml` at the root defining 3 or more ind…; Per-service `Dockerfile` inside multiple directories at…; OpenAPI or Proto contract files (`*.proto`, `*.openapi.…
-- anti-signals: Single `Dockerfile` at the project root serving the entire application; All business logic in a single `src/` or `app/` directory; No inter-service contract definitions or shared API specs
+- when: Microservices should be used for large-scale, complex systems where multiple independent teams need to deliver features at different velocities.
+- dir signals: `services/` containing 3+ distinct named subdirectories each with their own `Dockerfile` (e.g. `services/orders/`, `services/payments/`, `services/shipping/`); `contracts/` or `api-specs/`; `shared-libraries/` or `libs/`
+- file signals: `docker-compose.yml` at the root defining 3 or more independently named services; Per-service `Dockerfile` inside multiple directories at the same level; OpenAPI or Proto contract files (`*.proto`, `*.openapi.yml`, `*.swagger.json`) in a shared `contracts/` directory; Service mesh config files: `istio.yml`, `envoy.yaml`, `linkerd-config.yml`
+- anti-signals: Single `Dockerfile` at the project root serving the entire application; All business logic in a single `src/` or `app/` directory; No inter-service contract definitions or shared API specs; No independent deployment manifests per service
 - cross-refs: messaging.md, saga.md, cqrs.md, ddd.md
 - audit: L30-133
 
 ## modular-monolith
 
 - ids: MOM-001 .. MOM-050 (50 rules)
-- when: This pattern is the "Goldilocks" choice for systems with high domain…
-- when not: Use it when the team is large enough to require i…
+- when: This pattern is the "Goldilocks" choice for systems with high domain complexity but moderate scale.
+- when not: Use it when the team is large enough to require independent workstreams but the infrastructure budget does not yet justify a fleet of microservices.
 - dir signals: `modules/`; `modules/*/api/`; `modules/*/internal/`; `platform/` or `shared/`; `modules/*/db/`
-- file signals: Module-level dependency manifests (`package.json`, `pyp…; Explicit module registration files (`module.json`, `mod…; `index.*` or `public_api.*` files at each module root d…
-- anti-signals: No `modules/` directory; Multiple independent `Dockerfile` files per service directory (leans Microservi…; No distinction between public API and private internals within business areas
+- file signals: Module-level dependency manifests (`package.json`, `pyproject.toml`, `build.gradle`) inside `modules/*/`; Explicit module registration files (`module.json`, `module.config.ts`, `__init__.py` exporting a public API only); `index.*` or `public_api.*` files at each module root defining the module's public surface
+- anti-signals: No `modules/` directory; Multiple independent `Dockerfile` files per service directory (leans Microservices instead); No distinction between public API and private internals within business areas
 - cross-refs: ddd.md, cqrs.md, messaging.md, hexagonal.md
 - audit: L30-139
 
 ## repository
 
 - ids: REP-001 .. REP-077 (44 rules)
-- when: Use the Repository pattern in any system with a meaningful separation…
+- when: Use the Repository pattern in any system with a meaningful separation between business logic and data storage — specifically when: - A service layer orchestrates domain objects that need to be loaded, persisted, and queried - The persistence technology may change, or must be swapped per environment (e.g., in-memory for tests) - Integration tests are expensive and unit tests must run without a live database - Multiple services share the same aggregate types and you want a single, authoritative access path
 - dir signals: `repositories/`; `domain/repositories/` or `application/repositories/`; `tests/fakes/` or `tests/stubs/`; `infrastructure/persistence/` alongside a separate `domain/` layer
-- file signals: Files named `*Repository.*` in a persistence or infrast…; Files named `Fake*Repository.*` or `InMemory*Repository…; Files named `Abstract*Repository.*` or `I*Repository.*`…
-- anti-signals: ORM queries (`.filter()`, `.query()`, `.find()`, `SELECT`) present directly in…; No files named `*Repository.*` anywhere in the codebase; Domain model files contain ORM base class inheritance (`declarative_base`, `Mod…
+- file signals: Files named `*Repository.*` in a persistence or infrastructure directory; Files named `Fake*Repository.*` or `InMemory*Repository.*` in a tests directory; Files named `Abstract*Repository.*` or `I*Repository.*` in a domain or application directory
+- anti-signals: ORM queries (`.filter()`, `.query()`, `.find()`, `SELECT`) present directly in service or handler files; No files named `*Repository.*` anywhere in the codebase; Domain model files contain ORM base class inheritance (`declarative_base`, `Model`)
 - cross-refs: ddd.md, hexagonal.md, layered-n-tier.md, cqrs.md, unit-of-work.md (planned), testing.md (planned)
 - audit: L37-146
 
 ## resilience
 
 - ids: RES-001 .. RES-050 (50 rules)
-- when: Resilience patterns must be applied to any system involving network b…
+- when: Resilience patterns must be applied to any system involving network boundaries, such as **microservices.md**, **backend-for-frontend.md**, or even a **layered-n-tier.md** monolith that communicates with external APIs.
 - dir signals: `infrastructure/resilience/`; `clients/resilience/` or `gateways/resilience/`; `services/*/integration/`
-- file signals: Files named `*CircuitBreaker.*`, `*RetryPolicy.*`, or `…; Files named `*Timeout.*` or `*RateLimiter.*` in infrast…; Resilience library configuration: `resilience4j.yml`, `…
-- anti-signals: Direct HTTP or network calls with no retry, circuit breaker, or timeout wrapping; No resilience policy, configuration, or strategy files anywhere in the project; Error handling limited to basic try/catch with no structured retry or fallback…
+- file signals: Files named `*CircuitBreaker.*`, `*RetryPolicy.*`, or `*Bulkhead.*`; Files named `*Timeout.*` or `*RateLimiter.*` in infrastructure or client directories; Resilience library configuration: `resilience4j.yml`, `polly_config.*`, `pybreaker_config.*`, `hystrix.yml`; Files named `*FallbackHandler.*` or `*FallbackStrategy.*`
+- anti-signals: Direct HTTP or network calls with no retry, circuit breaker, or timeout wrapping; No resilience policy, configuration, or strategy files anywhere in the project; Error handling limited to basic try/catch with no structured retry or fallback logic
 - cross-refs: microservices.md, backend-for-frontend.md, messaging.md, layered-n-tier.md, strategy.md
 - audit: L30-139
 
 ## saga
 
 - ids: SAG-001 .. SAG-065 (44 rules)
-- when: Use the saga pattern when you need distributed transactions across mu…
+- when: Use the saga pattern when you need distributed transactions across multiple services without using two-phase commit (2PC).
 - dir signals: `sagas/` or `application/sagas/`; `orchestrators/`; `compensations/` or `domain/compensations/`; `infrastructure/workflow/`
-- file signals: Files named `*Saga.*` anywhere in the codebase; Files named `*Orchestrator.*` containing multi-step coo…; Files named `*Compensation.*` or `*Rollback.*`
-- anti-signals: No saga, orchestrator, or compensation directory; Distributed operations with no rollback or compensation mechanism; Simple synchronous service-to-service calls with no multi-step coordination
+- file signals: Files named `*Saga.*` anywhere in the codebase; Files named `*Orchestrator.*` containing multi-step coordination logic; Files named `*Compensation.*` or `*Rollback.*`; Workflow definition files (`.workflow.yml`, Temporal workflow descriptors, Camunda BPMN); Files named `*SagaStep.*` or `*SagaState.*`
+- anti-signals: No saga, orchestrator, or compensation directory; Distributed operations with no rollback or compensation mechanism; Simple synchronous service-to-service calls with no multi-step coordination; All transactions handled within a single database boundary
 - cross-refs: messaging.md, event-sourcing.md, cqrs.md, resilience.md, monitoring.md (planned)
 - audit: L29-127
 
 ## strategy
 
 - ids: STG-001 .. STG-075 (41 rules)
-- when: Use the Strategy pattern wherever you have a family of interchangeabl…
-- dir signals: `infrastructure/runners/`; `infrastructure/adapters/`; `domain/ports/` or `ports/` alongside `infrastructure/runners/` or `infrastruct…; `config/` or `bootstrap/` alongside `infrastructure/runners/` or `infrastructur…; `workers/` alongside `application/services/`
-- file signals: Files named `*Runner.*`, `*Strategy.*`, `*Policy.*`, or…; A single abstract class or protocol file in `ports/` or…; A `Fake*`, `Stub*`, or `InMemory*` file in test directo…
-- anti-signals: If/else or switch blocks selecting a concrete class by name in service/applicat…; No abstract base class, interface, or protocol file corresponding to the concre…; Concrete runner classes importing sibling concrete runners
+- when: Use the Strategy pattern wherever you have a family of interchangeable behaviors, algorithms, or infrastructure implementations that must be selectable at configuration time or runtime without altering the client code.
+- dir signals: `infrastructure/runners/`; `infrastructure/adapters/`; `domain/ports/` or `ports/` alongside `infrastructure/runners/` or `infrastructure/adapters/`; `config/` or `bootstrap/` alongside `infrastructure/runners/` or `infrastructure/adapters/`; `workers/` alongside `application/services/`
+- file signals: Files named `*Runner.*`, `*Strategy.*`, `*Policy.*`, or `*Executor.*` specifically inside `infrastructure/`, `adapters/`, or `workers/` directories; A single abstract class or protocol file in `ports/` or `interfaces/` declaring one to five abstract methods with no concrete logic; A `Fake*`, `Stub*`, or `InMemory*` file in test directories whose name mirrors a production strategy suffix (e.g. `FakeJobRunner`, `InMemoryStorageAdapter`)
+- anti-signals: If/else or switch blocks selecting a concrete class by name in service/application files; No abstract base class, interface, or protocol file corresponding to the concrete runner/adapter classes; Concrete runner classes importing sibling concrete runners
 - cross-refs: hexagonal.md, resilience.md, messaging.md, ddd.md, testing.md (planned), dependency-injection.md (planned)
 - audit: L33-150

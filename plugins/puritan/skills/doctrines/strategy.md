@@ -32,7 +32,7 @@ Use the Strategy pattern wherever you have a family of interchangeable behaviors
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`):
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`):
 - `infrastructure/runners/` — concrete strategy implementations for job execution or processing backends
 - `infrastructure/adapters/` — pluggable external-system adapters (storage, notifications, queues)
 - `application/services/` — client code that holds a strategy reference; must depend on the interface, not an implementation

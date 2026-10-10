@@ -29,7 +29,7 @@ Resilience patterns must be applied to any system involving network boundaries, 
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`):
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`):
 - `infrastructure/resilience/` — Global resilience configurations and policies.
 - `clients/` or `gateways/` — Outgoing network calls that require protection.
 - `bff/*/clients/` — Downstream service proxies in the BFF layer.

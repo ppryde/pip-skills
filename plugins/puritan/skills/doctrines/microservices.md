@@ -29,7 +29,7 @@ Microservices should be used for large-scale, complex systems where multiple ind
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`):
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`):
 - `services/` — Independent service root directories.
 - `infrastructure/` — Global provisioning, mesh configuration, and CI/CD templates.
 - `shared-libraries/` — Cross-cutting utilities (strictly governed).

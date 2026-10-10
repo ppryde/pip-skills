@@ -27,7 +27,7 @@ Layered architecture is the standard choice for small to medium-sized applicatio
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`):
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`):
 - `presentation/` — UI components, controllers, view models, and API endpoints.
 - `business/` — Domain services, business logic, and application rules.
 - `persistence/` — Data Access Objects (DAOs), repositories, and ORM mapping.

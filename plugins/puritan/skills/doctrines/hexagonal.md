@@ -28,7 +28,7 @@ Use Hexagonal Architecture for mid-to-high complexity systems where the business
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`).
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`).
 Use relative paths without `src/` prefix (e.g. `domain/` not `src/domain/`):
 - `domain/` — The "Inside." Pure business logic, entities, and value objects reside here.
 - `application/` — Use case orchestration and the definition of Driving Ports.

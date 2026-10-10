@@ -42,7 +42,7 @@ Read `<plugin-root>/skills/doctrines/INDEX.md` (generated; do not open doctrine 
 2. Identify cross-reference opportunities; new doctrines should link to related existing ones
 3. If an existing doctrine already covers your pattern, update it instead
 
-**Cross-referencing:** reference doctrines that *should* pair with yours, even if they do not exist yet (use the filename they would have). Inquisition handles missing doctrines gracefully. List every referenced doctrine that does not exist under "Planned" in `doctrines/README.md`. After writing, check existing doctrines for stale or missing cross-references back to yours and update them. After adding or editing a doctrine, regenerate the INDEX: `python3 tools/build_index.py doctrines` (in the pip-skills repo).
+**Cross-referencing:** reference doctrines that *should* pair with yours, even if they do not exist yet (use the filename they would have). Inquisition handles missing doctrines gracefully. List every referenced doctrine that does not exist under "Planned" in `doctrines/README.md`. After writing, check existing doctrines for stale or missing cross-references back to yours and update them. After adding or editing a doctrine, regenerate the INDEX with `python3 tools/build_index.py doctrines` when `tools/build_index.py` exists (the pip-skills repo). Without it, readers fall back to the doctrine file (`../_shared/config.md`).
 
 ### Step 4: Structure the Doctrine
 Use `_template.md` with ALL its sections, in order. Header: pattern name, a 1-2 sentence summary and a **Language Scope** declaration (`Language-agnostic`; `Language-specific: <language>`; or `Language-specific: <lang1>, <lang2>`). If language-specific, "What to scan for" must use that language's idioms explicitly. When to Use must include when NOT to use. Pros and Cons has 5+ rows. Applicable Directories use relative paths without `src/` (`domain/`, not `src/domain/`). Cross-references use **bold** with `.md` (`**ddd.md**`). Sources are grouped under bold labels.
@@ -68,7 +68,7 @@ Every doctrine needs a `## Detection Signatures` section for Covenant discover m
 Real patterns have edge cases; document them with specific justification (vague exceptions are loopholes), for example: test code may keep adapters in the same package; a framework may require annotations on domain classes; denormalised projections may break normalisation.
 
 ### Step 10: Validate Completeness
-Verify against `_template.md`, counting explicitly: all sections present and in order; categories and rule counts within the SHOULD limits above; Language Scope declared and detection patterns consistent with it; 5+ Pros/Cons rows; sources (1 primary, 2 practitioners, 1 failure case); exceptions justified; cross-references bold with `.md`; non-existent cross-referenced doctrines listed under "Planned" in `doctrines/README.md`; Detection Signatures present with relative `src/`-less paths; INDEX regenerated.
+Verify against `_template.md`, counting explicitly: all sections present and in order; categories and rule counts within the SHOULD limits above; Language Scope declared and detection patterns consistent with it; 5+ Pros/Cons rows; sources (1 primary, 2 practitioners, 1 failure case); exceptions justified; cross-references bold with `.md`; non-existent cross-referenced doctrines listed under "Planned" in `doctrines/README.md`; Detection Signatures present with relative `src/`-less paths; INDEX regenerated (only where `tools/build_index.py` exists).
 
 ## Violation ID Convention
 
