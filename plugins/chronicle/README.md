@@ -82,6 +82,8 @@ afterwards keeps it clean. `sync --full` is not required, and either order conve
 
 ## Usage
 
+Requires Python 3.10 or later; an older interpreter prints a one-line JSON error and exits 2.
+
 Locate `cli.py` relative to the plugin root (when installed from the marketplace the scripts
 live under `~/.claude/plugins/chronicle/`):
 
@@ -170,8 +172,8 @@ It lands in the same machine config as `claude_dirs` (`<primary>/overseer/config
 A config without `volumes` behaves exactly as before, and `overseer claude-dirs add|remove`
 keeps the key when it edits the file.
 
-**How it reads.** One short-lived helper container (`docker run --rm -v wf-state:/v:ro
---network none alpine ...`) lists every transcript, main and subagent, with its mtime and size.
+**How it reads.** The helper image is pinned to the exact tag `alpine:3.20.3` (not floating `alpine`/`latest`); pull it once (`docker pull alpine:3.20.3`) before the first offline sync. One short-lived helper container (`docker run --rm -v wf-state:/v:ro
+--network none alpine:3.20.3 ...`) lists every transcript, main and subagent, with its mtime and size.
 Files whose mtime/size match the cursor are skipped on that listing alone, so a sync with
 nothing new is **one** docker call. For files that moved, a second helper reads only the bytes
 appended since the cursor (the whole file if it shrank or was never seen), in batches of at
