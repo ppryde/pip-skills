@@ -6,6 +6,11 @@ compilation traps, and deliberate content/tone violations. Use these to verify
 skill output, regression-test after doctrine changes, and measure how many
 planted violations the skill catches vs misses.
 
+**Alias-aware matching.** Duplicate rules are aliases of one canonical rule
+(`doctrines/INDEX.md`, Aliases table) and are reported once, under the canonical id with
+`also:`. A planted violation counts as caught when the audit reports its expected id, the
+canonical id, or any alias in the same group (for example `GOTCHA-025` is caught by `RENDER-009`).
+
 ---
 
 ## Template Overview

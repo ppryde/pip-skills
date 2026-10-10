@@ -1,3 +1,11 @@
+---
+doctrine: maizzle
+prefix: MZL
+kind: language
+templating: maizzle
+scribe: constraints
+---
+
 # Maizzle — Email Doctrine
 
 ## Purpose
@@ -54,6 +62,7 @@ Rules and gotchas for engineers building email templates with Maizzle — the Ta
 
 **[MZL-012]** `transactional: venial | marketing: venial` — For Outlook background images, use VML — either Maizzle's `<x-bg-image>` component or manually coded VML conditionals.
 > Standard CSS `background-image` is not supported in Outlook 2007–2019 (see RENDER-015). Maizzle does not abstract this automatically. The VML approach must be explicitly implemented in templates that use background images. Source: Maizzle documentation; Campaign Monitor VML guide.
+> `applies: targets=outlook-2019`
 > `detect: contextual` — check templates using `bg-[url(...)]` Tailwind classes or CSS `background-image` for Outlook VML fallback
 
 **[MZL-013]** `transactional: venial | marketing: venial` — Use `x-component` (or Maizzle's component include syntax) for shared email parts.

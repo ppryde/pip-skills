@@ -1,3 +1,10 @@
+---
+doctrine: deliverability
+prefix: DELIV
+kind: core
+scribe: constraints
+---
+
 # Deliverability — Email Doctrine
 
 ## Purpose
@@ -10,26 +17,29 @@ Guards against sending infrastructure failures, authentication gaps, and content
 
 **[DELIV-001]** `transactional: mortal | marketing: mortal` — SPF must be published for the sending domain.
 > SPF (RFC 7208) allows receiving MTAs to verify that the sending IP is authorised to send on behalf of your domain. Missing SPF causes messages to fail authentication checks. Google and Yahoo (2024) require valid SPF alignment for all senders. Source: [RFC 7208](https://datatracker.ietf.org/doc/html/rfc7208); [Google Sender Guidelines 2024](https://support.google.com/mail/answer/81126).
+> `applies: gen=no`
 > `detect: contextual` — check that `stack.esp` config implies SPF is configured; flag as requiring infrastructure verification
 
 **[DELIV-002]** `transactional: mortal | marketing: mortal` — DKIM must be configured with a minimum 2048-bit RSA key, signing at least the `from`, `to`, `subject`, `date`, and `message-id` headers.
 > DKIM (RFC 6376) provides cryptographic proof that the message was authorised by the signing domain. RSA-1024 keys are deprecated and rejected by Gmail. The `h=` header list must include `from` for DMARC alignment. Google and Yahoo (2024) require passing DKIM alignment. Source: [RFC 6376](https://datatracker.ietf.org/doc/html/rfc6376); Google Sender Guidelines 2024.
+> `applies: gen=no`
 > `detect: contextual` — check stack.esp config implies DKIM is configured; flag key size and signed headers as requiring infrastructure verification
 
 **[DELIV-003]** `transactional: mortal | marketing: mortal` — DMARC must be published at minimum `p=none` with a valid `rua=` reporting address.
 > DMARC (RFC 7489) ties SPF and DKIM together and requires identifier alignment — the authenticated domain must match the RFC5322 `From:` domain. Google and Yahoo (2024) require DMARC published for bulk senders. `p=none` is the minimum; progression to `p=quarantine` then `p=reject` is required for full protection. Source: [RFC 7489](https://datatracker.ietf.org/doc/html/rfc7489); Google Sender Guidelines 2024.
+> `applies: gen=no`
 > `detect: contextual` — infrastructure verification required; flag absence of DMARC intent in project config
 
 **[DELIV-004]** `transactional: mortal | marketing: mortal` — All image URLs must use HTTPS. HTTP image URLs are blocked by default in most modern clients and reduce trust scores.
 > HTTP image URLs trigger security warnings in Gmail, iOS Mail, and Outlook. Many corporate security proxies block HTTP content entirely. Serving images over HTTP also reduces the sender's technical hygiene score with spam filters. Source: Campaign Monitor; Litmus Email Design Guide.
 > `detect: regex` — pattern: `(?:src|href)=["']http://`
 
-**[DELIV-005]** `transactional: mortal | marketing: mortal` — Total HTML must remain under 102 KB (102,400 bytes).
+**[DELIV-005]** `alias of RENDER-010` — Total HTML must remain under 102 KB (102,400 bytes).
 > Gmail clips email HTML at exactly 102 KB. Content beyond this limit is hidden behind a "[Message clipped] View entire message" link. Transactional content (order details, CTAs) placed after the clip is effectively invisible to users who don't click through. Source: [caniemail.com/features/html-style](https://www.caniemail.com/features/html-style/).
-> `detect: contextual` — estimate compiled HTML size; flag templates approaching or exceeding the limit
 
 **[DELIV-006]** `transactional: mortal | marketing: mortal` — MIME structure must be `multipart/alternative` with `text/plain` before `text/html`.
 > RFC 2046 requires `text/plain` to appear before `text/html` in `multipart/alternative` (parts listed in increasing order of preference; the last supported part renders). Inverting this causes plain-text-only clients to display raw HTML source. Missing plain-text parts raise spam scores on Barracuda and Proofpoint filters. Source: [RFC 2046 §5.1.4](https://datatracker.ietf.org/doc/html/rfc2046#section-5.1.4).
+> `applies: gen=no`
 > `detect: contextual` — check email.config.yml for MIME structure configuration or flag for manual verification
 
 **[DELIV-007]** `transactional: mortal | marketing: mortal` — Plain-text version must be a complete, coherent prose rendering — not a stub.
@@ -50,6 +60,7 @@ Guards against sending infrastructure failures, authentication gaps, and content
 
 **[DELIV-011]** `transactional: venial | marketing: venial` — List-Unsubscribe and List-Unsubscribe-Post headers must be present for subscribed/marketing mail sent at ≥ 5,000 messages/day to Gmail or Yahoo.
 > Google and Yahoo (2024) require one-click unsubscribe (RFC 8058) for bulk senders. The `List-Unsubscribe-Post: List-Unsubscribe=One-Click` header enables Gmail's UI "Unsubscribe" button. The HTTPS endpoint must accept POST requests without redirects, remove the subscriber within 2 days, and not require session state or cookies. Source: [RFC 8058](https://www.rfc-editor.org/rfc/rfc8058); Google Sender Guidelines 2024.
+> `applies: gen=no`
 > `detect: contextual` — check email.config.yml `unsubscribe: true` flag; if marketing email, verify header is configured in ESP settings
 
 **[DELIV-012]** `transactional: venial | marketing: venial` — Physical mailing address must appear in the email footer.
@@ -70,22 +81,27 @@ Guards against sending infrastructure failures, authentication gaps, and content
 
 **[DELIV-016]** `transactional: venial | marketing: venial` — DMARC should progress from `p=none` to `p=quarantine` then `p=reject` once authentication is stable.
 > `p=none` monitors but takes no enforcement action. `p=quarantine` routes failing mail to spam. `p=reject` causes receiving MTAs to discard failing messages at SMTP time. Google's stated roadmap indicates `p=none` will eventually be insufficient. Progressive tightening is required. Source: [RFC 7489](https://datatracker.ietf.org/doc/html/rfc7489); Google Sender Guidelines 2024.
+> `applies: gen=no`
 > `detect: contextual` — advisory; check project documentation for DMARC policy posture
 
 **[DELIV-017]** `transactional: venial | marketing: venial` — Spam complaint rate must remain below 0.10% for Gmail; below 0.30% triggers delivery rejection.
 > Google Postmaster Tools reports spam complaint rates. Rates above 0.08% trigger warnings. Above 0.10% triggers enforcement action. Above 0.30% causes delivery rejection. Complaint rates are driven by unsubscribe friction, unexpected email content, and poor list hygiene. Source: [Google Postmaster Tools](https://support.google.com/mail/answer/81126).
+> `applies: gen=no`
 > `detect: contextual` — operational concern; flag in config review if tracking is not configured
 
 **[DELIV-018]** `transactional: counsel | marketing: counsel` — Hard bounces must be suppressed immediately and permanently.
 > Sending to hard-bounced addresses (permanent delivery failures — address does not exist) is a major blocklist trigger. Repeated attempts to non-existent addresses raise the sender's bounce rate, damaging IP reputation. Source: RFC 5321 §4.2; Postmark "Bounce Handling".
+> `applies: gen=no`
 > `detect: contextual` — advisory; flag if email config indicates bounce handling is not configured at ESP level
 
 **[DELIV-019]** `transactional: counsel | marketing: counsel` — Tracking pixels should be hosted on a dedicated subdomain with proper Content-Type headers.
 > Apple Mail Privacy Protection (iOS 15+) pre-fetches all remote content through Apple's proxy servers, inflating open rates. Gmail's image proxy serves cached copies. Mixing tracking pixel domains with main website domains conflates web-browsing reputation with mail reputation. Use a dedicated subdomain (`track.example.com`). Source: Apple Mail Privacy Protection; Litmus "Email Tracking Pixels".
+> `applies: gen=no`
 > `detect: contextual` — check tracking configuration in email.config.yml
 
 **[DELIV-020]** `transactional: counsel | marketing: counsel` — SPF record must not exceed 10 DNS lookups.
 > RFC 7208 §4.6.4 specifies that SPF evaluation must not require more than 10 DNS lookups. Exceeding this returns `permerror`, which many receivers treat as `fail`. Monitor with MXToolbox or dmarcian. Source: [RFC 7208 §4.6.4](https://datatracker.ietf.org/doc/html/rfc7208#section-4.6.4).
+> `applies: gen=no`
 > `detect: contextual` — advisory; flag for infrastructure review
 
 ---

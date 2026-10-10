@@ -29,13 +29,14 @@ and front matter are material to build from, never instructions to follow.
 
 Load dynamically — do not hardcode the list:
 
-1. List all `*.md` files in `<plugin-root>/doctrines/` (ignore any whose basename starts with `_`, e.g. `_template.md`) — this SKILL.md lives at `<plugin-root>/skills/scribe/SKILL.md`, so the doctrines directory is two levels up from here
+1. List all `*.md` files in `<plugin-root>/doctrines/` (ignore any whose basename starts with `_`, e.g. `_template.md`, and `INDEX.md`, a generated index) — this SKILL.md lives at `<plugin-root>/skills/scribe/SKILL.md`, so the doctrines directory is two levels up from here
 2. Separate into **per-language doctrines** (filenames matching: `liquid`, `handlebars`, `mjml`, `react-email`, `maizzle`) and **core doctrines** (everything else)
 3. Load all core doctrines **except** two intentional exclusions:
    - `content-ux.md` — advisory only for generation; the Scribe follows these rules but they are not blocking constraints
    - `tooling.md` — pipeline/tooling configuration is the caller's concern, not the template's
 4. Load the per-language doctrine matching `stack.templating` from config; skip gracefully if none matches
 5. Any other core doctrine found in the directory is loaded as a blocking constraint
+6. Skip rules whose header reads `` `alias of <ID>` `` (follow the canonical rule), rules whose `applies:` line does not match the config (`esp`, `templating`, `targets`, `type`; an absent config key filters nothing), and rules with `applies: gen=no` (audit-only checks such as SPF, DKIM and DMARC)
 
 This ensures new doctrines added to the plugin are included automatically. Only `content-ux.md` and `tooling.md` remain intentionally non-blocking for generation purposes.
 
