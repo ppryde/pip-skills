@@ -214,7 +214,7 @@ def _our_commands(record: Dict[str, Any]) -> Set[str]:
 
 
 def _is_capture(command: str, record: Dict[str, Any]) -> bool:
-    return "capture.sh" in command and any(d in command for d in _skill_dirs(record))
+    return command in {f'bash "{Path(d) / "scripts" / "capture.sh"}"' for d in _skill_dirs(record)}
 
 
 class _DuplicateKey(ValueError):
@@ -579,6 +579,18 @@ def _settings_existed_before() -> bool:
     return prior if isinstance(prior, bool) else settings_path().exists()
 
 
+_SHELL_UNSAFE = '"$`\\'
+
+
+def _refuse_unsafe_skill_dir() -> None:
+    """Hook and status-line commands quote the skill dir in double quotes: a dir holding
+    a shell-special character would be interpreted by the shell, so refuse it."""
+    path = str(paths.skill_dir())
+    if any(ch in path for ch in _SHELL_UNSAFE):
+        raise InstallError(f"the skill directory {path!r} contains a shell-special character "
+                           "(one of \" $ ` \\); move the skill and re-run (nothing was changed)")
+
+
 def plan_install(threshold: Optional[int], launcher: Optional[str] = None,
                  last_light: Optional[bool] = None,
                  last_light_threshold: Optional[int] = None,
@@ -587,6 +599,10 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None,
         config.coerce("context.threshold", threshold)
     if last_light_threshold is not None:
         config.coerce("last_light.threshold", last_light_threshold)
+    _refuse_unsafe_skill_dir()
+    if bar and not mod_dir().is_dir():
+        raise InstallError(f"--bar on needs the vigil bar mod at {mod_dir()}, which this "
+                           "skill does not ship; nothing was changed")
     before, data = _read_settings()
     plan = Plan(threshold=threshold, last_light=last_light,
                 last_light_threshold=last_light_threshold)
