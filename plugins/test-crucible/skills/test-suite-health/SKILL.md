@@ -277,7 +277,7 @@ The reason it's harder: speed has an oracle (the clock) and a safety net (identi
 
 ```bash
 # fixtures defined in many places
-rg -U -o '@pytest\.fixture[^\n]*\n(?:\s*@[^\n]*\n)*\s*(?:async )?def (\w+)' -r '$1' tests | sort | uniq -c | sort -rn | head -20
+rg -U -I -o '@pytest\.fixture(?:\([^)]*\))?[^\n]*\n(?:\s*[@#][^\n]*\n)*\s*(?:async )?def (\w+)' -r '$1' tests | sort | uniq -c | sort -rn | head -20
 
 # how much parametrisation is actually in use
 echo "$(rg -c 'pytest.mark.parametrize' tests | awk -F: '{s+=$2} END {print s}') decorators / $(rg -l 'def test_' tests | wc -l) files"

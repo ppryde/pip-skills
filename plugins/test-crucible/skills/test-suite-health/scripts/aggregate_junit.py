@@ -63,7 +63,7 @@ if args.compare:
     for f in reversed(movers[-12:]):  # top savers
         print(f"  {before.get(f, 0):8.2f} {after.get(f, 0):8.2f} {after.get(f, 0) - before.get(f, 0):+8.2f}  {f}")
 
-    regressions = [f for f in reversed(movers) if after.get(f, 0) - before.get(f, 0) > 0][:12]
+    regressions = [f for f in reversed(movers) if after.get(f, 0) - before.get(f, 0) >= 0.005][:12]
     if regressions:
         print("\n  top regressions (slower after):")
         for f in regressions:
