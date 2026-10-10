@@ -1,0 +1,61 @@
+{
+  "_comment": "Per-file byte budgets for every SKILL.md and commands/*.md (CRLF counted as LF). Seeded at the size on origin/main when WF-268 PR 0 landed: a file may only shrink. Ratchet down by editing the number in the PR that shrinks the file. A new skill needs a row; the default target is default_target_bytes and any budget above it needs an entry in exemptions with a reason.",
+  "default_target_bytes": 10240,
+  "_comments": {
+    "plugins/test-crucible/skills/test-suite-health/SKILL.md": "Q3 (ratified): the WF-268 test-crucible PR targets 12288 bytes (12 KB), not the 10 KB default. It is the only skill with measured evidence (28 subagent runs, iteration-3 pass rates) and its phase one-liners are what the measurement says matters. Lower this budget to 12288 in that PR."
+  },
+  "indexes": {
+    "optimise-orm": {
+      "enforced": false,
+      "reason": "checks/INDEX.md is still hand-written on main; the django-inquisition PR commits the generated one and sets enforced to true."
+    },
+    "doctrines": {
+      "enforced": false,
+      "reason": "doctrines/INDEX.md does not exist yet; the puritan PR commits it and sets enforced to true."
+    }
+  },
+  "budgets": {
+    "plugins/census-mod/plugin/commands/vitals.md": 3633,
+    "plugins/census-mod/plugin/skills/vitals-detailed/SKILL.md": 1983,
+    "plugins/census-mod/plugin/skills/vitals-lean/SKILL.md": 1854,
+    "plugins/census/commands/vitals.md": 3659,
+    "plugins/census/skills/setup-statusline/SKILL.md": 6233,
+    "plugins/census/skills/vitals-detailed/SKILL.md": 2066,
+    "plugins/census/skills/vitals-lean/SKILL.md": 1938,
+    "plugins/chronicle/skills/chronicle/SKILL.md": 5629,
+    "plugins/chronicle/skills/reconcile/SKILL.md": 9963,
+    "plugins/django-inquisition/skills/optimise-orm/SKILL.md": 17652,
+    "plugins/email-absolution/skills/elder/SKILL.md": 21228,
+    "plugins/email-absolution/skills/scribe/SKILL.md": 14553,
+    "plugins/email-absolution/skills/visitation/SKILL.md": 10197,
+    "plugins/overseer/commands/dashboard.md": 1629,
+    "plugins/overseer/skills/ledger/SKILL.md": 9770,
+    "plugins/overseer/skills/orchestrate/SKILL.md": 22317,
+    "plugins/puritan/skills/covenant/SKILL.md": 23216,
+    "plugins/puritan/skills/inquisition/SKILL.md": 15416,
+    "plugins/puritan/skills/scriptorium/SKILL.md": 16087,
+    "plugins/review-clone/commands/clone-reviewer.md": 273,
+    "plugins/review-clone/skills/clone-reviewer/SKILL.md": 11164,
+    "plugins/review-clone/skills/review-as/SKILL.md": 11851,
+    "plugins/review-panel/commands/review-panel.md": 831,
+    "plugins/review-panel/skills/convene/SKILL.md": 5840,
+    "plugins/test-crucible/skills/test-suite-health/SKILL.md": 28228,
+    "plugins/tribunal/skills/reckoning/SKILL.md": 38891,
+    "plugins/vigil/commands/handover.md": 1513,
+    "plugins/vigil/skills/vigil/SKILL.md": 4765,
+    "skills/context-vigil/SKILL.md": 9179
+  },
+  "exemptions": {
+    "plugins/django-inquisition/skills/optimise-orm/SKILL.md": "WF-268 django-inquisition PR: restructured around the generated checks INDEX; budget ratchets down there",
+    "plugins/email-absolution/skills/elder/SKILL.md": "own stream (email-absolution redesign); seeded at current size, only ratchets down",
+    "plugins/email-absolution/skills/scribe/SKILL.md": "own stream (email-absolution redesign); seeded at current size, only ratchets down",
+    "plugins/overseer/skills/orchestrate/SKILL.md": "own stream (overseer redesign); seeded at current size, only ratchets down",
+    "plugins/puritan/skills/covenant/SKILL.md": "WF-268 puritan PR: covenant, inquisition and scriptorium are split into references; budget ratchets down there",
+    "plugins/puritan/skills/inquisition/SKILL.md": "WF-268 puritan PR: covenant, inquisition and scriptorium are split into references; budget ratchets down there",
+    "plugins/puritan/skills/scriptorium/SKILL.md": "WF-268 puritan PR: covenant, inquisition and scriptorium are split into references; budget ratchets down there",
+    "plugins/review-clone/skills/clone-reviewer/SKILL.md": "WF-268 sweep (deferral-only PR); seeded at current size, ratchets down when its sweep PR lands",
+    "plugins/review-clone/skills/review-as/SKILL.md": "WF-268 sweep (deferral-only PR); seeded at current size, ratchets down when its sweep PR lands",
+    "plugins/test-crucible/skills/test-suite-health/SKILL.md": "WF-268 test-crucible PR: phases defer to references/",
+    "plugins/tribunal/skills/reckoning/SKILL.md": "own stream (tribunal redesign); seeded at current size, only ratchets down"
+  }
+}
