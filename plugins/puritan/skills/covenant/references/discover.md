@@ -9,9 +9,11 @@ Directories only, three levels deep, pruning noise (discovery does not read file
 find . -maxdepth 3 \( -name .git -o -name node_modules -o -name vendor -o -name __pycache__ -o -name .venv \) -prune -o -type d -print
 ```
 
+Layouts nested deeper than three levels (for example `src/<pkg>/domain/commands`) are not seen; if the project uses one, re-run the find from that subdirectory.
+
 ## Step D2: Detect Pattern Signals
 
-Read `<plugin-root>/skills/doctrines/INDEX.md` (see `../../_shared/config.md`). Each doctrine row carries `dir signals`, `file signals` and `anti-signals`. Do not open a doctrine file, except one that has no row in the INDEX (a newly added or hand-edited doctrine): for that one, read its `## Detection Signatures` section directly.
+Read `<plugin-root>/skills/doctrines/INDEX.md` (see `../../_shared/config.md`). Each doctrine row carries `dir signals`, `file signals` and `anti-signals`. Do not open a doctrine file, except one that has no row in the INDEX (a newly added or hand-edited doctrine; Glob `doctrines/*.md` to find them): for that one, read its `## Detection Signatures` section directly.
 
 1. Match a signal against the scan by path suffix: `domain/commands/` matches `./app/domain/commands`. A signal listing alternatives ("`a/` or `b/`") counts once. A content-dependent signal such as "`infrastructure/` alongside `domain/`" counts when both directories exist as siblings in the scan; do not read files to judge coupling.
 2. Score each doctrine:

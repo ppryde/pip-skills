@@ -29,7 +29,7 @@ Business requirements, technical constraints (team size, timeline, existing syst
 
 ## Step 0: Load Available Doctrines
 
-Planning modes run this first. Read `<plugin-root>/skills/doctrines/INDEX.md` (doctrine discovery and `<plugin-root>` are defined in `../_shared/config.md`). Its `when` / `when not` lines are the fit criteria and scope boundaries; do not open the doctrine files, with one exception: a `doctrines/*.md` file (not `_template.md`, `README.md`) that has no row in the INDEX is read directly (its `## When to Use` and `## Detection Signatures` sections) and treated as a candidate too. Otherwise use the doctrines listed there as the candidate patterns. If the folder or INDEX is missing or unreadable, warn the user and proceed with built-in knowledge as a fallback only.
+Planning modes run this first. Read `<plugin-root>/skills/doctrines/INDEX.md` (doctrine discovery and `<plugin-root>` are defined in `../_shared/config.md`). Its `when` / `when not` lines are the fit criteria and scope boundaries; do not open the doctrine files, with one exception: a `doctrines/*.md` file (not `_template.md`, `README.md`) that has no row in the INDEX is read directly (Glob `doctrines/*.md` to find them; its `## When to Use` and `## Detection Signatures` sections) and treated as a candidate too. Otherwise use the doctrines listed there as the candidate patterns. If the folder or INDEX is missing or unreadable, warn the user and proceed with built-in knowledge as a fallback only.
 
 ## Workflow
 

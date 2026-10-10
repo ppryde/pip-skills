@@ -35,7 +35,7 @@ Suggest [Pattern] is NOT in use:
 | Rule | Why |
 |------|-----|
 | Use specific sub-paths (`infrastructure/event_store/`), not bare parent dirs (`infrastructure/`) | Parent dirs appear in many patterns; sub-paths discriminate |
-| Put the path or glob first, in backticks, then ` — meaning`; keep each entry short | The generated INDEX drops everything after the ` — ` and copies the rest of the entry whole (never truncated), so every glob Covenant must match has to sit before the dash |
+| Put the path or glob first, in backticks, then ` — meaning`; keep each entry short | The generated INDEX drops everything after the spaced dash (em dash, en dash or hyphen, ` — `) and copies the rest of the entry whole (never truncated), so every glob Covenant must match has to sit before the dash |
 | Do not state a count threshold in the preamble | Covenant scores signals (a file signal is stronger than a directory signal); a second threshold here would conflict |
 | Anti-signals must name the pattern they point toward (`leans DDD`, `leans Microservices`) | Lets Covenant present a scored comparison rather than a yes/no |
 | Generic dirs (`services/`, `domain/`, `shared/`) must be qualified with required context | `services/` alone fires on Layered, Microservices and Modular Monolith |

@@ -42,6 +42,10 @@ Next steps:
   3. Consider adding overrides in .architecture/decisions.yml
 ```
 
+## Subagent span check
+
+Paste into each subagent prompt: "The first line of your Read range must be `## Applicable Directories`. If it is not (the INDEX row is stale), locate that heading and read from there through `## Allowed Exceptions`, and report `span_relocated: true`."
+
 ## Subagent JSON contract
 
 Each doctrine subagent MUST return this JSON structure:
@@ -62,6 +66,7 @@ Each doctrine subagent MUST return this JSON structure:
     }
   ],
   "clean_files": ["<pkg>/domain/aggregates/account.py"],
+  "span_relocated": false,
   "notes": ["Unable to parse <pkg>/broken.py - syntax error"]
 }
 ```

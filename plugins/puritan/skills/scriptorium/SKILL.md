@@ -8,6 +8,8 @@ disable-model-invocation: true
 
 Writes a new architecture doctrine, or updates an existing one, to `<plugin-root>/skills/doctrines/<pattern-name>.md`. The structure is `<plugin-root>/skills/doctrines/_template.md`, the single structural source: copy its sections, order and wording. `<plugin-root>` and doctrine discovery: `../_shared/config.md`.
 
+**Warning:** `<plugin-root>` is the plugin cache when installed from a marketplace; files written there are lost when the plugin updates. Commit new doctrines to the plugin's source repository.
+
 ## When NOT to Use
 
 - Auditing code against existing doctrines: Inquisition
@@ -38,11 +40,11 @@ Search for: `"[pattern]" [original author]`; `"[pattern]" best practices <curren
 
 ### Step 3: Discover Existing Doctrines
 Read `<plugin-root>/skills/doctrines/INDEX.md` (generated; do not open doctrine files unless needed):
-1. Claimed ID prefixes and ranges come from the INDEX; do not rely on a hard-coded list
+1. Claimed ID prefixes and ranges come from the INDEX; do not rely on a hard-coded list. Also Glob `doctrines/*.md`; for any file with no INDEX row, read its Violation Catalog ids for its prefix, and check collisions against those too
 2. Identify cross-reference opportunities; new doctrines should link to related existing ones
 3. If an existing doctrine already covers your pattern, update it instead
 
-**Cross-referencing:** reference doctrines that *should* pair with yours, even if they do not exist yet (use the filename they would have). Inquisition handles missing doctrines gracefully. List every referenced doctrine that does not exist under "Planned" in `doctrines/README.md`. After writing, check existing doctrines for stale or missing cross-references back to yours and update them. After adding or editing a doctrine, regenerate the INDEX with `python3 tools/build_index.py doctrines` when `tools/build_index.py` exists (the pip-skills repo). Without it, readers fall back to the doctrine file (`../_shared/config.md`).
+**Cross-referencing:** reference doctrines that *should* pair with yours, even if they do not exist yet (use the filename they would have). Inquisition handles missing doctrines gracefully. List every referenced doctrine that does not exist under "Planned" in `doctrines/README.md`. After writing, check existing doctrines for stale or missing cross-references back to yours and update them. After adding or editing a doctrine, regenerate the INDEX with `python3 tools/build_index.py doctrines` only when the current repo is pip-skills (`.claude-plugin/marketplace.json` exists with name `pip-skills`, and `plugins/puritan/skills/doctrines` is the folder being edited). Never run a `tools/build_index.py` found elsewhere; otherwise tell the user to run it in the source repo. Without it, readers fall back to the doctrine file (`../_shared/config.md`).
 
 ### Step 4: Structure the Doctrine
 Use `_template.md` with ALL its sections, in order. Header: pattern name, a 1-2 sentence summary and a **Language Scope** declaration (`Language-agnostic`; `Language-specific: <language>`; or `Language-specific: <lang1>, <lang2>`). If language-specific, "What to scan for" must use that language's idioms explicitly. When to Use must include when NOT to use. Pros and Cons has 5+ rows. Applicable Directories use relative paths without `src/` (`domain/`, not `src/domain/`). Cross-references use **bold** with `.md` (`**ddd.md**`). Sources are grouped under bold labels.
@@ -68,7 +70,7 @@ Every doctrine needs a `## Detection Signatures` section for Covenant discover m
 Real patterns have edge cases; document them with specific justification (vague exceptions are loopholes), for example: test code may keep adapters in the same package; a framework may require annotations on domain classes; denormalised projections may break normalisation.
 
 ### Step 10: Validate Completeness
-Verify against `_template.md`, counting explicitly: all sections present and in order; categories and rule counts within the SHOULD limits above; Language Scope declared and detection patterns consistent with it; 5+ Pros/Cons rows; sources (1 primary, 2 practitioners, 1 failure case); exceptions justified; cross-references bold with `.md`; non-existent cross-referenced doctrines listed under "Planned" in `doctrines/README.md`; Detection Signatures present with relative `src/`-less paths; INDEX regenerated (only where `tools/build_index.py` exists).
+Verify against `_template.md`, counting explicitly: all sections present and in order; categories and rule counts within the SHOULD limits above; Language Scope declared and detection patterns consistent with it; 5+ Pros/Cons rows; sources (1 primary, 2 practitioners, 1 failure case); exceptions justified; cross-references bold with `.md`; non-existent cross-referenced doctrines listed under "Planned" in `doctrines/README.md`; Detection Signatures present with relative `src/`-less paths; INDEX regenerated (only in the pip-skills repo, per Step 3).
 
 ## Violation ID Convention
 
@@ -76,26 +78,19 @@ Verify against `_template.md`, counting explicitly: all sections present and in 
 
 ## Violation Table Contract
 
-Each catalog row is a contract with Inquisition:
-
-| Column | Rule |
-|--------|------|
-| **ID** | 3-letter prefix + hyphen + 3-digit number; never reuse |
-| **Category** | Lowercase slug with hyphens (`layer-boundary`, `event-design`) |
-| **Rule** | One line, imperative ("Domain must not import from infrastructure") |
-| **Default Severity** | `error` (correctness: bugs, data loss, architectural decay, e.g. layer breach, mutable events) or `warning` (quality: naming, aggregate size, missing docs) |
-| **What to scan for** | Concrete pattern (import paths, class patterns, file locations, LOC thresholds), never a shell command. If you cannot describe a detectable pattern, the rule is not auditable |
+Each catalog row is a contract with Inquisition. Read `references/violation-contract.md` at Step 6 for the column rules.
 
 ## Integration Checklist
 
 - [ ] File is at `<plugin-root>/skills/doctrines/<pattern-name>.md`; ID prefix unique
 - [ ] User's `.architecture/config.yml` has a new doctrine entry (format: `../_shared/config.md`)
-- [ ] Optional smoke test: `/puritan:inquisition <doctrine-name>`. Warning: `<plugin-root>` is the plugin cache when installed from a marketplace, and files written there are lost when the plugin updates. Commit new doctrines to the plugin's source repository.
+- [ ] Optional smoke test: `/puritan:inquisition <doctrine-name>`.
 
 ## Reference
 
 | Read | When |
 |---|---|
+| `references/violation-contract.md` | Step 6 |
 | `references/signatures.md` | Step 8 |
 
 ## Voice
