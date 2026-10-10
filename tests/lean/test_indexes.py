@@ -79,7 +79,9 @@ def test_spans_match_headings_and_cover_read_window(root):
         a, b = int(a), int(b)
         assert lines[a - 1].startswith(f"### {code}")  # offset=a, 1-based
         assert a <= b <= len(lines)
-        assert b == len(lines) or b == len(lines) - 1 or re.match(r"#{2,3} ", lines[b])  # limit = b - a + 1
+        body = lines[:-1] if lines[-1] == "" else lines
+        nxt = next((ln for ln, _, _ in bi.headings(body) if ln > a), None)
+        assert b == (nxt - 1 if nxt else len(body))  # limit = b - a + 1
         assert not any(re.match(r"### [A-Z]+-\d+", l) for l in lines[a:b])
 
 
@@ -114,3 +116,56 @@ def test_committed_index_is_current_once_enforced(name):
         pytest.skip(cfg["reason"])
     r = run(name, "--check")
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def _heading_texts(text):
+    return [t for _, _, t in bi.headings(text.split("\n"))]
+
+
+def test_nested_longer_fence_hides_inner_fence_and_heading():
+    text = "## A\n````md\n```\n### H\n```\n### Still inside\n````\n### B\n"
+    assert _heading_texts(text) == ["A", "B"]
+
+
+def test_info_string_line_inside_open_fence_does_not_close_it():
+    text = "## A\n```\n```python\n### inside\n```\n### B\n"
+    assert _heading_texts(text) == ["A", "B"]
+
+
+def test_tilde_inside_backtick_fence_does_not_toggle():
+    text = "```\n~~~\n### inside\n```\n### B\n"
+    assert _heading_texts(text) == ["B"]
+
+
+GROUP = ("---\nname: g\ntitle: G\nchecks:\n  - id: G-001\n    title: One\n    severity_base: high\n"
+         "  - id: G-002\n    title: Two\n    severity_base: low\n---\n# G\n\n### G-001\n{body}\n### G-002\nlast\n")
+
+
+def _scratch(tmp_path, raw: str):
+    cdir = tmp_path / SOURCES["optimise-orm"]
+    cdir.mkdir(parents=True)
+    (cdir / "g.md").write_bytes(raw.encode())
+    return tmp_path
+
+
+@pytest.mark.parametrize("variant", ["lf", "crlf", "no_trailing_newline", "fenced_heading"])
+def test_exact_spans(tmp_path, variant):
+    body = "text\n```\n### G-001\n```\nmore" if variant == "fenced_heading" else "text"
+    raw = GROUP.format(body=body)
+    g1 = raw.split("\n").index("### G-001") + 1
+    g2 = raw.split("\n").index("### G-002") + 1
+    if variant == "crlf":
+        raw = raw.replace("\n", "\r\n")
+    if variant == "no_trailing_newline":
+        raw = raw.rstrip("\n")
+    root = _scratch(tmp_path, raw)
+    assert run("optimise-orm", "--root", str(root)).returncode == 0
+    text = (root / SOURCES["optimise-orm"] / "INDEX.md").read_text()
+    spans = {c: (int(a), int(b)) for c, a, b in re.findall(r"^\| (G-\d+) \|.*g\.md L(\d+)-(\d+) \|$", text, re.M)}
+    assert spans == {"G-001": (g1, g2 - 1), "G-002": (g2, g2 + 1)}
+
+
+def test_folded_scalar_in_frontmatter_is_rejected(tmp_path):
+    raw = GROUP.format(body="x").replace("title: One", "title: >\n      folded")
+    r = run("optimise-orm", "--root", str(_scratch(tmp_path, raw)))
+    assert r.returncode == 2 and "folded" in r.stderr

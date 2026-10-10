@@ -65,7 +65,7 @@ Using Bash for these triggers permission prompts on every call. Dedicated tools 
 
 ## Lean skills
 
-SKILL.md <= 10 KB target; procedures for one mode or phase go in `references/` with an explicit read instruction, and big rule corpora get a generated compact INDEX (`tools/build_index.py`, see `tools/README.md`; generators live in `tools/`, the generated file is committed inside the plugin). `tests/lean/` enforces per-file budgets (`budgets.json`), reference wiring and index drift; budgets only ratchet down.
+SKILL.md <= 10 KB target; procedures for one mode or phase go in `references/` with an explicit read instruction, and big rule corpora get a generated compact INDEX (`tools/build_index.py`, see `tools/README.md`; generators live in `tools/`, the generated file is committed inside the plugin). `tests/lean/` enforces per-file budgets (`budgets.json`), reference wiring and index drift; budgets are meant to only ratchet down, which is a review convention (the test does not compare against the merge base), so a raised number in `budgets.json` needs a stated reason in the PR.
 
 ## Test isolation — clean up after yourself
 

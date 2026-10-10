@@ -31,4 +31,5 @@ generated `INDEX.md` as a plain copy, in the same sync that carries the skill ch
 regenerate and run the same `--check` itself; it does not hold generated files it cannot rebuild.
 Edits still follow the standing rule: fix in pip-skills first, merge, then sync wf. Every lean PR's
 sync note lists these paths. If wf has plugins pip-skills lacks, add their rows to wf's
-`budgets.json` there only.
+`budgets.json` there only. When copying, drop the pip-only `budgets.json` rows (files wf does not
+have) and the overseer-ledger dangling-reference exemption in `test_references_wired.py` if wf's ledger skill differs.

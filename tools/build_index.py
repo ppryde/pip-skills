@@ -64,14 +64,14 @@ def cell(text: str) -> str:
 def headings(lines: list[str]) -> list[tuple[int, int, str]]:
     """(1-based line, level, text) for every `##`/`###` heading outside code fences."""
     out: list[tuple[int, int, str]] = []
-    fence: str | None = None
+    fence: tuple[str, int] | None = None  # (char, length) of the open fence
     for i, line in enumerate(lines, 1):
-        m = re.match(r"\s*(`{3,}|~{3,})", line)
+        m = re.match(r"\s{0,3}(`{3,}|~{3,})(.*)$", line)
         if m:
-            marker = m.group(1)[0]
+            char, length, rest = m.group(1)[0], len(m.group(1)), m.group(2)
             if fence is None:
-                fence = marker
-            elif fence == marker:
+                fence = (char, length)
+            elif char == fence[0] and length >= fence[1] and not rest.strip():
                 fence = None
             continue
         if fence is not None:
@@ -118,7 +118,11 @@ def parse_frontmatter(text: str, path: Path) -> tuple[str, list[dict[str, str]]]
             continue
         m = re.match(r"\s+(\w+):\s*(.*)$", raw)
         if m and checks:
-            checks[-1][m.group(1)] = m.group(2).strip().strip("'\"")
+            value = m.group(2).strip()
+            if value[:1] in (">", "|"):
+                raise SourceError(
+                    f"{path}: {checks[-1]['id']}.{m.group(1)}: folded/literal scalars ({value[:1]}) are not supported; use a one-line value")
+            checks[-1][m.group(1)] = value.strip("'\"")
     return name, checks
 
 

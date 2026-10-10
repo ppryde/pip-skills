@@ -72,8 +72,19 @@ def reachable_references(skill_dir: Path) -> tuple[set[Path], list[tuple[Path, s
     if root is not None and (root / "commands").is_dir():
         seeds += sorted((root / "commands").glob("*.md"))
 
-    def names(ref: Path) -> list[str]:
-        return [f"references/{ref.relative_to(refs_dir).as_posix()}", ref.name]
+    def named_in(ref: Path, text: str, src_is_reference: bool) -> bool:
+        """`references/<rel>` on a word boundary; reference-to-reference links may use the bare name."""
+        rel = ref.relative_to(refs_dir).as_posix()
+        forms = [f"references/{rel}"]
+        if src_is_reference:
+            forms += [rel, ref.name]
+        return any(re.search(r"(?<![\w./-])" + re.escape(f) + r"(?![\w-]|\.\w)", text) for f in forms)
+
+    def exists(src: Path, mention: str) -> bool:
+        if (skill_dir / mention).exists():
+            return True
+        # A command may point at any skill's references in the same plugin.
+        return src.parent.name == "commands" and root is not None and any(root.glob(f"skills/*/{mention}"))
 
     reached: set[Path] = set()
     frontier = list(seeds)
@@ -82,14 +93,14 @@ def reachable_references(skill_dir: Path) -> tuple[set[Path], list[tuple[Path, s
     while frontier:
         src = frontier.pop()
         text = read_lf(src)
+        is_ref = src not in seeds
         for m in re.finditer(r"references/[A-Za-z0-9_./-]*[A-Za-z0-9_]\.[A-Za-z0-9]+", text):
-            # Only SKILL.md mentions are checked for dangling links.
-            if src.name == "SKILL.md" and not (skill_dir / m.group(0)).exists():
+            if not exists(src, m.group(0)):
                 dangling.append((src, m.group(0)))
         for ref in all_refs:
             if ref in reached:
                 continue
-            if any(n in text for n in names(ref)):
+            if named_in(ref, text, is_ref):
                 reached.add(ref)
                 if ref not in seen_src and ref.suffix == ".md":
                     seen_src.add(ref)

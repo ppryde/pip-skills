@@ -52,3 +52,38 @@ def test_reachability_is_transitive(tmp_path, monkeypatch):
     reached, dangling = lc.reachable_references(skill)
     assert {p.name for p in reached} == {"a.md", "b.md", "d.md"}
     assert dangling == []
+
+
+def _mk(tmp_path, monkeypatch, skill_md, refs, command=None):
+    import lean_common as lc
+    plugin = tmp_path / "plugins" / "p"
+    skill = plugin / "skills" / "s"
+    (skill / "references").mkdir(parents=True)
+    (plugin / ".claude-plugin").mkdir()
+    (skill / "SKILL.md").write_text(skill_md)
+    for name, body in refs.items():
+        (skill / "references" / name).write_text(body)
+    if command is not None:
+        (plugin / "commands").mkdir()
+        (plugin / "commands" / "go.md").write_text(command)
+    monkeypatch.setattr(lc, "REPO", tmp_path)
+    return lc, skill
+
+
+def test_bare_name_in_prose_does_not_wire_a_skill_reference(tmp_path, monkeypatch):
+    lc, skill = _mk(tmp_path, monkeypatch, "the schema.md file and a data file index.md, myindex.md\n",
+                    {"index.md": "x\n"})
+    assert lc.reachable_references(skill)[0] == set()
+
+
+def test_word_boundary_on_references_form(tmp_path, monkeypatch):
+    lc, skill = _mk(tmp_path, monkeypatch, "see references/index.md.bak and xreferences/a.md\n",
+                    {"index.md": "x\n", "a.md": "x\n"})
+    assert lc.reachable_references(skill)[0] == set()
+
+
+def test_dangling_checked_in_references_and_commands(tmp_path, monkeypatch):
+    lc, skill = _mk(tmp_path, monkeypatch, "references/a.md\n",
+                    {"a.md": "then references/gone.md\n"}, command="load references/missing.md\n")
+    _, dangling = lc.reachable_references(skill)
+    assert sorted(t for _, t in dangling) == ["references/gone.md", "references/missing.md"]
