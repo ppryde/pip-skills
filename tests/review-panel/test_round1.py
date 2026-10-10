@@ -108,7 +108,7 @@ def test_parse_never_keeps_input_verdict_fields():
     assert f[0].category_defaulted is False
 
 
-def test_cli_payload_verdict_ignored_flat_output_trusted(tmp_path):
+def test_cli_payload_verdict_and_fingerprint_ignored(tmp_path):
     payloads = _write(tmp_path / "f.json", [{"reviewer": "general", "findings": [
         _raw(1, verdict="refuted", fingerprint="fforged000000")]}])
     out = j(tmp_path, "reconcile", "--findings", payloads, "--require-verdicts")

@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 from scripts.config import DEFAULT_STRICTNESS
-from scripts.contract import Finding
+from scripts.contract import VALID_SEVERITY, Finding
 
 _DEFAULT = DEFAULT_STRICTNESS
 
@@ -56,6 +56,10 @@ def apply_decisions(
     id key (a reused id cannot hijack it). A legacy id match appends a
     migrate note to `notes` when one is given."""
     raw = (decisions or {}).get("overrides", {}) or {}
+    if not isinstance(raw, dict):
+        if notes is not None:
+            notes.append("decisions overrides ignored (not a mapping)")
+        raw = {}
     overrides = {str(k): v for k, v in raw.items()}
     out: list[Finding] = []
     for f in findings:
@@ -68,11 +72,13 @@ def apply_decisions(
         if ov and not isinstance(ov, dict) and notes is not None:
             notes.append(f"override ignored (not a mapping): {f.fingerprint or f.id}")
         if isinstance(ov, dict) and ov:
-            out.append(replace(
-                f,
-                severity=ov.get("severity", f.severity),
-                reason=ov.get("reason", f.reason),
-            ))
+            sev = ov.get("severity", f.severity)
+            if sev not in VALID_SEVERITY:  # also keeps unhashable junk out
+                if notes is not None:
+                    notes.append(f"override severity {sev!r} invalid, kept {f.severity}: "
+                                 f"{f.fingerprint or f.id}")
+                sev = f.severity
+            out.append(replace(f, severity=sev, reason=ov.get("reason", f.reason)))
         else:
             out.append(f)
     return out

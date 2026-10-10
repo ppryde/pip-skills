@@ -27,7 +27,9 @@ orchestrator wrote with the Write tool; finding text is never an argument.
              category_defaulted and `_source` in input are ignored, and
              fingerprints are always recomputed in code. Verdicts come only
              from `reconcile --verdicts`. The output (flat findings) may be
-             fed back to any command; it is simply re-read as data.
+             fed to `reconcile --findings` (it is re-read as plain data, so
+             `category_defaulted` is dropped). `match` takes the RAW reviewer
+             payloads only: its category-defaulted guard needs them.
 
   match      two independent passes -> agreed / disagreements (dual-tiebreaker)
                --a FILE --b FILE [--window 3]
@@ -60,6 +62,8 @@ import json
 import sys
 from dataclasses import asdict, replace
 from pathlib import Path
+
+import yaml
 
 _ROOT = Path(__file__).resolve().parent.parent
 # Imports below resolve `scripts.*` against this plugin whatever the cwd or
@@ -122,7 +126,7 @@ def _load_findings(path: str):
 
 def _findings_from_data(data):
     flat_shape = isinstance(data, dict) and "reviewer" not in data and (
-        isinstance(data.get("findings"), list) or "agreed" in data
+        isinstance(data.get("findings"), list) or any(k in data for k in ("agreed", "only_a", "only_b"))
     )
     notes: list[str] = []
     if isinstance(data, dict) and "_source" in data:
@@ -134,14 +138,21 @@ def _findings_from_data(data):
         # reviewer. One payload per finding keeps the original order.
         flat = data.get("findings")
         if not isinstance(flat, list):
-            flat = [r for k in ("agreed", "only_a", "only_b") for r in data.get(k) or []]
+            flat = []
+            for key in ("agreed", "only_a", "only_b"):
+                part = data.get(key)
+                if part is None:
+                    continue
+                if not isinstance(part, list):
+                    raise CliError(f"{key!r} must be a list, got {type(part).__name__}")
+                flat += part
         for i, raw in enumerate(flat):
             if not isinstance(raw, dict):
                 notes.append(f"REJECTED {i}: not an object")
             elif not raw.get("reviewer"):
                 notes.append(f"REJECTED {raw.get('id', i)}: missing reviewer")
             else:
-                payloads.append({"reviewer": str(raw["reviewer"]), "findings": [raw]})
+                payloads.append({"reviewer": raw["reviewer"], "findings": [raw]})
         clean += _as_list(data.get("clean_files"))
         notes += _as_list(data.get("notes"))
     else:
@@ -253,7 +264,10 @@ def cmd_reconcile(args) -> int:
     elif args.verdicts:
         # Tolerated (a stage may legitimately produce none) but never silent.
         notes.append(f"verdicts file not found, no verdicts applied: {args.verdicts}")
-    decisions = load_decisions(Path(args.decisions)) if args.decisions else {}
+    try:
+        decisions = load_decisions(Path(args.decisions)) if args.decisions else {}
+    except (yaml.YAMLError, OSError, UnicodeDecodeError) as exc:
+        raise CliError(f"cannot read decisions file {args.decisions}: {exc}") from exc
     strictness = _strictness_map(args.strictness)
     warnings: list[str] = []
     reviewers = sorted({f.reviewer for f in findings})
@@ -320,12 +334,30 @@ def _write_scratch(path: str, text: str) -> None:
     _write_confined(Path(path), text, roots, path)
 
 
+def _report_finding(d, path: str):
+    """A Finding from reconcile output, or a CliError naming the file."""
+    try:
+        if not isinstance(d, dict):
+            raise TypeError("finding is not an object")
+        f = finding_from_dict(d)
+        if f.severity not in VALID_SEVERITY:
+            raise ValueError(f"invalid severity {f.severity!r}")
+        if not all(isinstance(getattr(f, k), str) for k in ("reviewer", "id", "file", "rule")):
+            raise TypeError("reviewer, id, file and rule must be strings")
+        return f
+    except (TypeError, ValueError) as exc:
+        raise CliError(f"{path} is not reconcile output: {exc}") from exc
+
+
 def cmd_report(args) -> int:
     data = _read_json(args.reconciled)
     if not isinstance(data, dict) or not isinstance(data.get("findings"), list):
         raise CliError(f"{args.reconciled} is not reconcile output")
-    findings = [finding_from_dict(d) for d in data["findings"]]
-    dropped = [finding_from_dict(d) for d in data.get("dropped") or []]
+    dropped_raw = data.get("dropped") or []
+    if not isinstance(dropped_raw, list):
+        raise CliError(f"{args.reconciled} is not reconcile output ('dropped' is not a list)")
+    findings = [_report_finding(d, args.reconciled) for d in data["findings"]]
+    dropped = [_report_finding(d, args.reconciled) for d in dropped_raw]
     text = render_report(
         collate(findings),
         {"strategy": args.strategy, "scope": args.scope, "notes": data.get("notes") or []},

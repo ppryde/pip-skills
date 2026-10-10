@@ -78,7 +78,7 @@ _norm = norm
 
 
 def _base_fingerprint(f: Finding) -> str:
-    key = "\x1f".join([f.reviewer, f.rule_id or _norm(f.rule), f.file, _norm(f.actual)])
+    key = "\x1f".join([str(f.reviewer), f.rule_id or _norm(f.rule), str(f.file), _norm(f.actual)])
     # Leading "f" so YAML never reads an all-digit key (a decisions.yml
     # override key) as an integer.
     return "f" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:11]
@@ -99,7 +99,7 @@ def assign_fingerprints(findings: list[Finding]) -> list[Finding]:
     out = list(findings)
     for base, idxs in groups.items():
         idxs.sort(key=lambda i: (findings[i].line if findings[i].line is not None else -1,
-                                 findings[i].id, i))
+                                 str(findings[i].id), i))
         n = 1
         for i in idxs:
             cand = base
@@ -170,11 +170,24 @@ def _as_list(value: object) -> list:
     return list(value) if isinstance(value, (list, tuple)) else [str(value)]
 
 
+def _text(value: object, name: str) -> str:
+    """A string field: str as is, a number (not bool) coerced, anything else
+    rejected, so a malformed finding becomes a REJECTED note, never a TypeError."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    raise ContractError(f"{name} must be a string, got {type(value).__name__}")
+
+
 def _parse_one(reviewer: str, raw: dict, strict: bool, notes: list[str], label: str) -> Finding:
     required = _REQUIRED if strict else _REQUIRED_TOLERANT
     missing = [k for k in required if k not in raw]
     if missing:
         raise ContractError(f"finding missing {missing} in {raw!r}")
+    for key in ("id", "file", "rule", "actual", "category", "suggestion"):
+        if key in raw:
+            raw = {**raw, key: _text(raw[key], key)}
     category_defaulted = False
     if not strict:
         for key, default in (("category", "general"), ("suggestion", "")):
@@ -229,6 +242,7 @@ def parse_reviewer_result(
     reviewer = payload.get("reviewer")
     if not reviewer:
         raise ContractError("payload missing 'reviewer'")
+    reviewer = _text(reviewer, "reviewer")
     findings: list[Finding] = []
     notes_out: list[str] = []
     for index, raw in enumerate(payload.get("findings", []) or []):
