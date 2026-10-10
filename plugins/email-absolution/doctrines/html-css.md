@@ -18,7 +18,7 @@ Guards against HTML structure and CSS usage patterns that produce broken, unstyl
 
 **[HTML-003]** `transactional: mortal | marketing: venial` — `display: none` on any element must be accompanied by `mso-hide: all`.
 > Outlook 2007–2019 ignores `display: none` for some element types, rendering hidden content (preheaders, mobile-only blocks, dark mode swaps) visibly. `mso-hide: all` is the MSO-specific equivalent and must accompany every `display: none` declaration. Source: standard Outlook workaround pattern.
-> `detect: regex` — pattern: `style="(?![^"]*mso-hide)[^"]*display:\s*none` (inspects the whole `style` attribute, so mso-hide before or after display:none is accepted; display:none inside a style block is a contextual check — look for a matching mso-hide in the same rule)
+> `detect: hybrid` — pattern: `style="(?![^"]*mso-hide)[^"]*display:\s*none` (inspects the whole `style` attribute, so mso-hide before or after display:none is accepted; display:none inside a style block is the contextual part — for every display:none in a style block, check that the same rule also contains mso-hide: all)
 
 **[HTML-004]** `transactional: mortal | marketing: mortal` — Do not nest `<table>` elements more than 3–4 levels deep.
 > Deep table nesting causes rendering performance issues and layout glitches in older Outlook and Yahoo clients. Heavily nested tables also become unmaintainable. Flatten layout where possible; use padding and spacer rows for spacing rather than nested tables.
@@ -26,7 +26,7 @@ Guards against HTML structure and CSS usage patterns that produce broken, unstyl
 
 **[HTML-005]** `transactional: mortal | marketing: mortal` — `font-family` declarations must include at least one web-safe fallback.
 > Custom fonts (`@font-face`) are not supported in Gmail, Yahoo, or Outlook 2007–2019. If a custom font is declared without a web-safe fallback (e.g., `font-family: 'MyFont'`), these clients render the browser default (usually Times New Roman), which is almost never acceptable for production email. Source: [caniemail.com](https://www.caniemail.com/).
-> `detect: regex` — pattern: `font-family\s*:\s*(?:'[^',;"]*'|[^,;"'}]+)\s*[;"}]` (matches a declaration naming a single font — no comma — so a full fallback stack is not flagged; verify the matched line before reporting)
+> `detect: regex` — pattern: `font-family\s*:\s*(?:'[^',;"]*'|"[^",;]*"|(?!(?:inherit|initial|unset)\b)[A-Za-z][^,;"'}]*)\s*[;"}]` (check the matched line: it nominates a declaration naming a single font — no comma — so a full fallback stack, or inherit, is not flagged; confirm the line before reporting)
 
 **[HTML-006]** `transactional: venial | marketing: counsel` — `<a>` elements with custom colours must have `color` and `text-decoration` set via inline style.
 > Outlook.com, older Yahoo, and Gmail may strip `<a>` colour rules from `<style>` blocks. Without inline styles on the `<a>` element itself, link colours revert to the client's default blue underlined style, which breaks branded button colours and link styling in footers and body text.

@@ -58,7 +58,7 @@ This ensures new doctrines added to the plugin are included automatically. Only 
 | Omitting the unsubscribe link | Required by CAN-SPAM, GDPR, CASL, and Google/Yahoo 2024 |
 | Inline JavaScript | Forbidden in email — will be stripped and may trigger spam |
 | `box-shadow` / `border-radius` only in a `<head>` `<style>` block | Put layout-critical styles inline — Outlook silently ignores `box-shadow`/`border-radius` (no harm), and non-Outlook clients render them. Gmail ignores `<head>` styles for non-Google accounts, over ~16 KB and after a forward, so keep `@media`/dark-mode rules in `<style>` as an enhancement only (HTML-009) |
-| CSS shorthand in `<style>` block | Head-block CSS can use shorthand for non-Outlook clients; inline element styles must use longhand |
+| CSS shorthand in `<style>` block | Head-block CSS can use shorthand for non-Outlook clients; inline `<td>` padding must use longhand |
 
 ## Workflow
 

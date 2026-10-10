@@ -33,14 +33,28 @@ def test_html003_order_independent():
     assert hits("HTML-003", '<div style="display:none">')
 
 
+def test_html003_is_hybrid():
+    text = (DOCTRINES / "html-css.md").read_text()
+    block = text.split("**[HTML-003]**", 1)[1].split("\n**[", 1)[0]
+    assert "`detect: hybrid`" in block
+
+
 def test_html005_single_font_only():
     for ok in (
         'style="font-family: Arial, Helvetica, sans-serif;"',
         "font-family: 'Open Sans', Arial, sans-serif;",
         "font-family: 'Open Sans', sans-serif }",
+        'font-family: "Open Sans", Arial, sans-serif;',
+        "font-family: inherit;",
+        "font-family: Arial, sans-serif !important;",
     ):
         assert not hits("HTML-005", ok), ok
-    for bad in ("font-family: 'MyFont';", 'style="font-family: MyFont"'):
+    for bad in (
+        "font-family: 'MyFont';",
+        'style="font-family: MyFont"',
+        'font-family: "MyFont";',
+        "font-family: Arial !important;",
+    ):
         assert hits("HTML-005", bad), bad
 
 
