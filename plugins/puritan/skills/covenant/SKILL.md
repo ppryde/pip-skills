@@ -570,7 +570,7 @@ See Inquisition SKILL.md Step 1 for the full `.architecture/config.yml` format
 
 # Run initial audit to establish baseline
 /puritan:inquisition full
-# Creates: baseline-audit.json
+# Prints the audit report (no baseline file is written)
 ```
 
 ### With CI/CD Pipeline
