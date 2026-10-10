@@ -100,10 +100,12 @@ def test_reviewer_cannot_self_stamp_verdict_fields():
         None, None, None, None)
 
 
-def test_trusted_parse_keeps_them():
+def test_parse_never_keeps_input_verdict_fields():
     f, _, _ = parse_reviewer_result({"reviewer": "g", "findings": [
-        _raw_dict(verdict="confirmed", fingerprint="fkeep0000000")]}, trusted=True)
-    assert f[0].verdict == "confirmed" and f[0].fingerprint == "fkeep0000000"
+        _raw_dict(verdict="confirmed", fingerprint="fkeep0000000",
+                  category_defaulted=True)]})
+    assert f[0].verdict is None and f[0].fingerprint is None
+    assert f[0].category_defaulted is False
 
 
 def test_cli_payload_verdict_ignored_flat_output_trusted(tmp_path):

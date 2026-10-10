@@ -156,7 +156,7 @@ def _coerce_line(value: object) -> tuple[int | None, bool]:
         return None, False
     try:
         n = int(value)  # type: ignore[call-overload]
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: Infinity
         return None, False
     return (n, True) if n >= 1 else (None, False)
 
@@ -170,13 +170,12 @@ def _as_list(value: object) -> list:
     return list(value) if isinstance(value, (list, tuple)) else [str(value)]
 
 
-def _parse_one(reviewer: str, raw: dict, strict: bool, notes: list[str], label: str,
-               trusted: bool = False) -> Finding:
+def _parse_one(reviewer: str, raw: dict, strict: bool, notes: list[str], label: str) -> Finding:
     required = _REQUIRED if strict else _REQUIRED_TOLERANT
     missing = [k for k in required if k not in raw]
     if missing:
         raise ContractError(f"finding missing {missing} in {raw!r}")
-    category_defaulted = bool(trusted and raw.get("category_defaulted"))
+    category_defaulted = False
     if not strict:
         for key, default in (("category", "general"), ("suggestion", "")):
             if key not in raw:
@@ -202,27 +201,22 @@ def _parse_one(reviewer: str, raw: dict, strict: bool, notes: list[str], label: 
     rule_id = raw.get("rule_id")
     if not isinstance(rule_id, str) or rule_id_of(rule_id) != rule_id:
         rule_id = None if str(raw["id"]).startswith("CLONE-") else rule_id_of(raw["id"])
-    # verdict / reason / severity_before / fingerprint are set by the critic,
-    # the arbiter, the verdicts file and assign_fingerprints, never by a
-    # reviewer: only our own parse/match output (trusted) may carry them.
-    fp = raw.get("fingerprint") if trusted else None
+    # No findings file is ever trusted. verdict / reason / severity_before /
+    # fingerprint / category_defaulted are never read from input: verdicts
+    # come only from the verdicts file, fingerprints are recomputed in code.
     return Finding(
         reviewer=reviewer,
         id=raw["id"], file=raw["file"], rule=raw["rule"],
         actual=raw["actual"], severity=severity,
         category=raw["category"], suggestion=raw["suggestion"],
         line=line, citation=raw.get("citation"),
-        verdict=raw.get("verdict") if trusted else None,
-        reason=raw.get("reason") if trusted else None,
         rule_id=rule_id,
         category_defaulted=category_defaulted,
-        severity_before=raw.get("severity_before") if trusted else None,
-        fingerprint=fp if isinstance(fp, str) and fp else None,
     )
 
 
 def parse_reviewer_result(
-    payload: dict, strict: bool = False, trusted: bool = False
+    payload: dict, strict: bool = False
 ) -> tuple[list[Finding], list[str], list[str]]:
     """Parse one reviewer payload into (findings, clean_files, notes).
 
@@ -230,9 +224,8 @@ def parse_reviewer_result(
     `REJECTED <id|index>: <reason>` note and the valid ones are kept (the
     caller re-asks that reviewer once for only the rejected ones). A payload
     with no `reviewer` always raises. `strict=True` raises on the first bad
-    finding. A reviewer's own `verdict`, `reason`, `severity_before` and
-    `fingerprint` are ignored; `trusted=True` (our own parse/match output
-    only) keeps them."""
+    finding. Input is never trusted: `verdict`, `reason`, `severity_before`,
+    `fingerprint` and `category_defaulted` in it are ignored."""
     reviewer = payload.get("reviewer")
     if not reviewer:
         raise ContractError("payload missing 'reviewer'")
@@ -246,7 +239,7 @@ def parse_reviewer_result(
             notes_out.append(f"REJECTED {label}: not an object")
             continue
         try:
-            findings.append(_parse_one(reviewer, raw, strict, notes_out, label, trusted))
+            findings.append(_parse_one(reviewer, raw, strict, notes_out, label))
         except ContractError as exc:
             if strict:
                 raise

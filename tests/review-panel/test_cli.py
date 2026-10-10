@@ -184,11 +184,13 @@ def test_match_then_reconcile_dual_tiebreaker(tmp_path):
     assert [f["id"] for f in m["agreed"]] == ["GEN-001"]
     assert [f["id"] for f in m["only_a"]] == ["GEN-002"]
     assert [f["id"] for f in m["only_b"]] == ["GEN-003"]
-    assert m["agreed"][0]["verdict"] == "confirmed"
+    assert list(m["verdicts"]) == [m["agreed"][0]["fingerprint"]]
+    assert m["verdicts"][m["agreed"][0]["fingerprint"]]["reason"] == "both passes"
     allfps = [f["fingerprint"] for k in ("agreed", "only_a", "only_b") for f in m[k]]
     assert len(set(allfps)) == 3
     matchfile = _write(tmp_path / "m.json", m)
     verdicts = _write(tmp_path / "v.json", {
+        **m["verdicts"],
         m["only_a"][0]["fingerprint"]: {"verdict": "refuted", "reason": "no"},
         m["only_b"][0]["fingerprint"]: {"verdict": "confirmed", "reason": "yes"}})
     out = j(tmp_path, "reconcile", "--findings", matchfile, "--verdicts", verdicts,

@@ -22,23 +22,27 @@ orchestrator wrote with the Write tool; finding text is never an argument.
              FILE: a JSON list of reviewer payloads (or one payload).
              stdout {"status":"ok","findings":[...],"clean_files":[...],"notes":[...]}
              Notes carry `REJECTED <id>: <reason>` for malformed findings.
-             The output is stamped "_source": "review-panel-cli"; only a file
-             with that stamp is trusted to carry fingerprints and verdicts.
-             Everything else (any reviewer payload, however laid out) has its
-             verdict, reason, severity_before and fingerprint ignored.
+             NO findings file is ever trusted (parse, match and reconcile
+             alike): verdict, reason, severity_before, fingerprint,
+             category_defaulted and `_source` in input are ignored, and
+             fingerprints are always recomputed in code. Verdicts come only
+             from `reconcile --verdicts`. The output (flat findings) may be
+             fed back to any command; it is simply re-read as data.
 
   match      two independent passes -> agreed / disagreements (dual-tiebreaker)
                --a FILE --b FILE [--window 3]
-             stdout {"status":"ok","agreed":[...],"only_a":[...],"only_b":[...],
-             "notes":[...]}; fingerprints are final across all three lists.
+             stdout {"status":"ok","findings":[all],"agreed":[...],
+             "only_a":[...],"only_b":[...],"verdicts":{<fp>: confirmed for
+             each agreed finding},"notes":[...]}; fingerprints are final
+             across all lists, and are the ones `reconcile` recomputes from
+             this file. Merge "verdicts" with the arbiter's into --verdicts.
 
   reconcile  verdicts -> strictness -> decisions
                --findings FILE [--verdicts FILE] [--require-verdicts]
                [--strictness REVIEWER=LEVEL ...] [--decisions FILE]
                [--reviewers-dir DIR] [--out FILE]
-             --findings: a list of reviewer payloads, or the `parse` output
-             ({"findings":[flat findings with "reviewer"]}), or the `match`
-             output (agreed + only_a + only_b are reconciled together).
+             --findings: reviewer payloads, or the flat `parse`/`match`
+             output (all of its findings are reconciled together).
              --verdicts: {"<fingerprint>": {"verdict": "confirmed|refuted|weakened",
              "reason": "..."}}; a missing file is fine, an unknown fingerprint
              is noted.
@@ -83,9 +87,6 @@ from scripts.strictness import load_decisions  # noqa: E402
 _REVIEWERS_DIR = _ROOT / "skills" / "reviewers"
 _STRATEGIES_DIR = _ROOT / "skills" / "strategies"
 _DEFAULT_CONFIG = ".review-panel/config.yml"
-# Stamped on `parse` / `match` output. Trust is this marker, never the shape
-# of a file: a reviewer payload cannot be made trusted by how it is laid out.
-TRUST_MARKER = "review-panel-cli"
 
 
 class CliError(Exception):
@@ -109,41 +110,49 @@ def _read_json(path: str):
 
 
 def _load_findings(path: str):
-    """(findings, clean_files, notes) from a payload list or flat findings."""
-    data = _read_json(path)
-    if isinstance(data, dict) and "reviewer" not in data and (
+    """(findings, clean_files, notes) from a findings file.
+
+    No findings file is ever trusted, whatever it contains or however it is
+    laid out (reviewer payloads, or the flat output of `parse`/`match`):
+    `verdict`, `reason`, `severity_before`, `fingerprint`,
+    `category_defaulted` and `_source` are ignored, and fingerprints are always
+    recomputed here. Verdicts come only from `--verdicts`."""
+    return _findings_from_data(_read_json(path))
+
+
+def _findings_from_data(data):
+    flat_shape = isinstance(data, dict) and "reviewer" not in data and (
         isinstance(data.get("findings"), list) or "agreed" in data
-    ):
-        # `parse` / `match` output: flat findings, each naming its reviewer.
+    )
+    notes: list[str] = []
+    if isinstance(data, dict) and "_source" in data:
+        notes.append("ignored _source in input")
+    payloads: list = []
+    clean: list = []
+    if flat_shape:
+        # Flat findings (`parse`/`match` output shape), each naming its
+        # reviewer. One payload per finding keeps the original order.
         flat = data.get("findings")
         if not isinstance(flat, list):
             flat = [r for k in ("agreed", "only_a", "only_b") for r in data.get(k) or []]
-        # Only output carrying our marker keeps fingerprints and verdicts;
-        # any other file of this shape is untrusted reviewer data.
-        trusted = data.get("_source") == TRUST_MARKER
-        by_reviewer: dict[str, list] = {}
-        skipped: list[str] = []
         for i, raw in enumerate(flat):
             if not isinstance(raw, dict):
-                skipped.append(f"REJECTED {i}: not an object")
+                notes.append(f"REJECTED {i}: not an object")
             elif not raw.get("reviewer"):
-                skipped.append(f"REJECTED {raw.get('id', i)}: missing reviewer")
+                notes.append(f"REJECTED {raw.get('id', i)}: missing reviewer")
             else:
-                by_reviewer.setdefault(str(raw["reviewer"]), []).append(raw)
-        payloads = [{"reviewer": r, "findings": fs} for r, fs in by_reviewer.items()]
-        extra_clean = _as_list(data.get("clean_files"))
-        extra_notes = _as_list(data.get("notes")) + skipped
+                payloads.append({"reviewer": str(raw["reviewer"]), "findings": [raw]})
+        clean += _as_list(data.get("clean_files"))
+        notes += _as_list(data.get("notes"))
     else:
-        trusted = False
         payloads = data if isinstance(data, list) else [data]
-        extra_clean, extra_notes = [], []
-    findings, clean, notes = [], list(extra_clean), list(extra_notes)
+    findings = []
     for payload in payloads:
         if not isinstance(payload, dict):
             notes.append("REJECTED payload: not an object")
             continue
         try:
-            fs, cl, nt = parse_reviewer_result(payload, trusted=trusted)
+            fs, cl, nt = parse_reviewer_result(payload)
         except ContractError as exc:
             notes.append(f"REJECTED payload: {exc}")
             continue
@@ -189,7 +198,7 @@ def cmd_resolve(args) -> int:
 
 def cmd_parse(args) -> int:
     findings, clean, notes = _load_findings(args.findings)
-    _emit({"status": "ok", "_source": TRUST_MARKER,
+    _emit({"status": "ok",
            "findings": [finding_to_dict(f) for f in findings],
            "clean_files": clean, "notes": notes})
     return 0
@@ -199,24 +208,28 @@ def cmd_match(args) -> int:
     a, _, notes_a = _load_findings(args.a)
     b, _, notes_b = _load_findings(args.b)
     result = match(a, b, window=args.window)
-    # Fingerprints were assigned per pass; re-assign across the union so a
-    # finding only B raised cannot share a key with one only A raised.
-    flat = result.agreed + result.only_a + result.only_b
-    flat = assign_fingerprints([_unfingerprint(f) for f in flat])
+    # Fingerprints are recomputed across the union by the very loader that
+    # `reconcile` will use on this output, so the keys here are the keys it
+    # will see. (A finding only B raised cannot share a key with one only A
+    # raised.)
+    union = result.agreed + result.only_a + result.only_b
+    flat_dicts = [finding_to_dict(replace(f, fingerprint=None)) for f in union]
+    final, _, _ = _findings_from_data({"findings": flat_dicts})
     n1, n2 = len(result.agreed), len(result.agreed) + len(result.only_a)
+    dicts = [finding_to_dict(f) for f in final]
     _emit({
         "status": "ok",
-        "_source": TRUST_MARKER,
-        "agreed": [finding_to_dict(f) for f in flat[:n1]],
-        "only_a": [finding_to_dict(f) for f in flat[n1:n2]],
-        "only_b": [finding_to_dict(f) for f in flat[n2:]],
+        "findings": dicts,
+        "agreed": dicts[:n1],
+        "only_a": dicts[n1:n2],
+        "only_b": dicts[n2:],
+        # Verdicts the code itself decided; merge into the arbiter's verdicts
+        # file for `reconcile --verdicts` (nothing is read back from this file).
+        "verdicts": {f.fingerprint: {"verdict": "confirmed", "reason": "both passes"}
+                     for f in final[:n1]},
         "notes": [f"A: {n}" for n in notes_a] + [f"B: {n}" for n in notes_b],
     })
     return 0
-
-
-def _unfingerprint(f):
-    return replace(f, fingerprint=None)
 
 
 def _strictness_map(items: list[str]) -> dict[str, str]:
