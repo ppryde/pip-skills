@@ -39,7 +39,10 @@ def cmd_begin(args: argparse.Namespace) -> int:
 
 
 def _current_context_percent(
-    root: Path, cfg: dict[str, object], session_id: str | None = None
+    root: Path,
+    cfg: dict[str, object],
+    session_id: str | None = None,
+    transcript_path: str | None = None,
 ) -> int | None:
     # census first: keyed by session id when we have one (this session's own
     # entry, never a sibling's — see census.context_percent), else the
@@ -49,7 +52,18 @@ def _current_context_percent(
     # to "ctx unknown".
     pct = census.context_percent(root, session_id=session_id)
     if pct is None:
-        transcript = ctx.find_transcript(root.resolve(), Path.home())
+        transcript = None
+        if transcript_path:
+            candidate = Path(transcript_path)
+            if candidate.is_file():
+                transcript = candidate
+        if transcript is None:
+            env_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+            transcript = ctx.find_transcript(
+                root.resolve(),
+                Path.home(),
+                Path(env_dir) if env_dir else None,
+            )
         tokens = ctx.context_tokens(transcript) if transcript else None
         pct = (
             ctx.context_percent(tokens, cast(int, cfg["context.window"]))
@@ -360,7 +374,13 @@ def cmd_nudge_hook(args: argparse.Namespace) -> int:
         return 0
     cfg = load_config(root)
     threshold = cast(int, cfg["context.threshold"])
-    pct = _current_context_percent(root, cfg, session_id=_hook_session_id(payload, args))
+    hook_transcript = payload.get("transcript_path")
+    pct = _current_context_percent(
+        root,
+        cfg,
+        session_id=_hook_session_id(payload, args),
+        transcript_path=hook_transcript if isinstance(hook_transcript, str) else None,
+    )
     if pct is None or pct < threshold:
         return 0
     st.set_gate(root)
