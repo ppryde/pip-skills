@@ -177,6 +177,9 @@ def test_scribe_footer_rule_limits_sc2_to_the_address():
 
 def test_elder_dispatch_default_and_precedence_documented():
     audit = text(SHARED / "audit.md")
-    assert "10 or more templates" in audit and "below Elder's 50-template pause" in audit
+    # owner-approved: the split is unconditional (no template-count threshold); 50-template pause kept
+    assert "10 or more templates" not in audit and "whatever the template count" in audit
+    assert "50-template pause" in audit and "`rules.py batches`" in audit and "BATCH_CAP" in audit
+    assert "Audit in rule batches" in text(skill_md("elder"))
     elder = text(skill_md("elder"))
     assert "Argument precedence" in elder and "doctrine <name>" in elder

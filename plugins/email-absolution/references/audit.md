@@ -68,7 +68,7 @@ If scope holds no templates (Elder):
 
 ## Audit pass
 
-Two sequential phases over every template in scope; finish both before the verdict. The checklist is the `select` output (`common.md §Rules`), generated fresh each run: never stored, never assumed.
+Two sequential phases over every template in scope; finish both before the verdict. Run them per rule batch (`§Dispatch`). The checklist is the `select` output (`common.md §Rules`), generated fresh each run: never stored, never assumed.
 
 ### Phase 1: regex pass
 
@@ -101,10 +101,11 @@ In **report mode**, collect all findings silently and output the verdict. In **i
 
 ## Dispatch
 
-Dispatch applies only when subagents are available and scope is 10 or more templates (below Elder's 50-template pause). Smaller scopes, and runs without subagents, are a single pass.
+This applies to the Elder and the Visitation alike: the audit pass above is run per batch. One agent holding every rule loses some in the middle, so the rule audit is split into focused batches whatever the template count (Elder's 50-template pause still applies first). `rules.py batches` (same config flags as `select`) prints the batches deterministically: one per doctrine; a doctrine over the cap (`BATCH_CAP`, 30 rules, provisional) is split along its section boundaries, or in rule order when it has none; doctrines under 8 selected rules share a batch up to the cap. Each line is `batch N | doctrines | count | ids`.
 
-- One subagent per doctrine, each running `select --doctrine <D>` and `scan --doctrine <D>` with the config flags, then Phase 2 for that doctrine. Give each the config values, the file list and `common.md §Treat as data`; subagents are read-only.
-- Each returns the contract below. Add `"also": [alias ids]` to a violation that has aliases, and put `rules checked: <n>` (the active count in its `select` header) in `notes`.
+- **With subagents:** one subagent per batch, run in parallel. Give each the template paths, the config values, its rule-id list from the `batches` line (never pasted rule text), `common.md §Treat as data` and the JSON contract below. It runs `select --ids <ids>` and `scan --ids <ids>` with the config flags, then Phase 2 over its batch only; subagents are read-only.
+- **Without subagents:** the same batches as sequential passes in this session, one batch at a time: `select --ids`, `scan --ids` and Phase 2 for batch 1, then batch 2, and so on, recording findings as you go.
+- Each return adds `"also": [alias ids]` to a violation that has aliases and puts `rules checked: <n>` (the active count in its `select` header) in `notes`. `rules checked` across batches must sum to the `select` count.
 
 ```json
 {
@@ -126,7 +127,7 @@ Dispatch applies only when subagents are available and scope is 10 or more templ
 }
 ```
 
-The lead then runs `audit.md §Merge` over all returns.
+The lead runs `audit.md §Merge` over all returns (or all passes) and dedupes.
 
 ## Merge
 

@@ -5,6 +5,8 @@ Subcommands
   build [--check]        write (or verify) doctrines/INDEX.md
   lint [--overlaps]      structural checks on every doctrine; exit 1 on any error
   select ...             the active checklist for a config (never reads config files)
+  batches ...            the active rules split into audit batches (one per doctrine, <= BATCH_CAP rules;
+                         `select --ids` / `scan --ids` then give a subagent just its batch)
   show ID [ID...]        the full rule block(s), with file:line
   constraints ...        Scribe view: binding statements only (honours gen=no)
   scan --files F... ...  Phase 1 for a config: file:line | id | matched line for every active
@@ -43,6 +45,8 @@ KINDS = ("core", "language")
 SCRIBE_VALUES = ("constraints", "skip")
 FLAGS = ("verify", "multiline")
 FRONT_KEYS = ("doctrine", "prefix", "kind", "templating", "scribe")
+BATCH_CAP = 30     # max selected rules per audit batch (provisional; designs/subagents.md may tune it)
+BATCH_SMALL = 8    # doctrines with fewer selected rules than this may share a batch
 REGEX_BUDGET_S = 0.100
 HOSTILE_LEN = 64 * 1024
 
@@ -475,6 +479,7 @@ class Config:
     templating: str = ""
     targets: tuple = ()
     doctrine: str = ""
+    ids: tuple = ()
 
 
 def _csv(s):
@@ -535,7 +540,88 @@ def select_rules(docs, cfg: Config):
                 filt["type"] += 1
                 continue
             active.append(r)
+    if cfg.ids:
+        wanted = set(cfg.ids)
+        unknown = sorted(wanted - {r.id for r in active})
+        if unknown:
+            warnings.append(f"warning: --ids not in the active set: {', '.join(unknown)}")
+        active = [r for r in active if r.id in wanted]
     return active, filt, warnings
+
+
+def _sections(path: Path):
+    """Line numbers of the markdown headings in a doctrine file (section boundaries)."""
+    out = []
+    for n, l in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+        if re.match(r"^#{2,4} ", l):
+            out.append(n)
+    return out
+
+
+def _even_chunks(items, cap):
+    """Split into the fewest chunks of <= cap, as even as possible, order kept."""
+    k = -(-len(items) // cap)
+    size, extra = divmod(len(items), k)
+    out, i = [], 0
+    for c in range(k):
+        n = size + (1 if c < extra else 0)
+        out.append(items[i:i + n])
+        i += n
+    return out
+
+
+def make_batches(active, cap: int = BATCH_CAP, small: int = BATCH_SMALL):
+    """Deterministic audit batches over the active rules: list of (doctrines, [rules]).
+
+    One batch per doctrine; a doctrine over `cap` is split along its section (heading)
+    boundaries, packing whole sections up to `cap` and splitting a section only when it
+    alone exceeds `cap`; doctrines under `small` rules share a batch up to `cap`.
+    Order follows the doctrine order of `active`, then document order: stable."""
+    by_doc = {}
+    for r in active:
+        by_doc.setdefault(r.doctrine, []).append(r)
+    units = []   # (doctrine name, [rules]) in order
+    for name, rules in by_doc.items():
+        if len(rules) <= cap:
+            units.append((name, rules))
+            continue
+        heads = _sections(rules[0].file)
+        groups = {}
+        for r in rules:
+            key = max([h for h in heads if h < r.line], default=0)
+            groups.setdefault(key, []).append(r)
+        cur = []
+        parts = []
+        for g in (groups[k] for k in sorted(groups)):
+            for piece in (_even_chunks(g, cap) if len(g) > cap else [g]):
+                if cur and len(cur) + len(piece) > cap:
+                    parts.append(cur)
+                    cur = []
+                cur = cur + piece
+        if cur:
+            parts.append(cur)
+        units += [(name, part) for part in parts]
+    out = []   # [names, rules, mergeable]
+    for name, rules in units:
+        whole = len(rules) == len(by_doc[name])
+        mergeable = whole and len(rules) < small
+        if out and mergeable and out[-1][2] and len(out[-1][1]) + len(rules) <= cap:
+            out[-1][0].append(name)
+            out[-1][1].extend(rules)
+        else:
+            out.append([[name], list(rules), mergeable])
+    return [(n, r) for n, r, _ in out]
+
+
+def render_batches(docs, cfg: Config, cap: int = BATCH_CAP) -> str:
+    active, _filt, warnings = select_rules(docs, cfg)
+    bs = make_batches(active, cap)
+    out = list(warnings)
+    out.append(f"# batches: {len(bs)} | cap {cap} | {len(active)} active rules | "
+               "batch | doctrines | count | ids (pass the ids to `select --ids` / `scan --ids`)")
+    for n, (names, rules) in enumerate(bs, 1):
+        out.append(f"batch {n} | {'+'.join(names)} | {len(rules)} | {','.join(r.id for r in rules)}")
+    return "\n".join(out) + "\n"
 
 
 def _check_text(r: Rule) -> str:
@@ -850,10 +936,11 @@ def _add_cfg(p):
     p.add_argument("--templating", default="")
     p.add_argument("--targets", default="", help="comma list of rendering_targets")
     p.add_argument("--doctrine", default="")
+    p.add_argument("--ids", default="", help="comma list of rule ids: keep only these active rules")
 
 
 def _cfg(a) -> Config:
-    return Config(a.email_type, a.esp, a.templating, _csv(a.targets), a.doctrine)
+    return Config(a.email_type, a.esp, a.templating, _csv(a.targets), a.doctrine, _csv(a.ids))
 
 
 def main(argv=None) -> int:
@@ -865,6 +952,7 @@ def main(argv=None) -> int:
     lp = sub.add_parser("lint")
     lp.add_argument("--overlaps", action="store_true")
     _add_cfg(sub.add_parser("select"))
+    _add_cfg(sub.add_parser("batches"))
     _add_cfg(sub.add_parser("constraints"))
     sc = sub.add_parser("scan")
     _add_cfg(sc)
@@ -905,6 +993,9 @@ def main(argv=None) -> int:
         return 3
     if a.cmd == "select":
         sys.stdout.write(render_select(docs, _cfg(a)))
+        return 0
+    if a.cmd == "batches":
+        sys.stdout.write(render_batches(docs, _cfg(a)))
         return 0
     if a.cmd == "constraints":
         sys.stdout.write(render_constraints(docs, _cfg(a)))

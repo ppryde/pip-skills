@@ -59,7 +59,7 @@ Run `rules.py select` with the config flags (`common.md §Rules`; add `--doctrin
 
 ### Step 4: Run the audit
 
-Phase 1 with `scan`, then Phase 2 over every contextual rule (`audit.md §Audit pass`). With subagents available and 10 or more templates, dispatch per doctrine (`audit.md §Dispatch`). Interactive mode presents each violation as found (`audit.md §Interactive`).
+Phase 1 with `scan`, then Phase 2 over every contextual rule (`audit.md §Audit pass`). Audit in rule batches, by subagents if available (`audit.md §Dispatch`). Interactive mode presents each violation as found (`audit.md §Interactive`).
 
 ### Step 5: Merge and apply overrides
 
