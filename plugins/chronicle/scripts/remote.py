@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from collections.abc import Callable
@@ -32,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts import store
+from scripts.volumes import _MAIN_RE, _SUBAGENT_RE
 
 DISABLE_ENV = "CHRONICLE_NO_REMOTES"
 
@@ -153,6 +155,26 @@ def _save_state(mirror_root: Path, state: dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+_META_RELPATH_RE = re.compile(
+    r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/subagents/agent-[A-Za-z0-9_-]+\.meta\.json$")
+
+
+def _validate_relpath(mirror_root: Path, relpath: object) -> str:
+    """A remote-supplied ``file`` must be a transcript or sub-agent meta path of
+    the shape ``claude`` writes, and must resolve inside ``<mirror>/projects``.
+    The remote is not trusted: a hostile one could otherwise name ``../..`` and
+    make us write or unlink outside the mirror. Raises ``ValueError`` (which
+    ``_pull_once`` reports as a garbled response)."""
+    if not isinstance(relpath, str) or not (
+            _MAIN_RE.match(relpath) or _SUBAGENT_RE.match(relpath)
+            or _META_RELPATH_RE.match(relpath)):
+        raise ValueError(f"unexpected remote file path {relpath!r}")
+    root = (mirror_root / "projects").resolve()
+    if root not in (root / relpath).resolve().parents:
+        raise ValueError(f"remote file path escapes the mirror: {relpath!r}")
+    return relpath
+
+
 def _mirror_path(mirror_root: Path, relpath: str) -> Path:
     return mirror_root / "projects" / relpath
 
@@ -162,7 +184,12 @@ def _append_file_frame(mirror_root: Path, state: dict[str, Any], frame: dict[str
     any partial append a previous crash left behind), append this frame's
     lines, fsync, THEN advance the checkpoint in ``state`` (the caller saves
     it). Never called for a frame with no new lines and no truncation."""
-    relpath = frame["file"]
+    relpath = _validate_relpath(mirror_root, frame["file"])
+    to_offset = frame["to_offset"]
+    lines = frame["lines"]
+    if (not isinstance(to_offset, int) or isinstance(to_offset, bool) or to_offset < 0
+            or not isinstance(lines, list) or not all(isinstance(x, str) for x in lines)):
+        raise ValueError("malformed file frame")
     target = _mirror_path(mirror_root, relpath)
     target.parent.mkdir(parents=True, exist_ok=True)
     entry = state["files"].get(relpath) or {"offset": 0, "mirror_bytes": 0}
@@ -178,25 +205,29 @@ def _append_file_frame(mirror_root: Path, state: dict[str, Any], frame: dict[str
         if handle.tell() > checkpoint:
             handle.truncate(checkpoint)
             handle.seek(checkpoint)
-        for line in frame["lines"]:
+        for line in lines:
             handle.write(line.encode("utf-8"))
             handle.write(b"\n")
         handle.flush()
         os.fsync(handle.fileno())
         new_len = handle.tell()
-    state["files"][relpath] = {"offset": frame["to_offset"], "mirror_bytes": new_len}
+    state["files"][relpath] = {"offset": to_offset, "mirror_bytes": new_len}
 
 
 def _apply_meta_frame(mirror_root: Path, state: dict[str, Any], frame: dict[str, Any],
                       remote_size: int) -> None:
-    relpath = frame["file"]
+    relpath = _validate_relpath(mirror_root, frame["file"])
     target = _mirror_path(mirror_root, relpath)
     content = frame.get("content")
     if content is not None:
+        if not isinstance(content, str):
+            raise ValueError("malformed meta frame")
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name(target.name + ".tmp")
-        tmp.write_text(content)
-        os.fsync(os.open(str(tmp), os.O_RDONLY)) if tmp.exists() else None
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, target)
     state["meta"][relpath] = {"remote_size": remote_size}
 

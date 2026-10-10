@@ -1,11 +1,12 @@
 # Read-only queries for a reconcile
 
 All of these open the store read-only. Set `DB` to the store or, better, a copy. Run from a checkout
-that has the merged chronicle code so `scripts.report` prices with the current rates.
+that has the merged chronicle code (Python >= 3.10) so `scripts.report` prices with the current rates.
+Set `CHRONICLE_PLUGIN_ROOT` to that checkout's `plugins/chronicle`.
 
 ```python
-import sqlite3, sys
-sys.path.insert(0, "plugins/chronicle")          # so `from scripts import report` works
+import os, sqlite3, sys
+sys.path.insert(0, os.environ["CHRONICLE_PLUGIN_ROOT"])   # so `from scripts import report` works
 from scripts import report, ratebook
 DB = "/Users/<you>/.claude/chronicle/sessions.db"   # or a copy
 c = sqlite3.connect(f"file:{DB}?mode=ro", uri=True); c.row_factory = sqlite3.Row
@@ -64,6 +65,9 @@ print(groups, "duplicated calls,", extra, "surplus rows")     # 0 after `chronic
 
 ## Daily comparison against the console
 
+`by_day` buckets are LOCAL time; the console's are UTC. The first snippet is chronicle's own view; the
+second is the like-for-like UTC series to compare with the console.
+
 ```python
 import time
 ENT = "1538875f-1dea-4637-b6cb-9c21c02c8ce9"
@@ -74,7 +78,20 @@ for day in sorted(set(ours) | set(console)):
     print(day, console.get(day, 0), round(ours.get(day, 0)), round(ours.get(day, 0) - console.get(day, 0)))
 ```
 
+UTC variant (same pricing, UTC day buckets, de-duplication as chronicle does it):
+
+```python
+utc = report._costs_by(c, "date(t.ts,'unixepoch')", " WHERE t.ts >= ?", [since], extra="t.ts IS NOT NULL")
+ours_utc = {d: v["cost_usd"] for d, v in utc.items()}      # add AND s.account_uuid = ? to scope an account
+for day in sorted(set(ours_utc) | set(console)):
+    print(day, console.get(day, 0), round(ours_utc.get(day, 0)), round(ours_utc.get(day, 0) - console.get(day, 0)))
+```
+
 ## Cost by model for a window (compare with the console's per-model view)
+
+`by_model` is a whole-session sum for every session active in the window, so it over-counts sessions that
+began before the window. For spend strictly inside the window, group `report._costs_by` by `t.model` with a
+`t.ts >= ?` filter, as in the UTC snippet above.
 
 ```python
 s = report.summary(c, account=ENT, since=since)

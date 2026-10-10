@@ -10,7 +10,7 @@ Guards against HTML structure and CSS usage patterns that produce broken, unstyl
 
 **[HTML-001]** `transactional: mortal | marketing: mortal` — Never use `<p>` tags for spacing or layout.
 > Outlook 2007–2019 applies its own default margins to `<p>` elements that vary by Word version and cannot be fully reset via CSS. This causes inconsistent spacing between versions and breaks pixel-level layouts. Use table cell padding for spacing instead. If `<p>` is used for paragraph text, always include `style="margin: 0; padding: 0;"` explicitly.
-> `detect: regex` — pattern: `<p(?![^>]*style="[^"]*margin:\s*0)[^>]*>`
+> `detect: regex` — pattern: `<p\b(?![^>]*style="[^"]*margin:\s*0)[^>]*>` (the word boundary stops it matching picture, pre and param elements)
 
 **[HTML-002]** `transactional: mortal | marketing: mortal` — Headings (`<h1>`–`<h6>`) must have `margin: 0` set inline.
 > Outlook and most clients apply browser-default margins to headings. Without an inline `margin: 0`, headings introduce unexpected vertical gaps above and below them that compound in multi-section layouts.
@@ -18,7 +18,7 @@ Guards against HTML structure and CSS usage patterns that produce broken, unstyl
 
 **[HTML-003]** `transactional: mortal | marketing: venial` — `display: none` on any element must be accompanied by `mso-hide: all`.
 > Outlook 2007–2019 ignores `display: none` for some element types, rendering hidden content (preheaders, mobile-only blocks, dark mode swaps) visibly. `mso-hide: all` is the MSO-specific equivalent and must accompany every `display: none` declaration. Source: standard Outlook workaround pattern.
-> `detect: regex` — pattern: `display:\s*none(?![^"]{0,120}mso-hide)`
+> `detect: hybrid` — pattern: `style="(?![^"]*mso-hide)[^"]*display:\s*none` (inspects the whole `style` attribute, so mso-hide before or after display:none is accepted; display:none inside a style block is the contextual part — for every display:none in a style block, check that the same rule also contains mso-hide: all)
 
 **[HTML-004]** `transactional: mortal | marketing: mortal` — Do not nest `<table>` elements more than 3–4 levels deep.
 > Deep table nesting causes rendering performance issues and layout glitches in older Outlook and Yahoo clients. Heavily nested tables also become unmaintainable. Flatten layout where possible; use padding and spacer rows for spacing rather than nested tables.
@@ -26,7 +26,7 @@ Guards against HTML structure and CSS usage patterns that produce broken, unstyl
 
 **[HTML-005]** `transactional: mortal | marketing: mortal` — `font-family` declarations must include at least one web-safe fallback.
 > Custom fonts (`@font-face`) are not supported in Gmail, Yahoo, or Outlook 2007–2019. If a custom font is declared without a web-safe fallback (e.g., `font-family: 'MyFont'`), these clients render the browser default (usually Times New Roman), which is almost never acceptable for production email. Source: [caniemail.com](https://www.caniemail.com/).
-> `detect: regex` — pattern: `font-family\s*:\s*['"]?[A-Za-z][^;'"]*['"]?\s*[;"]` (check for single font — no comma following)
+> `detect: regex` — pattern: `font-family\s*:\s*(?:'[^',;"]*'|"[^",;]*"|(?!(?:inherit|initial|unset)\b)[A-Za-z][^,;"'}]*)\s*[;"}]` (check the matched line: it nominates a declaration naming a single font — no comma — so a full fallback stack, or inherit, is not flagged; confirm the line before reporting)
 
 **[HTML-006]** `transactional: venial | marketing: counsel` — `<a>` elements with custom colours must have `color` and `text-decoration` set via inline style.
 > Outlook.com, older Yahoo, and Gmail may strip `<a>` colour rules from `<style>` blocks. Without inline styles on the `<a>` element itself, link colours revert to the client's default blue underlined style, which breaks branded button colours and link styling in footers and body text.

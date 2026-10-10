@@ -366,9 +366,12 @@ def slim(record: Any, fidelity: str = "minimal") -> dict[str, Any] | None:
     elif kind in ("bridge-session", "history-suppression"):
         out.update(_copy_scalars(record, ACCOUNT_KEYS))
     elif kind == "cost-state":
-        for key in ("totalCostUSD", "startTime", "modelUsage"):
-            if key in record:
-                out[key] = record[key]
+        for key in ("totalCostUSD", "startTime"):
+            value = record.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                out[key] = value
+        if "modelUsage" in record:
+            out["modelUsage"] = _usage(record["modelUsage"])
     else:
         return None
     return out

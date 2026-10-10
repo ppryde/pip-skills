@@ -41,3 +41,13 @@ def test_read_persona_malformed_frontmatter_degrades_to_empty():
     assert p is not None
     assert p.frontmatter == {}
     assert "keep going" in p.body
+
+
+def test_read_persona_rejects_hostile_alias():
+    assert read_persona("../evil") is None
+    assert read_persona("a/b") is None
+    assert read_persona("") is None
+
+
+def test_read_persona_rejects_trailing_newline():
+    assert read_persona("danvk\n") is None
