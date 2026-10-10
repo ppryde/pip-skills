@@ -57,7 +57,7 @@ For FETCH-020/022. Take the models the target references; run an **import scan**
 ### Step 5: Check execution
 Read `checks/INDEX.md` once; its header says how a `Span` becomes a `Read` call.
 
-1. **Triggers: run them before opening any check.** Issue one `Grep` per distinct `Trigger` regex among the active groups' rows, all in one parallel batch (`output_mode: count`), over the target plus the model, template and settings files Steps 3-4 resolved. A hit nominates that check. Do not pick checks by reading the target and guessing which apply, and do not judge whether a trigger "plausibly" matches: grep it. PAT-070 and WRITE-005 are nominated by Step 2 instead (`audit_framework`/`signals_safe` set, or a non-empty signal map). Then note one line, `Nominated: <codes>`.
+1. **Triggers: one Grep batch, before any check is opened.** Right after INDEX.md, make one `Grep` call per distinct `Trigger` regex of the active groups' rows (a dozen or more), all in one parallel message, `output_mode: count`, over the target plus the model, template and settings files Steps 3-4 resolved. No `checks/` group `Read` until they return. A hit nominates. Never guess checks from reading the target, or judge a trigger "plausible": grep it. PAT-070 and WRITE-005 are nominated by Step 2 instead (`audit_framework`/`signals_safe` set, or a non-empty signal map). Then note `Nominated: <codes>`.
 2. **Always nominate every `critical` row**, hit or not.
 3. **Open** each nominated check: `Read` its INDEX `Span` (adjacent spans in one file may share a call). Apply its Signature, Confidence rules and Savings formula with the Step 2-4 context. A trigger hit only nominates; the signature decides.
 4. Never report a code you did not open. Aliases are never run.
@@ -114,7 +114,7 @@ Total = sum of midpoints; range = sum of the low ends to sum of the high ends (n
 
 | Mistake | Fix |
 |---|---|
-| Reading whole group files without `--thorough`, or skipping the trigger greps | Grep the triggers, always open critical rows, `Read` only matching spans |
+| Whole group files without `--thorough`, or no trigger greps | Grep the triggers first; `Read` only nominated spans |
 | EXPLAIN ANALYZE on a write | EXPLAIN without ANALYZE; wrap SELECT EXPLAIN in BEGIN…ROLLBACK |
 | FETCH-020/022 with zero caller evidence | `confidence: low`; do not drop |
 | Escalating WRITE-006/007 without an audit package | Only when `audit_framework=true`; never for plain listeners or `pghistory` |
