@@ -86,11 +86,13 @@ Each doctrine is a markdown file with a structured violation catalog — typical
 | **Hexagonal** | `HEX` | Ports and adapters — core isolation, dependency direction |
 | **Saga** | `SAG` | Distributed transactions — orchestration, compensation, idempotency |
 | **Messaging** | `MSG` | Async communication — delivery guarantees, idempotency, dead letters |
-| **Microservices** | `MIC` | Service boundaries — independence, contracts, blast radius |
-| **Modular Monolith** | `MON` | Module isolation — public API enforcement, cross-module access |
+| **Microservices** | `MCR` | Service boundaries — independence, contracts, blast radius |
+| **Modular Monolith** | `MOM` | Module isolation — public API enforcement, cross-module access |
 | **Backend for Frontend** | `BFF` | Client-specific backends — aggregation, response shaping |
 | **Resilience** | `RES` | Fault tolerance — circuit breakers, retries, bulkheads, timeouts |
 | **Layered N-Tier** | `LNT` | Classic layering — presentation, business, persistence separation |
+| **Repository** | `REP` | Persistence abstraction — aggregate-scoped repositories, no leaking of storage details |
+| **Strategy** | `STG` | Interchangeable algorithms — interface-based selection, registration, no type-switching |
 
 Each doctrine also includes **Detection Signatures** — a lightweight set of directory and file signals that Covenant's discover mode uses to fingerprint which patterns your codebase is using, without running a full audit.
 

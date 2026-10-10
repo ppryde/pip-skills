@@ -157,12 +157,12 @@ After writing, inform the user:
 
 ## Step 0: Load Available Doctrines
 
-**Always run this before any other step — planning mode and discovery mode both.**
+**Planning modes run this before any other step. Discover mode skips Step 0 and follows D2 (it reads each doctrine's Detection Signatures only).**
 
 Do not rely on a hardcoded or memorised list of patterns. Load the available doctrine set dynamically:
 
 1. List all `*.md` files in `<plugin-root>/skills/doctrines/`, **excluding any file whose basename starts with `_`** (e.g. `_template.md`) — this SKILL.md lives at `<plugin-root>/skills/covenant/SKILL.md`, so the doctrines directory is the `doctrines/` sibling within the same `skills/` directory
-2. For each doctrine file, read its `## When to Use` section to understand the fit criteria and scope boundaries
+2. For each doctrine file, read its `## When to Use` section (planning modes only) to understand the fit criteria and scope boundaries
 3. Use this list — and only this list — as the candidate patterns for recommendation, roadmap planning, and discovery scoring
 
 This ensures new doctrines automatically participate in planning with no changes to this skill. If the doctrines directory is empty or unreadable, warn the user and proceed with built-in knowledge as a fallback only.
@@ -746,5 +746,3 @@ formally uncompromising, dramatically precise, with a
 knowing wink. Violations are heresies. Resolutions are
 absolution. The codebase is the sanctum.
 
-See persona.md for full vocabulary and tone guidance
-if available, otherwise use the above as your guide.

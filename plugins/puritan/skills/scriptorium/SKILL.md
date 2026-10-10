@@ -39,7 +39,7 @@ Examples:
 
 Search for:
 1. `"[pattern name]" [original author]` — Find who invented/formalized it
-2. `"[pattern name]" best practices 2024 2025` — Current consensus
+2. `"[pattern name]" best practices <current year>` — Current consensus (use the actual current year)
 3. `"[pattern name]" anti-patterns common mistakes` — What goes wrong
 4. `"[pattern name]" [language/framework]` — Language-specific adaptations
 
@@ -48,12 +48,14 @@ Minimum required sources:
 - 2+ recognized practitioners
 - 1+ failure case study or anti-pattern article
 
+**Cite only sources you actually fetched.** If you cannot fetch a source (offline, blocked), mark the citation `(unverified)` or omit it. Never invent a URL, title or quote.
+
 ## Step 3: Discover Existing Doctrines
 
 Before writing, read what already exists:
 
 1. List all `*.md` files in `<plugin-root>/skills/doctrines/`, **excluding any file whose basename starts with `_`** (e.g. `_template.md`) — this SKILL.md lives at `<plugin-root>/skills/scriptorium/SKILL.md`, so the doctrines directory is the `doctrines/` sibling within the same `skills/` directory
-2. Note which ID prefixes and ranges are already claimed
+2. Note which ID prefixes are already claimed (grep each doctrine for its `XXX-001`-style IDs)
 3. Identify cross-reference opportunities — new doctrines should link to related existing ones
 4. Check for overlap — if an existing doctrine already covers your pattern, update it instead
 
@@ -153,7 +155,7 @@ Use inline citations when:
 - The rule is controversial or has competing opinions
 - The source provides critical context
 
-## Step 8b: Write Detection Signatures
+## Step 8: Write Detection Signatures
 
 Every doctrine must include a `## Detection Signatures` section for Covenant discover mode. This section enables lightweight pattern fingerprinting without a full audit.
 
@@ -205,7 +207,7 @@ Suggest [Pattern] is NOT in use:
 | `shared/` or `common/` | Layered N-Tier, Modular Monolith | Require `modules/` context for Modular Monolith; require `persistence/` context for Layered |
 | `*Handler.*` files | CQRS, Messaging, Saga | Qualify with directory context |
 
-## Step 8c: Document Exceptions
+## Step 9: Document Exceptions
 
 Real patterns have edge cases. Document them to prevent false positives:
 
@@ -217,7 +219,7 @@ Real patterns have edge cases. Document them to prevent false positives:
 - **Performance:** Denormalized projections may break normalization rules
 ```
 
-## Step 9: Validate Completeness
+## Step 10: Validate Completeness
 
 Checklist before finishing — count explicitly, do not estimate:
 - [ ] All 9 required sections present and in order
@@ -236,23 +238,14 @@ Checklist before finishing — count explicitly, do not estimate:
 ## Violation ID Convention
 
 **The 3-letter prefix is the disambiguator.** `DDD-001` and `MSG-001` are
-distinct IDs — the numeric range is bookkeeping to track how many rules a
-doctrine has, not a global namespace. Prefixes must be unique across all
-doctrines. Numbers are scoped per prefix.
+distinct IDs — numbers are scoped per prefix. Prefixes must be unique across
+all doctrines. Derive the claimed prefixes by grepping `doctrines/` (Step 3);
+do not rely on a hard-coded list.
 
-| Doctrine | Prefix | Current range |
-|---|---|---|
-| DDD | DDD | 001-090 |
-| Event Sourcing | EVS | 100-175 |
-| CQRS | CQR | 200-264 |
-| Hexagonal | HEX | 001-042 |
-| Layer Boundaries | LYR | 400-499 (reserved) |
-| Messaging | MSG | 001-064 |
-| Saga | SAG | 001-065 |
-| Strategy | STG | 001-075 |
-| Repository | REP | 001-077 |
-
-New doctrines must claim a unique 3-letter prefix and a numeric range block (e.g. 001-099, 100-199). Number IDs starting from 001 within your chosen range.
+Rule: a unique 3-letter prefix; numbers start at 001; **never renumber or
+reuse an id, even a retired one**. Ids are stable keys: Inquisition overrides
+in `.architecture/decisions.yml` target them, so renumbering silently retargets
+or orphans an override.
 
 ## Output Specification
 
@@ -304,7 +297,7 @@ Every doctrine MUST contain these sections in order:
 ## Detection Signatures
   → Directory signals: 3–6 directory paths that indicate this pattern is in use
   → File signals: 2–4 file naming patterns that are strong indicators
-  → Anti-signals: 2–3 structural absences or alternative structures that rule this pattern out
+  → Anti-signals: 2–4 structural absences or alternative structures that rule this pattern out
   → Recognition signals only — not violations
 ```
 
@@ -314,7 +307,7 @@ Each row in the catalog is a contract with Inquisition. The columns mean:
 
 | Column | Purpose | Rule |
 |--------|---------|------|
-| **ID** | Unique identifier | 3-letter prefix + hyphen + 3-digit number. Check existing prefixes in the ID Convention table — never reuse |
+| **ID** | Unique identifier | 3-letter prefix + hyphen + 3-digit number. Check existing prefixes by grepping `doctrines/` — never reuse |
 | **Category** | Grouping slug | Lowercase with hyphens (e.g. `layer-boundary`, `event-design`) |
 | **Rule** | Human-readable statement | One line, imperative ("Domain must not import from infrastructure") |
 | **Default Severity** | `error` or `warning` | `error` = blocks commit, `warning` = advisory. Correctness → error, style/preference → warning |
@@ -330,8 +323,7 @@ Each row in the catalog is a contract with Inquisition. The columns mean:
 After writing a doctrine, verify it works with the ecosystem:
 
 - [ ] File is at `<plugin-root>/skills/doctrines/<pattern-name>.md`
-- [ ] ID prefix is unique (not in the convention table already)
-- [ ] Add the new prefix and range to the Violation ID Convention table in this skill
+- [ ] ID prefix is unique (no other doctrine in `doctrines/` uses it)
 - [ ] User's `.architecture/config.yml` updated with new doctrine entry (see Inquisition SKILL.md Step 1 for config format)
 - [ ] Run `/puritan:inquisition <doctrine-name>` to smoke-test the new doctrine
 
@@ -344,5 +336,3 @@ formally uncompromising, dramatically precise, with a
 knowing wink. Violations are heresies. Resolutions are
 absolution. The codebase is the sanctum.
 
-See persona.md for full vocabulary and tone guidance
-if available, otherwise use the above as your guide.
