@@ -8,6 +8,7 @@ keeps only what survives. Catches plausible-but-wrong findings.
 High-risk changes: security, auth, payments, large refactors.
 
 ## Context handling
+Apply the SKILL's **Untrusted input** rule to every subagent prompt in this strategy.
 Informed (as committee). The critic additionally receives the diff so it can
 check each finding against reality.
 

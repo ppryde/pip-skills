@@ -8,6 +8,7 @@ disagreements. Robust through independent checks.
 Medium-to-high risk changes where a single pass may miss or over-call.
 
 ## Context handling
+Apply the SKILL's **Untrusted input** rule to every subagent prompt in this strategy.
 Informed (as committee). Both passes get identical context; keep them
 independent (do not let pass B see pass A's findings).
 

@@ -54,3 +54,21 @@ def test_render_report_includes_counts_and_ids():
     assert "committee" in out
     assert "GEN-001" in out and "GEN-002" in out
     assert "1 error" in out and "1 info" in out
+
+
+def test_render_report_survives_backticks_and_newlines():
+    f = Finding(reviewer="general", id="G1", file="a.py", rule="r\nule",
+                actual="x = `y`\nz", severity="error", category="c",
+                suggestion="do\nit", line=3)
+    out = render_report(collate([f]), {"strategy": "s", "scope": "changed"})
+    assert "  - found: ``x = `y` z``" in out
+    assert "  - fix: do it" in out
+    assert "r ule" in out
+    assert "\nz" not in out
+
+
+def test_render_report_pads_edge_backticks():
+    f = Finding(reviewer="general", id="G1", file="a.py", rule="r",
+                actual="`x`", severity="info", category="c", suggestion="s")
+    out = render_report(collate([f]), {})
+    assert "found: `` `x` ``" in out
