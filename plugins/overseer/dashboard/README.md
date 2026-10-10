@@ -47,7 +47,7 @@ If you change anything under `frontend/src/`, you must rebuild and commit
 
 ```bash
 export PATH="$HOME/.nvm/versions/node/v22.22.1/bin:$PATH"   # node via nvm, not on default PATH
-cd frontend && npm install && npm run build
+cd frontend && npm ci && npm run build
 ```
 
 The backend's `test_dist_freshness.py` enforces this with a content hash of

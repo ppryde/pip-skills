@@ -11,6 +11,11 @@
 
 set -u
 
+py="${OVERSEER_PYTHON:-python3}"
+if [ -z "${OVERSEER_PYTHON:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/../../.venv/bin/python" ]; then
+  py="${CLAUDE_PLUGIN_ROOT}/../../.venv/bin/python"
+fi
+
 payload="$(cat)"
 
 # Parse the command + cwd fields from the JSON payload.
@@ -35,8 +40,8 @@ fi
 # (skipping arg-taking flags like `-C <dir>`), the next token must be `push`.
 # Falls back to a best-effort regex only when python3 is unavailable.
 _is_git_push() {
-  if command -v "${OVERSEER_PYTHON:-python3}" >/dev/null 2>&1; then
-    "${OVERSEER_PYTHON:-python3}" - "$cmd" <<'PY'
+  if command -v "$py" >/dev/null 2>&1; then
+    "$py" - "$cmd" <<'PY'
 import shlex
 import sys
 
@@ -150,11 +155,11 @@ fi
 # Resolve the ACTUAL backup dir first: a custom `backup_dir` pref, or a
 # worktree's own `.overseer/backups`, must be looked up and committed in the
 # same place the backup itself is written — never hard-code the default.
-bdir="$("${OVERSEER_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT:-}/scripts/cli.py" \
+bdir="$("$py" "${CLAUDE_PLUGIN_ROOT:-}/scripts/cli.py" \
   --root "$repo_root" backup --print-dir 2>/dev/null)" || exit 0
 [ -n "$bdir" ] || exit 0
 
-"${OVERSEER_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT:-}/scripts/cli.py" \
+"$py" "${CLAUDE_PLUGIN_ROOT:-}/scripts/cli.py" \
   --root "$repo_root" backup >/dev/null 2>&1 || exit 0
 
 if [ -n "$(git -C "$repo_root" status --porcelain "$bdir" 2>/dev/null)" ]; then

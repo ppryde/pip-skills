@@ -65,6 +65,7 @@ from scripts.sprints import (
     sprint_path,
 )
 from scripts.store import (
+    check_id,
     derive_repo_label,
     derive_repo_root,
     init_workflow,
@@ -419,6 +420,9 @@ def _create_card(args: argparse.Namespace) -> Card:
     """Mint and insert a card from new-card-style args. Raises
     ``sqlite3.IntegrityError`` on an id collision (insert-only, see below)."""
     conn = _conn(args.root)
+    for what, ref in (("--jira", args.jira), ("--linear", args.linear)):
+        if ref:
+            check_id(ref, what)
     card_id = args.jira or args.linear or db.mint_id(conn)
     card = Card(
         id=card_id,
@@ -1437,6 +1441,9 @@ def cmd_new_sprint(args: argparse.Namespace) -> int:
     # central folder and collide with legacy `.workflow/sprints/` data that
     # `db.connect`'s migration would have imported.
     _conn(args.root)
+    if sprint_path(state_root(args.root), args.sprint_id).exists():
+        print(f"error: sprint {args.sprint_id} already exists", file=sys.stderr)
+        return 1
     sprint = Sprint(
         id=args.sprint_id,
         status="planned",

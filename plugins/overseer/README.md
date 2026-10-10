@@ -7,7 +7,8 @@ adversarial review loops, integrated with sprint planning and superpowers.
 
 ## Requirements
 
-- **Python 3.11+** with PyYAML.
+- **Python 3.11+** with PyYAML and httpx (pinned in `requirements.txt`; set
+  `OVERSEER_PYTHON` to point the hooks at an interpreter that has them).
 - **Context handover** (optional) is provided by the separate **`vigil`** plugin
   (which requires tmux for automatic `/clear`). Install it to enable in-session
   context resets; overseer works without it.
