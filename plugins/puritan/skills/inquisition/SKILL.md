@@ -283,6 +283,8 @@ Each doctrine subagent MUST return this JSON structure:
 ## Integration Points
 
 ### Pre-push Hook
+The `puritan inquisition` commands below are illustrative wrappers you would write yourself (e.g. around `claude -p "/puritan:inquisition full"`); no `puritan` CLI ships with this plugin.
+
 ```bash
 #!/bin/bash
 # .git/hooks/pre-push

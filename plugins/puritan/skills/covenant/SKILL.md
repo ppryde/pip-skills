@@ -587,7 +587,7 @@ jobs:
       - uses: actions/checkout@v3
       - name: Check architecture drift
         run: |
-          puritan covenant assess --plan architecture-plan.md
+          claude -p "/puritan:covenant assess"  # illustrative wrapper
 
   pattern-audit:
     runs-on: ubuntu-latest
@@ -595,13 +595,12 @@ jobs:
       - uses: actions/checkout@v3
       - name: Audit pattern implementation
         run: |
-          /puritan:inquisition
+          claude -p "/puritan:inquisition"  # illustrative wrapper
 ```
 
 ### With Documentation
 ```bash
-# Generate architecture documentation
-/puritan:covenant docs
+# Illustrative only: there is no /puritan:covenant docs mode. Write the docs from Covenant's output yourself.
 
 # Creates:
 # - docs/architecture/README.md
@@ -706,7 +705,7 @@ Please provide:
   - Expected scale and growth rate
   - Key non-functional requirements
 
-Run: /puritan:covenant interview
+Provide the missing requirements and re-run /puritan:covenant
 ```
 
 ### Conflicting Patterns

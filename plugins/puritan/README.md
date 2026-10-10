@@ -25,6 +25,7 @@ Covenant helps you choose architectural patterns before you build, or assess wha
 | Invocation | What it does |
 |---|---|
 | `/puritan:covenant` | Full analysis — pattern recommendations + phased implementation roadmap |
+| `/puritan:covenant patterns` | Pattern selection only — recommended patterns with rationale |
 | `/puritan:covenant discover` | Lightweight codebase scan → detects patterns from directory structure → generates `.architecture/config.yml` |
 | `/puritan:covenant assess` | Gap analysis of your current architecture against your stated patterns |
 | `/puritan:covenant roadmap` | Phased implementation plan (assumes patterns already chosen) |
@@ -32,7 +33,7 @@ Covenant helps you choose architectural patterns before you build, or assess wha
 
 **Discover mode** is the fastest way to get started on an existing codebase. It reads directory structure only (no file contents), infers likely patterns from folder names and signal files, confirms with you, then writes `.architecture/config.yml` ready for Inquisition.
 
-Covenant is also invoked automatically by Inquisition if no config file is found — it offers to run discovery before giving up.
+If Inquisition finds no config file, it points you to `/puritan:covenant discover`; it does not invoke Covenant automatically.
 
 ---
 
