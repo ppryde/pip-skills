@@ -15,9 +15,47 @@ _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
 PERSONA_ROOT = Path(os.environ.get("REVIEW_CLONE_ROOT", "") or Path.home() / ".claude" / "review-clone")
 
 
+_ALIAS_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,40}")
+
+
+def validate_alias(alias: str) -> str:
+    """Return the alias unchanged, or raise ValueError if it is not a safe slug."""
+    if not isinstance(alias, str) or not _ALIAS_RE.fullmatch(alias):
+        raise ValueError(
+            f"invalid alias {alias!r}: use lowercase letters, digits and hyphens "
+            "only (max 41 chars, must start with a letter or digit)"
+        )
+    return alias
+
+
+def safe_alias(alias: str) -> str:
+    """Return the alias unchanged, or raise ValueError if it could escape the persona root.
+
+    Looser than validate_alias: legacy personas (uppercase, underscores, dots,
+    long names) keep working; only traversal, separators and absolute paths are refused.
+    """
+    if (
+        not isinstance(alias, str)
+        or not alias
+        or alias in {".", ".."}
+        or any(c in alias for c in ("/", "\\", "\0", "\n", "\r"))
+        or Path(alias).is_absolute()
+    ):
+        raise ValueError(f"unsafe alias {alias!r}")
+    return alias
+
+
+def check_alias(alias: str, root: Path) -> str:
+    """Traversal-only check for an existing persona; strict slug rules for a new one."""
+    safe_alias(alias)
+    if (root / alias).is_dir():
+        return alias
+    return validate_alias(alias)
+
+
 def persona_dir(alias: str) -> Path:
-    """Return the directory holding a persona's files."""
-    return PERSONA_ROOT / alias
+    """Return the directory holding a persona's files (existing legacy aliases allowed)."""
+    return PERSONA_ROOT / safe_alias(alias)
 
 
 def persona_path(alias: str) -> Path:
@@ -27,7 +65,10 @@ def persona_path(alias: str) -> Path:
 
 def persona_exists(alias: str) -> bool:
     """Return True if a PERSONA.md exists for the alias."""
-    return persona_path(alias).exists()
+    try:
+        return persona_path(alias).exists()
+    except ValueError:
+        return False
 
 
 def list_personas() -> list[str]:
