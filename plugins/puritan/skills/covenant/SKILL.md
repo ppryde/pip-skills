@@ -565,7 +565,7 @@ See Inquisition SKILL.md Step 1 for the full `.architecture/config.yml` format
 # Creates: architecture-plan.md
 
 # Generate audit configuration from plan
-/puritan:inquisition --from-plan architecture-plan.md
+/puritan:covenant discover
 # Creates: .architecture/config.yml
 
 # Run initial audit to establish baseline
@@ -595,7 +595,7 @@ jobs:
       - uses: actions/checkout@v3
       - name: Audit pattern implementation
         run: |
-          /puritan:inquisition --config .architecture/config.yml
+          /puritan:inquisition
 ```
 
 ### With Documentation

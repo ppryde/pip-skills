@@ -47,7 +47,9 @@ Inquisition audits your codebase against the doctrines configured in `.architect
 | `/puritan:inquisition` | Changed files only (git diff against base branch) |
 | `/puritan:inquisition full` | Entire codebase |
 | `/puritan:inquisition interactive` | Full codebase, interactive — fix violations one by one |
-| `/puritan:inquisition <doctrine>` | Changed files, single doctrine only |
+| `/puritan:inquisition <doctrine> [<doctrine>...]` | Changed files, only the named doctrine(s) |
+| `/puritan:inquisition full <doctrine> [<doctrine>...]` | Entire codebase, only the named doctrine(s) |
+| `/puritan:inquisition interactive <doctrine> [<doctrine>...]` | Full codebase, interactive, only the named doctrine(s) |
 
 **Large codebase guard:** If the configured targets exceed 100 files, Inquisition pauses and tells you how many files across how many directories it found. You can proceed, narrow the scope, switch to changed-files mode, or focus on a single doctrine.
 
