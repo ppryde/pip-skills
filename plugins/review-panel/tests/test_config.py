@@ -152,3 +152,21 @@ def test_profile_not_a_mapping_rejected():
 def test_none_strictness_rejected_clearly():
     with pytest.raises(ConfigError, match="strictness"):
         resolve_profile({"profiles": {"p": {"reviewers": {"general": None}}}}, "p")
+
+
+def test_trailing_newline_names_rejected():
+    with pytest.raises(ConfigError):
+        parse_reviewer_key("general\n", "strict")
+    with pytest.raises(ConfigError):
+        parse_reviewer_key("clone:dan\n", "strict")
+
+
+def test_null_output_file_uses_default():
+    cfg = {**_PROFILE, "output": {"file": None}}
+    assert resolve_profile(cfg, "p").output_file == ".review-panel/last-review.md"
+    assert resolve_adhoc(cfg, ["general"]).output_file == ".review-panel/last-review.md"
+
+
+def test_context_rejects_tilde():
+    with pytest.raises(ConfigError):
+        resolve_profile(_cfg(context=["~/notes.md"]), "p")

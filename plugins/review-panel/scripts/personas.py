@@ -27,7 +27,7 @@ def persona_path(alias: str) -> Path:
 
 
 def read_persona(alias: str) -> Persona | None:
-    if not _ALIAS_RE.match(alias) or ".." in alias:
+    if not _ALIAS_RE.fullmatch(alias) or ".." in alias:
         return None
     path = persona_path(alias)
     if not path.exists():

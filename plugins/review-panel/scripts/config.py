@@ -66,10 +66,10 @@ def parse_reviewer_key(key: str, strictness: str) -> ReviewerRef:
         alias = key[len("clone:"):]
         if not alias:
             raise ConfigError("clone reviewer key needs an alias, e.g. clone:danvk")
-        if not _NAME_RE.match(alias) or ".." in alias:
+        if not _NAME_RE.fullmatch(alias) or ".." in alias:
             raise ConfigError(f"invalid clone alias {alias!r}")
         return ReviewerRef(key, "clone", alias, strictness)
-    if not _NAME_RE.match(key) or ".." in key:
+    if not _NAME_RE.fullmatch(key) or ".." in key:
         raise ConfigError(f"invalid reviewer name {key!r}")
     return ReviewerRef(key, "builtin", key, strictness)
 
@@ -100,7 +100,10 @@ def _output_settings(config: dict) -> tuple[str, str]:
     output = out.get("default", DEFAULT_OUTPUT)
     if output not in VALID_OUTPUT:
         raise ConfigError(f"invalid output {output!r}; expected {sorted(VALID_OUTPUT)}")
-    output_file = _check_relative(str(out.get("file", DEFAULT_OUTPUT_FILE)), "output.file")
+    raw_file = out.get("file")
+    output_file = _check_relative(
+        DEFAULT_OUTPUT_FILE if raw_file is None else str(raw_file), "output.file"
+    )
     return output, output_file
 
 
