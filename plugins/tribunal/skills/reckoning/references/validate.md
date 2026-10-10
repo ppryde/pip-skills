@@ -21,9 +21,11 @@ For each comment targeting a specific file and line:
 
 For PR-level comments without a specific code reference, skip validation and mark as "not assessed".
 
+A `path` (or `old_path`/`new_path`) is only put into a shell command (git diff, git log, or the contents endpoint of gh api) after the validation in `references/commands.md`; if it fails there, skip the command and mark validity "Not assessed — path contains characters unsafe for a shell", and surface the path as a suspicious item. Reading the file with the Read tool takes the path as a tool argument and proceeds for any path.
+
 If the referenced file no longer exists or the line number is beyond the file's current length, first check for renames: `git diff <commit_id>..HEAD --diff-filter=R --name-status` to detect if the file was renamed rather than deleted. If a rename is detected, validate against the new file path at the corresponding line and append "— renamed from `old_path` to `new_path`" to the file reference. If truly deleted, mark validity as "Likely invalid" with the reason "referenced file/line no longer exists in the current branch." Still present the comment to the user — it may indicate an issue that was resolved by deletion.
 
-When a comment's `commit_id` differs from the current HEAD (stale comment), the referenced line number may no longer correspond to the same code. Use `git diff <commit_id>..HEAD -- <path>` to check if the file has been modified. If the old commit SHA is unreachable (force-push), attempt validation against the current file content using code quoted in the comment body rather than relying on the line number. If the comment quotes no code context and the line has changed, mark validity as "Uncertain — file changed since review, line reference may be stale."
+When a comment's `commit_id` differs from the current HEAD (stale comment), the referenced line number may no longer correspond to the same code. Use `git diff <commit_id>..HEAD -- '<path>'` to check if the file has been modified. If the old commit SHA is unreachable (force-push), attempt validation against the current file content using code quoted in the comment body rather than relying on the line number. If the comment quotes no code context and the line has changed, mark validity as "Uncertain — file changed since review, line reference may be stale."
 
 Do **not** hide or auto-dismiss any comments based on validity. Always present all comments to the user with the validity assessment clearly shown, so they can make the final call.
 

@@ -7,7 +7,7 @@ If the user hasn't provided them, infer or ask for:
 - **Repository** — detect from the current git remote with `gh repo view --json nameWithOwner -q .nameWithOwner`
 - **PR number** — detect from the current branch with `gh pr view --json number -q .number`
 
-After detecting a PR number via `gh pr view`, verify it's the only PR for this branch: run `gh pr list --head $(git branch --show-current) --json number,title --jq 'length'`. If the count is >1, list all PRs (`gh pr list --head <branch_name> --json number,title,url`) and ask the user to confirm which one to review, even if `gh pr view` succeeded. If `gh pr view` fails because the branch has multiple associated PRs, do the same listing.
+After detecting a PR number via `gh pr view`, verify it's the only PR for this branch: run `git branch --show-current`, validate the branch name as `references/commands.md` ("Quoting and validation") describes, then run `gh pr list --head '{branch_name}' --json number,title --jq 'length'`. If the count is >1, list all PRs (`gh pr list --head '{branch_name}' --json number,title,url`) and ask the user to confirm which one to review, even if `gh pr view` succeeded. If `gh pr view` fails because the branch has multiple associated PRs, do the same listing.
 
 If `gh pr view` fails with "no pull requests found", first check if the repo is a fork (`gh repo view --json isFork -q .isFork`). If it is a fork, retry against the parent repo: use `gh repo view --json parent -q .parent.nameWithOwner` as `{owner}/{repo}` for all subsequent API calls. If it is NOT a fork, inform the user: "No open PR found for branch `{branch_name}`. Would you like to provide a PR number or URL directly?"
 
@@ -15,7 +15,7 @@ Only prompt the user if auto-detection fails. If `gh` is not authenticated (`gh 
 
 **PR state check:** After detecting the PR, verify its state: `gh pr view {number} --json state,title -q '.state + " " + .title'`. If the state is `MERGED` or `CLOSED`, confirm with the user before proceeding: "PR #{number} ('{title}') is {state}. Is this the one you want to review, or would you like to provide a different PR number?" Always display the detected PR title so the user can catch detection mistakes.
 
-**Branch verification:** After confirming the PR, compare the local branch (`git branch --show-current`) with the PR's head branch (`gh pr view {number} --json headRefName -q .headRefName`). If they differ, inform the user: "You are on branch `{local}` but PR #{number} is on branch `{pr_branch}`. For accurate validation and code changes, I recommend switching: `gh pr checkout {number}`. Would you like me to do this, or proceed with read-only review?" If the user declines to switch, use `gh api repos/{owner}/{repo}/contents/{path}?ref={head_sha}` for Step 5 validation, and in Step 8 inform the user that code changes require being on the PR branch.
+**Branch verification:** After confirming the PR, compare the local branch (`git branch --show-current`) with the PR's head branch (`gh pr view {number} --json headRefName -q .headRefName`). If they differ, inform the user: "You are on branch `{local}` but PR #{number} is on branch `{pr_branch}`. For accurate validation and code changes, I recommend switching: `gh pr checkout {number}`. Would you like me to do this, or proceed with read-only review?" If the user declines to switch, use `gh api 'repos/{owner}/{repo}/contents/{path}?ref={head_sha}'` for Step 5 validation (only for a `{path}` that passes the validation in `references/commands.md`), and in Step 8 inform the user that code changes require being on the PR branch.
 
 When re-invoked after a prior round (user says "run again", "check for new comments"), re-fetch all comments from GitHub (new comments may have been added). Cross-reference against comments already actioned in this session by matching on the GitHub comment `id` field (unique and stable across fetches). A "session" is the current Claude Code conversation — if the user starts a new conversation, all comments are treated as fresh. Apply the resolved-thread filter (Step 3d) AFTER the session cross-reference — comments that were actioned in this session and are now resolved should appear in the "### Previously Actioned (this session)" section with a `[RESOLVED]` tag, even though they would normally be filtered out by the resolved-thread filter. This ensures the user sees a complete picture of what was addressed. Mark other matched comments with `[ACTIONED this session]`. If a previously actioned comment has new replies since the last fetch (compare `created_at` timestamps), present it with `[ACTIONED — new reply]` and show the new reply text. Previously actioned items should appear in a separate "### Previously Actioned (this session)" section at the end of Step 7 to keep them distinct from new unresolved items.
 
@@ -30,6 +30,8 @@ Get the head SHA with:
 Command: `references/commands.md`, section "Step 2: head SHA".
 
 Filter check runs to identify review-generating bots: compare each check run's `app.slug` or `app.name` against the known agent list in Step 4 (e.g., slugs containing "coderabbit", "cubic", "augment", "copilot"). Ignore CI, deploy, and security checks — they don't produce review comments. If you cannot determine whether a check produces review comments, include it with a caveat: "(may not produce review comments)."
+
+Some bots report through the commit-status API rather than as check runs. Also run the commit-status command (`references/commands.md`, section "Step 2: commit statuses"); on a best-effort basis, treat a `state: pending` status whose `context` matches a known agent as a review still running, with the same caveat for contexts you cannot attribute.
 
 If any review-related check runs have `status: "in_progress"` or `status: "queued"`, inform the user:
 
@@ -87,7 +89,7 @@ If the user specifies a particular reviewer (e.g., "show me Cubic's comments", "
 
 ## Large PRs and common mistakes
 
-- **Large PRs**: If >100 comments, save fetched JSON to a temporary file (`gh api ... --paginate > /tmp/pr_comments.json`) rather than holding raw API output in context. Process comments in batches by file or priority tier. In Step 7, present only Critical and High items by default and offer to expand Medium/Low on request. The >50 threshold in Step 5 still applies for validation batching
+- **Large PRs**: If >100 comments, keep only the `--jq` projections from Step 3 rather than holding raw API output in context (never redirect `gh` output in the shell); if the projected comment list is still too large to hold, write it to a temporary file with the Write tool (path from `mktemp`). Process comments in batches by file or priority tier. In Step 7, present only Critical and High items by default and offer to expand Medium/Low on request. The >50 threshold in Step 5 still applies for validation batching
 
 | Mistake | Fix |
 |---------|-----|

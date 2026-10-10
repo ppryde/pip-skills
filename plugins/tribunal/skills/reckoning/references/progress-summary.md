@@ -38,7 +38,7 @@ To build this summary, cross-reference:
 
 1. **Review submissions** — group comments by their `pull_request_review_id` and the review's `commit_id` to determine the round and triggering commit
 2. **Thread resolution status** — from the GraphQL reviewThreads query (see "Thread resolution status" section)
-3. **Git log** — to determine FIXED status: (a) check if the thread is resolved on GitHub (from GraphQL), (b) check if a subsequent commit modified the file at or near the referenced line range (`git log --oneline <review_commit>..HEAD -- <path>`), (c) check if the commit message references the issue or review round. Mark as FIXED only if (a) is met, or (b)+(c) together. If only (b) is met, mark as "LIKELY FIXED — file modified in {sha}, thread still open"
+3. **Git log** — to determine FIXED status: (a) check if the thread is resolved on GitHub (from GraphQL), (b) check if a subsequent commit modified the file at or near the referenced line range (`git log --oneline <review_commit>..HEAD -- '<path>'` (path validated per `references/commands.md`)), (c) check if the commit message references the issue or review round. Mark as FIXED only if (a) is met, or (b)+(c) together. If only (b) is met, mark as "LIKELY FIXED — file modified in {sha}, thread still open"
 4. **Session history** — track which comments were actioned, dismissed, or skipped during the current session
 
 This summary can be requested at any point during the workflow. It does not require re-fetching comments if data is already in context.

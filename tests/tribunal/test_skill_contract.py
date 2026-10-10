@@ -12,15 +12,9 @@ from tribunal_helpers import REPO, SHA, SKILL, THREADS_GRAPHQL, allow_gh, allowe
 
 SKILL_FILES = [SKILL, *sorted((SKILL.parent / "references").glob("*.md"))]
 
-# Regression window (WF-264 PR 1 -> PR 2): the three forms in today's SKILL.md that the
-# parser hook correctly declines. PR 2 rewrites them (quoting, two-step branch lookup,
-# `--jq` projection instead of a redirect) and then empties this set; the final assertion
-# below flips to `== set()`.
-EXPECTED_PROMPT = {
-    "gh pr list --head $(git branch --show-current) --json number,title --jq 'length'",
-    f"gh api repos/octo/repo/contents/src/app.py?ref={SHA}",
-    "gh api ... --paginate > /tmp/pr_comments.json",
-}
+# WF-264 PR 2 drained the regression window: every `gh` command the skill emits is approved.
+# A new entry here needs a reason in review; the assertion below keeps the set honest.
+EXPECTED_PROMPT: set[str] = set()
 
 # Prose, not commands: a bare command family name or an instruction to the human.
 NOT_RUN = {"gh api", "gh auth login"}
@@ -44,23 +38,30 @@ FENCE = re.compile(r"```bash\n(.*?)```", re.S)
 INLINE = re.compile(r"`((?:gh|git) [^`\n]*)`")
 
 
+# Free-form untrusted values: must be single-quoted wherever they appear in a command.
+FREE_FORM = ["{path}", "<path>", "{branch_name}", "<branch_name>"]
+
+
 def substitute(text: str) -> str:
     for key, val in PLACEHOLDERS.items():
         text = text.replace(key, val)
     return text
 
 
-def commands() -> list[tuple[str, str]]:
-    """(source file name, command) for every gh/git command in the skill text."""
+def commands(raw: bool = False) -> list[tuple[str, str]]:
+    """(source file name, command) for every gh/git command in the skill text.
+
+    raw=True leaves the placeholders in place (for the quoting lint)."""
+    sub = (lambda t: t) if raw else substitute
     found: list[tuple[str, str]] = []
     for path in SKILL_FILES:
         text = path.read_text(encoding="utf-8")
         for block in FENCE.findall(text):
             for cmd in re.split(r"\n(?=(?:gh|git) )", block.strip()):
-                found.append((path.name, substitute(cmd.strip())))
+                found.append((path.name, sub(cmd.strip())))
         stripped = FENCE.sub("", text)
         for span in INLINE.findall(stripped):
-            found.append((path.name, substitute(span.strip())))
+            found.append((path.name, sub(span.strip())))
     return found
 
 
@@ -89,9 +90,35 @@ def test_expected_prompt_entries_really_prompt_and_are_still_in_the_skill() -> N
         assert argv is None or not allow_gh.decide(argv), cmd
 
 
-def test_expected_prompt_set_is_exactly_the_three_known_forms() -> None:
-    # PR 2 changes this to `== set()`.
-    assert len(EXPECTED_PROMPT) == 3
+def test_expected_prompt_set_is_empty() -> None:
+    assert EXPECTED_PROMPT == set()
+
+
+def test_free_form_placeholders_are_single_quoted() -> None:
+    bad = []
+    for name, cmd in commands(raw=True):
+        for ph in FREE_FORM:
+            if ph in cmd and not re.search(r"'[^']*" + re.escape(ph) + r"[^']*'", cmd):
+                bad.append((name, cmd[:100], ph))
+    assert not bad, f"free-form placeholders must be single-quoted in commands: {bad}"
+
+
+def test_no_command_substitution_or_redirect_in_any_command() -> None:
+    bad = [(n, c[:100]) for n, c in commands(raw=True)
+           if c not in NOT_RUN and re.search(r"\$\(|`|\s>\s|\s>/", c)]
+    assert not bad, bad
+
+
+def test_commit_status_query_is_a_projection_and_allowed() -> None:
+    cmd = "gh api repos/octo/repo/commits/" + SHA + "/status --jq '.statuses[] | {context, state}'"
+    assert allowed(cmd)
+    assert cmd in {c for _, c in commands()}
+
+
+def test_description_is_narrowed() -> None:
+    head = SKILL.read_text(encoding="utf-8").split("---")[1]
+    assert "Use even if the user just says" not in head
+    assert "Not for writing a code review of a PR." in head
 
 
 def test_git_commands_are_not_auto_approved() -> None:
