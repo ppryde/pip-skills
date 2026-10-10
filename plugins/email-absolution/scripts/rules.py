@@ -7,8 +7,10 @@ Subcommands
   select ...             the active checklist for a config (never reads config files)
   show ID [ID...]        the full rule block(s), with file:line
   constraints ...        Scribe view: binding statements only (honours gen=no)
-  fire FILE...           ids of regex rules whose patterns hit the files (line by line;
-                         the seed of PR 2's `scan`, used by the golden test)
+  scan --files F... ...  Phase 1 for a config: file:line | id | matched line for every active
+                         regex rule (line by line; binary and >2 MiB files are listed as skipped;
+                         5 s per-file timer on POSIX; matched lines cut to 200 characters)
+  fire FILE...           first hit per regex rule, ignoring config (used by the golden test)
 
 The doctrine markdown stays canonical. This script only parses it. `--doctrines-dir`
 points every subcommand at another copy (the golden test uses an export of old doctrines).
@@ -683,6 +685,109 @@ def fire_ids(rules, text: str) -> dict:
     return hits
 
 
+# --------------------------------------------------------------------------- scan
+
+SCAN_FILE_TIMEOUT_S = 5.0   # per file, POSIX only (setitimer)
+SCAN_LINE_CHARS = 200       # echoed matched lines are truncated: template content is data
+SCAN_MAX_HITS = 20          # per rule per file; the rest is summarised, not listed
+
+
+class ScanTimeout(Exception):
+    pass
+
+
+def _short(line: str) -> str:
+    line = line.strip()
+    return line if len(line) <= SCAN_LINE_CHARS else line[: SCAN_LINE_CHARS - 1] + "…"
+
+
+def scan_text(rules, text: str):
+    """Phase 1 over one file's text: [(line, id, matched line, flags)] plus {id: extra hits not listed}.
+
+    Line by line, so a pattern's backtracking is bounded by one line. A rule flagged
+    `multiline` is matched against the whole text instead. Absence rules report line 1
+    when the trigger is present and the required pattern is not. Aliases and contextual
+    rules never run; `gen` is ignored (an audit checks everything). A rule flagged `verify`,
+    or whose detect note says "check ...", only nominates: scan marks it `[verify]`.
+    """
+    lines = text.split("\n")
+    out, extra = [], {}
+    for r in rules:
+        if r.is_alias or r.detect is None or r.detect.kind == "contextual":
+            continue
+        d = r.detect
+        # a detect note that says "check ..." means the pattern only nominates (as `flags: verify`)
+        flags = ",".join(r.flags) + (",verify" if d.note and re.search(r"\bcheck\b", d.note, re.I) else "")
+        if d.absence:
+            if re.search(d.absence[0], text) and not re.search(d.absence[1], text):
+                out.append((1, r.id, "absence: trigger present, required pattern missing", flags))
+            continue
+        seen = set()
+        for pat in d.patterns:
+            c = re.compile(pat)
+            if "multiline" in r.flags:
+                for m in c.finditer(text):
+                    n = text.count("\n", 0, m.start()) + 1
+                    seen.add((n, _short(lines[n - 1])))
+            else:
+                for n, ln in enumerate(lines, 1):
+                    if c.search(ln):
+                        seen.add((n, _short(ln)))
+        hits = sorted(seen)
+        for n, shown in hits[:SCAN_MAX_HITS]:
+            out.append((n, r.id, shown, flags))
+        if len(hits) > SCAN_MAX_HITS:
+            extra[r.id] = len(hits) - SCAN_MAX_HITS
+    out.sort(key=lambda h: (h[0], h[1]))
+    return out, extra
+
+
+def scan_with_timeout(rules, text: str, seconds: float = None):
+    """scan_text under a per-file interval timer; raises ScanTimeout. Without setitimer (Windows) no timer runs."""
+    seconds = SCAN_FILE_TIMEOUT_S if seconds is None else seconds
+    if not hasattr(signal, "setitimer"):
+        return scan_text(rules, text)
+
+    def _alarm(signum, frame):
+        raise ScanTimeout()
+
+    old = signal.signal(signal.SIGALRM, _alarm)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        return scan_text(rules, text)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old)
+
+
+def render_scan(docs, cfg: Config, files) -> str:
+    active, _filt, warnings = select_rules(docs, cfg)
+    rx = [r for r in active if r.detect is not None and r.detect.kind in ("regex", "hybrid")]
+    out = list(warnings)
+    out.append(f"# scan: {len(rx)} regex rules x {len(files)} file(s) | file:line | id | matched line "
+               "([verify] = read the line and confirm before recording a finding)")
+    skipped, timed_out, total = [], [], 0
+    for fp in files:
+        text, why = read_scannable(Path(fp))
+        if why:
+            skipped.append(f"skipped: {fp} ({why})")
+            continue
+        try:
+            hits, extra = scan_with_timeout(rx, text)
+        except ScanTimeout:
+            timed_out.append(fp)
+            continue
+        for n, rid, shown, flags in hits:
+            out.append(f"{fp}:{n} | {rid} | {shown}" + (" [verify]" if "verify" in flags else ""))
+            total += 1
+        for rid, more in sorted(extra.items()):
+            out.append(f"{fp} | {rid} | (+{more} more matching lines not listed)")
+    out += skipped
+    out += [f"scan timed out: {fp} (apply Phase 1 to this file by hand)" for fp in timed_out]
+    out.append(f"# scan done: {total} hit(s), {len(skipped)} skipped, {len(timed_out)} timed out")
+    return "\n".join(out) + "\n"
+
+
 # --------------------------------------------------------------------------- index
 
 LETTER = {"mortal": "M", "venial": "V", "counsel": "C"}
@@ -761,6 +866,9 @@ def main(argv=None) -> int:
     lp.add_argument("--overlaps", action="store_true")
     _add_cfg(sub.add_parser("select"))
     _add_cfg(sub.add_parser("constraints"))
+    sc = sub.add_parser("scan")
+    _add_cfg(sc)
+    sc.add_argument("--files", nargs="+", required=True)
     s = sub.add_parser("show")
     s.add_argument("ids", nargs="+")
     f = sub.add_parser("fire")
@@ -800,6 +908,9 @@ def main(argv=None) -> int:
         return 0
     if a.cmd == "constraints":
         sys.stdout.write(render_constraints(docs, _cfg(a)))
+        return 0
+    if a.cmd == "scan":
+        sys.stdout.write(render_scan(docs, _cfg(a), a.files))
         return 0
     if a.cmd == "show":
         text, missing = render_show(docs, a.ids)

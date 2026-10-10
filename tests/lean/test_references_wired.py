@@ -13,6 +13,18 @@ EXEMPT: dict[str, dict[str, str]] = {}
 
 # Dangling-mention exemptions: skill dir -> {mentioned path: reason}.
 EXEMPT_DANGLING: dict[str, dict[str, str]] = {
+    "plugins/email-absolution/skills/elder": {
+        "references/common.md": "plugin-level shared reference at <plugin root>/references/",
+        "references/audit.md": "plugin-level shared reference at <plugin root>/references/",
+    },
+    "plugins/email-absolution/skills/visitation": {
+        "references/common.md": "plugin-level shared reference at <plugin root>/references/",
+        "references/audit.md": "plugin-level shared reference at <plugin root>/references/",
+    },
+    "plugins/email-absolution/skills/scribe": {
+        "references/common.md": "plugin-level shared reference at <plugin root>/references/",
+        "references/audit.md": "plugin-level shared reference at <plugin root>/references/",
+    },
     "plugins/overseer/skills/ledger": {
         "references/telemetry.md": "names the orchestrate skill's reference (cross-skill pointer)",
         "references/review-loop.md": "names the orchestrate skill's reference (cross-skill pointer)",
