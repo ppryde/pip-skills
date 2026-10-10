@@ -192,7 +192,7 @@ class TestStopHook:
                 calls = marker.read_text().strip().splitlines()
             time.sleep(0.05)
         assert marker.exists()
-        assert calls[0] == "rename-window -t %9 fix the auth bug"
+        assert calls[0] == "rename-window -t %9 -- fix the auth bug"
         assert calls[1] == "send-keys -t %9 /clear Enter"
 
     def test_auto_mode_skips_rename_when_no_title_armed(self, tmp_path):
