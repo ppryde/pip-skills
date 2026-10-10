@@ -18,6 +18,8 @@ def _same_kind(a: Finding, b: Finding) -> bool:
     if a.rule_id and b.rule_id:
         # Two distinct rules never auto-confirm each other, even in one category.
         return a.rule_id == b.rule_id
+    if a.category_defaulted or b.category_defaulted:
+        return False  # a filled-in category says nothing about the finding
     return _norm(a.category) == _norm(b.category)
 
 

@@ -53,7 +53,10 @@ def _rule_key(f: Finding) -> str:
 
 
 def _is_twin(a: Finding, b: Finding) -> bool:
-    if (a.reviewer, a.file, _rule_key(a)) != (b.reviewer, b.file, _rule_key(b)):
+    # `actual` must match too: an inherited `refuted` must never hide a
+    # different problem that merely shares a rule and a neighbourhood.
+    if (a.reviewer, a.file, _rule_key(a), norm(a.actual)) != (
+            b.reviewer, b.file, _rule_key(b), norm(b.actual)):
         return False
     if a.line is None or b.line is None:
         return a.line is None and b.line is None

@@ -22,6 +22,10 @@ orchestrator wrote with the Write tool; finding text is never an argument.
              FILE: a JSON list of reviewer payloads (or one payload).
              stdout {"status":"ok","findings":[...],"clean_files":[...],"notes":[...]}
              Notes carry `REJECTED <id>: <reason>` for malformed findings.
+             The output is stamped "_source": "review-panel-cli"; only a file
+             with that stamp is trusted to carry fingerprints and verdicts.
+             Everything else (any reviewer payload, however laid out) has its
+             verdict, reason, severity_before and fingerprint ignored.
 
   match      two independent passes -> agreed / disagreements (dual-tiebreaker)
                --a FILE --b FILE [--window 3]
@@ -79,6 +83,9 @@ from scripts.strictness import load_decisions  # noqa: E402
 _REVIEWERS_DIR = _ROOT / "skills" / "reviewers"
 _STRATEGIES_DIR = _ROOT / "skills" / "strategies"
 _DEFAULT_CONFIG = ".review-panel/config.yml"
+# Stamped on `parse` / `match` output. Trust is this marker, never the shape
+# of a file: a reviewer payload cannot be made trusted by how it is laid out.
+TRUST_MARKER = "review-panel-cli"
 
 
 class CliError(Exception):
@@ -111,7 +118,9 @@ def _load_findings(path: str):
         flat = data.get("findings")
         if not isinstance(flat, list):
             flat = [r for k in ("agreed", "only_a", "only_b") for r in data.get(k) or []]
-        trusted = True  # our own output: fingerprints and verdicts stand
+        # Only output carrying our marker keeps fingerprints and verdicts;
+        # any other file of this shape is untrusted reviewer data.
+        trusted = data.get("_source") == TRUST_MARKER
         by_reviewer: dict[str, list] = {}
         skipped: list[str] = []
         for i, raw in enumerate(flat):
@@ -180,7 +189,8 @@ def cmd_resolve(args) -> int:
 
 def cmd_parse(args) -> int:
     findings, clean, notes = _load_findings(args.findings)
-    _emit({"status": "ok", "findings": [finding_to_dict(f) for f in findings],
+    _emit({"status": "ok", "_source": TRUST_MARKER,
+           "findings": [finding_to_dict(f) for f in findings],
            "clean_files": clean, "notes": notes})
     return 0
 
@@ -196,6 +206,7 @@ def cmd_match(args) -> int:
     n1, n2 = len(result.agreed), len(result.agreed) + len(result.only_a)
     _emit({
         "status": "ok",
+        "_source": TRUST_MARKER,
         "agreed": [finding_to_dict(f) for f in flat[:n1]],
         "only_a": [finding_to_dict(f) for f in flat[n1:n2]],
         "only_b": [finding_to_dict(f) for f in flat[n2:]],
@@ -226,6 +237,9 @@ def cmd_reconcile(args) -> int:
         verdicts = _read_json(args.verdicts)
         if not isinstance(verdicts, dict):
             raise CliError(f"{args.verdicts} must be a JSON object keyed by fingerprint")
+    elif args.verdicts:
+        # Tolerated (a stage may legitimately produce none) but never silent.
+        notes.append(f"verdicts file not found, no verdicts applied: {args.verdicts}")
     decisions = load_decisions(Path(args.decisions)) if args.decisions else {}
     strictness = _strictness_map(args.strictness)
     warnings: list[str] = []
@@ -252,8 +266,7 @@ def cmd_reconcile(args) -> int:
         "counts": counts,
     }
     if args.out:
-        # A scratch file the orchestrator made (mktemp); not a repo path.
-        Path(args.out).write_text(json.dumps(out, indent=2) + "\n")
+        _write_scratch(args.out, json.dumps(out, indent=2) + "\n")
     _emit(out)
     return 0
 
@@ -265,17 +278,33 @@ def _safe_relative(path: str) -> Path:
     return p
 
 
-def _write_text(path: str, text: str) -> None:
-    p = _safe_relative(path)
-    cwd = Path.cwd().resolve()
-    parent = (cwd / p).parent.resolve()  # follows symlinks
-    if parent != cwd and cwd not in parent.parents:
-        raise CliError(f"output path resolves outside the repo: {path!r}")
+def _under(parent: Path, root: Path) -> bool:
+    return parent == root or root in parent.parents
+
+
+def _write_confined(p: Path, text: str, roots: list[Path], path: str) -> None:
+    """Write `p` only if its parent, symlinks resolved, sits under one of
+    `roots`, and the target itself is not a symlink."""
+    parent = (Path.cwd() / p).parent.resolve()
+    if not any(_under(parent, r) for r in roots):
+        raise CliError(f"output path resolves outside the allowed area: {path!r}")
     parent.mkdir(parents=True, exist_ok=True)
     target = parent / p.name
     if target.is_symlink():
         raise CliError(f"output path is a symlink: {path!r}")
     target.write_text(text)
+
+
+def _write_text(path: str, text: str) -> None:
+    """Repo output (report --out): relative, and inside the cwd."""
+    _write_confined(_safe_relative(path), text, [Path.cwd().resolve()], path)
+
+
+def _write_scratch(path: str, text: str) -> None:
+    """Scratch output (reconcile --out): inside the cwd or the temp dir."""
+    import tempfile
+    roots = [Path.cwd().resolve(), Path(tempfile.gettempdir()).resolve()]
+    _write_confined(Path(path), text, roots, path)
 
 
 def cmd_report(args) -> int:

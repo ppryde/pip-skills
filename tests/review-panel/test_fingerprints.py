@@ -42,7 +42,7 @@ def test_tolerant_parse_coerces_line():
     ok, _, _ = parse_reviewer_result({"reviewer": "g", "findings": [_raw(line="42")]})
     assert ok[0].line == 42
     bad, _, notes = parse_reviewer_result({"reviewer": "g", "findings": [_raw(line="abc")]})
-    assert bad[0].line is None and any("not numeric" in n for n in notes)
+    assert bad[0].line is None and any("invalid" in n for n in notes)
     none, _, notes = parse_reviewer_result({"reviewer": "g", "findings": [_raw(line=None)]})
     assert none[0].line is None and not notes
 

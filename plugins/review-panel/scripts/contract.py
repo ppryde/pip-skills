@@ -23,7 +23,7 @@ _LOWER = {"error": "warning", "warning": "info", "info": "info"}
 _SEVERITY_SYNONYMS = {
     "critical": "error", "high": "error", "blocker": "error", "major": "error",
     "medium": "warning", "moderate": "warning", "warn": "warning",
-    "low": "info", "minor": "info", "nit": "info",
+    "low": "info", "minor": "info", "nit": "info", "suggestion": "info",
 }
 
 
@@ -54,6 +54,9 @@ class Finding:
     rule_id: str | None = None
     severity_before: str | None = None
     fingerprint: str | None = None
+    # True when the reviewer omitted `category` and "general" was filled in;
+    # a made-up category must never be a reason to pair two findings.
+    category_defaulted: bool = False
 
 
 def finding_to_dict(f: Finding) -> dict:
@@ -152,9 +155,10 @@ def _coerce_line(value: object) -> tuple[int | None, bool]:
     if isinstance(value, bool):
         return None, False
     try:
-        return int(value), True  # type: ignore[call-overload]
+        n = int(value)  # type: ignore[call-overload]
     except (TypeError, ValueError):
         return None, False
+    return (n, True) if n >= 1 else (None, False)
 
 
 def _as_list(value: object) -> list:
@@ -172,11 +176,13 @@ def _parse_one(reviewer: str, raw: dict, strict: bool, notes: list[str], label: 
     missing = [k for k in required if k not in raw]
     if missing:
         raise ContractError(f"finding missing {missing} in {raw!r}")
+    category_defaulted = bool(trusted and raw.get("category_defaulted"))
     if not strict:
         for key, default in (("category", "general"), ("suggestion", "")):
             if key not in raw:
-                notes.append(f"{key} missing, defaulted: {label}")
+                notes.append(f"{key} missing, defaulted: {label} ({raw['file']}:{raw.get('line')})")
                 raw = {**raw, key: default}
+                category_defaulted = category_defaulted or key == "category"
     severity = raw["severity"]
     if severity not in VALID_SEVERITY:
         mapped = None if strict else _SEVERITY_SYNONYMS.get(str(severity).strip().lower())
@@ -191,7 +197,8 @@ def _parse_one(reviewer: str, raw: dict, strict: bool, notes: list[str], label: 
     if not strict:
         line, ok = _coerce_line(line)
         if not ok:
-            notes.append(f"line {raw.get('line')!r} not numeric, treated as no line: {label}")
+            notes.append(f"line {raw.get('line')!r} invalid (not a number >= 1), "
+                         f"treated as no line: {label}")
     rule_id = raw.get("rule_id")
     if not isinstance(rule_id, str) or rule_id_of(rule_id) != rule_id:
         rule_id = None if str(raw["id"]).startswith("CLONE-") else rule_id_of(raw["id"])
@@ -208,6 +215,7 @@ def _parse_one(reviewer: str, raw: dict, strict: bool, notes: list[str], label: 
         verdict=raw.get("verdict") if trusted else None,
         reason=raw.get("reason") if trusted else None,
         rule_id=rule_id,
+        category_defaulted=category_defaulted,
         severity_before=raw.get("severity_before") if trusted else None,
         fingerprint=fp if isinstance(fp, str) and fp else None,
     )

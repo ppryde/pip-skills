@@ -65,6 +65,8 @@ def apply_decisions(
             ov = overrides.get(f.id)
             if ov and notes is not None:
                 notes.append(f"legacy id-keyed override matched: {f.id}; migrate")
+        if ov and not isinstance(ov, dict) and notes is not None:
+            notes.append(f"override ignored (not a mapping): {f.fingerprint or f.id}")
         if isinstance(ov, dict) and ov:
             out.append(replace(
                 f,

@@ -110,7 +110,8 @@ def test_reconcile_missing_verdicts_file_is_tolerated(tmp_path):
     payloads = _write(tmp_path / "f.json", {"reviewer": "general", "findings": [_raw(1)]})
     out = j(tmp_path, "reconcile", "--findings", payloads,
             "--verdicts", tmp_path / "absent.json")
-    assert len(out["findings"]) == 1 and out["notes"] == []
+    assert len(out["findings"]) == 1
+    assert len(out["notes"]) == 1 and "verdicts file not found" in out["notes"][0]
 
 
 def test_reconcile_applies_exceptions_decisions_and_legacy_note(tmp_path):
