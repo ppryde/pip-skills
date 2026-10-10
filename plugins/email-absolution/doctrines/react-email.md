@@ -1,3 +1,11 @@
+---
+doctrine: react-email
+prefix: REMAIL
+kind: language
+templating: react-email
+scribe: constraints
+---
+
 # React Email — Email Doctrine
 
 ## Purpose
@@ -38,18 +46,19 @@ Rules and gotchas for engineers building email templates with React Email — th
 
 **[REMAIL-008]** `transactional: venial | marketing: venial` — Type all email component props with explicit TypeScript interfaces.
 > `any` prop types defeat the primary advantage of React Email. When `order.items` is typed as `OrderItem[]` (with your application's shared type), renaming a field in `OrderItem` fails the TypeScript build immediately — not a production send.
-> `detect: regex` — pattern: `:\s*any\b` in email component prop interfaces
+> `detect: regex` — pattern: `:\s*any\b` — in email component prop interfaces
 
 **[REMAIL-009]** `transactional: venial | marketing: venial` — Use `<Img>` from `@react-email/components` — not bare `<img>`.
 > `<Img>` applies email-safe defaults: `display: block`, `border: 0`, `max-width: 100%`. These defaults prevent the 4px gap-below-image bug (see RENDER-002) and image overflow in mobile clients.
-> `detect: regex` — pattern: `<img\s` (lowercase `img` element — not the React Email component)
+> `detect: regex` — pattern: `<img\s` — lowercase `img` element — not the React Email component
 
 **[REMAIL-010]** `transactional: venial | marketing: venial` — Use `<Link>` from `@react-email/components` for hyperlinks — not bare `<a>`.
 > `<Link>` applies email-safe inline style defaults including `text-decoration: none` overrides and properly serialises the `href` attribute for email clients.
-> `detect: regex` — pattern: `<a\s+(?:href|style)=` outside of MSO conditional comment blocks
+> `detect: regex` — pattern: `<a\s+(?:href|style)=` — outside of MSO conditional comment blocks
 
 **[REMAIL-011]** `transactional: venial | marketing: venial` — Use `<Button>` for CTAs and verify the rendered output includes VML for Outlook targets.
 > React Email's `<Button>` renders an `<a>` with inline styles. Check whether the compiled output from your React Email version includes the VML bulletproof button pattern for Outlook 2007–2019. If it does not, manually wrap with MSO conditional VML (see RENDER-014).
+> `applies: targets=outlook-2019`
 > `detect: contextual` — check compiled HTML output for VML when `<Button>` is used with Outlook as a target client
 
 **[REMAIL-012]** `transactional: venial | marketing: venial` — All `href` values in `<Link>` and `<Button>` must be absolute HTTPS URLs.

@@ -1,3 +1,10 @@
+---
+doctrine: accessibility
+prefix: ACCESS
+kind: core
+scribe: constraints
+---
+
 # Accessibility — Email Doctrine
 
 ## Purpose
@@ -14,7 +21,7 @@ Guards against HTML patterns that exclude users with visual, motor, or cognitive
 
 **[ACCESS-002]** `transactional: mortal | marketing: mortal` — Decorative images must use `alt=""` (empty string, not omitted, not a space).
 > `alt=" "` (a space) is not treated as empty by all screen readers — some announce it as an unlabelled image or pause. `alt` omitted causes filename announcement. Empty string `alt=""` is the correct signal for decorative content. Source: WebAIM "Alternative Text"; WCAG 2.1 SC 1.1.1.
-> `detect: regex` — pattern: `<img[^>]*\balt=["']\s+["'][^>]*>` (alt with only whitespace)
+> `detect: regex` — pattern: `<img[^>]*\balt=["']\s+["'][^>]*>` — alt with only whitespace
 
 **[ACCESS-003]** `transactional: mortal | marketing: mortal` — All layout `<table>` elements must have `role="presentation"`.
 > Without `role="presentation"`, screen readers announce table structure ("table, 3 columns, 5 rows") for every visual layout table, creating noise that obscures actual content. Layout tables must be marked as presentational. Source: WCAG 2.1 SC 1.3.1 — Info and Relationships (Level A); caniemail.com/features/html-role/ (~73% support).
@@ -34,11 +41,11 @@ Guards against HTML patterns that exclude users with visual, motor, or cognitive
 
 **[ACCESS-007]** `transactional: mortal | marketing: mortal` — Link text must be descriptive without relying on surrounding context.
 > "Click here", "read more", and "learn more" are meaningless when a screen reader announces them in isolation (e.g. via link list navigation). Use descriptive text: "Track your order", "Download invoice", "Confirm your email". Source: WCAG 2.1 SC 2.4.6 — Headings and Labels (Level AA); WebAIM "Links and Hypertext".
-> `detect: regex` — pattern (case insensitive): `<a\b[^>]*>\s*(?:click here|read more|learn more|view more|see more|here|click)\s*</a>`
+> `detect: regex` — pattern: `(?i)<a\b[^>]*>\s*(?:click here|read more|learn more|view more|see more|here|click)\s*</a>` — case-insensitive
 
 **[ACCESS-008]** `transactional: mortal | marketing: mortal` — Email must have a meaningful `<title>` element in `<head>`.
 > Screen readers announce the `<title>` when the email is opened. An absent or generic `<title>` (e.g. "Email") provides no context. Use the email subject or a descriptive title: "Order #12345 Confirmed — Acme". Source: WCAG 2.1 SC 2.4.2 — Page Titled (Level A).
-> `detect: regex` — pattern: `<title\s*>(\s*|email\s*|untitled\s*)</title>` (absent or generic title)
+> `detect: regex` — pattern: `<title\s*>(\s*|email\s*|untitled\s*)</title>` — absent or generic title
 
 **[ACCESS-009]** `transactional: venial | marketing: venial` — Heading hierarchy must be logical: one `<h1>`, followed by `<h2>`, `<h3>` with no skipped levels.
 > Screen reader users navigate by headings. A heading structure that jumps from `<h1>` to `<h3>` or uses headings purely for visual sizing disrupts this navigation pattern. Every email should have exactly one `<h1>`. Source: WCAG 2.1 SC 1.3.1 — Info and Relationships.
@@ -46,7 +53,7 @@ Guards against HTML patterns that exclude users with visual, motor, or cognitive
 
 **[ACCESS-010]** `transactional: venial | marketing: venial` — Lists must use semantic `<ul>` or `<ol>` markup — not manually formatted with bullets or numbers in `<p>` tags.
 > Screen readers announce "list, 3 items" for `<ul>`, giving structural context. A visually identical list created with `<p>• Item one</p>` receives no structural announcement. Outlook 2007–2019 adds unwanted margins to `<ul>`/`<ol>` — correct with MSO styles rather than removing semantic markup. Source: WCAG 2.1 SC 1.3.1.
-> `detect: regex` — patterns: `<p[^>]*>\s*[•\*\-–▸▪►]\s` (symbol bullet); `<p[^>]*>\s*\d+[.)]\s` (numbered list in paragraph)
+> `detect: regex` — patterns: `<p[^>]*>\s*[•\*\-–▸▪►]\s` | `<p[^>]*>\s*\d+[.)]\s` — symbol bullet; numbered list in paragraph
 
 **[ACCESS-011]** `transactional: venial | marketing: venial` — Data tables (order summaries, line items) must use `<th scope="col">` or `<th scope="row">` for header cells.
 > Without scope attributes, screen readers cannot associate data cells with their headers, making order summaries and pricing tables inaccessible. Layout tables use `role="presentation"` (ACCESS-003); data tables use `<th>` with `scope`. Source: WCAG 2.1 SC 1.3.1; WebAIM "Tables".
@@ -54,7 +61,7 @@ Guards against HTML patterns that exclude users with visual, motor, or cognitive
 
 **[ACCESS-012]** `transactional: venial | marketing: venial` — Minimum font size for body text is 14px. 16px is preferred.
 > iOS Mail auto-inflates fonts below 13px, potentially breaking layouts. Users with low vision rely on adequate base font sizes. `pt` units render inconsistently across email clients — use `px` exclusively. Source: Email on Acid "Mobile Email Rendering" (2022); WCAG 2.1 SC 1.4.4 — Resize Text.
-> `detect: regex` — pattern: `font-size\s*:\s*([0-9]+)px` (flag values below 14, excluding footer/legal text)
+> `detect: regex` — pattern: `font-size\s*:\s*([0-9]+)px` — flag values below 14, excluding footer/legal text
 
 **[ACCESS-013]** `transactional: venial | marketing: venial` — Body text must have `line-height` of at least 1.4 (1.5 preferred).
 > WCAG 2.1 SC 1.4.12 (Text Spacing, Level AA) specifies that content must remain accessible when line height is set to 1.5× font size. Compact line spacing reduces readability for users with dyslexia, cognitive disabilities, and low vision. Source: WCAG 2.1 SC 1.4.12 — Text Spacing (Level AA).
@@ -86,7 +93,8 @@ Guards against HTML patterns that exclude users with visual, motor, or cognitive
 
 **[ACCESS-020]** `transactional: counsel | marketing: counsel` — Outlook 2007–2019 list margin fix should be included when `<ul>` or `<ol>` is present.
 > Outlook adds large unwanted margins to lists. The MSO-specific conditional comment fix prevents lists from appearing indented off-screen in some Outlook configurations. Source: standard Outlook pattern.
-> `detect: regex` — pattern: `<[uo]l(?![^>]*mso)[^>]*>` (check if MSO list margin fix is present elsewhere in template)
+> `applies: targets=outlook-2019`
+> `detect: regex` — pattern: `<[uo]l(?![^>]*mso)[^>]*>` — check if MSO list margin fix is present elsewhere in template
 
 ---
 
