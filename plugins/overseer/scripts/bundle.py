@@ -174,6 +174,9 @@ def prepare(
             except gitops.GitError as exc:
                 raise BundleError(f"could not write the diff: {exc}") from exc
         values["target_path"] = str(target)
+    clash = sorted(set(variables) & set(values))
+    if clash:
+        raise BundleError(f"--var cannot override built-in placeholder(s): {', '.join(clash)}")
     values.update(variables)
     template = (TEMPLATES_DIR / f"{role}.md").read_text()
     text = _PLACEHOLDER.sub(lambda m: values.get(m.group(1), "_(none)_"), template)

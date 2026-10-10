@@ -18,20 +18,31 @@ what Anthropic billed. They differ for a small set of reasons, and this skill wa
 that cost the least to check. Run it by hand; it is deliberately not part of any sync.
 
 Locate the CLI relative to the plugin root: `python plugins/chronicle/scripts/cli.py <verb>` (every
-verb prints JSON). Use the checkout that has the merged code; an old checkout silently gives old
-numbers. Read the store with `file:<db>?mode=ro`. Always compare per account and per day, in the
-console's UTC against chronicle's local dates (a few dollars per day of skew is timezone, not a bug).
+verb prints JSON; it needs Python 3.10 or later). Use the checkout that has the merged code; an old
+checkout silently gives old numbers. Read the store with `file:<db>?mode=ro`. Always compare per
+account and per day. The console's days are UTC; chronicle's `by_day` buckets use LOCAL time, so a
+turn near midnight lands on different days and the skew is not bounded by "a few dollars". For a
+like-for-like daily comparison use the UTC variant in `references/queries.md`.
 
 ## Ground rules
 
 1. **Snapshot before you write.** Copy the store first (`sqlite3` backup API, not `cp`, the store is
-   WAL): `python - <<EOF ... src.backup(dst)` into an archive folder. Do every experiment on a COPY
-   with `CHRONICLE_DB=<copy>` and a scratch `CLAUDE_CONFIG_DIR`; touch the real store only for a
-   step you have already proved on the copy.
+   WAL) into an archive folder:
+   ```python
+   import sqlite3
+   src = sqlite3.connect(f"file:{DB}?mode=ro", uri=True); dst = sqlite3.connect(COPY)
+   src.backup(dst); print(dst.execute("PRAGMA integrity_check").fetchone()[0])  # expect "ok"
+   dst.close(); src.close()
+   ```
+   Do every experiment on a COPY with a scratch config dir, and keep `sync` away from the network and
+   other sources: `env -u CLAUDE_CONFIG_DIRS CLAUDE_CONFIG_DIR=$SCRATCH CHRONICLE_DB=$COPY
+   CHRONICLE_NO_REMOTES=1 CHRONICLE_NO_PRICING_REFRESH=1 python plugins/chronicle/scripts/cli.py ...` (`sync` otherwise
+   honours `CLAUDE_CONFIG_DIRS`, configured remotes and volumes, and the daily price refresh). Touch
+   the real store only for a step you have already proved on the copy.
 2. **Never delete or rebuild the store.** Claude Code prunes old transcripts and chronicle keeps the
    rows it already ingested, so some sessions exist ONLY in the store (174 of them on the author's
    machine, 54k turns). Count them first (`references/queries.md`, "DB-only sessions") and keep a
-   stripped copy of them in the archive.
+   copy of them in the archive.
 3. **Read-only until told.** Docker volumes are read with `:ro`, remote boxes only through the
    redacting `remotes` transport, transcripts are copied not moved. Never point a tool at a
    production-access host without the user configuring it (`chronicle remotes add` is the standing
@@ -43,9 +54,11 @@ console's UTC against chronicle's local dates (a few dollars per day of skew is 
 
 ### 0. Frame the gap
 Get the console figure for the same account and window (Claude Code product only, UTC) and,
-ideally, its daily bars and per-model split. Compute chronicle's for the same window from
-`GET /api/chronicle/summary?account=<uuid>&since=<ISO>` (the `since` value must be ISO-8601, not an
-epoch) or `report.summary`. The rest of the skill is explaining that difference.
+ideally, its daily bars and per-model split. Compute chronicle's for the same window with
+`python plugins/chronicle/scripts/cli.py summary --account <uuid> --since <ISO>` (the `since` value must be ISO-8601, not an
+epoch; the dashboard's `GET /api/chronicle/summary` returns the same JSON). Spend IN the window is
+`sum(by_day[*].cost_usd)`: the window selects sessions, so `totals` and `by_model` are whole-session sums
+and over-count sessions that began before the window. The rest of the skill is explaining that difference.
 
 ### 1. Are the sources all being read?
 List what chronicle reads: `claude_dirs`, `volumes`, `remotes` and `path_map` in
@@ -68,6 +81,10 @@ per-turn override from `bridge-session` records (`ownerAccountUuid`). Check `ref
 account, and the cost sitting in that disagreement. Transcripts rarely carry an account id
 (only recent versions, only bridged or artifact sessions), so backups need a whitelisted
 `.claude.json` next to them (the file lives BESIDE the dir for a default `~/.claude`, not inside it).
+Caveats: the account stamped is the CURRENT login of that config dir at ingest time, and
+`backfill_account_uuids` fills NULL rows from that same login later, so a config dir that has switched
+accounts relabels its old sessions. A default `~/.claude` install keeps its `.claude.json` BESIDE the
+dir (`~/.claude.json`), which chronicle does not read, so its sessions can have no account at all.
 A bridge owner is the account that owns the claude.ai bridge, not necessarily the billed account;
 when the transcript cannot settle it, say so and ask the user what they were signed in as.
 
@@ -84,6 +101,9 @@ groups"; expect it to matter on agent-team sessions and to be ~0 elsewhere. It i
 transcript records are a useful cross-check where present (they are periodic snapshots, so long sessions
 lag) but are NOT a ledger and chronicle deliberately does not use them.
 Unknown model ids show as unpriced; a prefix match can silently price a new model at its parent's rate.
+Chronicle prices every turn at the standard list rate: it does not model fast-mode, regional-inference,
+long-context or tool-fee premiums. On an expensive day with a uniform shortfall, check
+`usage.speed` / `usage.inference_geo` in the transcripts before blaming the rate table.
 
 ### 5. Compare per day and per model
 Line the console's daily bars up against chronicle's `by_day` for the account (`references/queries.md`

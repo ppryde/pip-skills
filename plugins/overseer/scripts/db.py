@@ -412,7 +412,10 @@ def _upsert(conn: sqlite3.Connection, card: Card, archived: int, *, commit: bool
 
 
 def save_card(conn: sqlite3.Connection, card: Card) -> None:
-    _upsert(conn, card, archived=0)
+    """Insert or update a card. ``archived`` follows status: 1 only for done
+    and abandoned, so editing a finished card's fields keeps it archived while
+    moving it back to a live stage revives it."""
+    _upsert(conn, card, archived=1 if card.status in ("done", "abandoned") else 0)
 
 
 def create_card(conn: sqlite3.Connection, card: Card) -> None:

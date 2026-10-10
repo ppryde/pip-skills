@@ -89,12 +89,18 @@ def backup_board(repo_root: Path, dest: Path | None = None) -> dict:
     try:
         (staged / "cards.json").write_text(json.dumps(cards, indent=2, sort_keys=True))
         (staged / "meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True))
+        (staged / "label_colors.json").write_text(
+            json.dumps(_dump_table(conn, "label_colors"), indent=2, sort_keys=True))
 
         sprint_files = fact_files = usage_lines = 0
         for name in _COPY_STATE:
             src = central / name
+            if src.is_symlink():
+                continue
             if src.is_dir():
-                shutil.copytree(src, staged / name)
+                shutil.copytree(src, staged / name, symlinks=True)
+                for link in [x for x in (staged / name).rglob("*") if x.is_symlink()]:
+                    link.unlink()  # never snapshot what a symlink points at
                 count = sum(1 for _ in (staged / name).rglob("*") if _.is_file())
                 if name == "sprints": sprint_files = count
                 if name == "knowledge": fact_files = count
@@ -200,16 +206,29 @@ def restore_board(repo_root: Path, src: Path | None = None) -> dict:
             if m["key"] in IDENTITY_META_KEYS:
                 continue
             db.set_meta(conn, m["key"], m["value"])
+    colors_path = src / "label_colors.json"
+    if colors_path.exists():  # absent in older backups
+        colors = _load_json_or_raise(colors_path)
+        if not isinstance(colors, list) or not all(
+            isinstance(c, dict) and isinstance(c.get("name"), str)
+            and isinstance(c.get("color_key"), str) for c in colors
+        ):
+            raise ValueError(
+                f"{colors_path}: expected a list of objects with name and color_key")
+        for lc in colors:
+            conn.execute(
+                "INSERT OR IGNORE INTO label_colors (name, color_key) VALUES (?, ?)",
+                (lc["name"], lc["color_key"]))
     conn.commit()
 
     files_restored = files_skipped = 0
     for name in _COPY_STATE:
         s = src / name
-        if not s.exists():
+        if s.is_symlink() or not s.exists():
             continue
         if s.is_dir():
             for f in s.rglob("*"):
-                if not f.is_file():
+                if f.is_symlink() or not f.is_file():
                     continue
                 target = central / name / f.relative_to(s)
                 if target.exists():

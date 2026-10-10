@@ -187,6 +187,9 @@ def _check_detail(obj: dict, card: str | None, stage: str | None, errors: list[s
     if not value.startswith("/"):
         errors.append("field 'detail' must be an absolute path")
         return None
+    if ".." in Path(value).parts:
+        errors.append("field 'detail' must not contain '..' components")
+        return None
     match = _DISPATCH_RE.search(value)
     if match is None or (card is not None and match["card"] != card) or (
         stage is not None and match["stage"] != stage

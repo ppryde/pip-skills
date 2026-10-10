@@ -22,6 +22,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+# chronicle needs Python >= 3.10 (itertools.pairwise, zip(strict=True)). Say so
+# plainly before the 3.10-only imports below fail with a stack trace.
+if sys.version_info < (3, 10):  # noqa: UP036 - the guard exists for older interpreters
+    print(json.dumps({"error": "chronicle needs Python >= 3.10 (try python3.11)"}),
+          file=sys.stderr)
+    raise SystemExit(2)
+
 # Allow `python plugins/chronicle/scripts/cli.py` from anywhere.
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 if str(_PLUGIN_ROOT) not in sys.path:
@@ -180,7 +187,12 @@ def cmd_pricing(args: argparse.Namespace) -> int:
 def cmd_dedupe(args: argparse.Namespace) -> int:
     """Collapse calls the store holds more than once (see ``scripts.dedupe``).
     A dry run unless ``--apply``; prints what was or would be removed."""
-    conn = store.connect()
+    if args.apply:
+        conn = store.connect()
+    else:
+        # A dry run must not create or migrate the store: read it as it is, or
+        # (no store yet) dry-run against an empty in-memory one.
+        conn = _open_readonly() or store.connect(Path(":memory:"))
     try:
         result = dedupe.dedupe(conn, apply=bool(args.apply))
     finally:
@@ -630,6 +642,10 @@ def cmd_open(args: argparse.Namespace) -> int:
     printed the link). Multi-account contracting setups: one config dir per
     client, so this is how a client's artifact link lands in THAT client's
     browser identity instead of whichever Chrome window has focus."""
+    try:
+        chrome_profile.check_url(args.url)
+    except ValueError as exc:
+        return _fail(str(exc), code=INVALID_INPUT)
     if sys.platform != "darwin":
         print("chronicle open: macOS only (uses `open --args --profile-directory`)",
               file=sys.stderr)
@@ -824,7 +840,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="absolute host dir to copy into; watch it with `overseer claude-dirs add`")
     p.add_argument("--source", default=".config/claude/projects",
                    help="path to projects/ within the volume (default: %(default)s)")
-    p.add_argument("--image", default="alpine",
+    p.add_argument("--image", default=volumes.DEFAULT_IMAGE,
                    help="helper image used to read the volume (default: %(default)s)")
     p.set_defaults(fn=cmd_pull_volume)
     return parser

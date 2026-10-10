@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
 DEFAULT_LOCAL_STATE = Path.home() / "Library/Application Support/Google/Chrome/Local State"
 
@@ -78,3 +79,14 @@ def open_command(url: str, profile_dir: str) -> list[str]:
     showing `url` — ``-na`` so it never reuses whatever window already has
     focus (the common bug this whole thing exists to avoid)."""
     return ["open", "-na", "Google Chrome", "--args", f"--profile-directory={profile_dir}", url]
+
+
+def check_url(url: str) -> None:
+    """Refuse anything but a plain ``https://host/...`` URL: ``open`` hands the
+    url to Chrome after ``--args``, so a dash-prefixed value would be read as a
+    Chrome flag and ``javascript:``/``file:`` schemes are not links at all."""
+    if url.startswith("-") or any(c.isspace() or ord(c) < 32 for c in url):
+        raise ValueError(f"refusing url {url!r}: not a plain https link")
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError(f"refusing url {url!r}: only https links can be opened")
