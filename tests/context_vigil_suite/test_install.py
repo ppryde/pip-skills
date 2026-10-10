@@ -400,30 +400,40 @@ def test_reinstall_with_changed_matcher_replaces_our_entry(cfg: Path,
 
 
 
-def test_bar_on_adds_our_mod_dir_preserving_others(cfg, run_cli, monkeypatch) -> None:
+@pytest.fixture
+def mod(iso: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A shipped vigil bar mod: the real skill ships none, so install.mod_dir points here."""
+    path = iso / "mod"
+    path.mkdir()
+    monkeypatch.setattr(install, "mod_dir", lambda: path)
+    return path
+
+
+def _bar(on: bool) -> None:
+    install.apply(install.plan_install(None, bar=on))
+
+
+def test_bar_on_adds_our_mod_dir_preserving_others(cfg, mod) -> None:
     _write(cfg, {"env": {"CLAUDE_CODE_PLUGIN_DIRS": "/x/other", "KEEP": "1"}})
-    r = run_cli("install", "--yes", "--bar", "on")
-    assert r.returncode == 0, r.stderr
+    _bar(True)
     env = _settings(cfg)["env"]
     assert env["KEEP"] == "1"
-    assert env["CLAUDE_CODE_PLUGIN_DIRS"].split(os.pathsep) == ["/x/other",
-                                                               str(install.mod_dir())]
-    assert "/x/other" not in r.stdout          # other entries are never printed
+    assert env["CLAUDE_CODE_PLUGIN_DIRS"].split(os.pathsep) == ["/x/other", str(mod)]
 
 
-def test_bar_off_and_uninstall_remove_only_ours(cfg, run_cli) -> None:
+def test_bar_off_and_uninstall_remove_only_ours(cfg, mod) -> None:
     _write(cfg, {"env": {"CLAUDE_CODE_PLUGIN_DIRS": "/x/other"}})
-    run_cli("install", "--yes", "--bar", "on")
-    run_cli("install", "--yes", "--bar", "off")
+    _bar(True)
+    _bar(False)
     assert _settings(cfg)["env"]["CLAUDE_CODE_PLUGIN_DIRS"] == "/x/other"
-    run_cli("install", "--yes", "--bar", "on")
-    run_cli("uninstall", "--yes")
+    _bar(True)
+    install.apply(install.plan_uninstall())
     assert _settings(cfg)["env"]["CLAUDE_CODE_PLUGIN_DIRS"] == "/x/other"
 
 
-def test_bar_removal_drops_an_emptied_key(cfg, run_cli) -> None:
-    run_cli("install", "--yes", "--bar", "on")
-    run_cli("install", "--yes", "--bar", "off")
+def test_bar_removal_drops_an_emptied_key(cfg, mod) -> None:
+    _bar(True)
+    _bar(False)
     assert "CLAUDE_CODE_PLUGIN_DIRS" not in _settings(cfg).get("env", {})
 
 
@@ -446,14 +456,14 @@ def test_claude_supports_mods(iso, monkeypatch, version: str, ok: bool) -> None:
     assert install.claude_supports_mods() is ok
 
 
-def test_bar_keeps_a_preexisting_empty_env(cfg: Path) -> None:
+def test_bar_keeps_a_preexisting_empty_env(cfg: Path, mod: Path) -> None:
     _write(cfg, {"env": {}})
     for choice in ("on", "off"):
         install.apply(install.plan_install(None, bar=(choice == "on")))
     assert _settings(cfg)["env"] == {}
 
 
-def test_bar_refuses_a_non_object_env(cfg: Path) -> None:
+def test_bar_refuses_a_non_object_env(cfg: Path, mod: Path) -> None:
     _write(cfg, {"env": "oops"})
     before = (cfg / "settings.json").read_text()
     with pytest.raises(install.InstallError, match="not an object"):

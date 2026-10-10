@@ -22,6 +22,7 @@ from context_vigil import (
     last_light,
     launcher,
     messages,
+    pane,
     paths,
     session,
     state,
@@ -77,6 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
         func=_cmd_pause)
     sub.add_parser("resume", help="re-enable nudges/auto-clear for this session").set_defaults(
         func=_cmd_resume)
+    psp = sub.add_parser("_pane-safe", help=argparse.SUPPRESS)
+    psp.add_argument("target")
+    psp.set_defaults(func=_cmd_pane_safe)
     sub.add_parser("status", help="show install, mode and settings").set_defaults(
         func=_cmd_status)
     ip = sub.add_parser("install", help="wire hooks + status line (dry run without --yes)")
@@ -421,8 +425,8 @@ def _summaries(plan: install.Plan) -> List[str]:
 
 def _cmd_install(args: argparse.Namespace) -> int:
     if args.questions_json:
-        print(json.dumps(cards.install_cards(install.claude_supports_mods()),
-                         ensure_ascii=False, indent=2))
+        mods = install.claude_supports_mods() and install.mod_dir().is_dir()
+        print(json.dumps(cards.install_cards(mods), ensure_ascii=False, indent=2))
         return 0
     flag = {"on": True, "off": False, None: None}
     try:
@@ -591,6 +595,11 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
         raise CliError(f"uninstall failed ({exc}); nothing more was changed") from exc
     print(f"\ncontext-vigil uninstalled. Data left at {paths.data_root()} (delete it by hand).")
     return 0
+
+
+def _cmd_pane_safe(args: argparse.Namespace) -> int:
+    """Exit 0 when the pane is safe to type into (the detached sender's re-check)."""
+    return 0 if pane.pane_safe(args.target) else 1
 
 
 def _cmd_hook(args: argparse.Namespace) -> int:

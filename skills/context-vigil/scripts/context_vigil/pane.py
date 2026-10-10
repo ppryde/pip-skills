@@ -76,5 +76,7 @@ def safe_to_type(screen: str) -> bool:
 
 
 def pane_safe(target: str) -> bool:
+    if tmux.in_mode(target):
+        return False   # copy mode and friends swallow the keys
     screen = tmux.capture(target)
     return screen is not None and safe_to_type(screen)
