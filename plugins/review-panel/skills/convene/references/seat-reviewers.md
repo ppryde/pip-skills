@@ -1,7 +1,7 @@
 # Seating the reviewers (convene Step 4)
 
 For each `ReviewerRef`:
-- `builtin` → read `../reviewers/<name>.md`; its "What to look for" table is
+- `builtin` → read `../../reviewers/<name>.md`; its "What to look for" table is
   the rule set, its "Voice" drives tone.
 - `clone` → `read_persona(<alias>)`. If it returns null, warn
   "persona <alias> not found — skipping" and continue. Otherwise use the
@@ -21,7 +21,7 @@ read-only tools (Read/Grep/Glob); only the orchestrator writes files or posts
 to GitHub.
 
 Dispatch per the strategy's stages. Each reviewer subagent returns the
-finding contract JSON (see `../../scripts/contract.py`): `reviewer`,
+finding contract JSON (see `../../../scripts/contract.py`): `reviewer`,
 `findings[]` with `id,file,line,rule,actual,severity,category,suggestion`
 (+ `citation` for clone reviewers), `clean_files`, `notes`. Also ask for an
 explicit `rule_id`: the ID from the reviewer's "What to look for" table (a

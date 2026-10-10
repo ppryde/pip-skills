@@ -83,12 +83,6 @@ mention any notes in the output.
   `.review-panel/last-review.md`, `output_file` on the resolved review). Chat
   gets the refuted count (`counts.refuted`); the file also lists each refuted
   finding with its reason.
-- **report** (default) → save the `reconcile` output (`--out <tmp file>`),
-  then `cli.py report --reconciled <file> --strategy <s> --scope <s> --out
-  <output_file>`; it prints the report and writes `output.file` (default
-  `.review-panel/last-review.md`, `output_file` on the resolved review). Chat
-  gets the refuted count (`counts.refuted`); the file also lists each refuted
-  finding with its reason.
 - **interactive** or **inline** → Read `references/output-modes.md` and follow
   it. Inline never auto-posts.
 

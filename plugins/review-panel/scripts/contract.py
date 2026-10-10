@@ -167,7 +167,9 @@ def _as_list(value: object) -> list:
         return []
     if isinstance(value, str):
         return [value]
-    return list(value) if isinstance(value, (list, tuple)) else [str(value)]
+    if isinstance(value, (list, tuple)):
+        return [x if isinstance(x, str) else str(x) for x in value]
+    return [str(value)]
 
 
 def _text(value: object, name: str) -> str:
@@ -185,6 +187,9 @@ def _parse_one(reviewer: str, raw: dict, strict: bool, notes: list[str], label: 
     missing = [k for k in required if k not in raw]
     if missing:
         raise ContractError(f"finding missing {missing} in {raw!r}")
+    if not strict:  # an explicit null means "none given", like a missing key
+        raw = {k: v for k, v in raw.items()
+               if not (v is None and k in ("category", "suggestion"))}
     for key in ("id", "file", "rule", "actual", "category", "suggestion"):
         if key in raw:
             raw = {**raw, key: _text(raw[key], key)}
@@ -245,7 +250,14 @@ def parse_reviewer_result(
     reviewer = _text(reviewer, "reviewer")
     findings: list[Finding] = []
     notes_out: list[str] = []
-    for index, raw in enumerate(payload.get("findings", []) or []):
+    raw_findings = payload.get("findings", []) or []
+    if not isinstance(raw_findings, list):
+        msg = f"findings must be a list, got {type(raw_findings).__name__}"
+        if strict:
+            raise ContractError(msg)
+        notes_out.append(f"REJECTED findings: {msg}")
+        raw_findings = []
+    for index, raw in enumerate(raw_findings):
         label = str(raw.get("id", index)) if isinstance(raw, dict) else str(index)
         if not isinstance(raw, dict):
             if strict:
@@ -323,7 +335,7 @@ def render_report(
                 if f.fingerprint:
                     lines.append(f"  - fingerprint: {_code_span(f.fingerprint)}")
         lines.append("")
-    notes = [n for n in (meta.get("notes") or [])]
+    notes = _as_list(meta.get("notes"))
     if notes:
         lines.append("## Notes")
         lines.extend(f"- {_one_line(n)}" for n in notes)

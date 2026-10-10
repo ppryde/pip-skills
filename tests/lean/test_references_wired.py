@@ -105,3 +105,19 @@ def test_bare_name_resolves_only_in_the_sources_directory(tmp_path, monkeypatch)
     (skill / "references" / "sub").mkdir()
     (skill / "references" / "sub" / "b.md").write_text("other dir\n")
     assert {p.name for p in lc.reachable_references(skill)[0]} == {"a.md"}
+
+
+def test_relative_paths_in_references_resolve():
+    """A `../x` path written in a reference resolves from the reference's own directory."""
+    import re
+    bad = []
+    for skill_dir in DIRS:
+        refs = skill_dir / "references"
+        for md in sorted(refs.rglob("*.md")) if refs.is_dir() else []:
+            for m in re.finditer(r"`((?:\.\./)+[^`\s]+)`", md.read_text()):
+                target = m.group(1)
+                if "<" in target:  # placeholder such as <name>: check the directory
+                    target = target.split("<")[0]
+                if not (md.parent / target).resolve().exists():
+                    bad.append((md.relative_to(REPO).as_posix(), m.group(1)))
+    assert not bad, f"reference paths that do not resolve from the reference file: {bad}"
