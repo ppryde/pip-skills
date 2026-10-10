@@ -1,4 +1,4 @@
-"""Aggregate pytest JUnit XML into per-file and per-directory wall-clock.
+"""Aggregate pytest JUnit XML into per-file and per-directory summed test time.
 
     python aggregate_junit.py AFTER.xml                 # profile one run
     python aggregate_junit.py AFTER.xml --compare BEFORE.xml
@@ -9,6 +9,7 @@ faster" and "the suite stopped running things" produce the same headline
 number, so a timing claim without this check is unproven.
 """
 
+import argparse
 import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
@@ -26,25 +27,47 @@ def _statuses(xml_path: str) -> dict[str, str]:
     return out
 
 
+def _file_of(tc) -> str:
+    """Source file of a testcase: the file= attribute (xunit1), else derived from classname."""
+    f = tc.get("file")
+    if f:
+        return f
+    parts = (tc.get("classname") or "").split(".")
+    while len(parts) > 1 and parts[-1][:1].isupper():  # trailing class names
+        parts.pop()
+    return "/".join(parts) + ".py"
+
+
 def _per_file(xml_path: str) -> dict[str, float]:
     d: dict[str, float] = defaultdict(float)
     for tc in ET.parse(xml_path).getroot().iter("testcase"):
-        f = tc.get("file") or tc.get("classname", "").replace(".", "/") + ".py"
+        f = _file_of(tc)
         d[f] += float(tc.get("time", 0))
     return d
 
 
-if "--compare" in sys.argv:
-    after_path = sys.argv[1]
-    before_path = sys.argv[sys.argv.index("--compare") + 1]
+ap = argparse.ArgumentParser(description="Aggregate pytest JUnit XML.")
+ap.add_argument("after", help="JUnit XML to profile (the 'after' run with --compare)")
+ap.add_argument("--compare", metavar="BEFORE", help="JUnit XML of the 'before' run")
+args = ap.parse_args()
+
+if args.compare:
+    after_path, before_path = args.after, args.compare
 
     before, after = _per_file(before_path), _per_file(after_path)
     tb, ta = sum(before.values()), sum(after.values())
-    print(f"  TOTAL {tb:.1f}s -> {ta:.1f}s   ({(ta - tb) / tb * 100:+.1f}%, {tb - ta:.1f}s saved)\n")
+    pct = f"{(ta - tb) / tb * 100:+.1f}%" if tb else "n/a: before total is 0"
+    print(f"  TOTAL summed test time {tb:.1f}s -> {ta:.1f}s   ({pct}, {tb - ta:.1f}s saved)\n")
     print(f"  {'before':>8} {'after':>8} {'delta':>8}  file")
     movers = sorted(set(before) | set(after), key=lambda f: before.get(f, 0) - after.get(f, 0))
-    for f in reversed(movers[-12:]):
+    for f in reversed(movers[-12:]):  # top savers
         print(f"  {before.get(f, 0):8.2f} {after.get(f, 0):8.2f} {after.get(f, 0) - before.get(f, 0):+8.2f}  {f}")
+
+    regressions = [f for f in reversed(movers) if after.get(f, 0) - before.get(f, 0) > 0][:12]
+    if regressions:
+        print("\n  top regressions (slower after):")
+        for f in regressions:
+            print(f"  {before.get(f, 0):8.2f} {after.get(f, 0):8.2f} {after.get(f, 0) - before.get(f, 0):+8.2f}  {f}")
 
     sb, sa = _statuses(before_path), _statuses(after_path)
     added, removed = sorted(set(sa) - set(sb)), sorted(set(sb) - set(sa))
@@ -63,7 +86,7 @@ if "--compare" in sys.argv:
     print("  (Explain each addition individually — meta-guards that scan every file gain a case per new file.)")
     raise SystemExit(0)
 
-path = sys.argv[1]
+path = args.after
 tree = ET.parse(path)
 root = tree.getroot()
 
@@ -73,7 +96,7 @@ n = 0
 slowest = []
 
 for tc in root.iter("testcase"):
-    f = tc.get("file") or tc.get("classname", "").replace(".", "/") + ".py"
+    f = _file_of(tc)
     t = float(tc.get("time", 0))
     per_file[f][0] += t
     per_file[f][1] += 1
@@ -81,7 +104,10 @@ for tc in root.iter("testcase"):
     n += 1
     slowest.append((t, f, tc.get("name")))
 
-print(f"TOTAL: {total:.1f}s across {n} tests ({total / 60:.1f} min of measured test time)\n")
+print(f"TOTAL: {total:.1f}s summed test time across {n} tests ({total / 60:.1f} min; wall time differs under xdist)\n")
+if total == 0:
+    print("All recorded test times are 0s: nothing to rank or apportion.")
+    raise SystemExit(0)
 
 per_dir = defaultdict(lambda: [0.0, 0])
 for f, (t, c) in per_file.items():
@@ -113,5 +139,5 @@ for pct in (50, 80, 90):
     for i, (t, c) in enumerate(ordered, 1):
         run += t
         if run >= total * pct / 100:
-            print(f"  {pct}% of wall-clock is in {i} files ({i / len(ordered) * 100:.1f}% of files)")
+            print(f"  {pct}% of summed test time is in {i} files ({i / len(ordered) * 100:.1f}% of files)")
             break
