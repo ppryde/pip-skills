@@ -167,6 +167,9 @@ class Facts:
     first_ts: float | None = None
     last_ts: float | None = None
     turns: dict[tuple[str, str], Turn] = field(default_factory=dict)
+    # tool_use_id -> the turns that issued that Artifact publish, so a tool
+    # result finds them without scanning every turn.
+    artifact_turns: dict[str, list[Turn]] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
     # Usage-limit banners seen in this batch of lines (see ``LimitHit``).
     limit_hits: list[LimitHit] = field(default_factory=list)
@@ -373,6 +376,9 @@ def _fold_assistant(facts: Facts, record: dict[str, Any], agent_id: str) -> None
                     artifact = _artifact_use(tool_id, block.get("input"))
                     if artifact is not None:
                         turn.artifacts[tool_id] = artifact
+                        holders = facts.artifact_turns.setdefault(tool_id, [])
+                        if all(h is not turn for h in holders):
+                            holders.append(turn)
 
 
 def _artifact_use(tool_id: str, raw: Any) -> ArtifactUse | None:
@@ -610,7 +616,7 @@ def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, 
         edit = _file_edit(tool_id, record.get("toolUseResult"), ts, agent_id)
         if edit is not None:
             facts.file_edits[tool_id] = edit
-        for turn in facts.turns.values():
+        for turn in facts.artifact_turns.get(tool_id, ()):
             if is_error:
                 turn.artifacts.pop(tool_id, None)
             elif url and tool_id in turn.artifacts:
