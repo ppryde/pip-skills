@@ -11,6 +11,7 @@ import yaml
 
 from scripts.discovery import review_clone_root
 
+_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 
 
@@ -26,6 +27,8 @@ def persona_path(alias: str) -> Path:
 
 
 def read_persona(alias: str) -> Persona | None:
+    if not _ALIAS_RE.fullmatch(alias) or ".." in alias:
+        return None
     path = persona_path(alias)
     if not path.exists():
         return None

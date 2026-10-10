@@ -15,9 +15,20 @@ def test_strict_keeps_severity():
     assert out[0].severity == "error"
 
 
-def test_aspirational_downgrades_everything():
-    out = apply_strictness([_f("G1"), _f("G2", severity="info")], {"general": "aspirational"})
-    assert [f.severity for f in out] == ["warning", "warning"]
+def test_aspirational_downgrades_errors_only():
+    out = apply_strictness(
+        [_f("G1"), _f("G2", severity="info"), _f("G3", severity="warning")],
+        {"general": "aspirational"},
+    )
+    assert [f.severity for f in out] == ["warning", "info", "warning"]
+
+
+def test_pragmatic_exception_keeps_info():
+    out = apply_strictness(
+        [_f("G2", severity="info")], {"general": "pragmatic"},
+        allowed_exceptions={"general": {"G2"}},
+    )
+    assert out[0].severity == "info"
 
 
 def test_pragmatic_downgrades_only_allowed_exceptions():

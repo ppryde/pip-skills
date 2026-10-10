@@ -6,9 +6,15 @@ from pathlib import Path
 
 import yaml
 
+from scripts.config import DEFAULT_STRICTNESS
 from scripts.contract import Finding
 
-_DEFAULT = "pragmatic"
+_DEFAULT = DEFAULT_STRICTNESS
+
+
+def _soften(f: Finding) -> Finding:
+    """Cap severity at warning: error becomes warning, lower tiers stay."""
+    return replace(f, severity="warning") if f.severity == "error" else f
 
 
 def apply_strictness(
@@ -21,9 +27,9 @@ def apply_strictness(
     for f in findings:
         level = strictness_by_reviewer.get(f.reviewer, _DEFAULT)
         if level == "aspirational":
-            out.append(replace(f, severity="warning"))
+            out.append(_soften(f))
         elif level == "pragmatic" and f.id in exceptions.get(f.reviewer, set()):
-            out.append(replace(f, severity="warning"))
+            out.append(_soften(f))
         else:  # strict, or pragmatic non-exception
             out.append(f)
     return out
