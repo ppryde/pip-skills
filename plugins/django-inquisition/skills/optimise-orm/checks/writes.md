@@ -5,45 +5,73 @@ checks:
   - id: WRITE-001
     title: Loop of .save() → bulk_create
     severity_base: critical
+    kind: perf
+    trigger: '\.save\('
   - id: WRITE-002
     title: Loop of .save() for existing rows → bulk_update
     severity_base: high
+    kind: perf
+    trigger: '\.save\('
   - id: WRITE-003
     title: get_or_create in loop → bulk_create with ignore_conflicts
     severity_base: medium
+    kind: perf
+    trigger: '\.get_or_create\('
   - id: WRITE-004
     title: update_or_create in loop → bulk_create with update_conflicts + update_fields
     severity_base: high
+    kind: perf
+    trigger: '\.update_or_create\('
   - id: WRITE-005
     title: Signal listeners present — bulk recommendations bypass them (info banner)
     severity_base: info
+    kind: perf
+    trigger: '@receiver\(|\bdef\s+(save|delete)\(self'
   - id: WRITE-006
     title: Existing .update() on model with pre_save/post_save listeners
     severity_base: medium
+    kind: perf
+    trigger: '\.update\('
   - id: WRITE-007
     title: Existing bulk_create/bulk_update on model with listeners
     severity_base: medium
+    kind: perf
+    trigger: '\.bulk_(create|update)\('
   - id: WRITE-008
     title: Existing raw SQL write (cursor.execute) to model with listeners
     severity_base: medium
+    kind: perf
+    trigger: '\bcursor\(|\.execute\(|\.raw\('
   - id: WRITE-009
     title: QuerySet.delete() on model that overrides Model.delete()
     severity_base: medium
+    kind: perf
+    trigger: '\.delete\('
   - id: WRITE-010
     title: .save() without update_fields rewrites entire row
     severity_base: medium
+    kind: perf
+    trigger: '\.save\('
   - id: WRITE-020
     title: Read-modify-write loop → qs.update(F expression)
     severity_base: high
+    kind: perf
+    trigger: '\.save\('
   - id: WRITE-030
     title: Many writes outside transaction.atomic block
     severity_base: medium
+    kind: correctness
+    trigger: '\.(save|create|update)\('
   - id: WRITE-031
     title: select_for_update outside atomic block
     severity_base: high
+    kind: correctness
+    trigger: '\.select_for_update\('
   - id: WRITE-040
     title: post_save handler issues queries (hidden N+1 on bulk write)
     severity_base: medium
+    kind: perf
+    trigger: '\bpost_save\b'
 ---
 
 # Writes
@@ -471,7 +499,7 @@ with transaction.atomic():
 
 ### WRITE-031
 
-**Signature:** `.select_for_update()` called outside a `transaction.atomic()` block. `SELECT FOR UPDATE` requires an active transaction to hold the row lock; outside a transaction the lock is released immediately, making the pattern a no-op.
+**Signature:** `.select_for_update()` called outside a `transaction.atomic()` block. `SELECT FOR UPDATE` requires an active transaction to hold the row lock. In autocommit mode Django raises `TransactionManagementError` when the queryset is evaluated on backends that support row locks; on backends that ignore `select_for_update()` (for example SQLite) it silently does nothing, so the code appears to work and protects nothing.
 
 **Grep / AST hints:**
 ```regex
@@ -488,7 +516,7 @@ Follow-up: scan enclosing function and any `with` blocks for `transaction.atomic
 
 **Suggested fix template:**
 ```python
-# Before — lock immediately released
+# Before — raises TransactionManagementError in autocommit (or protects nothing on backends that ignore it)
 order = Order.objects.select_for_update().get(pk=order_id)
 order.status = "processing"
 order.save()

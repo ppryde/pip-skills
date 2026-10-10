@@ -5,39 +5,63 @@ checks:
   - id: FETCH-001
     title: Missing select_related for FK access in loop
     severity_base: high
+    kind: perf
+    trigger: '\bfor\s+\w+\s+in\b'
   - id: FETCH-002
     title: select_related() with no args fetches every FK
     severity_base: medium
+    kind: perf
+    trigger: '\.select_related\(\s*\)'
   - id: FETCH-003
     title: select_related chain > 3 deep across nullable FKs
     severity_base: low
+    kind: perf
+    trigger: 'select_related\(.*__.*__.*__'
   - id: FETCH-010
     title: Missing prefetch_related for reverse/M2M access in loop
     severity_base: high
+    kind: perf
+    trigger: '\bfor\s+\w+\s+in\b'
   - id: FETCH-011
     title: Prefetch() with custom QS would reduce work
     severity_base: medium
+    kind: perf
+    trigger: '\.prefetch_related\('
   - id: FETCH-012
     title: Filtered Prefetch without to_attr replaces the unfiltered relation (clarity)
     severity_base: low
+    kind: perf
+    trigger: '\bPrefetch\('
   - id: FETCH-020
     title: Wide column over-fetched and unread by callers
     severity_base: high
+    kind: perf
+    trigger: '\.objects\b|\b(Text|JSON|Binary)Field\b'
   - id: FETCH-021
     title: values()/values_list() opportunity on single-field iteration
     severity_base: medium
+    kind: perf
+    trigger: '[\[(]\s*\w+\.\w+\s+for\s+\w+\s+in\b'
   - id: FETCH-022
     title: only() viable — callers read subset of fields
     severity_base: medium
+    kind: perf
+    trigger: '\.objects\b|\.(filter|all|get)\('
   - id: FETCH-030
     title: N+1 in template for loop
     severity_base: critical
+    kind: perf
+    trigger: '\{%\s*for\s+\w+\s+in\b'
   - id: FETCH-031
     title: N+1 in DRF SerializerMethodField / nested serializer
     severity_base: critical
+    kind: perf
+    trigger: 'SerializerMethodField|to_representation|\bdef\s+get_\w+\(self,\s*obj\)'
   - id: FETCH-032
     title: N+1 hidden in __str__ / __repr__
     severity_base: high
+    kind: perf
+    trigger: '\bdef\s+__(str|repr)__\('
 ---
 
 # Fetching

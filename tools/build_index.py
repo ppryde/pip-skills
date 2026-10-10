@@ -37,16 +37,12 @@ READ_MAPPING = (
     "`### CODE` heading line to the line before the next heading."
 )
 
-SEVERITY_LEGEND = """\
-## Severity legend
-
-| Tier | Internal | When |
-|---|---|---|
-| Critical | `critical` always; `high` when `savings_midpoint >= 100ms` | Query-killers: N+1 loops, bulk-write loops, missing index on hot filter |
-| Medium | `high` when `savings_midpoint < 100ms`, `medium` always, `low` when `savings_midpoint >= 50ms` | Meaningful improvements |
-| Low | `low` when `savings_midpoint < 50ms` | Stylistic / micro-optimisations |
-| Header banner | `info` | Context: audit framework detected, signal-context info |
-"""
+TRIGGER_NOTE = (
+    "`Trigger` is a ripgrep regex for the `Grep` tool, run over the target and the model, template and settings "
+    "files it references; `\\|` in a cell is a markdown-escaped `|` (alternation). An empty trigger means the "
+    "check declares none. A blank `Kind` means `perf`. `Severity` is the check's default internal severity; "
+    "the tier mapping lives in SKILL.md."
+)
 
 
 class SourceError(Exception):
@@ -95,7 +91,7 @@ def section_end(hs: list[tuple[int, int, str]], idx: int, total: int, max_level:
 
 # ---------------------------------------------------------------- optimise-orm
 
-def parse_frontmatter(text: str, path: Path) -> tuple[str, list[dict[str, str]]]:
+def parse_frontmatter(text: str, path: Path) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
         raise SourceError(f"{path}: no YAML frontmatter")
@@ -105,40 +101,44 @@ def parse_frontmatter(text: str, path: Path) -> tuple[str, list[dict[str, str]]]
         raise SourceError(f"{path}: unterminated YAML frontmatter") from None
     name = ""
     checks: list[dict[str, str]] = []
-    in_checks = False
+    aliases: list[dict[str, str]] = []
+    items: list[dict[str, str]] | None = None  # the list being filled: checks or aliases
     pending: tuple[str, int] | None = None
     for raw in lines[1:end]:
         if re.match(r"checks:\s*$", raw):
-            in_checks = True
+            items = checks
             continue
-        if not in_checks:
+        if re.match(r"aliases:\s*$", raw):
+            items = aliases
+            continue
+        if items is None:
             m = re.match(r"name:\s*(.*)$", raw)
             if m:
                 name = m.group(1).strip().strip("'\"")
             continue
         m = re.match(r"\s*-\s+id:\s*(.*)$", raw)
         if m:
-            checks.append({"id": m.group(1).strip().strip("'\"")})
+            items.append({"id": m.group(1).strip().strip("'\"")})
             continue
         if pending is not None and raw.strip():
             if len(raw) - len(raw.lstrip()) > pending[1]:
                 raise SourceError(f"{path}: {pending[0]}: multi-line values are not supported; use a one-line value")
             pending = None
         m = re.match(r"(\s+)(\w+):\s*(.*)$", raw)
-        if m and checks:
+        if m and items:
             key, value = m.group(2), m.group(3).strip()
             if value[:1] in (">", "|"):
                 raise SourceError(
-                    f"{path}: {checks[-1]['id']}.{key}: folded/literal scalars ({value[:1]}) are not supported; use a one-line value")
+                    f"{path}: {items[-1]['id']}.{key}: folded/literal scalars ({value[:1]}) are not supported; use a one-line value")
             if value[:1] in ("'", '"'):
                 quoted = re.match(r"(['\"])(.*?)\1(?:\s|$)", value)
                 value = quoted.group(2) if quoted else value.strip("'\"")
             else:
                 value = re.sub(r"\s+#.*$", "", value)  # trailing ` # comment` on unquoted values
             if not value:
-                pending = (f"{checks[-1]['id']}.{key}", len(m.group(1)))
-            checks[-1][key] = value
-    return name, checks
+                pending = (f"{items[-1]['id']}.{key}", len(m.group(1)))
+            items[-1][key] = value
+    return name, checks, aliases
 
 
 def optimise_orm_index(root: Path) -> tuple[Path, str]:
@@ -146,14 +146,20 @@ def optimise_orm_index(root: Path) -> tuple[Path, str]:
     if not cdir.is_dir():
         raise SourceError(f"{cdir}: not found")
     rows: list[tuple[str, str, dict[str, str], int, int]] = []
+    alias_rows: list[tuple[str, str, str]] = []  # (alias id, canonical id, group file)
     problems: list[str] = []
     for gpath in sorted(p for p in cdir.glob("*.md") if p.name != "INDEX.md"):
         text = read_lf(gpath)
         lines = text.split("\n")
         if lines and lines[-1] == "":
             lines = lines[:-1]
-        group, checks = parse_frontmatter(text, gpath)
+        group, checks, aliases = parse_frontmatter(text, gpath)
         group = group or gpath.stem
+        for a in aliases:
+            if "of" not in a:
+                problems.append(f"{gpath.name}: alias {a['id']} has no `of:` target")
+            else:
+                alias_rows.append((a["id"], a["of"], gpath.name))
         hs = headings(lines)
         spans: dict[str, tuple[int, int]] = {}
         for i, (line, level, title) in enumerate(hs):
@@ -172,9 +178,16 @@ def optimise_orm_index(root: Path) -> tuple[Path, str]:
             if c["id"] in spans:
                 start, end = spans[c["id"]]
                 rows.append((group, gpath.name, c, start, end))
+    live = {r[2]["id"] for r in rows}
+    for aid, of, fname in alias_rows:
+        if aid in live:
+            problems.append(f"{fname}: alias {aid} is also a live check")
+        if of not in live:
+            problems.append(f"{fname}: alias {aid} points at unknown check {of}")
     if problems:
         raise SourceError("\n".join(problems))
     rows.sort(key=lambda r: (r[1], r[2]["id"]))
+    alias_rows.sort()
     out = [
         "# Check Index",
         "",
@@ -186,20 +199,31 @@ def optimise_orm_index(root: Path) -> tuple[Path, str]:
         "",
         READ_MAPPING,
         "",
-        "`kind` and `trigger` are empty until a check declares them in its group file's frontmatter.",
+        TRIGGER_NOTE,
         "",
-        "| ID | Group | Severity | Kind | Check | Trigger | Span |",
-        "|---|---|---|---|---|---|---|",
+        "| ID | Severity | Kind | Check | Trigger | Span |",
+        "|---|---|---|---|---|---|",
     ]
     for group, fname, c, start, end in rows:
+        trig = cell(c.get("trigger", ""))
         out.append(
-            "| {id} | {g} | {sev} | {kind} | {title} | {trig} | {f} L{s}-{e} |".format(
-                id=c["id"], g=group, sev=cell(c.get("severity_base", "")), kind=cell(c.get("kind", "")),
-                title=cell(c.get("title", "")), trig=cell(c.get("trigger", "")),
+            "| {id} | {sev} | {kind} | {title} | {trig} | {f} L{s}-{e} |".format(
+                id=c["id"], sev=cell(c.get("severity_base", "")), kind=cell(c.get("kind", "").replace("perf", "")),
+                title=cell(c.get("title", "")), trig=f"`{trig}`" if trig else "",
                 f=f"{fname}", s=start, e=end,
             )
         )
-    out += ["", SEVERITY_LEGEND.rstrip("\n"), ""]
+    correctness = [r[2]["id"] for r in rows if r[2].get("kind") == "correctness"]
+    if correctness:
+        out += ["", "## Correctness (outside the perf scope)", "",
+                "Checks with `kind: correctness`: " + ", ".join(correctness) + ". "
+                "Report them under this banner, after the tiers; they are not part of the tier counts or the savings total."]
+    if alias_rows:
+        out += ["", "## Aliases", "",
+                "Retired codes. Do not run them as checks; report the canonical code. "
+                "`# noqa: optimise-orm <alias>` suppresses the canonical code on that line."]
+        out += [f"- {aid} -> {of}" for aid, of, _ in alias_rows]
+    out += [""]
     return cdir / "INDEX.md", "\n".join(out)
 
 

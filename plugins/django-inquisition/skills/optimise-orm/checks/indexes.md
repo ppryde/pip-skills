@@ -5,36 +5,58 @@ checks:
   - id: IDX-001
     title: Filter column without db_index / Meta.indexes
     severity_base: high
+    kind: perf
+    trigger: '\.(filter|exclude|get)\('
   - id: IDX-002
     title: order_by column without index — sort cost
     severity_base: medium
+    kind: perf
+    trigger: '\.order_by\('
   - id: IDX-010
     title: Multi-column filter → composite index, leading-column matters
     severity_base: high
+    kind: perf
+    trigger: '\.(filter|exclude)\(\w+(__\w+)*=.*,\s*\w+(__\w+)*='
   - id: IDX-011
     title: Composite index column order doesn't match common queries
     severity_base: low
+    kind: perf
+    trigger: '\bindexes\s*=|\bIndex\('
   - id: IDX-020
     title: Soft-delete / status filter → partial index opportunity
     severity_base: medium
+    kind: perf
+    trigger: '(deleted_at|is_deleted|archived_at|is_active)\w*=(True|False)|\bdef\s+get_queryset\('
   - id: IDX-030
     title: Lower/Upper filtered → expression index
     severity_base: medium
+    kind: perf
+    trigger: '__iexact=|\bLower\('
   - id: IDX-040
     title: JSONField / ArrayField filtered without GIN (Postgres)
     severity_base: high
+    kind: perf
+    trigger: '__(contains|has_key|has_keys|has_any_keys|overlap|contained_by)='
   - id: IDX-041
     title: Append-only timestamps without BrinIndex (Postgres, large tables)
     severity_base: low
+    kind: perf
+    trigger: '__(gte|lte|gt|lt|range)='
   - id: IDX-050
     title: Duplicate / prefix-covered indexes
     severity_base: low
+    kind: perf
+    trigger: '\bindexes\s*=|\bIndex\('
   - id: IDX-060
     title: Meta.ordering triggers sort without index
     severity_base: medium
+    kind: perf
+    trigger: '\bordering\s*='
   - id: IDX-061
     title: order_by('?') is full-table sort
     severity_base: high
+    kind: perf
+    trigger: 'order_by\(\s*.\?'
 ---
 
 # Indexes
@@ -185,6 +207,10 @@ indexes = [
 Also:
 ```regex
 \.filter\(is_active=True\)
+```
+Also (formerly PAT-020, now an alias of this check): a default manager whose `get_queryset()` applies that filter, which counts as repeated use on its own:
+```regex
+def\s+get_queryset\(self\):
 ```
 Follow-up: count occurrences. If 2+ in file or across caller-grep, flag.
 

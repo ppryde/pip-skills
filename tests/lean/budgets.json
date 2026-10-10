@@ -6,8 +6,8 @@
   },
   "indexes": {
     "optimise-orm": {
-      "enforced": false,
-      "reason": "checks/INDEX.md is still hand-written on main; the django-inquisition PR commits the generated one and sets enforced to true."
+      "enforced": true,
+      "reason": "generated checks/INDEX.md is committed (WF-268 django-inquisition PR)"
     },
     "doctrines": {
       "enforced": false,
@@ -24,7 +24,7 @@
     "plugins/census/skills/vitals-lean/SKILL.md": 1938,
     "plugins/chronicle/skills/chronicle/SKILL.md": 5629,
     "plugins/chronicle/skills/reconcile/SKILL.md": 9963,
-    "plugins/django-inquisition/skills/optimise-orm/SKILL.md": 17652,
+    "plugins/django-inquisition/skills/optimise-orm/SKILL.md": 10220,
     "plugins/email-absolution/skills/elder/SKILL.md": 22102,
     "plugins/email-absolution/skills/scribe/SKILL.md": 14957,
     "plugins/email-absolution/skills/visitation/SKILL.md": 10414,
@@ -46,7 +46,6 @@
     "skills/context-vigil/SKILL.md": 9179
   },
   "exemptions": {
-    "plugins/django-inquisition/skills/optimise-orm/SKILL.md": "WF-268 django-inquisition PR: restructured around the generated checks INDEX; budget ratchets down there",
     "plugins/email-absolution/skills/elder/SKILL.md": "own stream (email-absolution redesign); seeded at current size, only ratchets down",
     "plugins/email-absolution/skills/scribe/SKILL.md": "own stream (email-absolution redesign); seeded at current size, only ratchets down",
     "plugins/email-absolution/skills/visitation/SKILL.md": "own stream (email-absolution redesign); WF-266 PR 1 added the alias/applies/INDEX patch lines; PR 2 (lean loading) ratchets all three skills down",

@@ -42,6 +42,7 @@ Or reference the plugin directory directly in your Claude Code settings.
 | Flag | Default | Effect |
 |---|---|---|
 | `--parallel` | off | Fan out 8 subagents (one per check-group); merge and rank results |
+| `--thorough` | off | Read every active group file whole and evaluate every check, instead of opening only the checks the index triggers nominate |
 | `--no-explain` | off | Skip EXPLAIN even when DB is reachable |
 | `--report` | off | Write full markdown report to `reports/optimise-orm/<slug>-<timestamp>.md` |
 | `--engine=<pg\|mysql\|sqlite\|oracle>` | auto-detect | Override DB engine detection |
@@ -75,7 +76,7 @@ Estimated savings if all addressed: ~620–1450 ms
 
 **Full report (`--report`):**
 
-Written to `reports/optimise-orm/apps-orders-views-20260430-143200.md`. Includes current code excerpts, suggested fix templates, EXPLAIN evidence (when available), and signal-bypass caveats for write findings.
+Written to `reports/optimise-orm/apps-orders-views-20260430-143200.md` (the skill no longer edits `.gitignore`; it prints a one-line reminder to ignore `reports/optimise-orm/`). Includes current code excerpts, suggested fix templates, EXPLAIN evidence (when available), and signal-bypass caveats for write findings.
 
 ---
 
@@ -116,7 +117,7 @@ qs = Order.objects.all()  # noqa: optimise-orm FETCH-002
 qs = Order.objects.select_related()  # noqa: optimise-orm
 ```
 
-Suppressed findings are counted in the report frontmatter (`suppressed: N`) but not shown in the report body.
+Suppressed findings are counted in the report frontmatter (`suppressed: N`) but not shown in the report body. The retired codes PAT-010 and PAT-020 are aliases of IDX-040 and IDX-020 and suppress those.
 
 ---
 
@@ -129,6 +130,8 @@ Suppressed findings are counted in the report frontmatter (`suppressed: N`) but 
 | 🔵 Low | < 10ms savings; code smells; manual-review escape hatches | FETCH-002, PAT-040 |
 
 Info-level findings (PAT-070, WRITE-005) appear as a header banner before the tiered list.
+
+Checks marked `kind: correctness` (WRITE-030, WRITE-031) are not performance findings: they are listed after the tiers under a "Correctness (outside the perf scope)" banner and are not counted in the tiers or the savings total.
 
 ---
 

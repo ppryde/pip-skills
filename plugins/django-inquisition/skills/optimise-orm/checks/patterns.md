@@ -5,39 +5,58 @@ checks:
   - id: PAT-001
     title: __icontains on un-indexed text — suggest pg_trgm GIN
     severity_base: medium
+    kind: perf
+    trigger: '__(icontains|istartswith|iendswith)='
   - id: PAT-002
     title: unaccent / full-text search candidates
     severity_base: low
+    kind: perf
+    trigger: '__icontains=|\bSearchVector\b|\bunaccent\b'
   - id: PAT-003
     title: __regex / __iregex on un-indexed text — full-table scan per query
     severity_base: medium
-  - id: PAT-010
-    title: JSONField __contains / __has_key un-indexed
-    severity_base: high
+    kind: perf
+    trigger: '__i?regex='
   - id: PAT-011
     title: KeyTransform index opportunity for hot keys
     severity_base: medium
-  - id: PAT-020
-    title: Default manager soft-delete benefits from partial index
-    severity_base: medium
+    kind: perf
+    trigger: '\bJSONField\b|\.(filter|exclude|get)\(\w+__\w+='
   - id: PAT-030
     title: GenericForeignKey accessed in loop without prefetch (prefetch_related / GenericPrefetch)
     severity_base: high
+    kind: perf
+    trigger: '\bcontent_object\b|\bGenericForeignKey\b|\bcontent_type\b'
   - id: PAT-040
     title: .raw() / .extra() flagged for review (.extra() discouraged)
     severity_base: low
+    kind: perf
+    trigger: '\.(raw|extra)\('
   - id: PAT-050
     title: Sync ORM call in async view (Django >= 4.1)
     severity_base: medium
+    kind: perf
+    trigger: '\basync\s+def\b'
   - id: PAT-060
     title: CONN_MAX_AGE = 0 on production settings
     severity_base: low
+    kind: perf
+    trigger: '\bCONN_MAX_AGE\b|\bDATABASES\s*='
   - id: PAT-061
     title: Read-heavy query could use .using('replica')
     severity_base: low
+    kind: perf
+    trigger: '\.(aggregate|annotate)\(|\.using\('
   - id: PAT-070
     title: Audit/history framework detected — surface in report header
     severity_base: info
+    kind: perf
+    trigger: 'easyaudit|auditlog|simple_history|reversion|pghistory'
+aliases:
+  - id: PAT-010
+    of: IDX-040
+  - id: PAT-020
+    of: IDX-020
 ---
 
 # Patterns
@@ -171,24 +190,6 @@ class User(models.Model):
 
 ---
 
-### PAT-010
-
-**Signature:** Cross-reference of IDX-040. `JSONField` filtered with `__contains`/`__has_key`/`__has_any_keys` without a `GinIndex`. Listed here as a patterns signal for when the index check alone does not capture the pattern.
-
-**Grep / AST hints:**
-```regex
-\.filter\(\w+__(contains|has_key|has_any_keys)=
-```
-Same follow-up as IDX-040. Emit both PAT-010 and IDX-040 if both trigger, or suppress PAT-010 if IDX-040 already fired on the same line.
-
-**Confidence rules:** Same as IDX-040.
-
-**Savings formula:** Same as IDX-040.
-
-**Suggested fix template:** See IDX-040.
-
----
-
 ### PAT-011
 
 **Signature:** `.filter(<json_field>__<key>=...)` used repeatedly for the same JSON key — an expression index on that key would allow the DB to index the value extracted from the JSON blob. The index expression must match what the lookup compiles to: on PostgreSQL `metadata__color="red"` compiles to `(metadata -> 'color') = '"red"'` (a `KeyTransform`, jsonb), **not** `->>` (`KeyTextTransform`).
@@ -231,24 +232,6 @@ class Product(models.Model):
             ),
         ]
 ```
-
----
-
-### PAT-020
-
-**Signature:** Cross-reference of IDX-020. Default manager with `deleted_at__isnull=True` or `is_active=True` filtering. Listed here as a patterns signal for soft-delete manager patterns specifically.
-
-**Grep / AST hints:**
-```regex
-def\s+get_queryset\(self\):
-```
-Follow-up: inside `get_queryset`, look for `.filter(deleted_at__isnull=True)` or `.filter(is_active=True)`. If found, emit PAT-020 (and IDX-020 if no partial index exists). Suppress PAT-020 if IDX-020 already fired.
-
-**Confidence rules:** Same as IDX-020.
-
-**Savings formula:** Same as IDX-020.
-
-**Suggested fix template:** See IDX-020.
 
 ---
 

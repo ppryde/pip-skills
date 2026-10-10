@@ -5,15 +5,23 @@ checks:
   - id: ITER-001
     title: Large queryset materialised without .iterator(chunk_size=…)
     severity_base: high
+    kind: perf
+    trigger: '\blist\(|\bfor\s+\w+\s+in\b'
   - id: ITER-002
     title: iterator() caveats — prefetch_related without chunk_size, pooler vs server-side cursors
     severity_base: low
+    kind: perf
+    trigger: '\.iterator\('
   - id: ITER-010
     title: Same query re-issued in scope (aggregate/in_bulk after evaluation, repeated filter chains)
     severity_base: medium
+    kind: perf
+    trigger: '\.(aggregate|in_bulk)\(|\.objects\.(filter|all)\('
   - id: ITER-011
     title: redundant .all() before .filter() on a QuerySet variable (style)
     severity_base: low
+    kind: perf
+    trigger: '\.all\(\)\.(filter|exclude|order_by|annotate)'
 ---
 
 # Iteration

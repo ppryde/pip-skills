@@ -5,27 +5,43 @@ checks:
   - id: AGG-001
     title: Python sum/max/min over queryset — push to DB
     severity_base: high
+    kind: perf
+    trigger: '\b(sum|max|min)\(\s*\w+\.\w+\s+for\s+\w+\s+in\b'
   - id: AGG-002
     title: Counter()/groupby on queryset rows — push to DB
     severity_base: medium
+    kind: perf
+    trigger: '\bCounter\(|\bgroupby\('
   - id: AGG-010
     title: Python if/else over rows — use Case/When
     severity_base: medium
+    kind: perf
+    trigger: '\bfor\s+\w+\s+in\b'
   - id: AGG-011
     title: Coalesce/Greatest/Least opportunities
     severity_base: low
+    kind: perf
+    trigger: '\w+\.\w+\s+or\s+\w+\.\w+|\b(max|min)\(\w+\.\w+,\s*\w+\.\w+\)'
   - id: AGG-020
     title: Python date/string ops should be DB-side
     severity_base: low
+    kind: perf
+    trigger: '\.(year|month|day|hour|weekday|lower|upper|strip|casefold)\b'
   - id: AGG-030
     title: filter(pk__in=other.values('pk')) → Exists()
     severity_base: medium
+    kind: perf
+    trigger: '__in=.*\.values\('
   - id: AGG-031
     title: Per-row filter().first() in loop → Subquery annotation
     severity_base: high
+    kind: perf
+    trigger: '\.first\(\)|\.last\(\)'
   - id: AGG-040
     title: Python rank/running-sum loop — use window function
     severity_base: medium
+    kind: perf
+    trigger: '\+=\s*1\b|\b(rank|position|running\w*|cumulative\w*)\s*='
 ---
 
 # Aggregation
