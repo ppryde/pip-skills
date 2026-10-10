@@ -8,7 +8,7 @@ DATABASES = {
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
-    # pghistory uses Postgres triggers — signals_safe=True, does NOT escalate WRITE-006/007/009
+    # pghistory uses Postgres triggers — signals_safe=True, does NOT escalate WRITE-006/007
     "pghistory",
     "pgtrigger",
 ]

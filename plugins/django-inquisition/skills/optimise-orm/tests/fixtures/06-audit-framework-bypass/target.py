@@ -6,7 +6,7 @@ easyaudit (django-easy-audit) is in INSTALLED_APPS.
 
 WRITE-006: .update() on Invoice — bypasses signals. Escalates to critical (easyaudit present).
 WRITE-007: bulk_create on Invoice — bypasses signals. Escalates to critical.
-WRITE-009: qs.delete() on Invoice — bypasses pre_delete. Escalates to critical.
+WRITE-009: qs.delete() on Invoice — skips the Invoice.delete() override (signals still fire). Stays medium.
 """
 
 from .models import Invoice
@@ -26,5 +26,5 @@ def import_invoices(data):
 
 
 def purge_draft_invoices():
-    """WRITE-009: qs.delete() on model with pre_delete listener — escalates to critical with easyaudit."""
+    """WRITE-009: qs.delete() on model that overrides delete() — override skipped, signals still fire, no escalation."""
     Invoice.objects.filter(status="draft", voided=True).delete()

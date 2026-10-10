@@ -80,7 +80,7 @@ Runs once before any check. Results are shared with all check groups.
 - Read `pyproject.toml` `[tool.poetry.dependencies]` or `pip freeze` output for `Django==x.y.z`.
 
 **EXPLAIN reachability:**
-- Probe `python manage.py dbshell --version` (or equivalent).
+- Probe with `python manage.py shell -c "from django.db import connection; connection.ensure_connection()"` (a non-zero exit means unreachable). Do not use `dbshell --version`: that flag only prints the Django version and never connects.
 - If unreachable: `EXPLAIN unavailable: <reason>. Falling back to static heuristics.` — continue.
 - `--no-explain` bypasses this check.
 
@@ -100,7 +100,7 @@ Also grep for:
 - `@receiver(pre_save\|post_save\|pre_delete\|post_delete, sender=<Model>)` patterns
 - Custom `Model.save()` and `Model.delete()` overrides
 
-Build a `{model → signal_dependencies}` map. This map is passed to all check groups and affects WRITE-001/002/003/005/006/007/008/009/020 behaviour.
+Build a `{model → signal_dependencies}` map. This map is passed to all check groups and affects WRITE-001/002/003/005/006/007/008/020 behaviour; WRITE-009 instead depends on the model overriding `Model.delete()`.
 
 ### Step 3: Target Intake
 
@@ -179,6 +179,8 @@ Runs by default when EXPLAIN is reachable and `--no-explain` is not set.
 
 **SELECT-shaped findings:** Run `EXPLAIN (ANALYZE, BUFFERS)` inside `BEGIN … ROLLBACK` so no data is modified.
 
+**Getting and running the SQL:** obtain the parametrised SQL from the queryset with `sql, params = queryset.query.sql_with_params()`, then run `EXPLAIN ...` on it via `python manage.py shell -c` using `connection.cursor().execute("EXPLAIN ..." + sql, params)` inside `transaction.atomic()` that is rolled back (or an explicit `BEGIN … ROLLBACK`).
+
 **Write-shaped findings:** Run `EXPLAIN` (without `ANALYZE`) or skip entirely.
 
 **On any failure for a single finding:** Skip enrichment for that finding, add inline note:
@@ -217,7 +219,7 @@ unknown savings (`?`)                                      → use internal-seve
 #### Audit-framework escalation (WRITE group)
 
 When `easyaudit`, `auditlog`, `simple_history`, or `reversion` is detected (PAT-070 fires):
-- WRITE-006, WRITE-007, WRITE-009: escalate from `medium` → `critical`
+- WRITE-006, WRITE-007: escalate from `medium` → `critical` (WRITE-009 does not: `QuerySet.delete()` still sends `pre_delete`/`post_delete`)
 - WRITE-008: stays at `medium` (may escalate to `critical` depending on what the raw SQL touches)
 - `pghistory`: `signals_safe=true` — does **not** trigger escalation
 
@@ -313,7 +315,7 @@ suppressed: 0
 | Symbol unresolvable | Bail | `Symbol not found.` |
 | Target has no Django ORM usage | Exit 0 | `No Django ORM usage detected. Nothing to analyse.` |
 | `DATABASES` engine ambiguous | Prompt user once | Engine prompt |
-| `manage.py dbshell` unreachable | Skip EXPLAIN globally | `EXPLAIN unavailable: <reason>. Falling back to static heuristics.` |
+| Database unreachable (`connection.ensure_connection()` fails) | Skip EXPLAIN globally | `EXPLAIN unavailable: <reason>. Falling back to static heuristics.` |
 | EXPLAIN errors on a single query | Skip enrichment for that finding | Inline: `EXPLAIN failed: <reason>` |
 | Subagent (parallel mode) fails/times out | Continue with rest | Note in summary + error excerpt |
 | Caller-grep returns 0 hits | Downgrade FETCH-020/022 confidence | Finding marked `confidence: low` |
@@ -330,8 +332,8 @@ suppressed: 0
 | Running EXPLAIN ANALYZE on a write query | Use EXPLAIN without ANALYZE for writes; wrap SELECT EXPLAIN in BEGIN…ROLLBACK |
 | Flagging engine-specific findings on the wrong engine | Check engine against finding's engine tag; demote to info if mismatch |
 | Reporting FETCH-020/022 with zero caller evidence | Mark confidence: low; do not drop the finding entirely |
-| Escalating WRITE-006/007/009 without detecting an audit package | Only escalate when `audit_framework=true` — not on plain signal listeners |
-| Adding signal-bypass caveats to WRITE findings on `pghistory`-using models | `pghistory` records history via Postgres triggers, not Django signals. `.update()` / `bulk_create` / `qs.delete()` still trigger those Postgres triggers, so history is preserved — do not append a signal-bypass caveat or escalate WRITE-006/007/009 |
+| Escalating WRITE-006/007 without detecting an audit package | Only escalate when `audit_framework=true` — not on plain signal listeners |
+| Adding signal-bypass caveats to WRITE findings on `pghistory`-using models | `pghistory` records history via Postgres triggers, not Django signals. `.update()` / `bulk_create` / `qs.delete()` still trigger those Postgres triggers, so history is preserved — do not append a signal-bypass caveat or escalate WRITE-006/007 |
 | Sorting findings by internal severity instead of savings midpoint | Sort key is `-savings_midpoint_ms` first; internal severity is for tier mapping only |
 | Emitting suppressed findings in the report body | Suppressed findings go only in the frontmatter `suppressed: N` count |
 
