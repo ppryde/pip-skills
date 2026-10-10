@@ -74,6 +74,20 @@ This doctrine pairs well with:
 - **[other-doctrine].md** — brief explanation of relationship
 - **[other-doctrine].md** — brief explanation of relationship
 
+## Sources and Authority
+
+**Foundational Works:**
+- [Author - Title (Year)](url) — Brief note on relevance
+- [Author - Title (Year)](url) — Brief note on relevance
+
+**Practitioner Guidance:**
+- [Author - Title](url) — Brief note on relevance
+
+**Anti-Patterns / Failure Cases:**
+- [Author - Title](url) — What goes wrong without this pattern
+
+[Minimum: 1 primary source, 2 practitioners, 1 failure case study.]
+
 ## Detection Signatures
 
 Quick-scan heuristics for Covenant discover mode. These are recognition
@@ -94,17 +108,3 @@ Strong indicators (any 1 is significant):
 Suggest this pattern is NOT in use:
 - [Structural absence that rules this pattern out]
 - [Alternative structure that indicates a different pattern]
-
-## Sources and Authority
-
-**Foundational Works:**
-- [Author - Title (Year)](url) — Brief note on relevance
-- [Author - Title (Year)](url) — Brief note on relevance
-
-**Practitioner Guidance:**
-- [Author - Title](url) — Brief note on relevance
-
-**Anti-Patterns / Failure Cases:**
-- [Author - Title](url) — What goes wrong without this pattern
-
-[Minimum: 1 primary source, 2 practitioners, 1 failure case study.]

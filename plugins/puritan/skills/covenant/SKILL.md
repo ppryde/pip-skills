@@ -34,7 +34,7 @@ The mode operates differently based on arguments passed after `covenant`:
 
 Discovery mode is a lightweight alternative to a full Inquisition audit. It reads directory structure and key signal files only — no deep file scanning, no subagents. Its purpose is to generate a working `.architecture/config.yml` so that Inquisition can run.
 
-Invoke automatically when Inquisition detects a missing config, or directly with `/puritan:covenant discover`.
+Run it directly with `/puritan:covenant discover`; Inquisition points you here when the config is missing.
 
 ### Step D1: Scan Directory Structure
 
@@ -157,13 +157,13 @@ After writing, inform the user:
 
 ## Step 0: Load Available Doctrines
 
-**Always run this before any other step — planning mode and discovery mode both.**
+**Planning modes run this before any other step. Discover mode skips Step 0 and follows D2 (it reads each doctrine's Detection Signatures only).**
 
 Do not rely on a hardcoded or memorised list of patterns. Load the available doctrine set dynamically:
 
 1. List all `*.md` files in `<plugin-root>/skills/doctrines/`, **excluding any file whose basename starts with `_`** (e.g. `_template.md`) — this SKILL.md lives at `<plugin-root>/skills/covenant/SKILL.md`, so the doctrines directory is the `doctrines/` sibling within the same `skills/` directory
-2. For each doctrine file, read its `## When to Use` section to understand the fit criteria and scope boundaries
-3. Use this list — and only this list — as the candidate patterns for recommendation, roadmap planning, and discovery scoring
+2. For each doctrine file, read its `## When to Use` section (planning modes only) to understand the fit criteria and scope boundaries
+3. Use this list — and only this list — as the candidate patterns for recommendation, roadmap planning
 
 This ensures new doctrines automatically participate in planning with no changes to this skill. If the doctrines directory is empty or unreadable, warn the user and proceed with built-in knowledge as a fallback only.
 
@@ -565,12 +565,12 @@ See Inquisition SKILL.md Step 1 for the full `.architecture/config.yml` format
 # Creates: architecture-plan.md
 
 # Generate audit configuration from plan
-/puritan:inquisition --from-plan architecture-plan.md
+/puritan:covenant discover
 # Creates: .architecture/config.yml
 
 # Run initial audit to establish baseline
 /puritan:inquisition full
-# Creates: baseline-audit.json
+# Prints the audit report (no baseline file is written)
 ```
 
 ### With CI/CD Pipeline
@@ -587,7 +587,7 @@ jobs:
       - uses: actions/checkout@v3
       - name: Check architecture drift
         run: |
-          puritan covenant assess --plan architecture-plan.md
+          claude -p "/puritan:covenant assess"  # illustrative wrapper
 
   pattern-audit:
     runs-on: ubuntu-latest
@@ -595,13 +595,12 @@ jobs:
       - uses: actions/checkout@v3
       - name: Audit pattern implementation
         run: |
-          /puritan:inquisition --config .architecture/config.yml
+          claude -p "/puritan:inquisition"  # illustrative wrapper
 ```
 
 ### With Documentation
 ```bash
-# Generate architecture documentation
-/puritan:covenant docs
+# Illustrative only: there is no /puritan:covenant docs mode. Write the docs from Covenant's output yourself.
 
 # Creates:
 # - docs/architecture/README.md
@@ -706,7 +705,7 @@ Please provide:
   - Expected scale and growth rate
   - Key non-functional requirements
 
-Run: /puritan:covenant interview
+Provide the missing requirements and re-run /puritan:covenant
 ```
 
 ### Conflicting Patterns
@@ -745,6 +744,3 @@ Deliver all findings in the voice of the Witchfinder —
 formally uncompromising, dramatically precise, with a
 knowing wink. Violations are heresies. Resolutions are
 absolution. The codebase is the sanctum.
-
-See persona.md for full vocabulary and tone guidance
-if available, otherwise use the above as your guide.
