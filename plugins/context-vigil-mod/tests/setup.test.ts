@@ -76,10 +76,10 @@ describe('nextCard', () => {
   })
   test('card 2 picks up follow-ups the answers switched on, never a dependant beside its parent', () => {
     const s = { ...DEFAULTS, auto: true, lastLight: true }
-    expect(nextCard(s, ['nudge', 'bar', 'auto', 'last_light'])).toEqual(['idle', 'last_light_at', 'limits'])
+    expect(nextCard(s, ['nudge', 'bar', 'auto', 'last_light'])).toEqual(['idle', 'rc', 'last_light_at', 'limits'])
   })
   test('card 3 asks the limits follow-ups only after limits was answered On', () => {
-    const asked = ['nudge', 'bar', 'auto', 'last_light', 'idle', 'last_light_at', 'limits'] as StepId[]
+    const asked = ['nudge', 'bar', 'auto', 'last_light', 'idle', 'rc', 'last_light_at', 'limits'] as StepId[]
     expect(nextCard(DEFAULTS, asked)).toEqual(['limit_pct', 'limit_windows'])
     expect(nextCard({ ...DEFAULTS, limits: false }, asked)).toEqual([])
   })
@@ -93,6 +93,9 @@ describe('nextCard', () => {
     expect(nextCard({ ...DEFAULTS, auto: false }, [], 'auto')).toEqual(['auto'])
     expect(nextCard({ ...DEFAULTS, auto: false }, ['auto'], 'auto')).toEqual([])
     expect(nextCard(DEFAULTS, [], 'rc')).toEqual(['rc'])
+    expect(nextCard({ ...DEFAULTS, auto: true }, ['auto'], 'auto')).toEqual(['idle', 'rc'])
+    expect(nextCard({ ...DEFAULTS, auto: true }, [])).toEqual(['nudge', 'bar', 'auto', 'last_light'])
+    expect(nextCard({ ...DEFAULTS, auto: false }, ['nudge', 'bar', 'auto', 'last_light'])).not.toContain('rc')
     expect(nextCard(DEFAULTS, [], 'bogus')).toEqual([])
     expect(ALIASES['last-light']).toEqual(['last_light', 'last_light_at'])
   })

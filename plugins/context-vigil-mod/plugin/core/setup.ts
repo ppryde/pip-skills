@@ -96,14 +96,14 @@ export const STEPS: Record<StepId, Step> = {
       { label: `No${REC}`, apply: s => ({ ...s, rcAutoClear: 'no' }) },
       { label: 'Yes', apply: s => ({ ...s, rcAutoClear: 'yes' }) },
     ],
-    askIf: () => false,
+    askIf: s => s.auto,
   },
 }
 
-export const FLOW: StepId[] = ['nudge', 'bar', 'auto', 'idle', 'last_light', 'last_light_at', 'limits', 'limit_pct', 'limit_windows']
+export const FLOW: StepId[] = ['nudge', 'bar', 'auto', 'idle', 'rc', 'last_light', 'last_light_at', 'limits', 'limit_pct', 'limit_windows']
 
 export const ALIASES: Record<string, StepId[]> = {
-  nudge: ['nudge'], bar: ['bar'], auto: ['auto', 'idle'], 'last-light': ['last_light', 'last_light_at'],
+  nudge: ['nudge'], bar: ['bar'], auto: ['auto', 'idle', 'rc'], 'last-light': ['last_light', 'last_light_at'],
   limits: ['limits', 'limit_pct', 'limit_windows'], rc: ['rc'],
 }
 
@@ -119,7 +119,7 @@ export function questionFor(id: StepId, explain = false): Question {
 
 // A dependant is never asked in the same card as its parent: the parent's answer decides it.
 const PARENT: Partial<Record<StepId, StepId>> = {
-  idle: 'auto', last_light_at: 'last_light', limit_pct: 'limits', limit_windows: 'limits',
+  idle: 'auto', rc: 'auto', last_light_at: 'last_light', limit_pct: 'limits', limit_windows: 'limits',
 }
 
 export function isStep(alias: string): boolean {
@@ -133,7 +133,7 @@ export function nextCard(s: Settings, asked: StepId[], only?: string): StepId[] 
   for (const id of pool) {
     if (card.length === 4) break
     if (asked.includes(id)) continue
-    if (!(STEPS[id].askIf(s) || (explicit && (id === 'rc' || pool[0] === id)))) continue
+    if (!(STEPS[id].askIf(s) || (explicit && ((id === 'rc' && only === 'rc') || pool[0] === id)))) continue
     const parent = PARENT[id]
     if (parent !== undefined && card.includes(parent)) continue
     card.push(id)

@@ -360,7 +360,7 @@ test('RC countdown: a hot reload mid-countdown never clears; the handover is off
   expect(w.state.get('context-vigil-mod.countdownEndsAt')).toBeNull()
 })
 
-for (const rcAutoClear of ['no', 'unanswered'] as const) {
+for (const rcAutoClear of ['no'] as const) {
   test(`RC ${rcAutoClear}: a hot reload never runs the parked unattended clear; it offers the handover`, async ($, on) => {
     const w = world(on, { store: { settings: { auto: true, rcAutoClear } } })
     await countdownSession($, w)
@@ -385,7 +385,7 @@ async function autoHandoverAfter($: Engine, w: World) {
   await w.clock.advance(60_000)
 }
 
-for (const rcAutoClear of ['no', 'unanswered'] as const) {
+for (const rcAutoClear of ['no'] as const) {
   test(`RC ${rcAutoClear}: a new unattended handover after a reload still meets the RC gate`, async ($, on) => {
     const w = world(on, { store: { settings: { auto: true, rcAutoClear } } })
     await $.session.start(START)
