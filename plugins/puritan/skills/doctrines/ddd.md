@@ -34,7 +34,7 @@ model the single source of truth for business rules. This means:
 
 ## Applicable Directories
 
-Primary targets (from `.architecture/config.yml` `layers` mapping):
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`):
 - `domain/` layer — ALL files (strictest rules)
 - `application/` layer — dependency direction only
 - `api/` and `infrastructure/` — checked only for inward dependency violations
@@ -208,7 +208,7 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest DDD is in use):
+Directory signals (counted by Covenant):
 - `domain/` — core business logic layer isolated from infrastructure
 - `domain/aggregates/` — aggregate root definitions
 - `domain/entities/` — domain entity classes
@@ -218,7 +218,7 @@ Strong indicators (any 2+ suggest DDD is in use):
 - `application/` — use case / application service orchestration layer
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - Files named `*Aggregate.*` anywhere in the domain layer
 - Files named `*Repository.*` in domain (interface definitions, not implementations)
 - Files named `*ValueObject.*` or `*VO.*`

@@ -28,7 +28,7 @@ Use Hexagonal Architecture for mid-to-high complexity systems where the business
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`).
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`).
 Use relative paths without `src/` prefix (e.g. `domain/` not `src/domain/`):
 - `domain/` — The "Inside." Pure business logic, entities, and value objects reside here.
 - `application/` — Use case orchestration and the definition of Driving Ports.
@@ -133,7 +133,7 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest Hexagonal Architecture is in use):
+Directory signals (counted by Covenant):
 - `ports/` — port interface definitions (the boundary contracts)
 - `adapters/` or `infrastructure/adapters/` — adapter implementations
 - `domain/` — pure business logic isolated from infrastructure concerns
@@ -141,7 +141,7 @@ Strong indicators (any 2+ suggest Hexagonal Architecture is in use):
 - `infrastructure/` alongside `domain/` with no direct coupling between them
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - Files named `*Port.*` defining interface contracts
 - Files named `*Adapter.*` implementing those contracts
 - Interface files in `ports/` with corresponding implementations in `adapters/` or `infrastructure/`

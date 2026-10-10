@@ -177,7 +177,7 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest Event Sourcing is in use):
+Directory signals (counted by Covenant):
 - `infrastructure/event_store/` or `event-store/` or `eventstore/` — append-only event log persistence
 - `domain/events/` — event schema and contract definitions
 - `domain/aggregates/` — event-emitting aggregate roots
@@ -186,7 +186,7 @@ Strong indicators (any 2+ suggest Event Sourcing is in use):
 - `snapshots/` or `infrastructure/snapshots/` — snapshot storage
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - Files named `*EventStore.*` or `*EventRepository.*`
 - Files named `*Snapshot.*` alongside event files
 - Files named `*Projector.*` or `*ProjectionBuilder.*`

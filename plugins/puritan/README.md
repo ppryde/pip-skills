@@ -54,6 +54,8 @@ Inquisition audits your codebase against the doctrines configured in `.architect
 
 **Large codebase guard:** If the configured targets exceed 100 files, Inquisition pauses and tells you how many files across how many directories it found. You can proceed, narrow the scope, switch to changed-files mode, or focus on a single doctrine.
 
+**Headless use:** `claude -p "/puritan:inquisition"` runs the audit non-interactively. It is advisory, not a hard gate: no `puritan` CLI, hook or exit codes ship with the plugin.
+
 **Violations are classified by severity:**
 - `error` — correctness violation; blocks commit
 - `warning` — quality concern; advisory
@@ -97,6 +99,8 @@ Each doctrine is a markdown file with a structured violation catalog — typical
 | **Repository** | `REP` | Persistence abstraction — aggregate-scoped repositories, no leaking of storage details |
 | **Strategy** | `STG` | Interchangeable algorithms — interface-based selection, registration, no type-switching |
 
+`skills/doctrines/INDEX.md` is generated (`python3 tools/build_index.py doctrines` in the pip-skills repo) and is what Covenant reads instead of the doctrine files; Inquisition passes each subagent only a doctrine's audit line range. Doctrines referenced but not yet written are listed in `skills/doctrines/README.md`.
+
 Each doctrine also includes **Detection Signatures** — a lightweight set of directory and file signals that Covenant's discover mode uses to fingerprint which patterns your codebase is using, without running a full audit.
 
 ---
@@ -121,21 +125,13 @@ doctrines:
       - domain/commands/
       - infrastructure/projections/
 
-layers:
-  domain:
-    - domain/
-  application:
-    - application/
-  infrastructure:
-    - infrastructure/
-
 exclude:
   - "**/migrations/**"
   - "**/vendor/**"
   - "**/*.generated.*"
 ```
 
-Generate this automatically with `/puritan:covenant discover`.
+Generate this automatically with `/puritan:covenant discover`. Unknown keys (for example an old `layers:`) are ignored. The canonical schema is `skills/_shared/config.md`; folders without a `SKILL.md` (`_shared/`, `doctrines/`) are not skills and Claude Code ignores them.
 
 ### `.architecture/decisions.yml` (optional)
 

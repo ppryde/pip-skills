@@ -29,7 +29,7 @@ Use the BFF pattern when your application supports multiple diverse client types
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`):
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`):
 - `bff/` — Root directory for all specialized backends.
 - `bff/*/api/` — Client-facing endpoint definitions (REST/GraphQL).
 - `bff/*/mappers/` — Logic transforming Core service models into UI-specific DTOs.
@@ -160,7 +160,7 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest the BFF pattern is in use):
+Directory signals (counted by Covenant):
 - `bff/` — dedicated BFF root directory
 - `bff/web/`, `bff/mobile/`, `bff/tv/` — client-specific BFF instances
 - `bff/*/api/` — client-specific endpoint definitions
@@ -168,7 +168,7 @@ Strong indicators (any 2+ suggest the BFF pattern is in use):
 - `bff/*/clients/` — downstream service proxies scoped to a client type
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - Files named `*BffController.*`, `*BffService.*`, or `*BffRouter.*`
 - Aggregation files that combine multiple upstream service responses for a single client type
 - Client-specific DTO or response model files (e.g. `*MobileResponse.*`, `*WebResponse.*`, `*TvPayload.*`)

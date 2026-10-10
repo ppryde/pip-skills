@@ -161,7 +161,7 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest CQRS is in use):
+Directory signals (counted by Covenant):
 - `commands/` or `domain/commands/` — command object definitions
 - `queries/` or `domain/queries/` — query object definitions
 - `infrastructure/projections/` or `projections/` — read-model projections
@@ -170,7 +170,7 @@ Strong indicators (any 2+ suggest CQRS is in use):
 - `handlers/` alongside both `commands/` and `queries/`
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - Files named `*Command.*` and `*Query.*` co-existing in the codebase
 - Files named `*CommandHandler.*` or `*QueryHandler.*`
 - Files named `*Projection.*` in an infrastructure or read-model directory

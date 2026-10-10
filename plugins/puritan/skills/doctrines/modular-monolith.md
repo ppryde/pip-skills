@@ -29,7 +29,7 @@ This pattern is the "Goldilocks" choice for systems with high domain complexity 
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`):
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`):
 - `modules/` — Root directory for functional modules (e.g., `modules/billing/`).
 - `modules/*/api/` — The public interface; the ONLY folder accessible to other modules.
 - `modules/*/internal/` — Private implementation, domain logic, and persistence logic.
@@ -165,7 +165,7 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest a Modular Monolith is in use):
+Directory signals (counted by Covenant):
 - `modules/` — root directory containing functional module subdirectories
 - `modules/*/api/` — explicit public interface directory inside each module
 - `modules/*/internal/` — explicit private implementation directory inside each module
@@ -173,7 +173,7 @@ Strong indicators (any 2+ suggest a Modular Monolith is in use):
 - `modules/*/db/` — per-module database migrations
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - Module-level dependency manifests (`package.json`, `pyproject.toml`, `build.gradle`) inside `modules/*/`
 - Explicit module registration files (`module.json`, `module.config.ts`, `__init__.py` exporting a public API only)
 - `index.*` or `public_api.*` files at each module root defining the module's public surface

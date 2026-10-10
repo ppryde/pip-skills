@@ -27,7 +27,7 @@ Layered architecture is the standard choice for small to medium-sized applicatio
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`):
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`):
 - `presentation/` — UI components, controllers, view models, and API endpoints.
 - `business/` — Domain services, business logic, and application rules.
 - `persistence/` — Data Access Objects (DAOs), repositories, and ORM mapping.
@@ -158,7 +158,7 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (3+ together are a confident match — individual dirs are too common):
+Directory signals (counted by Covenant; individual dirs are too common to count alone):
 - `presentation/` — UI components, controllers, view models, and API endpoints
 - `business/` — business logic and domain rules layer (more specific than `services/`)
 - `persistence/` or `dal/` — data access objects and repository implementations
@@ -168,7 +168,7 @@ Strong indicators (3+ together are a confident match — individual dirs are too
 Note: `services/` alone is NOT a reliable signal — it appears in Microservices (as independent service directories) and is too generic. Require `business/` or `persistence/` alongside it.
 
 ### File signals
-Strong indicators (any 1 alongside 2+ directory signals is significant):
+File signals (counted by Covenant):
 - Files named `*DAO.*` or `*DataAccessObject.*` in a persistence directory
 - Files named `*Controller.*` in `presentation/` alongside `*Service.*` in `business/`
 - ORM mapping files (`*Mapping.*`, `*OrmEntity.*`) in a `persistence/` layer
