@@ -223,3 +223,10 @@ class TestGlobs:
     def test_glob_in_redirect_target(self):
         (r,) = scan("cat > /tmp/*").commands[0].redirects
         assert r.glob
+
+
+def test_unquoted_equals_word_fails_closed_but_quoted_and_inner_equals_do_not():
+    """Round 2 (B low): zsh expands a word starting with `=` to a PATH location."""
+    assert scan("echo hi > =ls").error
+    assert scan("cat =ls").error
+    assert not scan("cat '=ls' a=b --x=y").error

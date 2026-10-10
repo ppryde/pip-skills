@@ -41,7 +41,6 @@ class TestBashAllowed:
         "git status && git log --oneline -3",
         "git -C /tmp/wt push -u origin feat/WF-1-x",
         "cd /repo && gh pr create --title t --body b",
-        "OVERSEER_DB=/x python plugins/overseer/scripts/cli.py board",
         f"python3 {OWN_CLI} --root . --help",
         f"python3 {OWN_CLI} set-field --help && python3 {OWN_CLI} log-progress --help",
         f'cd "{REPO}" && python plugins/overseer/scripts/cli.py --root . show WF-1',
@@ -63,6 +62,7 @@ class TestBashAllowed:
         "python scripts/other.py",
         "snowsql -q 'select 1'",
         "echo 'unbalanced",  # unbalanced quote: fails CLOSED now (verdict change 1)
+        "OVERSEER_DB=/x python plugins/overseer/scripts/cli.py board",  # round 2: no env prefixes
         "python3 /plugins/overseer/scripts/cli.py --root . --help",  # nonexistent: cli not found
     ])
     def test_denied(self, command):

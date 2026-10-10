@@ -56,6 +56,7 @@ def payload(**kw):
 def marker_dir():
     path = marker.marker_dir()
     path.mkdir(parents=True)
+    (path / f".checked-{SESSION}").touch()  # this session's one-off board lookup is done
     return path
 
 

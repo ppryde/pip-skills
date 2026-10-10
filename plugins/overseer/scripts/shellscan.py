@@ -49,6 +49,7 @@ class Redirect:
     target: str
     glob: bool = False
     fd_dup: bool = False  # ``2>&1`` / ``>&2`` / ``>&-``: no file involved
+    lead: str = ""  # the target's first character when it was UNQUOTED, else ''
 
     @property
     def writes(self) -> bool:
@@ -62,6 +63,9 @@ class Command:
     globs: tuple[bool, ...]
     redirects: tuple[Redirect, ...] = ()
     sep: str = ""  # the separator that FOLLOWED this command ('' at the end)
+    # per word: its first character when UNQUOTED (``~`` and ``=`` expand in
+    # the shell only then), else ''
+    leads: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -83,8 +87,10 @@ class _State:
     in_word: bool = False
     quoted: bool = False
     glob: bool = False
+    lead: str = ""
     # current command
     words: list[str] = field(default_factory=list)
+    leads: list[str] = field(default_factory=list)
     globs: list[bool] = field(default_factory=list)
     redirects: list[Redirect] = field(default_factory=list)
     pending: str | None = None  # a redirect operator awaiting its target word
@@ -95,6 +101,8 @@ class _State:
             self.error = why
 
     def add(self, text: str, *, quoted: bool = False, glob: bool = False) -> None:
+        if not self.in_word:
+            self.lead = "" if quoted else text[:1]
         self.in_word = True
         self.buf.append(text)
         self.quoted = self.quoted or quoted
@@ -103,12 +111,17 @@ class _State:
     def finish_word(self) -> None:
         if not self.in_word:
             return
-        word, quoted, glob = "".join(self.buf), self.quoted, self.glob
-        self.buf, self.in_word, self.quoted, self.glob = [], False, False, False
+        word, quoted, glob, lead = "".join(self.buf), self.quoted, self.glob, self.lead
+        self.buf, self.in_word, self.quoted, self.glob, self.lead = [], False, False, False, ""
+        if lead == "=" and self.pending != "<<<" and not (self.pending or "").startswith("<<"):
+            # zsh equals-expansion: `=ls` is the PATH location of ls
+            self.fail("word starting with '=' (zsh equals-expansion)")
+            return
         op = self.pending
         if op is None:
             self.words.append(word)
             self.globs.append(glob)
+            self.leads.append(lead)
             return
         self.pending = None
         if word.startswith("!") and op not in ("<<", "<<-", "<<<"):
@@ -127,7 +140,7 @@ class _State:
             pass  # a here-string operand: scanned like any word, not a file
         else:
             dup = op in (">&", "<&") and (_FD_DIGITS.fullmatch(word) is not None or word == "-")
-            self.redirects.append(Redirect(op, word, glob, dup))
+            self.redirects.append(Redirect(op, word, glob, dup, lead))
 
     def end_command(self, sep: str) -> None:
         self.finish_word()
@@ -136,9 +149,12 @@ class _State:
             self.pending = None
         if self.words or self.redirects:
             self.commands.append(
-                Command(tuple(self.words), tuple(self.globs), tuple(self.redirects), sep)
+                Command(
+                    tuple(self.words), tuple(self.globs), tuple(self.redirects), sep,
+                    tuple(self.leads),
+                )
             )
-        self.words, self.globs, self.redirects = [], [], []
+        self.words, self.globs, self.redirects, self.leads = [], [], [], []
 
 
 def scan(command: str) -> Scan:
@@ -270,6 +286,8 @@ def _dollar(st: _State) -> None:
 def _double_quoted(st: _State) -> None:
     s, n = st.s, len(st.s)
     i = st.i + 1
+    if not st.in_word:
+        st.lead = ""
     st.in_word = True
     st.quoted = True
     while i < n:

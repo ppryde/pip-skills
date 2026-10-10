@@ -88,6 +88,27 @@ def write_marker(session_id: str, board: Board) -> None:
     _store(session_id, [*boards, board])
 
 
+CHECKED_PREFIX = ".checked-"
+
+
+def checked_path(session_id: str) -> Path | None:
+    """The per-session "already looked for a board" sentinel (a dotfile in
+    the marker dir, so ``pretool.sh`` can test it without an interpreter)."""
+    return marker_dir() / (CHECKED_PREFIX + session_id) if _SAFE_SESSION.match(session_id) else None
+
+
+def is_checked(session_id: str) -> bool:
+    path = checked_path(session_id)
+    return path is not None and path.exists()
+
+
+def mark_checked(session_id: str) -> None:
+    path = checked_path(session_id)
+    if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
+
 def read_boards(session_id: str) -> list[Board]:
     return _read_raw(session_id)
 
@@ -109,9 +130,9 @@ def remove_marker(session_id: str, db: Path | None = None) -> None:
 def find_boards_for_session(session_id: str) -> list[Board]:
     """Boards on which ``session_id`` has a live orchestrated card, found with
     read-only opens and no git: ``OVERSEER_DB`` if set, else every
-    ``<config dir>/overseer/*/board.db``. Used once, when the marker dir is
-    first created (sessions already orchestrating at upgrade time) or cannot
-    be written."""
+    ``<config dir>/overseer/*/board.db``. Used once PER SESSION (the
+    ``.checked-<id>`` sentinel), so sessions already orchestrating at upgrade
+    time are each picked up, and whenever the marker dir cannot be written."""
     candidates: list[Path] = []
     override = os.environ.get("OVERSEER_DB")
     if override:
@@ -177,7 +198,12 @@ def sweep(now: float | None = None) -> int:
     removed = 0
     for path in directory.iterdir():
         try:
-            if path.name.startswith(".") or path.stat().st_mtime > cutoff:
+            if path.stat().st_mtime > cutoff:
+                continue
+            if path.name.startswith(CHECKED_PREFIX):
+                path.unlink(missing_ok=True)  # the session simply looks again
+                continue
+            if path.name.startswith("."):
                 continue
         except OSError:
             continue

@@ -472,8 +472,6 @@ class TestRoundOneCdAndVariables:
         denied(command)
 
     @pytest.mark.parametrize("command", [
-        "X=../../repo/x; echo hi > /tmp/$X",
-        "cd /tmp; D=/repo/x; echo hi > $D",
         "echo hi > $TMPDIR/x",
         'echo hi > "/tmp/$X"',
         f"{CLI} show WF-1 > /tmp/$X",
@@ -486,12 +484,20 @@ class TestRoundOneCdAndVariables:
         denied("grep foo $HOME/.claude/x", "$variables", roots=ROOTS)
         denied("cat > /tmp/x.md /tmp/$Y", "$variables")
 
-    def test_plain_dollar_words_that_are_not_paths_are_fine(self):
-        allowed("echo $HOME > /tmp/x.txt")
+    @pytest.mark.parametrize("command", [
+        "X=../../repo/x; echo hi > /tmp/$X",
+        "cd /tmp; D=/repo/x; echo hi > $D",
+    ])
+    def test_assigned_variables_in_redirect_targets_denied(self, command):
+        denied(command, "assignment to")
+
+    def test_dollar_words_deny_in_readers_and_writers_but_not_cli_arguments(self):
+        denied("echo $HOME > /tmp/x.txt", "$variables")  # round 2: $ in ANY word
         allowed(f'{CLI} log-progress WF-1 --note "cost $5" --tokens 0')
 
-    def test_overseer_env_assignment_still_fine(self):
-        allowed(f"OVERSEER_DB=/x {CLI} board")
+    def test_no_environment_assignment_is_allowed(self):
+        # round 2: an allowlist (empty), not a blocklist
+        denied(f"OVERSEER_DB=/x {CLI} board", "assignment to OVERSEER_DB")
 
     @pytest.mark.parametrize("command", [
         "cd /tmp; echo hi >!/etc/zz",

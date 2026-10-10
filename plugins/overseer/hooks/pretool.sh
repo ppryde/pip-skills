@@ -13,6 +13,9 @@
 #   * the payload has no parsable session_id (unknown shape -> ask python);
 #   * the marker directory does not exist yet (hookfast creates it, so every
 #     later call is cheap);
+#   * this session has neither a marker nor a `.checked-<id>` sentinel: its
+#     first call (hookfast backfills a marker for a session that already
+#     orchestrates, once PER SESSION, and leaves the sentinel);
 #   * a marker exists for this session (it orchestrates a card);
 #   * the tool is Read and the payload comes from an overseer agent (the Read
 #     limit).
@@ -72,6 +75,10 @@ elif [ ! -d "$marker_dir" ] || [ ! -w "$marker_dir" ]; then
                                            # session up once) or an unwritable dir: full guard
 elif [ -e "$marker_dir/$sid" ]; then
   slow=1                                   # this session orchestrates a card
+elif [ ! -e "$marker_dir/.checked-$sid" ]; then
+  slow=1                                   # first call of this session: hookfast looks for a
+                                           # board it already orchestrates (upgrade window),
+                                           # then leaves the .checked sentinel
 elif [ "$tool" = "Read" ] && [[ $input =~ $agent_re ]]; then
   slow=1                                   # an overseer agent's Read limit
 fi

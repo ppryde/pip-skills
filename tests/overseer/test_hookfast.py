@@ -357,9 +357,10 @@ class TestUpgradeWindowAndMultiBoard:
         assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
         assert marker.read_marker(SESSION) is not None  # left behind for the shell fast path
 
-    def test_missing_marker_in_an_existing_dir_is_not_searched_again(self, repo):
+    def test_missing_marker_of_an_already_checked_session_is_not_searched_again(self, repo):
         marker.remove_marker(SESSION)
-        assert hookfast.run(json.dumps(payload(cwd=str(repo)))) is None  # dir existed: no scan
+        marker.mark_checked(SESSION)  # this session was already looked up once
+        assert hookfast.run(json.dumps(payload(cwd=str(repo)))) is None  # no scan again
 
     def test_unwritable_marker_dir_falls_back_to_the_full_guard_loudly(self, repo, capsys):
         marker.remove_marker(SESSION)

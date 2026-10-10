@@ -10,8 +10,9 @@ library alone: ``json``, ``sqlite3``, ``os``, ``pathlib`` plus ``guard`` and
 It also hosts the git-push probe used by ``prepush-snapshot.sh`` so that hook
 needs one interpreter start (not up to three) to decide whether to act.
 
-Contract unchanged from the CLI hook: print a JSON decision, or nothing; ANY
-error means no output and exit 0 (fail open).
+Contract: print a JSON decision, or nothing. An internal error exits 0 with no
+output (fail open) EXCEPT for a Bash call from an orchestrating session, which
+is denied with a reason (fail closed).
 """
 from __future__ import annotations
 
@@ -105,16 +106,18 @@ def run(raw: str) -> dict[str, object] | None:
     session_id = payload.get("session_id")
     sid = session_id if isinstance(session_id, str) and session_id else None
     directory = marker.marker_dir()
-    existed = directory.is_dir()
     try:
         directory.mkdir(parents=True, exist_ok=True)  # next call takes the shell fast path
     except OSError:
         pass
     boards = marker.read_boards(sid) if sid else []
-    if sid and not boards and (not existed or not os.access(directory, os.W_OK)):
-        # Upgrade window / unwritable marker dir: the shell had no marker to
-        # trust, so ask the boards themselves (read-only, no git) once, and
-        # leave a marker behind if there is something to guard.
+    writable = os.access(directory, os.W_OK)
+    if sid and not boards and (not writable or not marker.is_checked(sid)):
+        # First call of THIS session (upgrade window: it may already be
+        # orchestrating, with no marker yet) or an unwritable marker dir: the
+        # shell had no marker to trust, so ask the boards themselves
+        # (read-only, no git), leave a marker behind if there is something to
+        # guard, and remember that this session has been looked up.
         boards = marker.find_boards_for_session(sid)
         for board in boards:
             try:
@@ -123,6 +126,10 @@ def run(raw: str) -> dict[str, object] | None:
                 print(f"overseer: cannot write the guard marker in {directory}: {exc}; "
                       "the full guard runs on every tool call until it is writable",
                       file=sys.stderr)
+        try:
+            marker.mark_checked(sid)
+        except OSError:
+            pass
     return evaluate(payload, boards)
 
 
@@ -167,8 +174,39 @@ def push_probe(raw: str) -> str:
     return "PUSH\n" + (cwd if isinstance(cwd, str) else "")
 
 
+def _deny_json(reason: str) -> str:
+    return json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": reason,
+    }})
+
+
+def _crash_decision(raw: str) -> str | None:
+    """After an internal error: a Bash call from a session that orchestrates
+    (it has a marker) is DENIED with a reason, never waved through — the
+    guard may not fail open on the one tool that can do anything. Anything
+    else stays fail-open (a hook crash must not wedge ordinary sessions)."""
+    try:
+        payload = json.loads(raw)
+        if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
+            return None
+        sid = payload.get("session_id")
+        path = marker.marker_path(sid) if isinstance(sid, str) else None
+        if path is not None and path.exists():
+            return _deny_json(
+                "GUARD: internal error while judging this Bash command (denied, fail closed). "
+                "Escape hatch: `release <card>`, \"guard\": false in .overseer/config.json, "
+                "or OVERSEER_GUARD=off"
+            )
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    raw = ""
     try:
         raw = sys.stdin.read()
         if args[:1] == ["--push-probe"]:
@@ -179,7 +217,10 @@ def main(argv: list[str] | None = None) -> int:
         decision = run(raw)
         if decision:
             print(json.dumps(decision))
-    except Exception:  # noqa: BLE001 — a failing PreToolUse hook must never block
+    except Exception:  # noqa: BLE001 — see _crash_decision for what still denies
+        out = _crash_decision(raw) if args[:1] != ["--push-probe"] else None
+        if out:
+            print(out)
         return 0
     return 0
 

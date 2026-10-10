@@ -10,14 +10,16 @@ they are told apart (verified on Claude Code 2.1.273).
 This is a cost guard, not a security boundary. Command parsing is done by
 ``scripts/shellscan.py`` and FAILS CLOSED: a command whose quote or heredoc
 state the scanner cannot model exactly is denied (a bash syntax error costs
-the orchestrator nothing). The Read limit and the hook as a whole still fail
-open on any internal error.
+the orchestrator nothing). An internal error while judging a Bash command, or any
+tool of an orchestrating session, DENIES (``decide`` catches it); only the
+Read limit and a crash in a session that orchestrates nothing fail open.
 
 The module is stdlib-only (no PyYAML, no card model): ``hookfast.py`` imports
 it on every guarded tool call.
 """
 from __future__ import annotations
 
+import dataclasses
 import functools
 import json
 import os
@@ -62,11 +64,24 @@ _MSG_SUBSTITUTION = (
 )
 _MSG_GLOBS = "GUARD: no globs in a read-only or scratch-write command — name the file"
 _MSG_VARS = (
-    "GUARD: no $variables in a path (a redirect target, CLI script or read-only/scratch path) — "
-    "write the literal path"
+    "GUARD: no $variables in a path or in any word of a read-only or scratch-write command "
+    "(a redirect target, CLI script, operand) — write the literal path"
 )
-# Assigning any of these changes what the guard's own expansion means.
-_TAINTING_VARS = {"CLAUDE_PLUGIN_ROOT", "PATH", "HOME", "PYTHONPATH", "TMPDIR"}
+# ``VAR=value`` assignments the orchestrator genuinely needs in front of a
+# command: none (the skill documents no such command), so every leading or
+# standalone assignment denies — PYTHONUSERBASE, PYTHONHOME, DYLD_*,
+# LD_PRELOAD, BASH_ENV, CDPATH, OVERSEER_DB ... are all ways to make a
+# trusted command run somebody else's code. An allowlist, never a blocklist.
+_ALLOWED_ASSIGNMENTS: frozenset[str] = frozenset()
+# Short options that consume a value (the value is not an operand/path).
+_VALUE_FLAGS = {
+    "grep": "efmABC", "rg": "efmABCgtTjM", "head": "nc", "tail": "nc",
+}
+_MSG_TILDE = (
+    "GUARD: only `~` and `~/...` may start a word (`~+`, `~-` and `~user` expand to places "
+    "the guard cannot vouch for) — write the literal path"
+)
+_MSG_INTERNAL = "GUARD: internal error while judging this command (denied, fail closed)"
 
 
 @dataclass(frozen=True)
@@ -184,12 +199,32 @@ def find_sibling_cli(name: str) -> Path | None:
     return max(found, key=lambda item: item[0])[1]
 
 
+def tilde_ok(word: str) -> bool:
+    """A leading ``~`` is only understood as exactly ``~`` or ``~/...``."""
+    return not word.startswith("~") or word == "~" or word.startswith("~/")
+
+
+def expand_user(word: str) -> Path | None:
+    """``Path(word).expanduser()``, or None when it cannot be done safely
+    (``~+``, ``~-``, ``~user``, no home directory): callers treat None as
+    "not inside anything" and so deny."""
+    if not tilde_ok(word):
+        return None
+    try:
+        return Path(word).expanduser()
+    except (RuntimeError, OSError):
+        return None
+
+
 def _expand_cli_word(word: str) -> str:
     plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT") or str(_own_cli().parent.parent)
     word = word.replace("${CLAUDE_PLUGIN_ROOT}", plugin_root).replace(
         "$CLAUDE_PLUGIN_ROOT", plugin_root
     )
-    return os.path.expanduser(word) if word.startswith("~") else word
+    if not word.startswith("~"):
+        return word
+    expanded = expand_user(word)
+    return str(expanded) if expanded is not None else word
 
 
 def _cli_denial(words: list[str], cwd: object) -> str | None:
@@ -245,7 +280,9 @@ def _within(path: Path, roots: list[Path]) -> bool:
 
 
 def _word_within(word: str, cwd: object, roots: list[Path]) -> bool:
-    path = Path(word).expanduser()
+    path = expand_user(word)
+    if path is None:
+        return False
     if not path.is_absolute():
         if not isinstance(cwd, str):
             return False
@@ -284,7 +321,9 @@ def protected_roots(
 def _word_is_scratch(word: str, cwd: object, scratch: list[Path], protected: list[Path]) -> bool:
     """Inside scratch space AND not inside the repo root or a card worktree
     — the repo-under-/tmp exclusion, applied per word."""
-    path = Path(word).expanduser()
+    path = expand_user(word)
+    if path is None:
+        return False
     if not path.is_absolute():
         if not isinstance(cwd, str):
             return False
@@ -292,8 +331,45 @@ def _word_is_scratch(word: str, cwd: object, scratch: list[Path], protected: lis
     return _within(path, scratch) and not _within(path, protected)
 
 
-def _is_path_like(word: str) -> bool:
-    return not word.startswith("-") and ("/" in word or word.startswith("~"))
+def _operands(head: str, words: list[str]) -> list[str]:
+    """The non-option words of ``head``'s argument list: every one is a path
+    candidate (a bare ``README.md`` is as much a read of the repo as
+    ``./README.md``). Skips option values (``head -n 5``), a lone ``-`` and
+    grep/rg's pattern word; ``echo``/``printf`` take text, not files."""
+    if head in {"echo", "printf"}:
+        return []
+    value_chars = _VALUE_FLAGS.get(head, "")
+    patterned = False
+    skip = False
+    ended = False
+    ops: list[str] = []
+    for w in words[1:]:
+        if skip:
+            skip = False
+            continue
+        if not ended and w == "--":
+            ended = True
+            continue
+        if not ended and w == "-":
+            continue
+        if not ended and w.startswith("--"):
+            name = w.split("=", 1)[0]
+            if head in {"grep", "rg"} and name in {"--regexp", "--file"}:
+                patterned = True
+                skip = "=" not in w
+            continue
+        if not ended and w.startswith("-"):
+            for pos, ch in enumerate(w[1:], start=1):
+                if ch in value_chars:
+                    if ch in "ef" and head in {"grep", "rg"}:
+                        patterned = True
+                    skip = pos == len(w) - 1  # value is the next word, else glued on
+                    break
+            continue
+        ops.append(w)
+    if head in {"grep", "rg"} and not patterned and ops:
+        ops = ops[1:]  # the pattern
+    return ops
 
 
 def _file_writes(command: shellscan.Command) -> list[shellscan.Redirect]:
@@ -315,7 +391,7 @@ def _read_only_allowed(
     scratch-write exclusion below needs the same check, so it's shared)."""
     if roots is None or _file_writes(command):
         return False
-    paths = [w for w in words[1:] if _is_path_like(w)]
+    paths = _operands(Path(words[0]).name, words)
     return bool(paths) and all(
         _word_within(w, cwd, roots) and not _word_within(w, cwd, protected) for w in paths
     )
@@ -343,7 +419,7 @@ def _scratch_write_allowed(
     if not all(_word_is_scratch(t, cwd, scratch, protected) for t in targets):
         return False
     readable = scratch + (roots or [])
-    others = [w for w in words[1:] if _is_path_like(w) and w not in targets]
+    others = [w for w in _operands(Path(words[0]).name, words) if w not in targets]
     return all(
         _word_within(w, cwd, readable) and not _word_within(w, cwd, protected) for w in others
     )
@@ -360,12 +436,16 @@ def _redirect_denial(
     scratch = tmp_roots() + ([roots[0]] if roots else [])
     readable = scratch + (roots or [])
     for r in command.redirects:
+        if r.lead == "~" and not tilde_ok(r.target):
+            return _MSG_TILDE
         if r.fd_dup or r.target == "/dev/null":
             continue
         if r.glob:
             return _MSG_GLOBS
         if "$" in r.target:
             return _MSG_VARS
+        if r.target.startswith("~") and r.lead != "~":
+            r = dataclasses.replace(r, target="./" + r.target)  # quoted: a literal name
         if r.writes:
             if not _word_is_scratch(r.target, cwd, scratch, protected):
                 return f"GUARD: redirect to {r.target} — output may only go to scratch or /dev/null"
@@ -408,10 +488,19 @@ def bash_check(
         if denial:
             return False, denial
         words, globs = list(cmd.words), list(cmd.globs)
+        leads = list(cmd.leads) + [""] * (len(words) - len(cmd.leads))
+        for n, (w, lead) in enumerate(zip(words, leads, strict=True)):
+            if lead == "~" and not tilde_ok(w):
+                return False, _MSG_TILDE
+            if w.startswith("~") and lead != "~":
+                words[n] = "./" + w  # a quoted tilde is a literal name, not $HOME
         while words and _ASSIGNMENT.match(words[0]):
             name = words[0].split("=", 1)[0]
-            if name in _TAINTING_VARS:
-                return False, f"GUARD: assignment to {name} is not allowed"
+            if name not in _ALLOWED_ASSIGNMENTS:
+                return False, (
+                    f"GUARD: assignment to {name} is not allowed — environment prefixes "
+                    "change what a trusted command runs; call the command bare"
+                )
             words, globs = words[1:], globs[1:]
         if not words:
             continue
@@ -443,7 +532,7 @@ def bash_check(
         if head in _READ_ONLY_INSPECT or head in _SCRATCH_WRITE_HEADS:
             if any(globs):
                 return False, _MSG_GLOBS
-            if any("$" in w and _is_path_like(w) for w in words[1:]):
+            if any("$" in w for w in words[1:]):
                 return False, _MSG_VARS
             if head in _READ_ONLY_INSPECT and _read_only_allowed(
                 cmd, words, cur_cwd, roots, protected
@@ -465,12 +554,19 @@ def _cd_target(words: list[str], globs: list[bool], cwd: object) -> str | None:
     target = words[1]
     if target.startswith("-") or "$" in target or globs[1]:
         return None
-    path = Path(target).expanduser()
+    path = expand_user(target)
+    if path is None:
+        return None
     if not path.is_absolute():
         if not isinstance(cwd, str):
             return None
         path = Path(cwd) / path
-    return str(path) if path.is_dir() else None  # a failed cd never moves the shell
+    # bash's cd is LOGICAL (`cd link/..` lands in link's lexical parent), the
+    # guard resolves PHYSICALLY: only trust a target where both agree.
+    lexical = os.path.normpath(str(path))
+    if lexical != os.path.realpath(lexical) or not os.path.isdir(lexical):
+        return None  # a failed cd never moves the shell
+    return lexical
 
 
 def bash_allowed(
@@ -530,7 +626,9 @@ def _hub_denial(
         raw = tool_input.get("file_path") or tool_input.get("path")
         if not isinstance(raw, str) or not raw:
             return work
-        path = Path(raw).expanduser()
+        path = expand_user(raw)
+        if path is None:
+            return work
         if not path.is_absolute() and isinstance(cwd, str):
             path = Path(cwd) / path
         return None if _within(path, roots) else work
@@ -586,8 +684,16 @@ def decide(
             )
         is_hub = not payload.get("agent_id") or is_hub_agent(payload.get("agent_type"))
         if is_hub:
-            protected = protected_roots(repo_root, cards, extra_protected)
-            reason = _hub_denial(cards, tool, tool_input, payload.get("cwd"), roots, protected)
+            try:
+                protected = protected_roots(repo_root, cards, extra_protected)
+                reason = _hub_denial(
+                    cards, tool, tool_input, payload.get("cwd"), roots, protected
+                )
+            except Exception as exc:  # noqa: BLE001 — fail CLOSED while orchestrating
+                reason = (
+                    f"{cards[0].id} in flight: {_MSG_INTERNAL} [{type(exc).__name__}]. "
+                    f"(Escape hatch: {_ESCAPES}.)"
+                )
             if reason:
                 return Verdict(reason)
     return Verdict(updated_input=_limited_read(tool, tool_input, payload, read_limit))

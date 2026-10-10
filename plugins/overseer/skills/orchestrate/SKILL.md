@@ -27,14 +27,12 @@ python3 "<base directory>/../../scripts/cli.py" --root . <verb> [flags]
 file). This is the ONLY lookup you need — never `find`, `locate`, `which`, or
 any other filesystem search for `cli.py`: that is a slow, denied guess at
 something this file already told you, and a real run has paid a 120-second
-`find /` timeout for it. The guard checks the *real path* of that file, so
-this exact form (with its `../..`) is accepted.
+`find /` timeout for it. The guard checks its *real path*, so this exact
+form (with `../..`) is accepted. No `VAR=value` prefixes, no `$var` words.
 
-**Free text** (a brief, a plan, a note) never goes inline in a double-quoted
-argument that holds backticks or `$(...)`: the guard denies live command
-substitution. Write it with a quoted heredoc to a scratch file and pass
-`--brief-file` / `--text-file`, or pipe it: `... --brief - <<'EOF' ... EOF`
-(a single-quoted or quoted-heredoc body is inert data).
+**Free text** with backticks or `$(...)` never goes in a double-quoted
+argument (denied as live substitution): use `--brief-file` / `--text-file`, or
+`--brief -` with a quoted heredoc (`<<'EOF'`; its body is inert).
 
 You are the orchestrator: the main session, the single writer of the card in
 `board.db` (the per-repo SQLite store shared across worktrees) and of the
@@ -49,29 +47,25 @@ Read source, Edit, Write, run tests or queries, or call MCP tools — and you
 **never fork** (a fork inherits your whole context). A `PreToolUse` guard
 enforces this for the session stamped as the card's orchestrator; if it denies
 you, dispatch instead. Genuine exceptions (the user asks you directly for
-something off-card): `release <card>` first, and say so. Every turn you take
-re-reads your whole context, so every turn you *don't* take is the saving.
+something off-card): `release <card>` first, and say so.
 
-This file is the lean driver. Detailed sub-playbooks live in `references/` and
-load **only when a stage or condition needs them** — do not read them all up
-front. An S or M card should need NONE of them (`policy.md` included): the CLI
-cheat-sheet and review-loop summary below are inlined for exactly that reason.
-The **References** table at the end says exactly when the rest earn a read;
-this keeps your context small, which is itself part of the job (see Context
-stewardship).
+This file is the lean driver. Sub-playbooks live in `references/` and load
+**only when a stage or condition needs them** — never all up front. An S or M card should need NONE of them
+(`policy.md` included): the CLI cheat-sheet and
+review-loop summary below are inlined for that reason. The **References** table
+at the end says when the rest earn a read.
 
 ## CLI cheat-sheet
 Exact signatures for every verb an S/M card needs; the parser rejects
-anything else with `error: ...`, exit 1 (or exit 2 → your own `bash_allowed`
-denial, unrelated). `<id>` is a card id (`WF-123`).
+anything else with `error: ...`, exit 1 (exit 2 = the guard). `<id>` is a card id (`WF-123`).
 
 | Verb | Signature | Notes |
 |---|---|---|
 | `resume` | `resume [--json]` | In-flight cards for this repo. Run first, every session. |
-| `bootstrap` | `bootstrap (--title "<t>" \| --card <id>) [--complexity S\|M\|L\|XL] [--labels a,b] [--goal "<g>"] [--jira K\|--linear K] [--type feat\|fix\|...] [--slug s] [--brief "<text>" \| --brief - \| --brief-file <path>]` | New card + worktree + branch, in one call. Plain: lands at `planning`. With `--brief`: writes `## Plan` from the text and lands at `implementation` directly — the whole S-card shortcut. `--brief -` reads stdin; `--brief-file` reads a file. |
+| `bootstrap` | `bootstrap (--title "<t>" \| --card <id>) [--complexity S\|M\|L\|XL] [--labels a,b] [--goal "<g>"] [--jira K\|--linear K] [--type feat\|fix\|...] [--slug s] [--brief "<text>" \| --brief - \| --brief-file <path>]` | New card + worktree + branch, in one call. Plain: lands at `planning`. With `--brief`: writes `## Plan` from the text and lands at `implementation` directly — the whole S-card shortcut. |
 | `dispatch-prep` | `dispatch-prep <id> --stage <s> --role planner\|implementer\|reviewer\|fixer\|verifier [--round n] [--slot A] [--chunk n] [--lens l] [--var k=v ...] [--advance]` | Prints ONLY the bundle path — that path is the agent's whole prompt. `--chunk` defaults to `1` for `--role implementer`. `--advance` runs `set-stage <id> <s>` first, in the same call — a stage transition and its first dispatch in one Bash call. |
 | `set-stage` | `set-stage <id> <stage>` | A bare stage transition with no dispatch (PLAN GATE approval, PR raised). Prefer `dispatch-prep --advance` when a dispatch follows immediately. |
-| `set-section` | `set-section <id> --section Plan\|Verification\|Decisions (--text-file <path> \| --text "<t>" \| --text -)` | `--text` for a short plain text; `--text-file` (alias `--file`) or `--text -` (stdin) for anything with backticks, quotes or several lines. |
+| `set-section` | `set-section <id> --section Plan\|Verification\|Decisions (--text-file <path> \| --text "<t>" \| --text -)` | `--text` for short plain text; `--text-file` (alias `--file`) or `--text -` otherwise. |
 | `set-field` | `set-field <id> [--branch b] [--worktree w] [--pr url] [--touches t] [--labels a,b] [--parent id] [--priority P0..P4] [--title t] [--body md] [--complexity S\|M\|L\|XL] [--estimate 400k]` | Any card metadata field; an empty string clears a clearable one. |
 | `block` / `unblock` | `block <id> --reason "..."` / `unblock <id>` | A real blocker, with a reason. |
 | `park` / `unpark` | `park <id>` / `unpark <id>` | Shelve without a blocker; resumable, preserves stage/branch/worktree. |
@@ -83,8 +77,8 @@ denial, unrelated). `<id>` is a card id (`WF-123`).
 | `accept-fact` / `reject-fact` | `accept-fact <P-id>` / `reject-fact <P-id> --reason "..."` | Adjudicate one pending fact — one call per decision. |
 | `conflicts` | `conflicts [--sprint s] [--json]` | Cross-card conflicts, run at the PLAN GATE. |
 | `handoff` | `handoff [--json]` | Ledger rollup, printed. To hand over, use `handover` below. |
-| `handover` | `handover [--notes "<t>"]` | The ledger rollup handed to vigil's `handover --no-snapshot` in one call (no shell pipe). Absent vigil: prints a one-line notice, exit 0. |
-| `vigil` | `vigil begin\|context\|pause\|resume` | Passthrough to the vigil plugin's CLI, located for you. Absent vigil: notice, exit 0. |
+| `handover` | `handover [--notes "<t>"]` | Ledger rollup to vigil's `handover`, one call. No vigil: notice, exit 0. |
+| `vigil` | `vigil begin\|context\|pause\|resume` | Vigil's CLI, located for you. No vigil: notice, exit 0. |
 | `usage` | `usage [--card <id>] [--json]` | Token spend; warns on unparsed reports. |
 
 ## On invocation
@@ -111,26 +105,23 @@ the mandatory weight, and are everything an S or M card needs:
   weight, no shortcuts. Read `policy.md` now — its Riders (split-first, lens
   set, re-grade valve) apply.
 
-Model tiers and panel sizes, inlined (S/M only — L reads `policy.md`'s table
-directly): tiers map to the smallest/middle/most-capable models the harness
-offers (haiku/sonnet/opus-or-better).
+Model tiers and panel sizes, inlined (S/M only; L reads `policy.md`): tiers map
+to the harness's smallest/middle/most-capable models (haiku/sonnet/opus+).
 
 | Complexity | Planner | Workers | Reviewers | Round cap |
 |---|---|---|---|---|
 | S | mid | 1 × cheap | 1 × mid | 2 |
 | M | mid | 1–2 × mid | 2 × mid, distinct lenses | 3 |
-- **Review gates (plan-review, impl-review) never shrink at any size** — a
-  card found wanting because its ceremony was skipped is unreviewed, not
-  efficient. Triage only ever scales what happens *before* implementation.
+- **Review gates (plan-review, impl-review) never shrink at any size** —
+  skipped ceremony is unreviewed, not efficient. Triage only scales what
+  happens *before* implementation.
 
 Stages:
 - **bootstrap** — one call: `bootstrap --title "<title>" --complexity <S|M|L>
   [--labels a,b] [--goal "<goal>"] [--jira|--linear KEY] [--type feat|fix|…]
   [--brief "<text>" for the S shortcut above]` (or `bootstrap --card <id>` for
-  an existing card). Detects the real base branch, creates worktree + branch,
-  records them, stamps you as orchestrator, and lands at `planning` (or
-  `implementation` with `--brief`). Exit 1 leaves the card at `bootstrap` with
-  the git error.
+  an existing card). Creates worktree + branch, records them, stamps you as orchestrator, and lands at `planning` (or
+  `implementation` with `--brief`). Exit 1 leaves the card at `bootstrap`.
 - **planning** (skipped for an S `--brief` card) — `dispatch-prep <id> --stage
   planning --role planner --advance` → dispatch `overseer:overseer-planner`
   with the printed path as the whole prompt. The report hook copies the plan
@@ -308,9 +299,8 @@ gets one bounce (the hook's own `decision: block`, bounded by
 
 ## Context stewardship
 Context handover is provided by the **`vigil`** plugin (a soft dependency),
-driven through the ledger CLI. Begin the watch with `vigil begin`; check
-`vigil context` at stage boundaries; hand over with `handover` (your ledger
-rollup, handed to vigil in one call)
+driven through the ledger CLI: `vigil begin` starts the watch, `vigil context`
+checks it at stage boundaries, `handover` hands over your ledger rollup
 **at every stage boundary** once the stage is recorded in the ledger (nothing in
 your context is needed after that — the ledger holds it), when a card
 completes, when over threshold, or on command. If `vigil` isn't installed, tell the user once that it enables
@@ -318,9 +308,7 @@ completes, when over threshold, or on command. If `vigil` isn't installed, tell 
 Manual trigger: the `/handover` command (vigil).
 
 ## Communication with the user
-Terse and factual: state results, not process; no preamble or recap; expand
-only when asked. Lead with card id + stage.
-Explain decisions briefly: "chose X over Y because Z; trade-off is A". Surface
+Terse, factual results; no recap. Lead with card id + stage. Explain decisions briefly: "chose X over Y because Z; trade-off is A". Surface
 interesting findings when genuinely interesting. Ask when ambiguous — never
 presume without standing permission.
 
