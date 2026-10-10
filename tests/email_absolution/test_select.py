@@ -72,7 +72,8 @@ def test_unknown_doctrine_warns(R, docs):
     assert "warning: unknown doctrine" in R.render_select(docs, R.Config(email_type="marketing", doctrine="x"))
 
 
-def test_fire_skips_binary_and_oversized_files_and_tolerates_bad_utf8(R, tmp_path):
+def test_fire_skips_binary_and_oversized_files_and_tolerates_bad_utf8(R, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     b = tmp_path / "a.bin"
     b.write_bytes(b"<html\0\0\0")
     assert R.read_scannable(b) == ("", "binary")
@@ -257,3 +258,10 @@ def test_canonical_entry_wins_when_both_are_keyed(R, docs):
 def test_unknown_override_ids_pass_through(R, docs):
     out, notes = R.resolve_overrides({"ZZZ-999": {"severity": "venial"}}, docs)
     assert out == {"ZZZ-999": {"severity": "venial"}} and not notes
+
+
+def test_select_shows_verify_for_a_detect_note_that_says_check(R, docs):
+    """Same marker as scan (review A2): ACCESS-020's note is 'check ...', so it only nominates."""
+    out = R.render_select(docs, R.Config(email_type="marketing", targets=("outlook-2019",)))
+    row = next(ln for ln in out.splitlines() if ln.startswith("ACCESS-020 |"))
+    assert row.split(" | ")[2] == "verify"
