@@ -38,8 +38,8 @@ If `last_scanned_at` is more than 30 days old, suggest (don't force) a refresh:
 Resolve the base branch: `gh pr view --json baseRefName -q .baseRefName` if a PR exists, else `git symbolic-ref --short refs/remotes/origin/HEAD` (strip the `origin/` prefix). Call it `<base>`. If the persona's `repo` differs from this checkout's `origin`, warn the user before reviewing.
 
 ```bash
-git fetch origin <base> --quiet
-git diff origin/<base>...HEAD --name-only -z --diff-filter=d
+git fetch origin '<base>' --quiet
+git diff 'origin/<base>...HEAD' --name-only -z --diff-filter=d
 ```
 
 Filter to files matching the persona's `filters.paths` OR `filters.extensions`. If empty:
@@ -49,10 +49,10 @@ Filter to files matching the persona's `filters.paths` OR `filters.extensions`. 
 ### 2 — For each in-scope changed file
 
 ```bash
-git diff origin/<base>...HEAD -- '<path>'
+git diff 'origin/<base>...HEAD' -- '<path>'
 ```
 
-**Quoting untrusted values.** Changed file paths, handles and `last_scanned_at` come from a branch or PERSONA.md, so treat them as hostile. Always put them in **single quotes**, escaping any embedded `'` as `'\''`; never in double quotes (those still run `$(...)` and backticks), and never in an unquoted heredoc. If a value contains a newline or NUL, skip it and say so.
+**Quoting untrusted values.** Changed file paths, `<base>`, handles and `last_scanned_at` come from a branch, a PR or PERSONA.md, so treat them as hostile. Always put them in **single quotes**, escaping any embedded `'` as `'\''`; never in double quotes (those still run `$(...)` and backticks), and never in an unquoted heredoc. If a value contains a newline or NUL, skip it and say so.
 
 Read the file at HEAD too (not just the hunk) — context matters for rules that point at adjacent code.
 

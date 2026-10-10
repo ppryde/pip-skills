@@ -162,3 +162,27 @@ def test_skill_has_no_double_quoted_untrusted_placeholders():
     skill = (Path(__file__).resolve().parents[2]
              / "plugins/review-clone/skills/review-as/SKILL.md").read_text()
     assert '"<path>"' not in skill and '"<last_scanned_at>"' not in skill
+
+
+def test_first_clone_keeps_all_comments_on_discovered_prs(tmp_path, monkeypatch):
+    """Without an explicit --since, fetch_pr gets no per-comment filter (origin/main behaviour)."""
+    import json
+    import scripts.collect as collect_mod
+
+    monkeypatch.setattr(collect_mod, "PERSONA_ROOT", tmp_path)
+    seen = []
+    real = collect_mod.fetch_pr
+
+    def spy(repo, n, handles, paths, extensions, since=None):
+        seen.append(since)
+        return real(repo, n, handles, paths, extensions, since)
+
+    monkeypatch.setattr(collect_mod, "discover_prs", lambda *a, **k: [1])
+    monkeypatch.setattr(collect_mod, "fetch_pr", spy)
+    with patch("scripts.collect._gh_get", side_effect=_pr_with_comments()):
+        collect_mod.run_collect(alias="jen", handles=["jane"], repo="o/r", months=6,
+                                paths=[], extensions=[], since=None)
+    assert seen == [None]
+    raw = json.loads((tmp_path / "jen" / "raw" / "pr-1.json").read_text())
+    assert [c["id"] for c in raw["review_comments"]] == [1, 2]
+    assert [c["id"] for c in raw["issue_comments"]] == [3, 4]

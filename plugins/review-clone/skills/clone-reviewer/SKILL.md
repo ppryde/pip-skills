@@ -66,6 +66,8 @@ Continue without confirmation — non-blocking by design.
 
 Data collection is pure I/O — `gh` API calls, file writes, no reasoning. **Dispatch it to a Haiku subagent** so the main (Opus) session keeps its context budget for theme extraction in Step 5. Do not run `collect.py` directly from this session.
 
+**Quoting untrusted values.** `<handles>`, `<repo>`, `<paths>` and `<extensions>` are user-supplied (or derived from the checkout's `origin`), so treat them as hostile. Put each in **single quotes**, escaping any embedded `'` as `'\''`; never double quotes (those still run `$(...)` and backticks). Before building the command, validate `<repo>` as `owner/name` (`[A-Za-z0-9._-]+/[A-Za-z0-9._-]+`) and each handle as `[A-Za-z0-9-]+`; if a value fails or contains a newline or NUL, stop and say so.
+
 Before dispatching, tell the user:
 
 > Pulling `<handle>`'s comments via a Haiku subagent. No live progress — I'll surface the summary when it finishes.
@@ -83,15 +85,15 @@ Prompt body to send to the subagent:
 >
 > ```bash
 > python3 <plugin>/scripts/collect.py \
->   --alias "<alias>" \
->   --handles "<handles>" \
->   --repo "<repo>" \
+>   --alias '<alias>' \
+>   --handles '<handles>' \
+>   --repo '<repo>' \
 >   --months <months> \
->   --paths="<paths>" \
->   --extensions="<extensions>"
+>   --paths='<paths>' \
+>   --extensions='<extensions>'
 > ```
 >
-> Pass `--paths=""` / `--extensions=""` (empty strings) when there is no filter — never omit the value after the flag. Requires `gh` >= 2.48.
+> Pass `--paths=''` / `--extensions=''` (empty strings) when there is no filter — never omit the value after the flag. Requires `gh` >= 2.48.
 >
 > The script writes raw scrape files and `snapshot.json` to `~/.claude/review-clone/<alias>/` and prints per-PR progress to stderr — you do not need to relay the stderr lines. When the command exits, reply with ONLY the JSON snapshot from stdout. If the command fails, reply with the stderr output prefixed `ERROR:`.
 

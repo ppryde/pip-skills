@@ -250,6 +250,7 @@ def run_collect(
     """Full scrape pipeline. Writes raw/ + snapshot.json. Returns the snapshot dict."""
     check_alias(alias, PERSONA_ROOT)
     _check_repo(repo)
+    explicit_since = since  # per-comment filter applies only in refresh mode
     since = since or _compute_since(months)
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -264,7 +265,7 @@ def run_collect(
 
     for i, n in enumerate(prs, 1):
         print(f"  [{i}/{len(prs)}] fetching PR #{n}", file=sys.stderr)
-        data = fetch_pr(repo, n, handles, paths, extensions, since)
+        data = fetch_pr(repo, n, handles, paths, extensions, explicit_since)
         if not data["review_comments"] and not data["issue_comments"] and not data["pr_description"]:
             continue  # PR had nothing matching the filter
         (raw_dir / f"pr-{n}.json").write_text(json.dumps(data, indent=2))
