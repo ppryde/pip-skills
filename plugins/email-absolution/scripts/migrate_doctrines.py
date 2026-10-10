@@ -278,7 +278,7 @@ REWRITE = {
     "HTML-006": dict(
         header=(None, None, None),
         rationale=None,
-        detect=("> `detect: regex` — pattern: `<a\\s(?![^>]*(?<=\\s)style\\s*=)[^>]*href=` — a linked anchor with "
+        detect=("> `detect: regex` — pattern: `(?i)<a\\s(?![^>]*(?<=\\s)style\\s*=)[^>]*href=` — a linked anchor with "
                 "no inline style attribute at all (matched over the whole tag, so wrapped anchors work; "
                 "`data-style=` and `title=\"style=1\"` are not a style attribute)"),
     ),
@@ -299,10 +299,12 @@ REWRITE = {
     "RENDER-009": dict(
         header=(None, None, None),
         rationale=None,
-        detect=("> `detect: regex` — pattern: `(?i)(?:src|href)=[\"'](?!https:|mailto:|tel:|cid:|#|\\{|<%|\\$\\{|\\[\\[|"
-                "\\*\\||%%)[^\"']+[\"']` — any src/href that is not https:, mailto:, tel:, cid:, an anchor or a "
-                "template placeholder: root-relative, plain-relative (`logo.png`, `./a`, `../a`), protocol-relative, "
-                "`www.`, and http: in any case"),
+        detect=("> `detect: regex` — pattern: `(?i)(?:src|href)=[\"'](?!https:|mailto:|tel:|cid:|sms:|geo:|webcal:|viber:|#|"
+                "[{%$\\[<@]|\\*\\|)[^\"']+[\"']` — any src/href that is not one of: https:, mailto:, tel:, cid:, sms:, geo:, "
+                "webcal:, viber:, an anchor (#), or a template placeholder starting with `{` (Liquid/Handlebars), `%` "
+                "(Mailgun %var%, %%x%%), `$` (`$url`, `${x}`), `[` (`[unsubscribe]`, `[[x]]`), `<` (`<%= %>`, `<?= ?>`, "
+                "`<unsubscribe>`) or `*|` (Mailchimp). Everything else fires: root-relative, plain-relative "
+                "(`logo.png`, `./a`, `../a`), protocol-relative, `www.`, http: in any case, javascript:, ftp:, data:"),
     ),
     "RENDER-008": dict(
         header=(None, None, None),

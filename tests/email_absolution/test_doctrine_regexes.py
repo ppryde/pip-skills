@@ -101,6 +101,30 @@ def test_render009_absolute_urls(hits, R, by_id):
         assert not hits("RENDER-009", ok), ok
 
 
+@pytest.mark.parametrize("ok", [
+    '<a href="sms:+4412345">', '<a href="geo:51.5,-0.1">', '<a href="webcal://x.com/cal.ics">',
+    '<a href="viber://chat?number=1">', '<a href="%unsubscribe_url%">', '<a href="%UNSUBSCRIBELINK%">',
+    '<a href="$url">', '<a href="${url}">', '<a href="[unsubscribe]">', '<a href="<unsubscribe>">',
+    '<a href="@Model.Url">', '<a href="<?= $url ?>">', '<a href="<%= url %>">',
+])
+def test_render009_allows_legit_schemes_and_esp_placeholders(hits, ok):
+    assert not hits("RENDER-009", ok), ok
+
+
+@pytest.mark.parametrize("bad", [
+    '<a href="javascript:void(0)">', '<a href="ftp://x.com/f">', '<a href="JAVASCRIPT:x">',
+])
+def test_render009_still_fires_on_javascript_and_ftp(hits, bad):
+    assert hits("RENDER-009", bad), bad
+
+
+def test_html006_is_case_insensitive(hits):
+    assert hits("HTML-006", '<A HREF="x">x</A>')
+    assert not hits("HTML-006", '<A HREF="x" STYLE="color:red">x</A>')
+    assert not hits("HTML-006", '<a href="x" STYLE="color:red">x</a>')
+    assert hits("HTML-006", '<A HREF="x" DATA-STYLE="a">x</A>')
+
+
 def test_planted_plain_relative_src_is_caught(by_id):
     line = next(ln for ln in (PLANTED / "level-1-obvious.liquid").read_text().splitlines()
                 if "images/footer-logo.png" in ln)
