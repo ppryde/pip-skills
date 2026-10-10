@@ -8,8 +8,8 @@ The skill should:
   1. Detect multiple definitions via grep.
   2. Prompt the user to disambiguate:
      "Symbol 'OrderListView' found in multiple locations:
-       1. fixture10/target.py:13
-       2. fixture10/target_alt.py:8
+       1. fixture10/target.py:26
+       2. fixture10/target_alt.py:11
      Please re-invoke with the dotted form, e.g.:
        /django-inquisition:optimise-orm fixture10.target.OrderListView"
   3. NOT proceed with analysis until the user clarifies.

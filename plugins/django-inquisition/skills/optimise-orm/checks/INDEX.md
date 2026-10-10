@@ -13,7 +13,7 @@ Files are listed in the order the orchestrator walks them.
 | FETCH-003 | low | `select_related` chain > 3 deep across nullable FKs |
 | FETCH-010 | high | Missing `prefetch_related` for reverse/M2M in loop |
 | FETCH-011 | medium | `Prefetch()` with custom QS would reduce work |
-| FETCH-012 | medium | Nested prefetch missing `to_attr` causes silent re-fetch |
+| FETCH-012 | low | Filtered `Prefetch` without `to_attr` replaces the unfiltered relation (clarity) |
 | FETCH-020 | high | Wide column over-fetched and unread by callers |
 | FETCH-021 | medium | `.values()` / `.values_list(flat=True)` opportunity |
 | FETCH-022 | medium | `.only()` viable: callers read only a subset |
@@ -52,13 +52,13 @@ Files are listed in the order the orchestrator walks them.
 |---|---|---|
 | WRITE-001 | critical | Loop of `.save()` → `bulk_create` |
 | WRITE-002 | high | Loop of `.update()` / `.save()` → `bulk_update` |
-| WRITE-003 | medium | `get_or_create` in loop → `bulk_create(..., update_conflicts=True)` |
+| WRITE-003 | medium | `get_or_create` in loop → `bulk_create(..., ignore_conflicts=True)` |
 | WRITE-004 | high | `update_or_create` in loop → `bulk_create(..., update_conflicts=True, update_fields=[...])` |
 | WRITE-005 | info (banner) | Model has signal listeners — bulk recommendations bypass them |
 | WRITE-006 | medium → critical w/ audit | Existing `.update()` on a model with signal listeners |
 | WRITE-007 | medium → critical w/ audit | Existing `bulk_create` / `bulk_update` on a model with listeners |
-| WRITE-008 | medium | Existing `.raw()` writing to a model with listeners |
-| WRITE-009 | medium → critical w/ audit | Existing `qs.delete()` on a model with `pre_delete`/`post_delete` listeners |
+| WRITE-008 | medium | Existing raw SQL write (`cursor.execute`) to a model with listeners |
+| WRITE-009 | medium | `qs.delete()` on a model that overrides `Model.delete()` (override is skipped; signals still fire) |
 | WRITE-010 | medium | `.save()` without `update_fields=` rewrites entire row |
 | WRITE-020 | high | Read-modify-write loop → `qs.update(F('<f>') + 1)` |
 | WRITE-030 | medium | Many writes outside `transaction.atomic` block |
@@ -70,9 +70,9 @@ Files are listed in the order the orchestrator walks them.
 | ID | Default Severity | Rule |
 |---|---|---|
 | ITER-001 | high | Large queryset materialised without `.iterator(chunk_size=…)` |
-| ITER-002 | low | `iterator()` without `chunk_size` on Postgres |
-| ITER-010 | medium | Same QuerySet evaluated twice in scope |
-| ITER-011 | low | `.all()` chained to fresh `.filter()` thrashes cache |
+| ITER-002 | low (high for prefetch without `chunk_size` on Django 5.0+) | `iterator()` caveats: `prefetch_related` without `chunk_size`, server-side cursors behind a pooler |
+| ITER-010 | medium | Same query re-issued in scope (`aggregate()`/`in_bulk()` after evaluation, repeated `filter()` chains) |
+| ITER-011 | low | redundant `.all()` before `.filter()` on a QuerySet variable (style) |
 
 ## Indexes — `checks/indexes.md`
 
@@ -97,7 +97,7 @@ Files are listed in the order the orchestrator walks them.
 | JOIN-001 | high | Chained M2M `.filter()` produces row explosion |
 | JOIN-002 | medium | `.distinct()` masking a join explosion |
 | JOIN-010 | medium | Multi-condition relation filter done in Python |
-| JOIN-011 | low | `FilteredRelation` would unify `Q`+`select_related`+`annotate` |
+| JOIN-011 | low | `FilteredRelation` for one conditioned relation (never several on one multi-valued relation) |
 
 ## Patterns — `checks/patterns.md`
 
@@ -109,7 +109,7 @@ Files are listed in the order the orchestrator walks them.
 | PAT-010 | high | `JSONField` `__contains` / `__has_key` un-indexed (cross-ref IDX-040) |
 | PAT-011 | medium | `KeyTransform` index opportunity for hot keys |
 | PAT-020 | medium | Default manager filtering soft-delete benefits from partial index |
-| PAT-030 | high | `GenericForeignKey` accessed in loop without `GenericPrefetch` |
+| PAT-030 | high | `GenericForeignKey` accessed in loop without prefetch (`prefetch_related("content_object")` / `GenericPrefetch`) |
 | PAT-040 | low | `.raw()` / `.extra()` flagged for review |
 | PAT-050 | medium | Sync ORM call in async view (Django ≥ 4.1) |
 | PAT-060 | low | `CONN_MAX_AGE = 0` on production settings |

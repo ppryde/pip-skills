@@ -21,10 +21,10 @@ checks:
     title: Default manager soft-delete benefits from partial index
     severity_base: medium
   - id: PAT-030
-    title: GenericForeignKey accessed in loop without GenericPrefetch
+    title: GenericForeignKey accessed in loop without prefetch (prefetch_related / GenericPrefetch)
     severity_base: high
   - id: PAT-040
-    title: .raw() / .extra() flagged for review
+    title: .raw() / .extra() flagged for review (.extra() discouraged)
     severity_base: low
   - id: PAT-050
     title: Sync ORM call in async view (Django >= 4.1)
@@ -46,16 +46,16 @@ checks:
 
 ### PAT-001
 
-**Signature:** `.filter(<field>__icontains=...)` on a text column that has no GIN trigram index (`GinIndex` with `opclasses=["gin_trgm_ops"]`). Without a trigram index, `ILIKE '%value%'` forces a sequential scan on every row.
+**Signature:** `.filter(<field>__icontains=...)` on a text column that has no matching GIN trigram index. On PostgreSQL Django compiles `icontains` to `UPPER(col::text) LIKE UPPER(%s)`, so the trigram index must be on the **expression** `Upper(col)`; a `GinIndex(fields=["col"], opclasses=["gin_trgm_ops"])` on the raw column is not matched by `icontains` (it serves `~`/`~*`, see PAT-003). `istartswith` and `iexact` are likewise `UPPER`-based. Without a matching trigram index, the lookup forces a sequential scan.
 
 **Grep / AST hints:**
 ```regex
 \.filter\(\w+__icontains=
 ```
-Follow-up: confirm the field is a `CharField`/`TextField`. Check `Meta.indexes` for a `GinIndex` with `gin_trgm_ops` on that field.
+Follow-up: confirm the field is a `CharField`/`TextField`. Check `Meta.indexes` for a `GinIndex` using `OpClass(Upper(<field>), name="gin_trgm_ops")` on that field.
 
 **Confidence rules:**
-- High: `__icontains` on text field confirmed, no trigram GIN index, Postgres engine.
+- High: `__icontains` on text field confirmed, no matching trigram GIN index on `Upper(<field>)`, Postgres engine.
 - Medium: `__icontains` found, index status or engine not confirmed.
 - Low: `__icontains` on field whose type is not determinable.
 
@@ -68,17 +68,24 @@ Follow-up: confirm the field is a `CharField`/`TextField`. Check `Meta.indexes` 
 # Before — full table scan per query
 User.objects.filter(username__icontains=term)
 
-# After — add pg_trgm GIN index (Postgres + pg_trgm extension required)
-from django.contrib.postgres.indexes import GinIndex
+# After — trigram GIN index on the expression icontains compiles to
+# (Postgres + pg_trgm extension required; expression indexes need Django 3.2+)
+from django.contrib.postgres.indexes import GinIndex, OpClass
+from django.db.models.functions import Upper
 
 class User(models.Model):
     username = models.CharField(max_length=150)
     class Meta:
         indexes = [
-            GinIndex(fields=["username"], opclasses=["gin_trgm_ops"], name="user_username_trgm_idx")
+            GinIndex(
+                OpClass(Upper("username"), name="gin_trgm_ops"),
+                name="user_username_trgm_idx",
+            )
         ]
-# Then enable extension in a migration:
-# CREATE EXTENSION IF NOT EXISTS pg_trgm;
+# Enable the extension in an earlier migration:
+#   from django.contrib.postgres.operations import TrigramExtension
+#   operations = [TrigramExtension()]
+# Verify the planner uses it with EXPLAIN.
 ```
 
 ---
@@ -118,7 +125,7 @@ Article.objects.annotate(
 
 ### PAT-003
 
-**Signature:** `.filter(<field>__regex=...)` or `.filter(<field>__iregex=...)` on a text column. Regex lookups are not index-eligible on any major engine — the DB must apply the pattern to every row. On large tables this is a sequential scan per query. The pattern can usually be rewritten as `__startswith` / `__endswith` / `__contains` / `__icontains` (which can use trigram GIN on PG) or, when the regex is genuinely needed, as a Postgres trigram-indexed `~` / `~*` operator using `pg_trgm`.
+**Signature:** `.filter(<field>__regex=...)` or `.filter(<field>__iregex=...)` on a text column. Regex lookups are not served by a btree index on any major engine — without help the DB must apply the pattern to every row, a sequential scan per query on large tables. On PostgreSQL a `pg_trgm` GIN index on the raw column can serve `~` / `~*` (what `__regex` / `__iregex` compile to). The pattern can usually be rewritten as `__startswith` / `__endswith` / `__contains` / `__icontains` (`contains`/`icontains` can use a trigram GIN on PG, see PAT-001 for the `Upper(...)` expression form; `istartswith`/`iexact` are also `UPPER`-based) or, when the regex is genuinely needed, keep `__regex`/`__iregex` and back it with a `pg_trgm` GIN index on the raw column.
 
 **Grep / AST hints:**
 ```regex
@@ -144,7 +151,7 @@ User.objects.filter(username__iregex=r"^john")
 User.objects.filter(username__istartswith="john")
 
 # After (option B) — keep regex semantics but back it with a trigram GIN index
-# on Postgres, then use the raw `~*` operator (Django's __iregex maps to ~*).
+# on the raw column (Postgres); Django's __iregex compiles to `~*`, which pg_trgm can serve.
 from django.contrib.postgres.indexes import GinIndex
 
 class User(models.Model):
@@ -157,8 +164,9 @@ class User(models.Model):
                 name="user_username_trgm_idx",
             ),
         ]
-# Then enable extension in a migration:
-# CREATE EXTENSION IF NOT EXISTS pg_trgm;
+# Enable the extension in an earlier migration:
+#   from django.contrib.postgres.operations import TrigramExtension
+#   operations = [TrigramExtension()]
 ```
 
 ---
@@ -183,13 +191,13 @@ Same follow-up as IDX-040. Emit both PAT-010 and IDX-040 if both trigger, or sup
 
 ### PAT-011
 
-**Signature:** `.filter(<json_field>__<key>=...)` used repeatedly for the same JSON key — a `KeyTransform` expression index on that key would allow the DB to index a virtual column extracted from the JSON blob.
+**Signature:** `.filter(<json_field>__<key>=...)` used repeatedly for the same JSON key — an expression index on that key would allow the DB to index the value extracted from the JSON blob. The index expression must match what the lookup compiles to: on PostgreSQL `metadata__color="red"` compiles to `(metadata -> 'color') = '"red"'` (a `KeyTransform`, jsonb), **not** `->>` (`KeyTextTransform`).
 
 **Grep / AST hints:**
 ```regex
 \.filter\(\w+__\w+=
 ```
-Follow-up: confirm the left-hand side resolves to a `JSONField` traversal (double-underscore into a JSON key). Check if the same key is queried 2+ times. Check `Meta.indexes` for an expression index using `KeyTextTransform` or `KeyTransform`.
+Follow-up: confirm the left-hand side resolves to a `JSONField` traversal (double-underscore into a JSON key). Check if the same key is queried 2+ times. Check `Meta.indexes` for an expression index using `KeyTransform` (matches the default lookup) or `KeyTextTransform` (matches only queries that annotate with `KeyTextTransform`).
 
 **Confidence rules:**
 - High: Same JSON key queried 2+ times, no expression index, Postgres confirmed.
@@ -204,11 +212,13 @@ Follow-up: confirm the left-hand side resolves to a `JSONField` traversal (doubl
 # Before — scans entire JSON blob per row
 Product.objects.filter(metadata__color="red")
 
-# After — expression index on the extracted key using KeyTextTransform.
-# Portable across PG/MySQL/SQLite (the ORM emits the right expression per
-# backend) and survives column renames; prefer this over RawSQL.
+# After — expression index on the extracted key using KeyTransform, which is
+# what the default `metadata__color="red"` lookup compiles to on PostgreSQL.
+# (KeyTextTransform would only serve queries that annotate with KeyTextTransform
+# and filter on the annotation.) Backend behaviour differs (MySQL/SQLite compile
+# JSON key lookups differently); verify the planner uses it with EXPLAIN.
 from django.db.models import Index
-from django.db.models.fields.json import KeyTextTransform
+from django.db.models.fields.json import KeyTransform
 
 class Product(models.Model):
     metadata = models.JSONField()
@@ -216,7 +226,7 @@ class Product(models.Model):
     class Meta:
         indexes = [
             Index(
-                KeyTextTransform("color", "metadata"),
+                KeyTransform("color", "metadata"),
                 name="product_metadata_color_idx",
             ),
         ]
@@ -244,17 +254,17 @@ Follow-up: inside `get_queryset`, look for `.filter(deleted_at__isnull=True)` or
 
 ### PAT-030
 
-**Signature:** `obj.content_object` (a `GenericForeignKey`) accessed inside a loop without Django 4.2+'s `GenericPrefetch`. Each access issues a query to the target content type's table.
+**Signature:** `obj.content_object` (a `GenericForeignKey`) accessed inside a loop without being prefetched. Each access issues a query to the target content type's table. `prefetch_related("content_object")` has long been supported for `GenericForeignKey`; `GenericPrefetch` (Django 4.2+) only adds per-content-type querysets (e.g. `select_related` on specific targets).
 
 **Grep / AST hints:**
 ```regex
 for\s+\w+\s+in\s+\w+.*:
 ```
-Follow-up: inside loop body, look for `<var>.content_object`. Confirm no `GenericPrefetch` in the queryset's `prefetch_related`.
+Follow-up: inside loop body, look for `<var>.content_object`. Confirm neither `prefetch_related("content_object")` nor a `GenericPrefetch` is in the queryset's `prefetch_related`.
 
 **Confidence rules:**
-- High: `content_object` access inside loop, no `GenericPrefetch`, Django ≥ 4.2 (check version).
-- Medium: `content_object` access in loop, Django version not confirmed.
+- High: `content_object` access inside loop over a queryset, no prefetch of `content_object`.
+- Medium: `content_object` access in loop, loop source not clearly a queryset.
 - Low: `content_object` access outside loop or single-object context.
 
 **Savings formula:**
@@ -263,11 +273,14 @@ Follow-up: inside loop body, look for `<var>.content_object`. Confirm no `Generi
 
 **Suggested fix template:**
 ```python
-# Before (Django < 4.2 or no prefetch)
+# Before — no prefetch
 for comment in Comment.objects.all():
     target = comment.content_object  # one query per comment
 
-# After (Django >= 4.2)
+# After — any Django version: one query per content type
+comments = Comment.objects.prefetch_related("content_object")
+
+# After — Django >= 4.2, when you need custom querysets per target type
 from django.contrib.contenttypes.prefetch import GenericPrefetch
 comments = Comment.objects.prefetch_related(
     GenericPrefetch("content_object", [Post.objects.all(), Article.objects.all()])
@@ -300,20 +313,20 @@ for comment in comments:
 # 1. Can this be expressed using the ORM (filter, annotate, subquery)?
 # 2. Is user input safely parameterised (never interpolated directly)?
 # 3. Is the raw SQL tested against the target DB engine?
-# 4. Is .extra() usage pre-Django 2.1 style that should be migrated?
+# 4. .extra() is discouraged (see the Django docs): prefer ORM expressions, annotate(), RawSQL or Func.
 ```
 
 ---
 
 ### PAT-050
 
-**Signature:** A synchronous ORM call (`.get()`, `.filter()`, `.all()`, `.first()`, `.save()`, etc.) inside an `async def` view (Django ≥ 4.1). Sync ORM calls block the event loop; use the async equivalents (`aget()`, `afilter()`, `asave()`, etc.).
+**Signature:** A synchronous ORM call that **evaluates** a queryset or hits the DB (`.get()`, `.first()`, `.last()`, `.count()`, `.exists()`, `.create()`, `.save()`, `.delete()`, `.update()`, plain iteration or `list(qs)`) inside an `async def` view. Sync ORM calls raise `SynchronousOnlyOperation` in an async context. `.filter()`, `.all()`, `.exclude()` and `.order_by()` are lazy and do not block — do not flag them on their own. Async counterparts: `aget`, `afirst`, `alast`, `acount`, `aexists`, `acreate`, `aget_or_create`, `aupdate`, `adelete`, `aaggregate`, `abulk_create`, `async for` iteration (Django 4.1+), and `Model.asave()` / `adelete()` / `arefresh_from_db()` (Django 4.2+).
 
 **Grep / AST hints:**
 ```regex
 async\s+def\s+\w+\(
 ```
-Follow-up: inside the async function body, look for synchronous ORM calls that are not prefixed with `a` (e.g. `aget`, `afilter`, `aall`, `asave`) and are not wrapped in `sync_to_async`.
+Follow-up: inside the async function body, look for evaluating sync ORM calls (see Signature) that are not their `a`-prefixed counterparts (`aget`, `acount`, `asave`, …), not `async for`, and not wrapped in `sync_to_async`.
 
 **Confidence rules:**
 - High: Sync ORM call inside `async def` view confirmed, Django ≥ 4.1.
@@ -413,7 +426,7 @@ summary = Order.objects.using("replica").filter(year=2024).aggregate(total=Sum("
 
 ### PAT-070
 
-**Signature:** `easyaudit`, `auditlog`, `simple_history`, `reversion`, or `pghistory` detected in `INSTALLED_APPS`. This is an info-level banner emitted once in the report header — no per-line finding. Its presence triggers severity escalation for WRITE-006/007/009 (except `pghistory`, which is `signals_safe=true`).
+**Signature:** `easyaudit`, `auditlog`, `simple_history`, `reversion`, or `pghistory` detected in `INSTALLED_APPS`. This is an info-level banner emitted once in the report header — no per-line finding. Its presence triggers severity escalation for WRITE-006/007 (except `pghistory`, which is `signals_safe=true`).
 
 **Grep / AST hints:**
 ```regex
@@ -432,6 +445,6 @@ Follow-up: scan the `INSTALLED_APPS` list for `"easyaudit"`, `"auditlog"`, `"sim
 ```
 [INFO] Audit/history framework detected: <package_name>
 Bulk write recommendations (WRITE-001/002/003/020) bypass signal-based audit trails.
-WRITE-006/007/009 findings are escalated to CRITICAL in this project.
+WRITE-006/007 findings are escalated to CRITICAL in this project.
 Note: pghistory uses Postgres triggers (signals_safe=true) — no escalation.
 ```
