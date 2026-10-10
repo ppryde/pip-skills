@@ -131,7 +131,8 @@ def parse_frontmatter(text: str, path: Path) -> tuple[str, list[dict[str, str]]]
                 raise SourceError(
                     f"{path}: {checks[-1]['id']}.{key}: folded/literal scalars ({value[:1]}) are not supported; use a one-line value")
             if value[:1] in ("'", '"'):
-                value = value.strip("'\"")
+                quoted = re.match(r"(['\"])(.*?)\1(?:\s|$)", value)
+                value = quoted.group(2) if quoted else value.strip("'\"")
             else:
                 value = re.sub(r"\s+#.*$", "", value)  # trailing ` # comment` on unquoted values
             if not value:

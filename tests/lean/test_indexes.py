@@ -189,3 +189,11 @@ def test_trailing_comment_stripped_from_unquoted_values(tmp_path):
     assert run("optimise-orm", "--root", str(root)).returncode == 0
     text = (root / SOURCES["optimise-orm"] / "INDEX.md").read_text()
     assert "| One |" in text and "Two # kept" in text and "note" not in text
+
+
+def test_quoted_value_stops_at_closing_quote(tmp_path):
+    raw = GROUP.format(body="x").replace("title: Two", 'title: "Two" # c')
+    root = _scratch(tmp_path, raw)
+    assert run("optimise-orm", "--root", str(root)).returncode == 0
+    text = (root / SOURCES["optimise-orm"] / "INDEX.md").read_text()
+    assert "| Two |" in text and "# c" not in text
