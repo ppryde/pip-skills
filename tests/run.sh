@@ -23,7 +23,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PYTHON:-$ROOT/.venv/bin/python}"
 [ -x "$PY" ] || PY="python"
 
-SUITES=(overseer census vigil review-clone chronicle almoner)
+SUITES=(overseer census vigil review-clone chronicle almoner tribunal email-absolution)
 FAIL=0
 
 for p in "${SUITES[@]}"; do
@@ -36,6 +36,9 @@ echo "=================== context-vigil ==================="
 
 echo "=================== context-vigil-mod ==================="
 ( cd "$ROOT" && "$PY" -m pytest plugins/context-vigil-mod/tests "$@" ) || FAIL=1
+
+echo "=================== lean (size budgets, reference wiring, generated indexes) ==================="
+( cd "$ROOT" && "$PY" -m pytest tests/lean "$@" ) || FAIL=1
 
 # Nothing test-only may sit inside a shipped plugin/ folder: installs copy it whole.
 echo "=================== no tests inside a shipped mod ==================="
