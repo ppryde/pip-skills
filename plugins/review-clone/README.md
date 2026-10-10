@@ -26,7 +26,7 @@ Personas are personal and portable across repos:
 
 ## Requirements
 
-- `gh` CLI authenticated (`gh auth status`)
+- `gh` CLI >= 2.48 (needed for `gh api --paginate --slurp`), authenticated (`gh auth status`)
 - Python 3.11+
 - Repo with `origin` set (for default repo detection at clone time)
 

@@ -15,9 +15,22 @@ _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
 PERSONA_ROOT = Path(os.environ.get("REVIEW_CLONE_ROOT", "") or Path.home() / ".claude" / "review-clone")
 
 
+_ALIAS_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,40}")
+
+
+def validate_alias(alias: str) -> str:
+    """Return the alias unchanged, or raise ValueError if it is not a safe slug."""
+    if not isinstance(alias, str) or not _ALIAS_RE.fullmatch(alias):
+        raise ValueError(
+            f"invalid alias {alias!r}: use lowercase letters, digits and hyphens "
+            "only (max 41 chars, must start with a letter or digit)"
+        )
+    return alias
+
+
 def persona_dir(alias: str) -> Path:
     """Return the directory holding a persona's files."""
-    return PERSONA_ROOT / alias
+    return PERSONA_ROOT / validate_alias(alias)
 
 
 def persona_path(alias: str) -> Path:

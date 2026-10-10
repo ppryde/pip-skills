@@ -19,6 +19,11 @@ PERSONA_ROOT = Path(
 
 WINDOW_CAP_MONTHS = 6
 
+try:  # imported as a package (tests)
+    from .persona_io import validate_alias
+except ImportError:  # run as a script: scripts/ is on sys.path
+    from persona_io import validate_alias
+
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     """Parse collect.py's command-line arguments."""
@@ -81,12 +86,22 @@ def discover_prs(repo: str, handles: list[str], since: str) -> list[int]:
 
 
 def _gh_get(api_path: str, paginate: bool = False) -> Any:
-    """Call `gh api <path>` and return parsed JSON."""
+    """Call `gh api <path>` and return parsed JSON.
+
+    Paginated calls use `--paginate --slurp` (gh >= 2.48) with per_page=100 and
+    return the pages flattened into one list.
+    """
     cmd = ["gh", "api", api_path]
     if paginate:
-        cmd.append("--paginate")
+        sep = "&" if "?" in api_path else "?"
+        cmd = ["gh", "api", f"{api_path}{sep}per_page=100", "--paginate", "--slurp"]
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return json.loads(result.stdout) if result.stdout.strip() else []
+    if not result.stdout.strip():
+        return []
+    data = json.loads(result.stdout)
+    if paginate:
+        return [item for page in data for item in page]
+    return data
 
 
 def _login(obj: dict) -> str | None:
@@ -112,8 +127,11 @@ def fetch_pr(
     handles: list[str],
     paths: list[str],
     extensions: list[str],
+    since: str | None = None,
 ) -> dict:
     """Fetch one PR's metadata + filtered comments + reply threads.
+
+    When `since` is given, handle-authored comments created before it are dropped.
 
     Returns a dict with pr_meta, review_comments (with diff_hunk + reply_thread),
     issue_comments, and pr_description (if authored by any handle).
@@ -122,7 +140,7 @@ def fetch_pr(
     review_comments = _gh_get(f"/repos/{repo}/pulls/{number}/comments", paginate=True)
     issue_comments = _gh_get(f"/repos/{repo}/issues/{number}/comments", paginate=True)
 
-    handle_set = set(handles)
+    handle_set = {h.lower() for h in handles}
 
     # Index review comments by id for threading
     by_id = {c["id"]: c for c in review_comments}
@@ -133,7 +151,9 @@ def fetch_pr(
     for c in review_comments:
         if c.get("in_reply_to_id") is not None:
             continue
-        if _login(c) not in handle_set:
+        if (_login(c) or "").lower() not in handle_set:
+            continue
+        if since and c["created_at"] < since:
             continue
         if not _matches_path_filter(c["path"], paths, extensions):
             continue
@@ -167,12 +187,13 @@ def fetch_pr(
             "created_at": c["created_at"],
         }
         for c in issue_comments
-        if _login(c) in handle_set
+        if (_login(c) or "").lower() in handle_set
+        and not (since and c["created_at"] < since)
     ]
 
     # PR description: capture if authored by a handle
     pr_description = None
-    if _login(pr_meta) in handle_set:
+    if (_login(pr_meta) or "").lower() in handle_set:
         pr_description = pr_meta.get("body") or ""
 
     return {
@@ -206,6 +227,7 @@ def run_collect(
     since: str | None,
 ) -> dict:
     """Full scrape pipeline. Writes raw/ + snapshot.json. Returns the snapshot dict."""
+    validate_alias(alias)
     since = since or _compute_since(months)
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -220,7 +242,7 @@ def run_collect(
 
     for i, n in enumerate(prs, 1):
         print(f"  [{i}/{len(prs)}] fetching PR #{n}", file=sys.stderr)
-        data = fetch_pr(repo, n, handles, paths, extensions)
+        data = fetch_pr(repo, n, handles, paths, extensions, since)
         if not data["review_comments"] and not data["issue_comments"] and not data["pr_description"]:
             continue  # PR had nothing matching the filter
         (raw_dir / f"pr-{n}.json").write_text(json.dumps(data, indent=2))
@@ -253,6 +275,12 @@ def main(argv: list[str] | None = None) -> int:
             f"error: --months {args.months} exceeds hard cap of {WINDOW_CAP_MONTHS}",
             file=sys.stderr,
         )
+        return 2
+
+    try:
+        validate_alias(args.alias)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
     snapshot = run_collect(
