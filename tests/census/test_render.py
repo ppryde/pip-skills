@@ -56,13 +56,13 @@ class TestBars:
 
 
 class TestLevelColours:
-    @pytest.mark.parametrize("pct,code", [(0, "32"), (74, "32"), (75, "38;5;208"), (89, "38;5;208"), (90, "31")])
-    def test_ramp(self, pct, code):
-        assert rd.level_colour(pct) == f"\x1b[{code}m"
+    @pytest.mark.parametrize("pct,name", [(0, "green"), (74, "green"), (75, "orange"), (89, "orange"), (90, "red")])
+    def test_ramp(self, pct, name):
+        assert rd.level_colour_name(pct) == name
 
-    @pytest.mark.parametrize("pct,code", [(100, "32"), (90, "32"), (89, "38;5;208"), (75, "38;5;208"), (74, "31")])
-    def test_inverted_ramp(self, pct, code):
-        assert rd.level_colour_inv(pct) == f"\x1b[{code}m"
+    @pytest.mark.parametrize("pct,name", [(100, "green"), (90, "green"), (89, "orange"), (75, "orange"), (74, "red")])
+    def test_inverted_ramp(self, pct, name):
+        assert rd.level_colour_inv_name(pct) == name
 
 
 class TestFmtReset:

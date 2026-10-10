@@ -44,7 +44,7 @@ if __package__ in (None, ""):  # run as a script: put the plugin root on sys.pat
 
 from scripts import gitcache, store
 
-STALE_SECONDS = 90  # census: not rendered for 90s (idle without refreshInterval, or closed)
+STALE_SECONDS = store.STALE_HORIZON_SECONDS  # census: not rendered for 90s (idle without refreshInterval, or closed)
 MAX_RESET_SECONDS = 10 * 86400  # census's own ceiling: further out is a corrupt/ms value
 TIMEOUT_SECONDS = 4
 WINDOW_SECONDS = {"five_hour": 5 * 3600, "seven_day": 7 * 86400}
@@ -408,8 +408,17 @@ def _columns(char: str) -> int:
     return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
 
 
+def _plain(text: str) -> str:
+    """``text`` with backticks and control characters (newlines included) neutralised, so
+    free text (a branch, a session name) can never close the code fence the skill wraps output in."""
+    return "".join(
+        "'" if char == "`" else " " if unicodedata.category(char) == "Cc" else char for char in text
+    )
+
+
 def clip(text: str, limit: int) -> str:
     """``text`` cut to ``limit`` terminal columns, ending in an ellipsis if cut."""
+    text = _plain(text)
     if sum(map(_columns, text)) <= limit:
         return text
     kept, used = [], 0
@@ -444,7 +453,7 @@ def repo_line(v: Vitals, budget: int = 40) -> str | None:
     pr = ""
     if v.pr_number:
         pr = f" · PR #{v.pr_number}" + (f" {v.pr_state}" if v.pr_state else "")
-    return clip(v.branch or "detached", budget - len(pr)) + pr
+    return clip(v.branch or "detached", budget - width(pr)) + pr
 
 
 def sync_line(v: Vitals) -> str | None:
@@ -555,9 +564,9 @@ def render_detailed(v: Vitals) -> str:
     if v.session_name:
         out.append(f"“{clip(v.session_name, 40)}”")
     if (live := liveness(v)) is not None:
-        out.append(f"⚠️  {live}")
+        out.append(f"⚠️  {clip(live, PHONE_COLUMNS - 4)}")
     if shows_idle(v):
-        out.append("💤 idle — no activity for 10+ min")
+        out.append(f"💤 idle — no activity for {store.IDLE_HORIZON_SECONDS // 60}+ min")
 
     out += ["", f"💾 Context {pct(v.ctx_pct)} {bar(v.ctx_pct, 12)}"]
     if v.ctx_tokens is not None:
@@ -585,7 +594,7 @@ def render_detailed(v: Vitals) -> str:
             out.append(f"   ↳ {sync}")
     if v.lines_added is not None:
         if repo_line(v) is None:
-            out += ["", "🌳 not a git repo"]
+            out += ["", "🌳 not a git repo" if v.dirty is None else "🌳 no commits yet"]
         out.append(f"   ↳ +{v.lines_added} / -{v.lines_removed or 0} lines this session")
 
     if v.duration_ms is not None or v.tools:
@@ -617,7 +626,9 @@ RENDERERS = {"compact": render_compact, "detailed": render_detailed}
 # --------------------------------------------------------------------------- main
 
 
-def gather(session_id: str | None, cwd: str, *, now: float | None = None) -> Vitals:
+def gather(
+    session_id: str | None, cwd: str, *, now: float | None = None, with_transcript: bool = True
+) -> Vitals:
     v = Vitals(now=time.time() if now is None else now, session_id=session_id)
     # Each source is independent: one failing (odd input we did not foresee)
     # must not hide the others.
@@ -628,7 +639,7 @@ def gather(session_id: str | None, cwd: str, *, now: float | None = None) -> Vit
             apply_census(v, entry)
     with contextlib.suppress(Exception):
         apply_git(v, entry, cwd)
-    if entry:
+    if entry and with_transcript:
         with contextlib.suppress(Exception):
             apply_transcript(v, _dict(entry.get("payload")).get("transcript_path"))
     return v
@@ -778,7 +789,7 @@ def main(argv: list[str] | None = None) -> int:
     saved = None if explicit else read_default()
     style = explicit or saved or "compact"
     try:
-        vitals = gather(session, args.cwd)
+        vitals = gather(session, args.cwd, with_transcript=(style == "detailed"))
         reading = RENDERERS[style](vitals)
     except Exception as exc:  # noqa: BLE001 -- last line of defence: never dump a traceback
         _emit(f"(vitals could not read this session: {type(exc).__name__}: {exc})")

@@ -87,14 +87,6 @@ def level_colour_inv_name(pct: float) -> str:
     return "red"
 
 
-def level_colour(pct: float) -> str:
-    return f"\x1b[{_CODES[level_colour_name(pct)]}m"
-
-
-def level_colour_inv(pct: float) -> str:
-    return f"\x1b[{_CODES[level_colour_inv_name(pct)]}m"
-
-
 def _round(value: float) -> int:
     """printf "%.0f": round half to even."""
     return int(f"{value:.0f}")
@@ -270,17 +262,6 @@ def seg_cost(c: Ctx) -> list[str]:
         value = str(burn_i) if burn_i >= 100 else f"{burn:.2f}"
         parts.append(f"{emoji} {c.pal.paint(colour, f'${value}/hr')}")
     return parts
-
-
-def detect_account(env: Mapping[str, str]) -> str:
-    """Which Claude config is active: CLAUDE_PROFILE, then CLAUDE_CONFIG_DIR, else work."""
-    profile = env.get("CLAUDE_PROFILE")
-    if profile:
-        return "personal" if profile in ("personal", "home", "p") else "work"
-    config = env.get("CLAUDE_CONFIG_DIR")
-    if config:
-        return "personal" if "personal" in config else "work"
-    return "work"
 
 
 DEFAULT_MASCOT = "✻"
