@@ -56,7 +56,7 @@ A model pattern is a family and at most a version: `opus` takes every Opus, `opu
 
 The threshold reads the main session's own model and context window from the engine's measure, which fires after main-thread turns only: a subagent's tokens and its smaller window never move it, so a subagent cannot trip a handover.
 
-Settings are per account (`$.store`) and re-read before every decision that matters, so a change made in one session reaches the others. Defaults: nudge 35% (+5% steps), with one default override `window=200k → 70%`, bar On, auto Off, idle window 30 min (15, 30 or 60), last light Off (writes its handover only at 25%+ context), limits On (95%, `seven_day` + `spend_limit`), RC auto-clear unanswered (treated as No).
+Settings are per account (`$.store`) and re-read before every decision that matters, so a change made in one session reaches the others. Defaults: nudge 35% (+5% steps), with one default override `window=200k → 70%`, bar On, auto Off, idle window 30 min (15, 30 or 60), last light Off (writes its handover only at 25%+ context), limits On (95%, `seven_day` + `spend_limit`), RC auto-clear unanswered (follows auto mode, with the phone safeguards: a 30 s countdown first, nothing within 2 min of your last phone message).
 
 ## Three states
 
@@ -115,7 +115,7 @@ A rate-limit failure or a window at its limit sets an account-wide **latch** wit
 
 ## Remote Control
 
-"On the phone" = the last human prompt came from `bridge`. The first time auto mode would arm there, a one-off question asks whether to allow auto-clear in RC sessions (`/vigil-setup rc` re-asks). The question is a dialog from the mod (no model turn); an open one raises Remote Control's "action required" push and can be answered on the phone (PROBES.md §1). Until it is answered nothing is cleared, and a dismissed one is asked again in a later session. Answering counts as you being here — a handover parked while the question waited is offered, never run. If allowed: a 30 s countdown with Cancel in the terminal bar (any message cancels; the countdown notice does not reach the phone yet, PROBES.md §1), and no clear within 2 min of the last phone prompt. Otherwise the handover is saved and a notice says why nothing cleared (`/vigil-setup rc` to enable, or auto-clear is off for RC). The countdown and holdback apply only to unattended clears: `/vho` or the bar's `1` from the phone bypass them. The countdown bar draws even with the bar setting Off.
+"On the phone" = the last human prompt came from `bridge`. Whether auto-clear may run there is asked in setup (`/vigil-setup`, right after the auto-mode question when auto is on; `/vigil-setup rc` asks it alone) and never during a run. Until it is answered it follows auto mode: on means it clears on the phone too, with the safeguards below, and a single hint per session says so (`/vigil-setup rc` to change). If allowed: a 30 s countdown with Cancel in the terminal bar (any message cancels; the countdown notice does not reach the phone yet, PROBES.md §1), and no clear within 2 min of the last phone prompt. If you answered No, the handover is saved and a notice says why nothing cleared (`/vigil-setup rc` to enable). The countdown and holdback apply only to unattended clears: `/vho` or the bar's `1` from the phone bypass them. The countdown bar draws even with the bar setting Off.
 
 ## Files
 

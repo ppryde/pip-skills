@@ -13,7 +13,7 @@ import { INPUT_SCHEMA, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instruc
 import { HOME_VARS_CHECKED } from '../core/home'
 import { TAIL_CMD, type CacheTtl, cacheLinesFromText, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
-import { clearGate, needsRcQuestion } from '../core/surfaces'
+import { clearGate, needsRcHint } from '../core/surfaces'
 import { applyAnswers, extractAnswers, isStep, nextCard, questionFor } from '../core/setup'
 import { RESUME_DELAY_MS, earlyStopDue, formatHHMM, latchCleared, latchFromMeasure, latchFromStopFailure, nextHop } from '../core/limits'
 import { classicHooksInstalled } from '../core/interlock'
@@ -72,9 +72,9 @@ let resumeChain: { cancel: () => void } | null = null
 let resumeGen = 0
 // The timer that lifts the account latch for this process: one, replaced never stacked (R2-04).
 let latchTimer: { cancel: () => void } | null = null
-// The first-RC question is asked once per process: a clear wipes $.state, so it cannot live there.
-// A new session (bindSession) starts it fresh; resetCaches leaves it alone.
-let rcAsked = false
+// The RC hint is shown once per session: a clear wipes $.state, so it cannot live there.
+// A new session (bindSession) resets it; resetCaches leaves it alone.
+let rcHinted = false
 
 // Module caches: rebuilt at session.start / after a hot reload.
 let root: string | null = null   // null: no config dir known, so nothing is written (configRoot)
@@ -240,7 +240,7 @@ async function observe($: EngineInterface, signal: Signal) {
   if (t && settings.auto) {
     await log($, t, { from: prev, to: next, idleMs: act.lastHumanAt === null ? null : now - act.lastHumanAt, origin: act.lastHumanOrigin })
   }
-  if (t === 'arm') await maybeAskRc($)
+  if (t === 'arm') await maybeHintRc($)
 }
 
 // A clear the latch parked is no longer going to run: it is offered instead (spec §5). Pending and
@@ -308,16 +308,14 @@ async function askSteps($: EngineInterface, run: NonNullable<typeof setupRun>) {
   if (parked) await notify($, V.pendingOffer(parked.path))
 }
 
-// Spec §2 / pre-flight F24: asked when auto mode would first arm on the phone.
-async function maybeAskRc($: EngineInterface) {
-  if (!needsRcQuestion(onPhone(activity), settings.rcAutoClear, settings.auto)) return
-  if (setupRun || rcAsked) return
-  // R1-21: the mod's own prompts obey stand-down (§7) and the latch (§5); asked on a later arm instead.
-  if (standDown || (await readLatch($))) return
-  rcAsked = true
-  await notify($, V.rcAsk)
-  await log($, 'rc.answer', { asked: true })
-  await startSetup($, 'rc')
+// Never a dialog mid-run (WF-262): the question lives in /vigil-setup. Unanswered follows auto mode
+// (clears on the phone, safeguards kept); this says so once per session, and only when the stand-down and the latch leave the mod free to speak.
+async function maybeHintRc($: EngineInterface) {
+  if (!needsRcHint(onPhone(activity), settings.rcAutoClear, settings.auto)) return
+  if (rcHinted || standDown || (await readLatch($))) return
+  rcHinted = true
+  await notify($, V.rcHint)
+  await log($, 'rc.answer', { hinted: true })
 }
 
 async function refreshGit($: EngineInterface) {
@@ -496,7 +494,7 @@ async function bindSession($: EngineInterface) {
   activity = { ...EMPTY_ACTIVITY, ...(await read($, phoneA)), lastHumanAt: await nowMs($) }
   lastLightArmed = false
   standDown = false
-  rcAsked = false
+  rcHinted = false
   root = configRoot({
     CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
     HOME: await $.env.get('HOME'),

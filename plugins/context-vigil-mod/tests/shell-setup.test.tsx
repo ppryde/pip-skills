@@ -16,20 +16,20 @@ const pluginSubmits = (w: ReturnType<typeof world>) => w.submits.filter(x => x.o
 test('/vigil-setup asks each step itself, one dialog at a time, with no prompt to the model', async ($, on) => {
   const w = world(on)
   w.askReply.value = byHeader({
-    [STEPS.nudge.header]: '50%', [STEPS.bar.header]: 'Off', [STEPS.auto.header]: 'On', [STEPS.idle.header]: '15 min',
+    [STEPS.nudge.header]: '50%', [STEPS.bar.header]: 'Off', [STEPS.auto.header]: 'On', [STEPS.idle.header]: '15 min', [STEPS.rc.header]: 'No',
     [STEPS.last_light.header]: 'Off (Recommended)', [STEPS.limits.header]: 'On (Recommended)',
     [STEPS.limit_pct.header]: '97', [STEPS.limit_windows.header]: 'Weekly (seven_day)',
   })
   await $.session.start(START)
   await $.command.run(setup())
   await w.clock.settle()
-  expect(w.asks.map(q => q.header)).toEqual(['🎚️ Nudge at', '🎛️ The bar', '🤖 Auto mode', '⏱️ Idle time', 'Last light', '⏳ Limits', '⏳ Trigger %', '⏳ Windows'])
+  expect(w.asks.map(q => q.header)).toEqual(['🎚️ Nudge at', '🎛️ The bar', '🤖 Auto mode', '⏱️ Idle time', '📱 RC clear', 'Last light', '⏳ Limits', '⏳ Trigger %', '⏳ Windows'])
   expect(pluginSubmits(w)).toEqual([])
   // Labels only: nothing for AskUserQuestion to draw on a second line.
   expect(w.asks.flatMap(q => q.descriptions).every(d => d === '')).toBe(true)
   expect(w.asks[0]?.options).toEqual(['25%', '35% (Recommended)', '50%', TELL])
   expect(w.asks.at(-1)?.multiSelect).toBe(true)
-  expect(w.store.get('settings')).toMatchObject({ nudgeAt: 50, bar: false, auto: true, idleMin: 15, lastLight: false, limits: true, limitPct: 97, limitWindows: ['seven_day'] })
+  expect(w.store.get('settings')).toMatchObject({ nudgeAt: 50, bar: false, auto: true, idleMin: 15, rcAutoClear: 'no', lastLight: false, limits: true, limitPct: 97, limitWindows: ['seven_day'] })
   expect(w.notices).toContain(SAVED)
 })
 
@@ -131,39 +131,36 @@ async function armOnPhone($: never, w: ReturnType<typeof world>) {
 }
 
 const rcAsks = (w: ReturnType<typeof world>) => w.asks.filter(q => q.header === STEPS.rc.header)
+const HINT = '📱 Auto-clear also runs on the phone — /vigil-setup rc to change'
 
-test('the RC question is asked once, when auto mode would first arm on the phone', async ($, on) => {
+test('unset RC answer on the phone with auto on: never asks, one hint, and the clear runs the safeguarded countdown', async ($, on) => {
   const w = world(on, { store: { settings: { auto: true } } })
   await armOnPhone($ as never, w)
-  expect(w.notices).toContain('📱 First Remote Control session with auto mode — one quick question about auto-clear')
-  expect(rcAsks(w)).toHaveLength(1)
+  expect(rcAsks(w)).toEqual([])
+  expect(w.asks).toEqual([])
   expect(pluginSubmits(w)).toEqual([])
-  await $.prompt.submit(human('back', 'bridge'))
+  expect(w.notices.filter(n => n === HINT)).toHaveLength(1)
   await w.clock.advance(31 * MIN)
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'ls' } as never)
   await w.clock.settle()
-  expect(rcAsks(w)).toHaveLength(1)
-})
-
-test('the RC question is not asked again after a /clear', async ($, on) => {
-  const w = world(on, { store: { settings: { auto: true } } })
-  await armOnPhone($ as never, w)
-  expect(rcAsks(w)).toHaveLength(1)
-  w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
-  await $.prompt.submit(human('back', 'bridge'))
-  await w.clock.advance(31 * MIN)
-  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'ls' } as never)
+  expect(w.notices.filter(n => n === HINT)).toHaveLength(1)   // once per session
+  await $.session.measure({ context: { window: 1_000_000, percent: 20 }, rateLimits: [], changed: ['context'] as never })
+  await $.session.measure({ context: { window: 1_000_000, percent: 36 }, rateLimits: [], changed: ['context'] as never })
   await w.clock.settle()
-  expect(rcAsks(w)).toHaveLength(1)
+  await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never)
+  await w.clock.settle()
+  expect(w.notices).toContain('🧹 Handing over in 30 s — send anything to cancel')
+  expect(w.commands).not.toContain('clear')
+  await w.clock.advance(30_000)
+  expect(w.commands).toContain('clear')
+  expect(rcAsks(w)).toEqual([])
 })
 
-test('RC answered Yes: saved, and the unattended clear on the phone goes through the countdown', async ($, on) => {
-  const w = world(on, { store: { settings: { auto: true } } })
-  w.askReply.value = byHeader({ [STEPS.rc.header]: 'Yes' })
+test('RC answered Yes in setup: no hint, and the unattended clear on the phone goes through the countdown', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
   await armOnPhone($ as never, w)
-  expect(w.store.get('settings')).toMatchObject({ rcAutoClear: 'yes' })
-  await w.clock.advance(31 * MIN)                // answering was presence: wait out the idle window
+  expect(w.notices).not.toContain(HINT)
+  await w.clock.advance(31 * MIN)
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b3', command: 'ls' } as never)
   await $.session.measure({ context: { window: 1_000_000, percent: 20 }, rateLimits: [], changed: ['context'] as never })
   await $.session.measure({ context: { window: 1_000_000, percent: 36 }, rateLimits: [], changed: ['context'] as never })
@@ -175,28 +172,18 @@ test('RC answered Yes: saved, and the unattended clear on the phone goes through
   expect(w.commands).toContain('clear')
 })
 
+test('/vigil-setup rc still asks the phone question explicitly, and saves it', async ($, on) => {
+  const w = world(on)
+  w.askReply.value = byHeader({ [STEPS.rc.header]: 'Yes (Recommended)' })
+  await $.session.start(START)
+  await $.command.run(setup('rc'))
+  await w.clock.settle()
+  expect(rcAsks(w)).toHaveLength(1)
+  expect(w.store.get('settings')).toMatchObject({ rcAutoClear: 'yes' })
+})
+
 const at = (percent: number) => ({ context: { window: 1_000_000, percent }, rateLimits: [], changed: ['context'] as never })
 const handWritten = { tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never
-
-// R1-03: an answered question is the person being here.
-test('R1-03: answering Yes to a parked unattended clear offers it, never runs it', async ($, on) => {
-  const w = world(on, { store: { settings: { auto: true } } })
-  w.askHold.held = true                           // the RC dialog stays open until answered below
-  await armOnPhone($ as never, w)
-  expect(rcAsks(w)).toHaveLength(1)
-  await $.session.measure(at(20))
-  await $.session.measure(at(36))
-  await w.clock.settle()
-  await $.tool.call(handWritten)
-  await w.clock.settle()
-  expect(w.notices).toContain('📱 Handover saved — auto-clear in Remote Control is not switched on (/vigil-setup rc)')
-  w.notices.length = 0
-  w.askHold.waiting[0]?.('Yes')
-  await w.clock.advance(31_000)
-  expect(w.commands).not.toContain('clear')
-  expect(w.state.get('context-vigil-mod.mode')).toBe('attended')
-  expect(w.notices.some(n => n.includes('A handover is waiting'))).toBe(true)
-})
 
 test('R1-03: any answered AskUserQuestion counts as presence, the mod asked it or not', async ($, on) => {
   const w = world(on, { store: { settings: { auto: true } } })
@@ -208,11 +195,10 @@ test('R1-03: any answered AskUserQuestion counts as presence, the mod asked it o
   expect(w.state.get('context-vigil-mod.mode')).toBe('attended')
 })
 
-test('RC answered No: saved, and the unattended clear on the phone never runs', async ($, on) => {
-  const w = world(on, { store: { settings: { auto: true } } })
-  w.askReply.value = byHeader({ [STEPS.rc.header]: 'No (Recommended)' })
+test('RC answered No in setup: no hint, and the unattended clear on the phone never runs', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'no' } } })
   await armOnPhone($ as never, w)
-  expect(w.store.get('settings')).toMatchObject({ rcAutoClear: 'no' })
+  expect(w.notices).not.toContain(HINT)
   await w.clock.advance(31 * MIN)                // answering was presence: wait out the idle window
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b3', command: 'ls' } as never)
   await $.session.measure({ context: { window: 1_000_000, percent: 20 }, rateLimits: [], changed: ['context'] as never })
@@ -290,17 +276,18 @@ test('R1-06: answering a step keeps what another session changed', async ($, on)
   expect(w.store.get('settings')).toMatchObject({ nudgeAt: 50, auto: false, rcAutoClear: 'yes' })
 })
 
-test('R1-21: with classic active, the RC question is never asked', async ($, on) => {
+test('R1-21: with classic active, the RC hint is never shown and nothing is asked', async ($, on) => {
   const classic = JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"/s/context-vigil/scripts/context-vigil" hook stop' }] }] } })
   const w = world(on, { store: { settings: { auto: true } }, files: { '/cfg/settings.json': classic } })
   await armOnPhone($ as never, w)
   expect(pluginSubmits(w)).toEqual([])   // 'go' is the test's own prompt
-  expect(rcAsks(w)).toEqual([])
-  expect(w.notices).not.toContain('📱 First Remote Control session with auto mode — one quick question about auto-clear')
+  expect(w.asks).toEqual([])
+  expect(w.notices).not.toContain(HINT)
 })
 
-test('R1-21: while the usage limit is latched, the RC question is not asked', async ($, on) => {
+test('R1-21: while the usage limit is latched, the RC hint is not shown', async ($, on) => {
   const w = world(on, { now: 1_000_000, store: { settings: { auto: true }, latch: { kind: 'five_hour', resetsAtMs: 1_000_000 + 10 * 3_600_000 } } })
   await armOnPhone($ as never, w)
-  expect(rcAsks(w)).toHaveLength(0)
+  expect(w.asks).toEqual([])
+  expect(w.notices).not.toContain(HINT)
 })

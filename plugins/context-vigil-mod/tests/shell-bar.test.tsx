@@ -360,9 +360,8 @@ test('RC countdown: a hot reload mid-countdown never clears; the handover is off
   expect(w.state.get('context-vigil-mod.countdownEndsAt')).toBeNull()
 })
 
-for (const rcAutoClear of ['no', 'unanswered'] as const) {
-  test(`RC ${rcAutoClear}: a hot reload never runs the parked unattended clear; it offers the handover`, async ($, on) => {
-    const w = world(on, { store: { settings: { auto: true, rcAutoClear } } })
+  test('RC no: a hot reload never runs the parked unattended clear; it offers the handover', async ($, on) => {
+    const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'no' } } })
     await countdownSession($, w)
     expect(w.commands).not.toContain('clear')
     w.notices.length = 0
@@ -371,7 +370,6 @@ for (const rcAutoClear of ['no', 'unanswered'] as const) {
     expect(w.commands).not.toContain('clear')
     expect(w.notices).toContain(OFFER)
   })
-}
 
 // The phone facts (last human origin, last bridge prompt) must survive a hot reload, or a later
 // unattended clear skips the whole RC gate.
@@ -385,9 +383,8 @@ async function autoHandoverAfter($: Engine, w: World) {
   await w.clock.advance(60_000)
 }
 
-for (const rcAutoClear of ['no', 'unanswered'] as const) {
-  test(`RC ${rcAutoClear}: a new unattended handover after a reload still meets the RC gate`, async ($, on) => {
-    const w = world(on, { store: { settings: { auto: true, rcAutoClear } } })
+  test('RC no: a new unattended handover after a reload still meets the RC gate', async ($, on) => {
+    const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'no' } } })
     await $.session.start(START)
     await $.prompt.submit(human('go', 'bridge'))
     await $.session.start(START)          // the reload
@@ -396,8 +393,8 @@ for (const rcAutoClear of ['no', 'unanswered'] as const) {
     expect(w.commands).not.toContain('clear')
   })
 
-  test(`RC ${rcAutoClear}: a deferred handover drained by the latch still meets the RC gate`, async ($, on) => {
-    const w = world(on, { now: 1_000_000, store: { settings: { auto: true, rcAutoClear }, latch: { kind: 'five_hour', resetsAtMs: 1_000_000 + 60 * MIN } } })
+  test('RC no: a deferred handover drained by the latch still meets the RC gate', async ($, on) => {
+    const w = world(on, { now: 1_000_000, store: { settings: { auto: true, rcAutoClear: 'no' }, latch: { kind: 'five_hour', resetsAtMs: 1_000_000 + 60 * MIN } } })
     await $.session.start(START)
     await $.prompt.submit(human('go', 'bridge'))
     await w.clock.advance(31 * MIN)
@@ -414,7 +411,18 @@ for (const rcAutoClear of ['no', 'unanswered'] as const) {
     await w.clock.advance(60_000)
     expect(w.commands).not.toContain('clear')
   })
-}
+
+test('RC unanswered: after a reload the phone is still on the countdown path, never a bare clear', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go', 'bridge'))
+  await $.session.start(START)          // the reload
+  await autoHandoverAfter($, w)
+  expect(w.submits.some(s => s.text.includes(TOOL))).toBe(true)
+  expect(w.notices).toContain('🧹 Handing over in 30 s — send anything to cancel')
+  await w.clock.advance(30_000)
+  expect(w.commands).toContain('clear')
+})
 
 test('the phone facts cross a clear and a reload after it', async ($, on) => {
   const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'no' } } })
