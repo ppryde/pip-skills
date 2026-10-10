@@ -92,6 +92,29 @@ When two reviewers suggest incompatible fixes for the same code location, Reckon
 
 ---
 
+## Auto-approve hook
+
+The plugin ships a `PreToolUse` hook (`hooks/allow_gh.py`) that pre-approves the exact `gh` commands Reckoning runs, so a triage does not stop at a permission prompt for every read. It only ever *allows*; for anything it does not recognise it stays silent and you get the normal prompt (your own allow and deny rules are untouched).
+
+**Policy**
+
+- The command is parsed, not pattern-matched: a strict shell-word subset (plain words and simple quotes only) is tokenised, and the resulting argv must match an allowlisted `gh` shape. Pipes, `;`, `&&`, redirects, `$(...)`, backticks, globs and anything else shell-like are declined.
+- Allowed: `gh auth status`; `gh repo view`, `gh pr view`, `gh pr list` with a short list of read-only flags (`--json`, `-q`/`--jq`, `-R`/`--repo`, `--head`, `--state`, `--limit`); `gh pr checkout <number>` (digits only, no flags); and `gh api` for read-only GETs of `repos/{owner}/{repo}/{pulls,issues,commits,contents}/...` (no `-X`, `-f`, `-F`, `-d`, `--input`, `-H` or `--hostname`).
+- Two exact GraphQL documents are allowed: the review-thread query (`hooks/queries/threads.graphql`) and the single-thread `resolveReviewThread` mutation. Documents are compared token by token, so spacing does not matter but an extra field, alias or second mutation does.
+- Unknown flags, `--`, flag-like values, `--web`, `--show-token` and `--jq` expressions that read the environment (`$ENV`, `env`, `input_filename`, `$__loc__`) are declined.
+- `git` commands are never auto-approved.
+
+**Requirements.** `python3` must be on `PATH`. Without it (for example on Windows) the hook exits silently and every command simply prompts as usual.
+
+**Fallback.** If you disable the hook, these read-only rules in `permissions.allow` cover most of a triage (the resolve mutation will then prompt, which is fine). Prefix rules cannot constrain flags, so they are a weaker policy than the hook:
+
+```json
+"Bash(gh auth status)", "Bash(gh repo view:*)", "Bash(gh pr view:*)", "Bash(gh pr list:*)",
+"Bash(gh api repos/:*)"
+```
+
+The hook's tests live in `tests/tribunal` and include a differential check of the tokeniser against real bash and zsh.
+
 ## Voice
 
 The Witchfinder presides over the review with formal precision and a knowing wink. PR comments are testimonies. Fixes are penance. A fully resolved PR means the soul is clean.
