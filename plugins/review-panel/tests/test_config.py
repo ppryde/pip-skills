@@ -94,3 +94,61 @@ def test_load_config_non_mapping_root_raises(tmp_path):
     bad.write_text("- a\n- b")
     with pytest.raises(ConfigError):
         load_config(bad)
+
+
+_PROFILE = {"profiles": {"p": {"reviewers": {"general": "strict"}}}}
+
+
+def _cfg(**spec):
+    return {"profiles": {"p": {"reviewers": {"general": "strict"}, **spec}}}
+
+
+@pytest.mark.parametrize("bad", ["/etc/x", "~/x", "../x", "a/../../x"])
+def test_output_file_rejects_escaping_paths(bad):
+    cfg = {**_PROFILE, "output": {"file": bad}}
+    with pytest.raises(ConfigError):
+        resolve_profile(cfg, "p")
+    with pytest.raises(ConfigError):
+        resolve_adhoc(cfg, ["general"])
+
+
+def test_output_file_default_accepted():
+    assert resolve_profile(_PROFILE, "p").output_file == ".review-panel/last-review.md"
+
+
+def test_context_entries_reject_escaping_paths():
+    with pytest.raises(ConfigError):
+        resolve_profile(_cfg(context=["/etc/passwd"]), "p")
+    with pytest.raises(ConfigError):
+        resolve_profile(_cfg(context=["../secret.md"]), "p")
+    assert resolve_profile(_cfg(context=["docs/spec.md"]), "p").context == ("docs/spec.md",)
+
+
+@pytest.mark.parametrize("key", ["../x", "a/b", "clone:../x", "clone:a/b", "-x", ".hidden"])
+def test_reviewer_key_rejects_hostile_names(key):
+    with pytest.raises(ConfigError):
+        parse_reviewer_key(key, "strict")
+
+
+def test_reviewer_key_accepts_normal_names():
+    assert parse_reviewer_key("clone:dan.vk-2", "strict").name == "dan.vk-2"
+    assert parse_reviewer_key("my_rev", "strict").name == "my_rev"
+
+
+def test_targets_string_is_one_item_not_characters():
+    assert resolve_profile(_cfg(targets="src/**"), "p").targets == ("src/**",)
+
+
+def test_targets_non_list_rejected():
+    with pytest.raises(ConfigError):
+        resolve_profile(_cfg(targets={"a": 1}), "p")
+
+
+def test_profile_not_a_mapping_rejected():
+    with pytest.raises(ConfigError):
+        resolve_profile({"profiles": {"p": ["general"]}}, "p")
+
+
+def test_none_strictness_rejected_clearly():
+    with pytest.raises(ConfigError, match="strictness"):
+        resolve_profile({"profiles": {"p": {"reviewers": {"general": None}}}}, "p")

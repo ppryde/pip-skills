@@ -2,6 +2,7 @@
 collation and neutral-voice report rendering."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 VALID_SEVERITY = ("error", "warning", "info")
@@ -62,6 +63,19 @@ def collate(findings: list[Finding]) -> dict:
     return grouped
 
 
+def _one_line(text: object) -> str:
+    return " ".join(str(text).split())
+
+
+def _code_span(text: object) -> str:
+    """A markdown code span that survives backticks and newlines in text."""
+    t = _one_line(text)
+    longest = max((len(m) for m in re.findall(r"`+", t)), default=0)
+    fence = "`" * (longest + 1)
+    pad = " " if t.startswith("`") or t.endswith("`") else ""
+    return f"{fence}{pad}{t}{pad}{fence}"
+
+
 def _counts(findings: list[Finding]) -> str:
     tally = {s: 0 for s in VALID_SEVERITY}
     for f in findings:
@@ -86,9 +100,9 @@ def render_report(collated: dict, meta: dict) -> str:
             for f in by_sev[sev]:
                 loc = f"{f.file}:{f.line}" if f.line is not None else f.file
                 verdict = f" _({f.verdict})_" if f.verdict else ""
-                lines.append(f"- **[{f.id}] {sev}**{verdict} — {f.rule} — `{loc}`")
-                lines.append(f"  - found: `{f.actual}`")
-                lines.append(f"  - fix: {f.suggestion}")
+                lines.append(f"- **[{f.id}] {sev}**{verdict} — {_one_line(f.rule)} — {_code_span(loc)}")
+                lines.append(f"  - found: {_code_span(f.actual)}")
+                lines.append(f"  - fix: {_one_line(f.suggestion)}")
                 if f.citation:
                     lines.append(f"  - citation: {f.citation}")
         lines.append("")

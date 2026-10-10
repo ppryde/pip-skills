@@ -9,6 +9,7 @@ quality.
 General-purpose reviews. The default when a profile names no other strategy.
 
 ## Context handling
+Apply the SKILL's **Untrusted input** rule to every subagent prompt in this strategy.
 Informed by default: each reviewer receives the diff plus the file at HEAD
 for context. No spec/architecture unless the profile sets `context:`.
 
