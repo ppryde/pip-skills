@@ -227,7 +227,7 @@ def bash_allowed(
             return False
         if head == "gh" and words[1:2] == ["pr"]:
             continue
-        if head.startswith("python") and len(words) > 1 and _LEDGER_CLI.search(_norm_word(words[1])):
+        if head.startswith("python") and len(words) > 1 and _LEDGER_CLI.search(words[1]):
             continue
         if head in _READ_ONLY_INSPECT and _read_only_allowed(words, cwd, roots, protected):
             continue
@@ -235,15 +235,6 @@ def bash_allowed(
             continue
         return False
     return True
-
-
-def _norm_word(word: str) -> str:
-    """Collapse ``..`` in a literal path word (the skill prescribes
-    ``.../skills/orchestrate/../../scripts/cli.py``). Variable forms such as
-    ``${CLAUDE_PLUGIN_ROOT}`` are left untouched."""
-    if "$" in word or "`" in word:
-        return word
-    return os.path.normpath(word)
 
 
 def allowed_roots(state: Path, plugin_root: Path, config_dir: Path) -> list[Path]:

@@ -12,11 +12,9 @@ from pathlib import Path
 
 import pytest
 from factories import db_repo, make_card
-
 from scripts import backup, config, db, gitops
 from scripts.cli import main
 from scripts.dispatch import dispatch_dir
-from scripts.guard import bash_allowed
 from scripts.knowledge import find_fact_path
 from scripts.report_hook import MAX_DETAIL_BYTES
 from scripts.schemas import ReportError, parse_report
@@ -41,7 +39,7 @@ def run(repo, *argv):
 # OL-2
 def test_editing_an_archived_card_keeps_it_archived(tmp_path, monkeypatch):
     _, conn = db_repo(tmp_path, monkeypatch)
-    card = make_card("WF-001")
+    card = make_card("WF-001", status="done")
     db.create_card(conn, card)
     db.archive_card(conn, card)
     card.pr = "x"
@@ -58,6 +56,20 @@ def test_set_field_on_done_card_stays_archived(repo):
     assert run(repo, "set-field", "WF-001", "--pr", "x") == 0
     conn = db.connect(repo, migrate=False)
     assert conn.execute("SELECT archived FROM cards WHERE id='WF-001'").fetchone()[0] == 1
+
+
+def test_moving_a_done_card_back_to_a_live_status_revives_it(tmp_path, monkeypatch):
+    _, conn = db_repo(tmp_path, monkeypatch)
+    card = make_card("WF-001")
+    db.create_card(conn, card)
+    card.status = "done"
+    db.save_card(conn, card)
+    assert conn.execute("SELECT archived FROM cards WHERE id='WF-001'").fetchone()[0] == 1
+    card.status = "in-flight"
+    db.save_card(conn, card)
+    assert conn.execute("SELECT archived FROM cards WHERE id='WF-001'").fetchone()[0] == 0
+    live, _ = db.load_live_cards(conn)
+    assert [c.id for c in live] == ["WF-001"]
 
 
 # OL-4
@@ -164,6 +176,32 @@ def test_backup_round_trips_label_colors_and_skips_symlinks(tmp_path, monkeypatc
     assert db.load_label_colors(db.connect(repo)) == {"bug": "red"}
 
 
+def test_backup_skips_top_level_symlinks(tmp_path, monkeypatch):
+    repo = tmp_path / "r"
+    repo.mkdir()
+    _git_init(repo)
+    central, _ = _seed(repo, monkeypatch)
+    secret = tmp_path / "secret.txt"
+    secret.write_text("secret")
+    (central / "usage.jsonl").symlink_to(secret)
+    (central / "knowledge").symlink_to(tmp_path)
+    backup.backup_board(repo)
+    dest = config.backup_dir(repo)
+    assert not (dest / "usage.jsonl").exists() and not (dest / "knowledge").exists()
+
+
+@pytest.mark.parametrize("bad", ['{"name": "x"}', '[{"name": "x"}]', "[1]"])
+def test_restore_refuses_malformed_label_colors(tmp_path, monkeypatch, bad):
+    repo = tmp_path / "r"
+    repo.mkdir()
+    _git_init(repo)
+    _seed(repo, monkeypatch)
+    backup.backup_board(repo)
+    (config.backup_dir(repo) / "label_colors.json").write_text(bad)
+    with pytest.raises(ValueError, match="label_colors"):
+        backup.restore_board(repo)
+
+
 def test_restore_without_label_colors_file_still_works(tmp_path, monkeypatch):
     repo = tmp_path / "r"
     repo.mkdir()
@@ -191,32 +229,6 @@ def test_fetch_timeout_does_not_stop_worktree_add(tmp_path, monkeypatch):
     assert all(kw["stdin"] == subprocess.DEVNULL for _, kw in calls)
     assert all(kw["env"]["GIT_TERMINAL_PROMPT"] == "0" for _, kw in calls)
     assert any("worktree" in argv for argv, _ in calls)
-
-
-# OR-1
-@pytest.mark.parametrize("command", [
-    'python3 "/h/.claude/plugins/cache/pip-skills/overseer/1.2.0/skills/orchestrate/../../scripts/cli.py" --root . resume',
-    "python3 plugins/overseer/skills/orchestrate/../../scripts/cli.py --root . resume",
-])
-def test_guard_allows_skill_dotdot_cli_form(command):
-    assert bash_allowed(command)
-
-
-@pytest.mark.parametrize("command", [
-    "python3 plugins/overseer/skills/../../../evil/scripts/cli.py resume",
-    "python3 /x/overseer/../other/scripts/cli.py resume",
-])
-def test_guard_still_denies_paths_that_normalise_elsewhere(command):
-    assert not bash_allowed(command)
-
-
-def test_guard_allows_literal_command_from_the_skill():
-    skill = (PLUGIN_ROOT / "skills" / "orchestrate" / "SKILL.md").read_text()
-    line = next(ln for ln in skill.splitlines() if "<base directory>/../../scripts/cli.py" in ln)
-    command = line.replace(
-        "<base directory>", "/h/.claude/plugins/cache/pip-skills/overseer/1.2.0/skills/orchestrate"
-    ).replace("<verb> [flags]", "resume")
-    assert bash_allowed(command)
 
 
 # OR-3

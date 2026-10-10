@@ -95,6 +95,8 @@ def backup_board(repo_root: Path, dest: Path | None = None) -> dict:
         sprint_files = fact_files = usage_lines = 0
         for name in _COPY_STATE:
             src = central / name
+            if src.is_symlink():
+                continue
             if src.is_dir():
                 shutil.copytree(src, staged / name, symlinks=True)
                 for link in [x for x in (staged / name).rglob("*") if x.is_symlink()]:
@@ -206,7 +208,14 @@ def restore_board(repo_root: Path, src: Path | None = None) -> dict:
             db.set_meta(conn, m["key"], m["value"])
     colors_path = src / "label_colors.json"
     if colors_path.exists():  # absent in older backups
-        for lc in _load_json_or_raise(colors_path):
+        colors = _load_json_or_raise(colors_path)
+        if not isinstance(colors, list) or not all(
+            isinstance(c, dict) and isinstance(c.get("name"), str)
+            and isinstance(c.get("color_key"), str) for c in colors
+        ):
+            raise ValueError(
+                f"{colors_path}: expected a list of objects with name and color_key")
+        for lc in colors:
             conn.execute(
                 "INSERT OR IGNORE INTO label_colors (name, color_key) VALUES (?, ?)",
                 (lc["name"], lc["color_key"]))

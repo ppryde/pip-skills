@@ -396,14 +396,12 @@ def row_to_card(row: sqlite3.Row) -> Card:
     )
 
 
-def _upsert(conn: sqlite3.Connection, card: Card, archived: int, *, commit: bool = True,
-            update_archived: bool = True) -> None:
+def _upsert(conn: sqlite3.Connection, card: Card, archived: int, *, commit: bool = True) -> None:
     params = card_to_params(card)
     params["archived"] = archived
     cols = ", ".join(f'"{c}"' for c in params)
     ph = ", ".join(f":{c}" for c in params)
-    skip = {"id"} if update_archived else {"id", "archived"}
-    updates = ", ".join(f'"{c}" = excluded."{c}"' for c in params if c not in skip)
+    updates = ", ".join(f'"{c}" = excluded."{c}"' for c in params if c != "id")
     conn.execute(
         f"INSERT INTO cards ({cols}) VALUES ({ph}) "
         f"ON CONFLICT(id) DO UPDATE SET {updates}",
@@ -414,10 +412,10 @@ def _upsert(conn: sqlite3.Connection, card: Card, archived: int, *, commit: bool
 
 
 def save_card(conn: sqlite3.Connection, card: Card) -> None:
-    """Insert or update a card. A new row is live (archived=0); an existing
-    row keeps its archived flag, so editing a done/abandoned card does not
-    un-archive it (use ``archive_card`` to archive)."""
-    _upsert(conn, card, archived=0, update_archived=False)
+    """Insert or update a card. ``archived`` follows status: 1 only for done
+    and abandoned, so editing a finished card's fields keeps it archived while
+    moving it back to a live stage revives it."""
+    _upsert(conn, card, archived=1 if card.status in ("done", "abandoned") else 0)
 
 
 def create_card(conn: sqlite3.Connection, card: Card) -> None:
