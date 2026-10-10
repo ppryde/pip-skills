@@ -41,4 +41,7 @@ Neutral, professional, direct. State the problem, the location, and the fix.
 No praise sandwiching; no persona flavour.
 
 ## Allowed exceptions
-- `GEN-008` and `GEN-010` are already at `info` — the lowest severity tier — so they never block under any strictness level. Strictness only ever lowers severity (`error` becomes `warning`); `info` and `warning` findings keep their tier. (Listed here for authoring clarity; no pragmatic downgrade applies to an `info` finding.)
+Nothing is excused. `GEN-008` and `GEN-010` are already at `info`, the lowest tier, and strictness only ever lowers severity (`error` becomes `warning`), so there is nothing for a pragmatic downgrade to act on.
+
+```allowed-exceptions
+```

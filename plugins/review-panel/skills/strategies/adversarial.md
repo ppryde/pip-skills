@@ -14,11 +14,11 @@ check each finding against reality.
 
 ## Stages
 1. **Reviewers (parallel).** As committee — one subagent per seated reviewer, `model: sonnet`. Output: candidate findings.
-2. **Critic (per finding).** One `model: sonnet` subagent per finding, prompted to REFUTE it (default to refuted when uncertain). Output: `{verdict: confirmed|refuted|weakened, reason}`.
-3. **Judge (orchestrator, no subagent).** Apply each critic verdict: keep `confirmed`, drop `refuted`, downgrade `weakened` one severity step. Attach the reason to each surviving finding.
+2. **Critic (batched).** Run `cli.py parse` over the reviewers' payloads to get each finding's `fingerprint`, and drop exact duplicates (same file, line window and rule). Group the rest by file and send up to 10 findings per `model: sonnet` critic call, at most 8 critic calls per review; findings past the cap get no verdict and are counted as `unverified`. Prompt: "REFUTE each finding; Read the cited file; if uncertain return `weakened`, not `refuted`." Output, keyed by fingerprint: `{"<fingerprint>": {"verdict": "confirmed|refuted|weakened", "reason": "..."}}`, written to a verdicts file.
+3. **Judge (orchestrator, no subagent).** Run `cli.py reconcile --verdicts <file> --require-verdicts`. Code keeps `confirmed`, lists `refuted` findings in the report's Refuted section, lowers `weakened` one severity step, and keeps (and notes) any finding with no verdict.
 
 ## Reconciliation
-The judged set (confirmed findings plus downgraded-weakened ones) is collated, then strictness and decisions overrides are applied.
+Run `reconcile --verdicts <critic verdicts> --require-verdicts` (SKILL Step 5).
 
 ## Cost
-Highest: N reviewers + one critic per candidate finding.
+High: N reviewers plus at most 8 critic calls (about one per 10 findings).

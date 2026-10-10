@@ -10,32 +10,37 @@ Run a composable code review. A review = a **strategy** (how to orchestrate)
 `.review-panel/config.yml`. Neutral voice throughout.
 
 The deterministic pieces live in `../../scripts/` (config resolution,
-discovery, finding contract, strictness, persona reading). They need PyYAML
-(pinned in `${CLAUDE_PLUGIN_ROOT}/requirements.txt`; install with
+discovery, finding contract, verdicts, strictness, persona reading). They need
+PyYAML (pinned in `${CLAUDE_PLUGIN_ROOT}/requirements.txt`; install with
 `pip install -r ${CLAUDE_PLUGIN_ROOT}/requirements.txt` if `import yaml`
-fails). Run them with the plugin root on the path:
-`PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" python3 -c '...'`. This SKILL owns the
-parts that need git, a live model, or `gh`.
+fails). Run them through the one CLI, which needs no `PYTHONPATH`:
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" <resolve|parse|match|reconcile|report> ...`
+(JSON out; the module docstring of `scripts/cli.py` has each command's flags
+and shapes). Findings and verdicts travel in files you write with the Write
+tool, never in arguments. This SKILL owns the parts that need git, a live
+model, or `gh`.
 
 ## Step 0 — Parse arguments
 
 `$ARGUMENTS` may be: empty · a profile name · a profile + `full`/`interactive`/
 `inline` · one or more reviewer keys · `reviewers` · `strategies`.
 
-- `reviewers` → list `available_reviewers(../reviewers/)` (built-in reviewers + `clone:<alias>` personas) and stop.
-- `strategies` → list `discover_strategies(../strategies/)` and stop.
+- `reviewers` → `cli.py resolve --list reviewers` (built-in reviewers + `clone:<alias>` personas) and stop.
+- `strategies` → `cli.py resolve --list strategies` and stop.
 
 ## Step 1 — Resolve the review
 
-Load `.review-panel/config.yml`. If it is missing, offer to seed it from
-`../../templates/config.yml`, then stop.
+Run `cli.py resolve` (config defaults to `.review-panel/config.yml`). Status
+`config-missing` → offer to seed it from `../../templates/config.yml`, then
+stop.
 
-- Profile form → `resolve_profile(config, <name or None>)`.
-- Ad-hoc reviewer form → `resolve_adhoc(config, [<keys>])`.
+- Profile form → `resolve [--profile <name>]` (no name = the default profile).
+- Ad-hoc reviewer form → `resolve --reviewer <key> [--reviewer <key> ...]`.
 
-A trailing `full` sets scope to `full`; `interactive`/`inline` overrides the
-output mode. You now have a `ResolvedReview`: strategy, scope, targets,
-reviewers, context, output.
+A trailing `full` becomes `--scope full`; `interactive`/`inline` becomes
+`--output <mode>`. The `review` object is the resolved review: strategy,
+scope, targets, reviewers (each with its strictness), context, output,
+output_file.
 
 ## Step 2 — Determine scope (the diff)
 
@@ -79,8 +84,14 @@ to GitHub.
 Dispatch per the strategy's stages. Each reviewer subagent returns the
 finding contract JSON (see `../../scripts/contract.py`): `reviewer`,
 `findings[]` with `id,file,line,rule,actual,severity,category,suggestion`
-(+ `citation` for clone reviewers), `clean_files`, `notes`. Clone findings
-use id `CLONE-<alias>-NNN`; built-in findings use the reviewer's prefix.
+(+ `citation` for clone reviewers), `clean_files`, `notes`. Also ask for an
+explicit `rule_id`: the ID from the reviewer's "What to look for" table (a
+clone reviewer gives its persona rule id if it has one, else omits it).
+Clone findings use id `CLONE-<alias>-NNN`; built-in findings use the
+reviewer's prefix. A malformed finding does not abort the review: `parse`
+and `reconcile` drop it with a `REJECTED <id>: <reason>` note. If the notes
+contain REJECTED, re-ask that subagent once for only those findings, then
+drop them.
 Set each finding's `reviewer` field to the reviewer's **bare name** — a
 built-in reviewer's name, or a clone persona's alias (i.e. `ReviewerRef.name`),
 never the `clone:` key. (Clone finding *ids* still use the `CLONE-<alias>-NNN`
@@ -88,22 +99,30 @@ form.)
 
 ## Step 5 — Reconcile, strictness, decisions
 
-Apply the strategy's reconciliation (adversarial critic/judge,
-dual-tiebreaker arbiter — these annotate each finding with a `verdict`; drop
-`refuted`, downgrade `weakened`). Then apply `apply_strictness(...)` using
-each reviewer's strictness and its "Allowed exceptions", and
-`apply_decisions(...)` from `.review-panel/decisions.yml` if present — load
-it with `load_decisions(path)` first (returns `{}` if the file is absent).
-The strictness and allowed-exception maps are keyed by this same bare
-`reviewer` name.
+Write the reviewers' payloads (a JSON list) to a temp file and run
+`cli.py reconcile --findings <file> --strictness <reviewer>=<level> ...`
+(one flag per resolved reviewer; add `--verdicts <file>` and
+`--require-verdicts` when the strategy produced critic/arbiter verdicts, and
+`--decisions .review-panel/decisions.yml` if that file exists). Code does the
+rest in a fixed order: verdicts (`refuted` dropped from the findings and
+listed in the report's Refuted section, `weakened` lowered one step, a
+missing verdict kept and noted), then strictness with each reviewer's
+`allowed-exceptions` block, then decisions (keyed by the finding's
+`fingerprint`; an old per-run-id key still matches, with a migrate note). The
+strictness and exception maps are keyed by the bare `reviewer` name. The
+output holds `findings`, `dropped`, `notes` and `counts`; mention any notes.
 
 ## Step 6 — Output
 
-- **report** (default) → `render_report(collate(findings), meta)`; print to
-  chat and write to `output.file` (default `.review-panel/last-review.md`,
-  available on the resolved review as `resolved.output_file`).
+- **report** (default) → save the `reconcile` output (`--out <tmp file>`),
+  then `cli.py report --reconciled <file> --strategy <s> --scope <s> --out
+  <output_file>`; it prints the report and writes `output.file` (default
+  `.review-panel/last-review.md`, `output_file` on the resolved review). Chat
+  gets the refuted count (`counts.refuted`); the file also lists each refuted
+  finding with its reason.
 - **interactive** → walk findings one at a time: fix / explain / skip /
-  accept-exception (accept writes an override into `.review-panel/decisions.yml`).
+  accept-exception (accept writes an override into `.review-panel/decisions.yml`, keyed by the
+  finding's `fingerprint`).
 - **inline** → confirmation-gated. Resolve the open PR
   (`gh pr view --json number`). If none, fall back to report. Preview the
   count, wait for an explicit yes, then post one batched review via
