@@ -50,7 +50,7 @@ as above, with the value from that list, never the raw text; then show the readi
 A style that is not on the list: say which two exist and change nothing.
 
 If the reading is empty or shows a shell error (the plugin root was not substituted),
-run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py"` yourself (the plugin root is
+run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}"` yourself (the plugin root is
 this command file's `../`) and print the result the same way. If it says "no census
 reading yet", add one line after the fence: census is fed by its status-line hook or by
 the census-mod mod, so a brand-new or headless session has none yet; if it never appears,

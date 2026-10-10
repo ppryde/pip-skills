@@ -1022,3 +1022,36 @@ def test_a_live_idle_session_is_still_idle():
     v = Vitals(now=NOW)
     vitals.apply_census(v, e)
     assert "idle" in vitals.render_compact(v).splitlines()[0]
+
+
+# ------------------------------------------------------- audit fixes (WF-153)
+
+
+@pytest.mark.parametrize(("with_transcript", "calls"), [(False, 0), (True, 1)])
+def test_gather_reads_the_transcript_only_when_asked(monkeypatch, with_transcript, calls):
+    seen = []
+    monkeypatch.setattr(vitals, "census_entry", lambda *_a: {"payload": {"transcript_path": "t.jsonl"}})
+    monkeypatch.setattr(vitals, "apply_transcript", lambda *_a: seen.append(1))
+    vitals.gather("s", ".", with_transcript=with_transcript)
+    assert len(seen) == calls
+
+
+def test_clip_neutralises_backticks_and_newlines():
+    out = vitals.clip("a`b\nc", 20)
+    assert "`" not in out and "\n" not in out
+    assert "`" not in vitals.lean_repo_line(lean(branch="x```y"))
+
+
+def test_a_repo_without_commits_is_not_called_a_non_repo():
+    v = Vitals(now=NOW)
+    v.dirty, v.branch, v.lines_added = 0, None, 3
+    assert "not a git repo" not in vitals.render_detailed(v)
+    assert "no commits yet" in vitals.render_detailed(v)
+    v.dirty = None
+    assert "not a git repo" in vitals.render_detailed(v)
+
+
+def test_detailed_liveness_warning_fits_a_phone(monkeypatch):
+    monkeypatch.setattr(vitals, "liveness", lambda _v: "x" * 80)
+    out = vitals.render_detailed(full_vitals())
+    assert max(width(line) for line in out.splitlines()) <= 44
