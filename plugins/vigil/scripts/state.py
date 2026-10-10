@@ -54,11 +54,24 @@ def rename_title_path(repo_root: Path) -> Path:
 
 
 def _sanitize_title(title: str) -> str | None:
-    """Collapse to a single line and cap length for a tmux window title."""
-    collapsed = " ".join(title.split())
+    """Collapse to a single line and cap length for a tmux window title.
+
+    Control characters are dropped and `#` is doubled so tmux does not
+    format-expand `#{...}` in the title; the cap never splits a `##` pair.
+    """
+    cleaned = "".join(ch for ch in title if ch.isprintable() or ch.isspace())
+    collapsed = " ".join(cleaned.split())
     if not collapsed:
         return None
-    return collapsed[:MAX_TITLE_LENGTH]
+    out: list[str] = []
+    length = 0
+    for ch in collapsed:
+        piece = "##" if ch == "#" else ch
+        if length + len(piece) > MAX_TITLE_LENGTH:
+            break
+        out.append(piece)
+        length += len(piece)
+    return "".join(out)
 
 
 def handoff_archive_dir(repo_root: Path) -> Path:

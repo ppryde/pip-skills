@@ -13,15 +13,19 @@ description: >
 
 Two jobs, one lifecycle: **measure** context accumulation, and **hand over**
 (reset + resume) before the window overflows. Vigil is self-contained — it needs
-no other plugin. State lives in `.claude/vigil/` in the working directory,
+no other plugin; if the census plugin is installed, ctx % is read from it
+(worktree-correct, more accurate), otherwise from the session transcript, which
+is a less reliable estimate. State lives in `.claude/vigil/` in the working directory,
 self-ignored via its own `.gitignore` — it never edits the repo's own.
 
-Drive it through the CLI (locate `cli.py` relative to this skill; when installed
-as a plugin the scripts live under the plugin root):
+Drive it through the `vigil` CLI (the plugin's `bin/` is on the Bash PATH;
+`--root` defaults to `.`):
 
 ```bash
-python .../scripts/cli.py --root . <command>
+vigil <command>
 ```
+
+Fallback if `vigil` is not found: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/cli.py <command>`.
 
 ## Begin the watch
 Run `begin` to activate vigil for this directory. It reports **auto** (under
@@ -36,11 +40,13 @@ it at natural stop points.
 
 ## Hand over — you decide, never a blind threshold
 Hand over when: (a) `ctx NN%` is over threshold AND you are at a clean stop
-point; (b) you finish a coherent unit of work; or (c) the user asks. Run:
+point; (b) `ctx NN%` is nearing the threshold and you have just finished a
+coherent unit of work; or (c) the user asks. Run:
 
 ```
 handover [--notes "the critical prose a fresh you must know"] \
-         [--content-file F | -] [--no-snapshot] [--title "short task name"]
+         [--content-file F | -] [--no-snapshot] [--title "short task name"] \
+         [--inline PATH]
 ```
 
 The handover document is assembled from a generic session snapshot (cwd, git
