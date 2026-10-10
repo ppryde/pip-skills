@@ -1,3 +1,11 @@
+---
+doctrine: liquid
+prefix: LIQ
+kind: language
+templating: liquid
+scribe: constraints
+---
+
 # Liquid — Email Doctrine
 
 ## Purpose
@@ -10,7 +18,7 @@ Rules and gotchas for engineers building transactional email templates with Liqu
 
 **[LIQ-001]** `transactional: mortal | marketing: mortal` — All output variables must use the `default` filter. `{{ first_name }}` renders as empty string when nil.
 > Without a default, a missing or nil variable silently produces "Hi ," in the email body. The `default` filter covers both `nil` values and absent keys. Source: Liquid Reference — Filters.
-> `detect: regex` — pattern: `\{\{[\s]*[a-zA-Z_][a-zA-Z0-9_.]*[\s]*\}\}` (output tag with no filter pipe)
+> `detect: regex` — pattern: `\{\{[\s]*[a-zA-Z_][a-zA-Z0-9_.]*[\s]*\}\}` — output tag with no filter pipe
 
 **[LIQ-002]** `transactional: mortal | marketing: mortal` — Use `{% for %}...{% else %}` to handle empty arrays. The `{% else %}` block renders when the array is nil or empty.
 > A `{% for %}` loop with no `{% else %}` leaves recipients with missing order rows, blank sections, or broken table structure when the array is empty. Always provide a fallback row or message.
@@ -54,6 +62,7 @@ Rules and gotchas for engineers building transactional email templates with Liqu
 
 **[LIQ-012]** `transactional: venial | marketing: venial` — In Klaviyo, use `{{ person.first_name }}` for profile properties and `{{ event.extra.property }}` for event properties.
 > Klaviyo's Liquid context exposes two namespaced objects: `person` (profile properties) and `event` (event payload). Raw `{{ first_name }}` is undefined in Klaviyo's context. Source: Klaviyo Developer Docs — Liquid Overview.
+> `applies: esp=klaviyo`
 > `detect: contextual` — if `stack.esp` is "klaviyo", check that variables use `person.` or `event.extra.` accessors
 
 **[LIQ-013]** `transactional: venial | marketing: venial` — Use `| truncate: 90, ""` without trailing ellipsis when building preheader text.
@@ -82,7 +91,8 @@ Rules and gotchas for engineers building transactional email templates with Liqu
 
 **[LIQ-019]** `transactional: venial | marketing: venial` — In Klaviyo, do not use raw variable names without an approved namespace prefix.
 > Klaviyo's Liquid context exposes only four top-level namespaces: `person` (profile properties), `event` (event payload — dynamic content accessed via `event.extra.*`), `organization` (account-level properties), and `unsubscribe_link`. Variable names like `{{ first_name }}`, `{{ email }}`, `{{ order_id }}`, `{{ customer.name }}`, or `{{ stats.revenue }}` are ALL undefined in Klaviyo and silently render as empty string. `{{ first_name }}` is correct in plain LiquidJS; `{{ customer.* }}` is correct in Shopify — neither works in Klaviyo. Source: Klaviyo Developer Docs — Liquid Overview.
-> `detect: regex` — (when `stack.esp` is "klaviyo") pattern: `\{\{[-\s]*(?!person\b|event\b|organization\b|unsubscribe_link\b)[a-zA-Z_][a-zA-Z0-9_.]*[-\s]*(?:\|[^}]*)?\}\}` — matches output tags whose root variable is not in the four approved Klaviyo namespaces
+> `applies: esp=klaviyo`
+> `detect: regex` — pattern: `\{\{[-\s]*(?!person\b|event\b|organization\b|unsubscribe_link\b)[a-zA-Z_][a-zA-Z0-9_.]*[-\s]*(?:\|[^}]*)?\}\}` — matches output tags whose root variable is not in the four approved Klaviyo namespaces
 
 ---
 
