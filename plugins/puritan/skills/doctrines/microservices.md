@@ -158,13 +158,13 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest a Microservices architecture is in use):
+Directory signals (counted by Covenant):
 - `services/` containing 3+ distinct named subdirectories each with their own `Dockerfile` (e.g. `services/orders/`, `services/payments/`, `services/shipping/`) — `services/` alone is not sufficient; Layered N-Tier and Modular Monolith apps also use it
 - `contracts/` or `api-specs/` — shared API definitions between independently deployed services
 - `shared-libraries/` or `libs/` — cross-service shared utilities under strict governance
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - `docker-compose.yml` at the root defining 3 or more independently named services
 - Per-service `Dockerfile` inside multiple directories at the same level
 - OpenAPI or Proto contract files (`*.proto`, `*.openapi.yml`, `*.swagger.json`) in a shared `contracts/` directory

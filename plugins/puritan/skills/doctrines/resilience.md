@@ -165,13 +165,13 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest Resilience patterns are in use):
+Directory signals (counted by Covenant):
 - `infrastructure/resilience/` — global resilience policy configuration
 - `clients/resilience/` or `gateways/resilience/` — per-client resilience wrapping
 - `services/*/integration/` — microservice integration points with external dependencies
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - Files named `*CircuitBreaker.*`, `*RetryPolicy.*`, or `*Bulkhead.*`
 - Files named `*Timeout.*` or `*RateLimiter.*` in infrastructure or client directories
 - Resilience library configuration: `resilience4j.yml`, `polly_config.*`, `pybreaker_config.*`, `hystrix.yml`

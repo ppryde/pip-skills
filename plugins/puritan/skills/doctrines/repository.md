@@ -175,14 +175,14 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest the Repository pattern is in use):
+Directory signals (counted by Covenant):
 - `repositories/` — dedicated directory for repository implementations (not just a `persistence/` catch-all)
 - `domain/repositories/` or `application/repositories/` — repository interfaces defined inside the domain or application layer
 - `tests/fakes/` or `tests/stubs/` — in-memory fake implementations indicating deliberate test-double strategy
 - `infrastructure/persistence/` alongside a separate `domain/` layer — adapter implementations separated from domain interfaces (bare `infrastructure/` alone is not sufficient; require the `persistence/` sub-path)
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - Files named `*Repository.*` in a persistence or infrastructure directory
 - Files named `Fake*Repository.*` or `InMemory*Repository.*` in a tests directory
 - Files named `Abstract*Repository.*` or `I*Repository.*` in a domain or application directory

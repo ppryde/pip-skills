@@ -6,328 +6,97 @@ disable-model-invocation: true
 
 # Scriptorium — Doctrine Writer
 
+Writes a new architecture doctrine, or updates an existing one, to `<plugin-root>/skills/doctrines/<pattern-name>.md`. The structure is `<plugin-root>/skills/doctrines/_template.md`, the single structural source: copy its sections, order and wording. `<plugin-root>` and doctrine discovery: `../_shared/config.md`.
+
 ## When NOT to Use
 
-- Auditing code against existing doctrines — use Inquisition
-- Planning which patterns to adopt — use Covenant
-- Documenting project-specific conventions (naming, folder structure) — put those in CLAUDE.md or a project README
-- The pattern is too niche for reusable rules (e.g. "how we use Redis in this one service") — that's project config, not a doctrine
+- Auditing code against existing doctrines: Inquisition
+- Planning which patterns to adopt: Covenant
+- Project conventions (naming, folder structure): CLAUDE.md or a project README
+- A pattern too niche for reusable rules ("how we use Redis in this one service"): that is project config, not a doctrine
 
 ## Common Mistakes
 
 | Mistake | Fix |
 |---------|-----|
-| Writing vague detection patterns | "Poor separation of concerns" is unauditable — write "Controller >200 LOC or >10 dependencies" |
-| Skipping the failure case research | Every doctrine needs at least one anti-pattern source — without it, rules lack grounding |
-| Too many violations per category | 3-8 per category — more than that is cognitive overload for the auditor |
-| Too few violations total | Aim for 20-50 rules — fewer means the doctrine is too shallow to be useful |
-| Forgetting allowed exceptions | Real patterns have pragmatic edge cases — undocumented exceptions become false positives |
-| Not claiming a unique ID prefix | Overlapping prefixes (e.g. two doctrines both using DDD-xxx) break audit reporting |
-| Writing rules that require runtime analysis | "What to scan for" must be detectable via grep/AST/regex — not "run the test suite and check" |
+| Vague detection patterns | "Poor separation of concerns" is unauditable; write "Controller >200 LOC or >10 dependencies" |
+| Skipping failure-case research | Every doctrine needs at least one anti-pattern source |
+| Too many or too few rules | 3-8 per category; 20-50 in total (fewer is too shallow to be useful) |
+| Forgetting allowed exceptions | Undocumented pragmatic edge cases become false positives |
+| Not claiming a unique ID prefix | Overlapping prefixes break audit reporting |
+| Rules that need runtime analysis | "What to scan for" must be detectable via grep/AST/regex |
 
-## Step 1: Identify the Pattern
+## Workflow
 
-Ask: What architectural pattern or principle needs a doctrine?
+### Step 1: Identify the Pattern
+Ask what architectural pattern or principle needs a doctrine (technical patterns such as CQRS or Saga, quality attributes, domain patterns such as Repository, infrastructure patterns such as Message Bus).
 
-Examples:
-- Technical patterns: CQRS, Hexagonal, Microservices, Saga
-- Quality attributes: Performance, Security, Testability
-- Domain patterns: Repository, Specification, Factory
-- Infrastructure patterns: Caching, Message Bus, API Gateway
+### Step 2: Research Authoritative Sources
+Search for: `"[pattern]" [original author]`; `"[pattern]" best practices <current year>`; `"[pattern]" anti-patterns common mistakes`; `"[pattern]" [language/framework]`. Minimum sources: 1 primary (original author or paper), 2 recognised practitioners, 1 failure case or anti-pattern article.
 
-## Step 2: Research Authoritative Sources
+**Cite only sources you actually fetched.** If you cannot fetch one (offline, blocked), mark the citation `(unverified)` or omit it. Never invent a URL, title or quote.
 
-Search for:
-1. `"[pattern name]" [original author]` — Find who invented/formalized it
-2. `"[pattern name]" best practices <current year>` — Current consensus (use the actual current year)
-3. `"[pattern name]" anti-patterns common mistakes` — What goes wrong
-4. `"[pattern name]" [language/framework]` — Language-specific adaptations
+### Step 3: Discover Existing Doctrines
+Read `<plugin-root>/skills/doctrines/INDEX.md` (generated; do not open doctrine files unless needed):
+1. Claimed ID prefixes and ranges come from the INDEX; do not rely on a hard-coded list
+2. Identify cross-reference opportunities; new doctrines should link to related existing ones
+3. If an existing doctrine already covers your pattern, update it instead
 
-Minimum required sources:
-- 1+ primary source (original author/paper)
-- 2+ recognized practitioners
-- 1+ failure case study or anti-pattern article
+**Cross-referencing:** reference doctrines that *should* pair with yours, even if they do not exist yet (use the filename they would have). Inquisition handles missing doctrines gracefully. List every referenced doctrine that does not exist under "Planned" in `doctrines/README.md`. After writing, check existing doctrines for stale or missing cross-references back to yours and update them. After adding or editing a doctrine, regenerate the INDEX: `python3 tools/build_index.py doctrines` (in the pip-skills repo).
 
-**Cite only sources you actually fetched.** If you cannot fetch a source (offline, blocked), mark the citation `(unverified)` or omit it. Never invent a URL, title or quote.
+### Step 4: Structure the Doctrine
+Use `_template.md` with ALL its sections, in order. Header: pattern name, a 1-2 sentence summary and a **Language Scope** declaration (`Language-agnostic`; `Language-specific: <language>`; or `Language-specific: <lang1>, <lang2>`). If language-specific, "What to scan for" must use that language's idioms explicitly. When to Use must include when NOT to use. Pros and Cons has 5+ rows. Applicable Directories use relative paths without `src/` (`domain/`, not `src/domain/`). Cross-references use **bold** with `.md` (`**ddd.md**`). Sources are grouped under bold labels.
 
-## Step 3: Discover Existing Doctrines
+### Step 5: Categorize Violations
+You SHOULD have 5-9 categories; fewer than 5 is too narrow, more than 9 slices too thin. Archetypes: Structural, Behavioral, Naming, Dependencies, State, Performance, Anti-patterns, Testing/Testability. Each category has 3-8 violations; total 20-50. Count your rules before moving on.
 
-Before writing, read what already exists:
+### Step 6: Write Auditable Rules
+For EACH violation: `| ID | Category | Rule | Default Severity | What to scan for |`. "What to scan for" MUST be a concrete file pattern or code signature, detectable via grep/AST/regex, specific enough to avoid false positives, and **describe the pattern, NOT the shell command**.
 
-1. List all `*.md` files in `<plugin-root>/skills/doctrines/`, **excluding any file whose basename starts with `_`** (e.g. `_template.md`) — this SKILL.md lives at `<plugin-root>/skills/scriptorium/SKILL.md`, so the doctrines directory is the `doctrines/` sibling within the same `skills/` directory
-2. Note which ID prefixes are already claimed (grep each doctrine for its `XXX-001`-style IDs)
-3. Identify cross-reference opportunities — new doctrines should link to related existing ones
-4. Check for overlap — if an existing doctrine already covers your pattern, update it instead
+Bad: "Poor separation of concerns" · Bad: `grep -r "import .*infrastructure" src/domain/`
+Good: `from <pkg>.infrastructure` in domain/ files · Good: Controller classes with >200 LOC or >10 dependencies
 
-**Optimistic cross-referencing:** Always reference doctrines that *should* pair
-with yours, even if they don't exist yet. Use the filename they would have
-(e.g. `hexagonal.md`, `testing.md`). Inquisition already handles missing
-doctrines gracefully. When the doctrine is eventually written, the
-cross-references are already waiting. After writing a new doctrine, check
-existing doctrines for stale or missing cross-references back to yours and
-update them.
+Language scope: a `Language-specific` doctrine uses that language's syntax (`import sqlalchemy`, `require('express')`). A `Language-agnostic` doctrine describes structural intent without syntax ("imports from infrastructure layer"). If a rule cannot be expressed that way, restrict the Language Scope or split into per-language variants.
 
-## Step 4: Structure the Doctrine
+### Step 7: Add Inline Citations
+For rules from a specific source rather than general consensus, cite inline in "What to scan for", e.g. `Aggregate >500 LOC ([Vernon: max 300-400 LOC](link))`. Cite when a number or threshold comes from one source, the rule is controversial, or the source gives critical context.
 
-Use the standard template with ALL required sections:
+### Step 8: Write Detection Signatures
+Every doctrine needs a `## Detection Signatures` section for Covenant discover mode (three subsections: directory signals, file signals, anti-signals). Read `references/signatures.md` for the exact structure, rules and known signal collisions.
 
-### Header
-- Pattern name and 1-2 sentence summary
-- **Language Scope** — declare one of:
-  - `Language-agnostic` — detection patterns work for any language
-  - `Language-specific: <language>` — patterns only apply to one language (e.g. `Language-specific: Python`)
-  - `Language-specific: <lang1>, <lang2>` — patterns cover multiple but not all languages
-  If language-specific, the "What to scan for" column must use that language's
-  idioms explicitly. Do not write `from <pkg>.infrastructure` and leave the
-  language implicit.
-- When to Use (problem context — MUST include when NOT to use)
-- Why Use It (value proposition, 4-6 bullet points)
-- Pros and Cons table (**minimum 5 rows** — honest trade-offs with inline
-  citations for controversial claims)
+### Step 9: Document Exceptions
+Real patterns have edge cases; document them with specific justification (vague exceptions are loopholes), for example: test code may keep adapters in the same package; a framework may require annotations on domain classes; denormalised projections may break normalisation.
 
-### Body
-- Applicable Directories (where to scan — use relative paths without `src/`
-  prefix, e.g. `domain/` not `src/domain/`)
-- Violation Catalog (5-8 categories, 20-50 rules total)
-- Allowed Exceptions (pragmatic flexibility)
-- Cross-Reference (use **bold** with `.md` suffix: `**ddd.md**`)
-- Sources and Authority (grouped under bold H3-style labels)
-
-## Step 5: Categorize Violations
-
-**You MUST have 5-8 categories. Fewer than 5 means you haven't thought
-broadly enough. More than 8 means you're slicing too thin.**
-
-Common category archetypes (pick 5-8 that fit your pattern):
-
-1. **Structural** — How components connect
-2. **Behavioral** — How components interact
-3. **Naming** — Conventions and terminology
-4. **Dependencies** — What can import what
-5. **State** — Mutability and data flow
-6. **Performance** — Efficiency concerns
-7. **Anti-patterns** — Known bad practices
-8. **Testing / Testability** — What the pattern demands for verification
-
-Each category: 3-8 violations. Total across all categories: **20-50 rules
-minimum.** If you have fewer than 20, you're missing categories or being
-too conservative within them. Count your rules before moving to Step 6.
-
-## Step 6: Write Auditable Rules
-
-For EACH violation, specify:
-
-| ID | Category | Rule | Default Severity | What to scan for |
-|---|---|---|---|---|
-| XXX-001 | category | One-line rule | error/warning | Concrete pattern to detect |
-
-The "What to scan for" MUST be:
-- Concrete file patterns or code signatures
-- Detectable via grep/AST/regex
-- Specific enough to avoid false positives
-- **Describe the pattern to detect, NOT the shell command**
-
-Bad: "Poor separation of concerns"
-Bad: `grep -r "import .*infrastructure" src/domain/`
-Good: `from <pkg>.infrastructure` or `import <pkg>.infrastructure` in domain/ files
-Good: Controller classes with >200 LOC or >10 dependencies
-
-**Language scope in detection patterns:** If the doctrine declared
-`Language-specific`, the "What to scan for" column must use that language's
-syntax explicitly (e.g. `import sqlalchemy` for Python, `require('express')` for
-Node). If declared `Language-agnostic`, detection patterns must describe
-structural intent without language syntax — e.g. "imports from infrastructure
-layer" not "from <pkg>.infrastructure". If a rule genuinely cannot be expressed
-in language-agnostic terms, either restrict the doctrine's Language Scope or
-split it into per-language variants.
-
-## Step 7: Add Inline Citations
-
-For rules that come from specific sources (not general consensus), add inline
-citations:
-
-| ID | ... | What to scan for |
-|---|---|---|
-| HEX-015 | ... | Aggregate >500 LOC ([Vernon: max 300-400 LOC](link)) |
-
-Use inline citations when:
-- A specific number/threshold comes from one source
-- The rule is controversial or has competing opinions
-- The source provides critical context
-
-## Step 8: Write Detection Signatures
-
-Every doctrine must include a `## Detection Signatures` section for Covenant discover mode. This section enables lightweight pattern fingerprinting without a full audit.
-
-**Structure (always three subsections in this order):**
-
-```markdown
-## Detection Signatures
-
-Quick-scan heuristics for Covenant discover mode. These are recognition
-signals only — not violations. Covenant reads this section to fingerprint
-the codebase without running a full audit.
-
-### Directory signals
-Strong indicators (any 2+ suggest [Pattern] is in use):
-- `specific/sub/path/` — what its presence implies
-- `another/path/` — what its presence implies
-[3–6 entries]
-
-### File signals
-Strong indicators (any 1 is significant):
-- Files named `*PatternSpecific.*` in [layer] directories
-- Configuration files: `pattern-config.yml`
-[2–4 entries]
-
-### Anti-signals
-Suggest [Pattern] is NOT in use:
-- [Structural absence or alternative structure that rules this out]
-- [Reference to adjacent pattern it might be confused with]
-[2–4 entries]
-```
-
-**Rules for writing good signals:**
-
-| Rule | Why |
-|------|-----|
-| Use specific sub-paths (`infrastructure/event_store/`), not bare parent dirs (`infrastructure/`) | Parent dirs appear in many patterns — sub-paths are discriminating |
-| Directory signals require 2+ to confirm; file signals require only 1 | File names are more specific; directories are cheaper to create |
-| Anti-signals must name the pattern they point toward (`leans DDD`, `leans Microservices`) | Helps Covenant present a scored comparison rather than a binary yes/no |
-| Generic dirs (`services/`, `domain/`, `shared/`) must be qualified with required context | `services/` alone fires on Layered, Microservices, and Modular Monolith |
-| If your pattern co-exists legitimately with another (e.g. DDD + CQRS), do NOT add the other as an anti-signal | Expected co-existence is fine; anti-signals are for genuine exclusions only |
-
-**Crossover awareness — avoid these known collisions:**
-
-| Signal | Also fires on | Resolution |
-|--------|--------------|------------|
-| `domain/events/` | DDD, ES, CQRS, Saga | Only use as a signal in DDD and ES; exclude from Messaging/Saga |
-| `services/` directory | Layered, Microservices, Modular Monolith | Qualify with 3+ subdirs + per-service Dockerfiles for Microservices; require `modules/` for Modular Monolith |
-| `infrastructure/` bare | Hexagonal, ES, CQRS, Messaging, Resilience | Always use specific sub-path |
-| `shared/` or `common/` | Layered N-Tier, Modular Monolith | Require `modules/` context for Modular Monolith; require `persistence/` context for Layered |
-| `*Handler.*` files | CQRS, Messaging, Saga | Qualify with directory context |
-
-## Step 9: Document Exceptions
-
-Real patterns have edge cases. Document them to prevent false positives:
-
-```markdown
-#### Allowed Exceptions
-
-- **Test code:** Test adapters may live in same package for simplicity
-- **Framework requirements:** Spring requires annotations on domain classes (use sparingly)
-- **Performance:** Denormalized projections may break normalization rules
-```
-
-## Step 10: Validate Completeness
-
-Checklist before finishing — count explicitly, do not estimate:
-- [ ] All 9 required sections present and in order
-- [ ] 5-8 violation categories
-- [ ] 20-50 violation rules total (count them)
-- [ ] Each "What to scan for" describes a pattern, not a shell command
-- [ ] **Language Scope declared in header** (`Language-agnostic` or `Language-specific: <lang>`)
-- [ ] Detection patterns match declared language scope — no implicit language assumptions
-- [ ] Pros and Cons table has 5+ rows
-- [ ] Sources cited (minimum: 1 primary, 2 practitioners, 1 failure case)
-- [ ] Exceptions documented with specific justification
-- [ ] Cross-references use **bold** with `.md` suffix
-- [ ] `## Detection Signatures` section present with directory signals, file signals, and anti-signals
-- [ ] Directory paths use relative format without `src/` prefix
+### Step 10: Validate Completeness
+Verify against `_template.md`, counting explicitly: all sections present and in order; categories and rule counts within the SHOULD limits above; Language Scope declared and detection patterns consistent with it; 5+ Pros/Cons rows; sources (1 primary, 2 practitioners, 1 failure case); exceptions justified; cross-references bold with `.md`; non-existent cross-referenced doctrines listed under "Planned" in `doctrines/README.md`; Detection Signatures present with relative `src/`-less paths; INDEX regenerated.
 
 ## Violation ID Convention
 
-**The 3-letter prefix is the disambiguator.** `DDD-001` and `MSG-001` are
-distinct IDs — numbers are scoped per prefix. Prefixes must be unique across
-all doctrines. Derive the claimed prefixes by grepping `doctrines/` (Step 3);
-do not rely on a hard-coded list.
+**The 3-letter prefix is the disambiguator.** `DDD-001` and `MSG-001` are distinct; numbers are scoped per prefix. Prefixes must be unique across all doctrines: take the claimed prefixes from `doctrines/INDEX.md` (Step 3). Numbers start at 001; **never renumber or reuse an id, even a retired one**. Ids are stable keys: Inquisition overrides in `.architecture/decisions.yml` target them, so renumbering silently retargets or orphans an override.
 
-Rule: a unique 3-letter prefix; numbers start at 001; **never renumber or
-reuse an id, even a retired one**. Ids are stable keys: Inquisition overrides
-in `.architecture/decisions.yml` target them, so renumbering silently retargets
-or orphans an override.
+## Violation Table Contract
 
-## Output Specification
+Each catalog row is a contract with Inquisition:
 
-The skill produces a complete doctrine file at:
-`<plugin-root>/skills/doctrines/<pattern-name>.md`
+| Column | Rule |
+|--------|------|
+| **ID** | 3-letter prefix + hyphen + 3-digit number; never reuse |
+| **Category** | Lowercase slug with hyphens (`layer-boundary`, `event-design`) |
+| **Rule** | One line, imperative ("Domain must not import from infrastructure") |
+| **Default Severity** | `error` (correctness: bugs, data loss, architectural decay, e.g. layer breach, mutable events) or `warning` (quality: naming, aggregate size, missing docs) |
+| **What to scan for** | Concrete pattern (import paths, class patterns, file locations, LOC thresholds), never a shell command. If you cannot describe a detectable pattern, the rule is not auditable |
 
-Use `<plugin-root>/skills/doctrines/_template.md` as the structural reference.
-Every doctrine MUST contain these sections in order:
+## Integration Checklist
 
-```
-# [Pattern Name] Doctrine
-  → 1-2 sentence summary of what is audited
+- [ ] File is at `<plugin-root>/skills/doctrines/<pattern-name>.md`; ID prefix unique
+- [ ] User's `.architecture/config.yml` has a new doctrine entry (format: `../_shared/config.md`)
+- [ ] Optional smoke test: `/puritan:inquisition <doctrine-name>`. Warning: `<plugin-root>` is the plugin cache when installed from a marketplace, and files written there are lost when the plugin updates. Commit new doctrines to the plugin's source repository.
 
-## When to Use
-  → Problem context, project characteristics, scope boundaries
-  → MUST include when NOT to use
+## Reference
 
-## Why Use It
-  → Value proposition as bullet points
-
-## Pros and Cons
-  → Minimum 5 rows — honest trade-offs with inline citations for controversial claims
-
-## Applicable Directories
-  → Paths mapped via .architecture/config.yml
-  → Each path with explanation of what lives there
-  → Use relative paths without src/ prefix (e.g. domain/ not src/domain/)
-
-## Violation Catalog
-  → 5-8 category sections, each with:
-    ### [Category Name] Violations
-    | ID | Category | Rule | Default Severity | What to scan for |
-  → 3-8 violations per category, 20-50 total
-  → Every "What to scan for" must be grep/AST/regex detectable
-
-## Allowed Exceptions
-  → Pragmatic edge cases with specific justification
-  → Vague exceptions are not exceptions — they're loopholes
-
-## Cross-Reference
-  → Related doctrines and why they pair
-  → Optimistic: reference doctrines that SHOULD exist, even if they don't yet
-  → After writing, update existing doctrines to cross-reference back
-
-## Sources and Authority
-  → Minimum: 1 primary source, 2 practitioners, 1 failure case
-  → Inline citations in violation tables for sourced thresholds
-
-## Detection Signatures
-  → Directory signals: 3–6 directory paths that indicate this pattern is in use
-  → File signals: 2–4 file naming patterns that are strong indicators
-  → Anti-signals: 2–4 structural absences or alternative structures that rule this pattern out
-  → Recognition signals only — not violations
-```
-
-### Violation Table Contract
-
-Each row in the catalog is a contract with Inquisition. The columns mean:
-
-| Column | Purpose | Rule |
-|--------|---------|------|
-| **ID** | Unique identifier | 3-letter prefix + hyphen + 3-digit number. Check existing prefixes by grepping `doctrines/` — never reuse |
-| **Category** | Grouping slug | Lowercase with hyphens (e.g. `layer-boundary`, `event-design`) |
-| **Rule** | Human-readable statement | One line, imperative ("Domain must not import from infrastructure") |
-| **Default Severity** | `error` or `warning` | `error` = blocks commit, `warning` = advisory. Correctness → error, style/preference → warning |
-| **What to scan for** | Detection pattern | MUST be concrete: import paths, class patterns, file locations, LOC thresholds. Describe the **pattern**, not the shell command (write `import <pkg>.infrastructure in domain/ files` not `grep -r "import" src/domain/`). If you can't describe a detectable pattern, the rule isn't auditable |
-
-### Severity Guidelines
-
-- **error** — Correctness violation. Causes bugs, data loss, or architectural decay if ignored (layer breach, mutable events, missing idempotency)
-- **warning** — Quality concern. Won't break things today but accumulates debt (naming conventions, aggregate size, missing docs)
-
-### Integration Checklist
-
-After writing a doctrine, verify it works with the ecosystem:
-
-- [ ] File is at `<plugin-root>/skills/doctrines/<pattern-name>.md`
-- [ ] ID prefix is unique (no other doctrine in `doctrines/` uses it)
-- [ ] User's `.architecture/config.yml` updated with new doctrine entry (see Inquisition SKILL.md Step 1 for config format)
-- [ ] Run `/puritan:inquisition <doctrine-name>` to smoke-test the new doctrine
-
-Ready for immediate use by Inquisition and Covenant.
+| Read | When |
+|---|---|
+| `references/signatures.md` | Step 8 |
 
 ## Voice
 

@@ -181,7 +181,7 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest the Strategy pattern is in use):
+Directory signals (counted by Covenant):
 - `infrastructure/runners/` — named directory for swappable job or task execution backends
 - `infrastructure/adapters/` — pluggable external-system implementations behind shared interfaces
 - `domain/ports/` or `ports/` alongside `infrastructure/runners/` or `infrastructure/adapters/` — interface definitions paired with concrete implementations (bare `ports/` alone is not discriminating; it also appears in Hexagonal architecture)
@@ -189,7 +189,7 @@ Strong indicators (any 2+ suggest the Strategy pattern is in use):
 - `workers/` alongside `application/services/` — background processing implementations beside orchestrating clients
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - Files named `*Runner.*`, `*Strategy.*`, `*Policy.*`, or `*Executor.*` specifically inside `infrastructure/`, `adapters/`, or `workers/` directories — concrete strategy implementations (this signal is too broad in `domain/` or root directories where these suffixes are common)
 - A single abstract class or protocol file in `ports/` or `interfaces/` declaring one to five abstract methods with no concrete logic — the canonical strategy interface contract; this is the strongest single-file fingerprint
 - A `Fake*`, `Stub*`, or `InMemory*` file in test directories whose name mirrors a production strategy suffix (e.g. `FakeJobRunner`, `InMemoryStorageAdapter`) — confirms the pattern is being tested correctly

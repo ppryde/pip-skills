@@ -40,6 +40,9 @@ echo "=================== context-vigil-mod ==================="
 echo "=================== lean (size budgets, reference wiring, generated indexes) ==================="
 ( cd "$ROOT" && "$PY" -m pytest tests/lean "$@" ) || FAIL=1
 
+echo "=================== puritan (doctrine lint) ==================="
+( cd "$ROOT" && "$PY" -m pytest tests/puritan "$@" ) || FAIL=1
+
 # Nothing test-only may sit inside a shipped plugin/ folder: installs copy it whole.
 echo "=================== no tests inside a shipped mod ==================="
 shipped=$(find "$ROOT"/plugins/*/plugin \( -name '*.test.ts' -o -name '*.test.tsx' -o -name 'test_*.py' -o -name '*_test.py' -o -name tests \) -not -path '*/node_modules/*' -print 2>/dev/null)

@@ -165,14 +165,14 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest the Saga pattern is in use):
+Directory signals (counted by Covenant):
 - `sagas/` or `application/sagas/` — saga definitions
 - `orchestrators/` — saga orchestrator classes
 - `compensations/` or `domain/compensations/` — compensation / rollback logic
 - `infrastructure/workflow/` — workflow engine integration (Temporal, Camunda, Conductor)
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - Files named `*Saga.*` anywhere in the codebase
 - Files named `*Orchestrator.*` containing multi-step coordination logic
 - Files named `*Compensation.*` or `*Rollback.*`

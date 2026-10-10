@@ -48,7 +48,7 @@ Use relative paths without `src/` prefix (e.g. `domain/` not `src/domain/`):
 [Add a brief "Scanning approach" note after each category table if the
 detection method isn't obvious from the "What to scan for" column.]
 
-[You MUST have 5-8 categories, 3-8 violations per category, 20-50 total.
+[You SHOULD have 5-9 categories, 3-8 violations per category, 20-50 total.
 Count your rules before finishing. Fewer than 20 = too shallow.]
 
 ### [Category Name] Violations
@@ -68,7 +68,8 @@ Count your rules before finishing. Fewer than 20 = too shallow.]
 Reference doctrines that pair with this one — even if they don't exist yet.
 Use the filename they would have. Inquisition handles missing doctrines
 gracefully. When the doctrine is eventually written, the cross-references
-are already wired up.
+are already wired up. Doctrines that do not exist yet must be listed under
+"Planned" in `README.md`.
 
 This doctrine pairs well with:
 - **[other-doctrine].md** — brief explanation of relationship
@@ -95,12 +96,12 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest this pattern is in use):
+Directory signals (counted by Covenant):
 - `[directory/]` — what its presence implies
 - `[directory/]` — what its presence implies
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - Files named `*[Pattern].*` in [layer] directories
 - Configuration files: `[config-file]`
 

@@ -225,6 +225,12 @@ def sentence_with(paragraph: str, pattern: str) -> str:
     return ""
 
 
+def brief(text: str, limit: int) -> str:
+    """Drop a trailing ` -- explanation`, collapse whitespace, cut at `limit` characters."""
+    flat = re.split(r"\s+[\u2014\u2013-]{1,2}\s+", " ".join(text.split()), maxsplit=1)[0]
+    return flat if len(flat) <= limit else flat[: limit - 1].rstrip() + "\u2026"
+
+
 def doctrine_entry(path: Path) -> dict:
     lines = read_lf(path).split("\n")
     if lines and lines[-1] == "":
@@ -304,21 +310,19 @@ def doctrines_index(root: Path) -> tuple[Path, str]:
         "# Doctrine Index", "", GENERATED, "",
         f"{len(entries)} doctrines. Read this instead of the doctrine files for discovery and planning.",
         "", READ_MAPPING.replace("`### CODE` heading line", "doctrine section line"),
-        "", "`audit:` is the contiguous span Applicable Directories through Allowed Exceptions, "
+        "", "Each `## <name>` is the file `<name>.md` in this folder. `audit:` is the contiguous span Applicable Directories through Allowed Exceptions, "
         "the only part an auditor needs.", "",
     ]
     for e in entries:
         planned = [x if x in names else f"{x} (planned)" for x in e["xref"]]
         out += [
             f"## {e['name']}", "",
-            f"- file: `{e['file']}`",
             f"- ids: {e['prefix']}-{e['lo']:03d} .. {e['prefix']}-{e['hi']:03d} ({e['rules']} rules)",
-            f"- categories: {', '.join(e['categories']) or 'none'}",
-            f"- when: {cell(e['when'])}",
-            f"- when not: {cell(e['when_not']) or 'none stated'}",
-            f"- directory signals: {cell('; '.join(e['dir'])) or 'none'}",
-            f"- file signals: {cell('; '.join(e['file_sig'])) or 'none'}",
-            f"- anti-signals: {cell('; '.join(e['anti'])) or 'none'}",
+            f"- when: {cell(brief(e['when'], 70))}",
+            *([f"- when not: {cell(brief(e['when_not'], 50))}"] if e["when_not"] else []),
+            f"- dir signals: {cell('; '.join(brief(s, 80) for s in e['dir'][:6])) or 'none'}",
+            f"- file signals: {cell('; '.join(brief(s, 56) for s in e['file_sig'][:3])) or 'none'}",
+            f"- anti-signals: {cell('; '.join(brief(s, 80) for s in e['anti'][:3])) or 'none'}",
             f"- cross-refs: {', '.join(planned) or 'none'}",
             f"- audit: {e['audit']}", "",
         ]
