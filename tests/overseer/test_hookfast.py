@@ -297,6 +297,7 @@ class TestReadOnlyOpenAgainstALiveWalWriter:
         board = marker.Board(tmp_path / "gone.db", repo, tmp_path)
         marker.remove_marker(SESSION)
         marker.write_marker(SESSION, board)
+        marker.mark_checked(SESSION)  # already looked up: no re-lookup finds the real board
         assert hookfast.run(json.dumps(payload(cwd=str(repo)))) is None
 
     def test_garbage_database_fails_open(self, repo, tmp_path):
@@ -304,6 +305,7 @@ class TestReadOnlyOpenAgainstALiveWalWriter:
         junk.write_text("this is not sqlite")
         marker.remove_marker(SESSION)
         marker.write_marker(SESSION, marker.Board(junk, repo, tmp_path))
+        marker.mark_checked(SESSION)  # already looked up: no re-lookup finds the real board
         assert hookfast.run(json.dumps(payload(cwd=str(repo)))) is None
 
     def test_main_swallows_everything(self, monkeypatch, capsys):

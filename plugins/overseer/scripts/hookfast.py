@@ -121,8 +121,9 @@ def run(raw: str) -> dict[str, object] | None:
         # While the sentinel is absent the lookup re-runs even when a marker
         # exists, so a board that was locked on an earlier call is found later.
         known = {b.db for b in boards}
-        boards = [*boards, *(b for b in found if b.db not in known)]
-        for board in found:
+        new = [b for b in found if b.db not in known]  # never overwrite a known entry
+        boards = [*boards, *new]
+        for board in new:
             try:
                 marker.write_marker(sid, board)
             except OSError as exc:
