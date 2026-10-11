@@ -68,7 +68,7 @@ continue anyway (two writers on one store: a warning, not a ban). Then:
 a removed status line back exactly, but only if `settings.json` has no status line now (or
 already has that one); otherwise it says so and keeps the backup.
 
-The payload's `census_mod.git` (`branch`, `uncommitted`, `ahead`, `has_upstream`, `detached`, or null when unknown) carries the git state from the mod's own `-uno` pass, so readers need not shell out to git or gh. For a phone-sized readout of a session, `/census-mod:vitals` is bundled (the setup summary always mentions it).
+The payload's `census_mod.git` (`branch`, `uncommitted`, `ahead`, `has_upstream`, `detached`, or null when unknown) carries the git state from the mod's own `-uno` pass, so readers need not shell out to git or gh.
 
 Precedence: an environment variable (`CENSUS_MOD_STORE`, `CENSUS_STATUSLINE_SEGMENTS`) wins,
 then the answers (kept in `$.store`), then the defaults. Before any answer the mod records to

@@ -58,7 +58,8 @@ export function gitOperationOf(result: unknown): GitOperation | null {
 }
 
 /** What a PR action changes: only the fields it speaks about. */
-export type Patch = { number: number; url?: string; state?: PrState; review?: string; lastAction: string }
+/** `review: null` clears the review state (gh says the PR needs none). */
+export type Patch = { number: number; url?: string; state?: PrState; review?: string | null; lastAction: string }
 
 /**
  * The patch for one `gitOperation.pr`. `draftFlag`: the command passed --draft. Actions that only touch the PR
@@ -81,10 +82,14 @@ export function patchFor(pr: NonNullable<GitOperation['pr']>, draftFlag: boolean
 export function applyPatch(old: PrRecord | undefined, patch: Patch, at: number, ctx: { sessionId: string; worktree: string; source?: 'event' | 'gh' }): PrRecord | undefined {
   if (old && old.number === patch.number && at < old.at) return old
   const keep = old && old.number === patch.number ? old : undefined
-  const { stale: _stale, ...rest } = keep ?? {}
+  // Only a word that settles the state or the review confirms the record; a comment, edit or auto-merge does not.
+  const confirms = patch.state !== undefined || patch.review !== undefined || ctx.source === 'gh'
+  const { stale, review: _old, ...rest } = keep ?? {}
+  const review = patch.review === null ? undefined : (patch.review ?? keep?.review)
 
   return {
     ...rest,
+    ...(stale && !confirms ? { stale } : {}),
     number: patch.number,
     state: patch.state ?? keep?.state ?? 'open',
     lastAction: patch.lastAction,
@@ -93,7 +98,7 @@ export function applyPatch(old: PrRecord | undefined, patch: Patch, at: number, 
     sessionId: ctx.sessionId,
     worktree: ctx.worktree,
     ...(patch.url ?? keep?.url ? { url: patch.url ?? keep?.url } : {}),
-    ...(patch.review ?? keep?.review ? { review: patch.review ?? keep?.review } : {}),
+    ...(review ? { review } : {}),
   }
 }
 

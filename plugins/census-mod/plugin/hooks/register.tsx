@@ -341,14 +341,19 @@ async function refreshGh($: EngineInterface, why: Why) {
   const branch = snap.git.branch
   const now = await nowMs($)
   const cached = (await $.store.get(key).catch(() => undefined)) as GhEntry | undefined
-  if (cached) snap.pr = (await prFromEvents($)) ?? cached.pr
+  if (cached) {
+    const recorded = await recordedPr($)
+    snap.pr = recorded === undefined ? cached.pr : recorded
+  } // a record that says "not open" (null) beats the gh cache; no record (undefined) falls back to it
   if (!shouldRefresh(why, cached, now, lastActiveAt)) return
   const before = snap.pr
   let entry: GhEntry
+  let answered = false
   try {
     const r = await $.process.run(ghArgv(branch), { cwd: snap.worktreePath ?? snap.cwd, timeoutMs: GH_TIMEOUT_MS })
     const pr = r.exitCode === 0 ? parsePrList(r.stdout) : undefined
     entry = pr === undefined ? { at: cached?.at ?? 0, pr: cached?.pr ?? null, failedAt: now } : { at: now, pr }
+    answered = pr !== undefined
   } catch {
     if (!saidNoGh) {
       saidNoGh = true
@@ -358,7 +363,12 @@ async function refreshGh($: EngineInterface, why: Why) {
   }
   await $.store.set(key, entry).catch(() => undefined)
   if (!snap || snap.git?.branch !== branch) return
-  snap.pr = (await recordGhAnswer($, branch, entry, now)) ?? entry.pr
+  // Only an answer is a word about the PR: a failed or backed-off gh must not reopen or refresh a record.
+  if (answered) snap.pr = (await recordGhAnswer($, branch, entry, now)) ?? entry.pr
+  else {
+    const recorded = await recordedPr($)
+    snap.pr = recorded === undefined ? entry.pr : recorded
+  }
   if (before?.number !== entry.pr?.number || before?.reviewState !== entry.pr?.reviewState) record($, 'pr')
   repaint($)
 }
@@ -388,13 +398,19 @@ async function readRecord($: EngineInterface, key: string): Promise<PrRecord | u
   return got && typeof got === 'object' && typeof got.number === 'number' ? got : undefined
 }
 
-/** The drawn PR of the current branch from its record; null when the record says none (or there is none). */
-async function prFromEvents($: EngineInterface): Promise<Snap['pr']> {
+/** The drawn PR of the current branch from its record; null when the record says none; undefined when there is no record. */
+async function recordedPr($: EngineInterface): Promise<Snap['pr'] | undefined> {
   const branch = currentBranch()
   const repo = branch ? await repoName($) : null
-  if (!branch || !repo) return null
+  if (!branch || !repo) return undefined
+  const rec = await readRecord($, prKey(repo, branch))
 
-  return toPr(await readRecord($, prKey(repo, branch)), await nowMs($))
+  return rec ? toPr(rec, await nowMs($)) : undefined
+}
+
+/** The drawn PR of the current branch from its record; null when the record says none (or there is none). */
+async function prFromEvents($: EngineInterface): Promise<Snap['pr']> {
+  return (await recordedPr($)) ?? null
 }
 
 /** Every record of the repo, so a PR can be found by number whatever branch the command ran on. */
@@ -456,7 +472,7 @@ async function recordGhAnswer($: EngineInterface, branch: string, entry: GhEntry
   const ctx = { sessionId: snap?.sessionId ?? '', worktree: snap?.worktreePath ?? snap?.cwd ?? '', source: 'gh' as const }
   let next: PrRecord | undefined = old
   if (entry.pr) {
-    next = applyPatch(old, { number: entry.pr.number, ...(entry.pr.url ? { url: entry.pr.url } : {}), state: 'open', ...(entry.pr.reviewState ? { review: entry.pr.reviewState } : {}), lastAction: 'gh' }, now, ctx)
+    next = applyPatch(old, { number: entry.pr.number, ...(entry.pr.url ? { url: entry.pr.url } : {}), state: 'open', ...(entry.pr.reviewState ? { review: entry.pr.reviewState } : old?.review === 'draft' || old?.review === 'pending' ? { review: null } : {}), lastAction: 'gh' }, now, ctx)
   } else if (old && old.state === 'open' && !(old.source === 'event' && now - old.at < GH_LISTING_GRACE_MS)) {
     next = applyPatch(old, { number: old.number, state: 'closed', lastAction: 'gh' }, now, ctx)
   }
@@ -861,7 +877,7 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   say($, '🧭 census-mod is set up', [
     `recording: ${eff.record === 'yes' ? 'into census (the real store)' : eff.record === 'shadow' ? `shadow store ${eff.shadowDir ?? ''} — the dashboards do not read it; run /census-setup and answer Yes to record into census itself` : 'off'}`,
     `band: ${drawOn ? `on, ${eff.placement === 'below' ? 'below the input' : 'above the input'}, ${PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
-    `PR segment (gh): ${saved.pr === false ? 'off, gh is never called' : 'on'}`,
+    `PR segment: ${saved.pr === false ? 'gh is never called; PRs this session creates, readies or merges still show' : 'on, with gh lookups'}`,
     ...(removed ? [`your status line was removed from settings.json; it is backed up in ${removed}`] : []),
     ...(keptForShadow ? ['your status line was kept: CENSUS_MOD_STORE makes census-mod record to a shadow store, so the status line is still the real store\'s writer. Unset it and run /census-setup again to replace it'] : []),
     'undo any time: /census-setup off (it restores a removed status line exactly), or /census-setup to answer again',

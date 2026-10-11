@@ -128,6 +128,14 @@ def test_census_mod_ships_no_vitals_command_skill_or_script():
     assert not (BUNDLE / "vitals.py").exists()
 
 
+def test_readmes_do_not_advertise_the_retired_vitals_command():
+    """No README may still point at /census-mod:vitals or a `vitals` key of `census where`."""
+    plugin_readme = (PLUGIN / "README.md").read_text()
+    assert "/census-mod:vitals" not in plugin_readme
+    census_readme = (BUNDLE.parents[2] / "census" / "README.md").read_text()
+    assert "whether this census ships" not in census_readme
+
+
 def test_census_mod_never_mentions_the_census_plugin_as_a_dependency():
     """No sibling discovery, no cli.path lookup, no CENSUS_CLI, no `census` on PATH, no version floor."""
     code = {f: f.read_text() for f in [*(PLUGIN / "core").glob("*.ts"), PLUGIN / "hooks" / "register.tsx"]}

@@ -188,3 +188,52 @@ test('gh, when it answers, is recorded as the newest word on the branch', async 
   expect(rec(w)).toMatchObject({ number: 102, state: 'open', review: 'approved', source: 'gh' })
   expect(w.ingests.at(-1)?.payload.pr).toMatchObject({ number: 102, review_state: 'approved' })
 })
+
+test('a failing gh after a close does not reopen the PR (the event record stands)', async ($, on) => {
+  const w = world(on)
+  w.remote.value = 'git@github.com:o/r.git\n'
+  w.gh.stdout = JSON.stringify([{ number: 7, url: 'u', reviewDecision: 'APPROVED' }])
+  await $.session.start(START)
+  await w.clock.advance(2 * SEC)
+  expect(w.ingests.at(-1)?.payload.pr).toMatchObject({ number: 7 })
+
+  op(w, { pr: { number: 7, action: 'closed' } })
+  w.gh.exitCode = 1 // gh now errors (e.g. a token without the GraphQL scope)
+  await $.tool.call(bash('gh pr close 7'))
+  await w.clock.advance(60 * SEC)
+  expect(rec(w)).toMatchObject({ state: 'closed' })
+  expect(w.ingests.at(-1)?.payload).not.toHaveProperty('pr')
+})
+
+test('a gh answer with no review decision clears draft and pending', async ($, on) => {
+  const w = world(on)
+  w.remote.value = 'git@github.com:o/r.git\n'
+  w.gh.stdout = '[]'
+  await $.session.start(START)
+  await w.clock.advance(2 * SEC)
+  op(w, { pr: { number: 7, url: 'u', action: 'created' } })
+  await $.tool.call(bash('gh pr create --draft --fill'))
+  await w.clock.advance(2 * SEC)
+  expect(rec(w)).toMatchObject({ review: 'draft' })
+
+  w.gh.stdout = JSON.stringify([{ number: 7, url: 'u', reviewDecision: '' }]) // marked ready on github.com
+  op(w, { push: { branch: 'main' } })
+  await $.tool.call(bash('git push'))
+  await w.clock.advance(60 * SEC)
+  expect(rec(w)).not.toHaveProperty('review')
+})
+
+test('a closed event record beats the stale open PR in the gh cache before any new gh answer', async ($, on) => {
+  const w = world(on)
+  w.remote.value = 'git@github.com:o/r.git\n'
+  w.gh.stdout = JSON.stringify([{ number: 7, url: 'u', reviewDecision: 'APPROVED' }])
+  await $.session.start(START)
+  await w.clock.advance(2 * SEC)
+  expect(w.ingests.at(-1)?.payload.pr).toMatchObject({ number: 7 })
+
+  op(w, { pr: { number: 7, action: 'merged' } })
+  await $.tool.call(bash('gh pr merge 7'))
+  await w.clock.advance(2 * SEC) // too soon for another gh call: only the cache and the record speak
+  expect(rec(w)).toMatchObject({ state: 'merged' })
+  expect(w.ingests.at(-1)?.payload).not.toHaveProperty('pr')
+})

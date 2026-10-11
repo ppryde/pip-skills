@@ -77,6 +77,21 @@ test('a push marks the record stale; the next word about the PR clears it', () =
   expect(fresh.stale).toBeUndefined()
 })
 
+test('a comment, edit or auto-merge leaves the unconfirmed marker; a gh answer clears it', () => {
+  const stale = markStale(applyPatch(undefined, patchFor({ number: 7, action: 'created' }, false), T0, CTX)!)
+  for (const action of ['commented', 'edited', 'auto-merge-enabled']) {
+    expect(applyPatch(stale, patchFor({ number: 7, action }, false), T0 + 1, CTX)!.stale).toBe(true)
+  }
+  expect(applyPatch(stale, { number: 7, state: 'open', lastAction: 'gh' }, T0 + 1, { ...CTX, source: 'gh' })!.stale).toBeUndefined()
+})
+
+test('review: null clears the review state', () => {
+  const draft = applyPatch(undefined, patchFor({ number: 7, action: 'created' }, true), T0, CTX)!
+  expect(draft.review).toBe('draft')
+  const cleared = applyPatch(draft, { number: 7, state: 'open', review: null, lastAction: 'gh' }, T0 + 1, { ...CTX, source: 'gh' })!
+  expect(cleared).not.toHaveProperty('review')
+})
+
 test('only an open PR is drawn; stale or a day old is dimmed', () => {
   const rec = (over: Partial<PrRecord>): PrRecord => ({ number: 7, state: 'open', lastAction: 'created', source: 'event', at: T0, sessionId: 's', worktree: '/r', ...over })
   expect(toPr(undefined, T0)).toBeNull()

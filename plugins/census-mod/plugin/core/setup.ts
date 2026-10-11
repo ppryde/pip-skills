@@ -161,7 +161,7 @@ export const L = {
   presetCompact: 'Compact — one line',
   presetMinimal: 'Minimal — context, limits / git',
   prYes: 'Yes',
-  prNo: "No — never call gh",
+  prNo: "No — no gh lookups (PRs this session makes still show)",
 } as const
 
 const rec = (s: string, on: boolean) => (on ? `${s}${REC}` : s)
@@ -235,7 +235,7 @@ export const Q = {
   }),
   pr: (): Question => ({
     header: '🔀 PR',
-    question: "Show the branch's open PR (number, review state) using gh? No means gh is never called.",
+    question: "Look up the branch's open PR (number, review state) using gh? No means gh is never called; PRs this session creates, readies or merges still show.",
     options: [rec(L.prYes, true), L.prNo],
   }),
 }

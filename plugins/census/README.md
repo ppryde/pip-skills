@@ -229,7 +229,7 @@ census uninstall --yes    # remove the launcher and block; restore a replaced st
 census uninstall --this-account-only --yes   # the launcher is shared: another account still runs it, so leave it for them
 census uninstall --all-accounts --yes        # ...or restore their status lines too and remove it (they are found under ~/.claude*)
 census statusline --preview [--segments LIST] [--config-dir DIR]   # a canned preview; both flags are valid only with --preview
-census where              # (where, install, uninstall and `statusline --preview` take --config-dir DIR: that account, for that run) read-only JSON: config dir, census dir, settings path, status line, plugin installs, census-mod enabled, and `vitals` (whether this census ships /census:vitals)
+census where              # (where, install, uninstall and `statusline --preview` take --config-dir DIR: that account, for that run) read-only JSON: config dir, census dir, settings path, status line, plugin installs, census-mod enabled
 ```
 
 `--statusline` skips the bash-block step, still installs the launcher (on Windows the command is `python "<census dir>\launcher.py" statusline`, a stable file that follows plugin upgrades), and needs a readable `settings.json`
