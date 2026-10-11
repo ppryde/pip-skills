@@ -41,15 +41,21 @@ def lang_of_qualname(q: str) -> str:
     return "typescript" if q.startswith("ts:") else "python"
 
 
+# String-aware JSONC cleanup: a JSON string literal is matched (and kept) before any comment or
+# comma can be, so "@/*" or "src/**/*" inside a string is never mistaken for a comment.
+_JSON_STR = r'"(?:[^"\\]|\\.)*"'
+_JSONC_COMMENT = re.compile(rf"({_JSON_STR})|//[^\n]*|/\*.*?\*/", re.DOTALL)
+_JSONC_COMMA = re.compile(rf"({_JSON_STR})|,(\s*[}}\]])")
+
+
 def _load_ts_paths(view: View) -> tuple[str, list[tuple[str, str]]]:
     """(baseUrl, [(pattern, first target)]) from the view's root tsconfig.json, if any."""
     raw = view.read_extra("tsconfig.json")
     if raw is None:
         return ".", []
     text = raw.decode("utf-8", errors="replace")
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    text = re.sub(r"(?m)^\s*//.*$", "", text)
-    text = re.sub(r",(\s*[}\]])", r"\1", text)
+    text = _JSONC_COMMENT.sub(lambda m: m.group(1) or "", text)
+    text = _JSONC_COMMA.sub(lambda m: m.group(1) or m.group(2), text)
     try:
         opts = json.loads(text).get("compilerOptions", {})
     except (json.JSONDecodeError, AttributeError):

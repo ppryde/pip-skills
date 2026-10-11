@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from scripts.index import ensure_view
-from scripts.resolve import Resolved, ViewIndex
+from scripts.resolve import Resolved, ViewIndex, _load_ts_paths
 from scripts.store import Store
 from scripts.views import worktree_view
 
@@ -113,5 +113,31 @@ def test_duplicate_qualnames_tolerated(tmp_path: Path, make_repo) -> None:
     assert r == Resolved("m.C.v", "exact")
     assert vi.lookup("m.C.v") == Resolved("m.C.v", "exact")
     assert vi.lookup("C.v").confidence == "inferred"
-    assert {ref.src for _, ref, _ in vi.callers("m.C.v")} <= {"m.go"}
-    assert vi.resolve("m.os").confidence in {"external", "exact"}
+    # the extractor emits `C.v` as a name ref to the class only, so no ref targets m.C.v
+    assert vi.callers("m.C.v") == []
+    assert {ref.src for _, ref, _ in vi.callers("m.C")} == {"m.go"}
+    assert vi.resolve("m.os") == Resolved("m.os", "exact")
+
+
+def _tsconfig_view(make_repo, text: str):
+    repo = make_repo({"tsconfig.json": text, "a.py": "x = 1\n"})
+    return worktree_view(repo.root)
+
+
+def test_tsconfig_glob_strings_are_not_comments(make_repo) -> None:
+    view = _tsconfig_view(make_repo, '{"compilerOptions":{"baseUrl":".","paths":'
+                          '{"@/*":["src/*"]}},"include":["src/**/*"]}')
+    assert _load_ts_paths(view) == (".", [("@/*", "src/*")])
+
+
+def test_tsconfig_comments_and_trailing_commas(make_repo) -> None:
+    view = _tsconfig_view(make_repo, """{
+  // line comment with "quote
+  "compilerOptions": {
+    /* block
+       comment */
+    "baseUrl": "src", // trailing
+    "paths": {"@lib/*": ["lib/*",],},
+  },
+}""")
+    assert _load_ts_paths(view) == ("src", [("@lib/*", "lib/*")])
