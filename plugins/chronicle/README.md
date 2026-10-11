@@ -98,6 +98,7 @@ chronicle sessions [--root R] [--days N] [--limit N]
 chronicle session <id>         # one session with its per-turn context series
 chronicle repos                # repo roots seen, with session counts
 chronicle ingest --transcript PATH [--session-id ID]   # one transcript, now
+chronicle permits [--days N | --since 30d] [--skill S] [--agent-type T] [--json]   # subagent outcomes: allowed / denied / prompted
 chronicle volumes list | add <name> [--claude-dir D] | rm <name>   # docker volumes read in place
 chronicle pricing status       # rates per model with effective ranges, as-of date, last refresh
 chronicle pricing seed         # write the built-in rate table into the store's history
@@ -300,6 +301,15 @@ result is read ONCE to put the call in a fixed category, and the text is then dr
   assignment is ever kept. Other tools are their own name.
 - `agents.agent_type`, `skill`, `non_interactive`, `model`: from the agent's meta sidecar and the
   attribution stamps.
+
+`chronicle permits` aggregates it: per (skill, agent type) the agents, calls, errors, denials by
+cause and prompts (split by whether the agent ran non-interactive, since a denial in a headless agent
+and a prompt in an interactive one mean different things); per tool the shapes that drew a denial or a
+prompt; and a drift line (the share of `error:other`, unknown outcomes, and calls with no
+`permissionDecision` among Claude Code 2.1.295+ sessions) so a harness wording change shows up as a
+number. An agent type that is neither a built-in nor `<plugin>:<name>` always prints as `(ad-hoc)`.
+`--json` is the only interface `tools/derive_agent_tools.py` reads. The report is pull only: run it by
+hand or from a schedule you set up; chronicle ships no scheduler.
 
 All of it is filled by `sync`, and backfilled by `sync --full` for older rows (rows whose
 transcripts Claude Code has since pruned stay empty). A remote box keeps the outcome and the

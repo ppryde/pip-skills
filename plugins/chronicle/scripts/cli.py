@@ -39,6 +39,7 @@ import sqlite3
 from scripts import (
     dedupe,
     ingest,
+    permits_report,
     pricehistory,
     pricerefresh,
     redact,
@@ -383,6 +384,15 @@ def _parse_since(value: str) -> float:
         raise argparse.ArgumentTypeError(f"invalid --since value: {value!r}") from None
 
 
+def _parse_window(value: str) -> float:
+    """``--since`` for `permits`: ``30d`` (the last 30 days) or anything
+    `_parse_since` accepts."""
+    match = re.fullmatch(r"(\d+)d", value)
+    if match:
+        return time.time() - int(match.group(1)) * 86400
+    return _parse_since(value)
+
+
 def _resolve_since(args: argparse.Namespace) -> float | None:
     return args.since if args.since is not None else _since(args.days)
 
@@ -627,6 +637,28 @@ def cmd_repos(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_permits(args: argparse.Namespace) -> int:
+    """`chronicle permits` — what subagents were allowed, denied and asked, per
+    (skill, agent type), from the outcome columns `sync` fills (see
+    ``scripts.permits_report``). Text tables by default; ``--json`` is the
+    structure the proposal generator reads."""
+    conn = _open_readonly()
+    if conn is None:
+        out: dict[str, Any] = {"supported": False,
+                               "note": f"no store at {store.db_path()}; run `chronicle sync`"}
+    else:
+        try:
+            out = permits_report.report(conn, since=_resolve_since(args), skill=args.skill,
+                                        agent_type=args.agent_type)
+        finally:
+            conn.close()
+    if args.json:
+        print(json.dumps(out))
+    else:
+        sys.stdout.write(permits_report.render_text(out))
+    return 0
+
+
 def cmd_accounts(_: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
@@ -731,6 +763,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_agent)
 
     sub.add_parser("repos", help="repo roots seen, with session counts (JSON)").set_defaults(fn=cmd_repos)
+
+    p = sub.add_parser("permits",
+                       help="what subagents were allowed, denied and asked, per skill and agent "
+                            "type (text; --json for the structure)")
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None, help="only tool calls in the last N days")
+    window.add_argument("--since", type=_parse_window, default=None,
+                        help="only tool calls since this ISO date/datetime, or `30d` for the last 30 days")
+    p.add_argument("--skill", default=None, help="only this skill (as stamped; default: all)")
+    p.add_argument("--agent-type", default=None,
+                   help="only this agent type (an ad-hoc name is `(ad-hoc)`)")
+    p.add_argument("--json", action="store_true", help="print the report as JSON")
+    p.set_defaults(fn=cmd_permits)
 
     sub.add_parser("accounts", help="account uuids seen, with session counts (JSON)").set_defaults(
         fn=cmd_accounts)

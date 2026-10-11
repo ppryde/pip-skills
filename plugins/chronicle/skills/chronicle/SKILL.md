@@ -58,6 +58,7 @@ If the user works in a dev container whose Claude config lives in a Docker named
 | `status` | path, row counts, last sync |
 | `pricing status` (also `refresh`, `backfill`, `seed`) | list-price history behind the cost figures |
 | `volumes`, `remotes` | configured Docker volumes / ssh boxes |
+| `permits` | what subagents were allowed, denied and asked, per skill and agent type; pass `--json` for the structure (`--days N`, `--since 30d`, `--skill`, `--agent-type`). Counts and fixed category names only. Run `sync` first (and `sync --full` once to backfill older sessions) |
 | `dedupe` | collapse calls stored twice (dry run unless `--apply`) |
 
 `--days 0` means no window (all history).
