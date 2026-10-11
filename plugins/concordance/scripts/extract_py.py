@@ -38,18 +38,22 @@ def is_test_path(path: str) -> bool:
 
 def extract_python(path: str, blob_sha: str, data: bytes) -> FileFacts:
     try:
-        source = data.decode("utf-8")
+        source = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         return FileFacts(path, blob_sha, "python", False,
                          f"not UTF-8: {exc.reason} at byte {exc.start}")
     try:
         tree = ast.parse(source, filename=path)
+        ex = _Extractor(path, source, tree)
+        ex.run()
+    except RecursionError:
+        return FileFacts(path, blob_sha, "python", False,
+                         "RecursionError: source nested too deeply to analyse")
     except (SyntaxError, ValueError) as exc:
         line = getattr(exc, "lineno", None)
         msg = getattr(exc, "msg", None) or str(exc)
-        return FileFacts(path, blob_sha, "python", False, f"SyntaxError: line {line}: {msg}")
-    ex = _Extractor(path, source, tree)
-    ex.run()
+        where = f"line {line}: " if line is not None else ""
+        return FileFacts(path, blob_sha, "python", False, f"SyntaxError: {where}{msg}")
     return FileFacts(path, blob_sha, "python", True, None,
                      ex.symbols, ex.refs, ex.literals, ex.guards)
 

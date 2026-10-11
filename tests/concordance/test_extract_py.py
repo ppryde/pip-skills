@@ -107,3 +107,23 @@ def test_bad_input_is_a_recorded_failure_not_a_crash() -> None:  # Review Focus 
     syn = extract_python("c.py", "s", b"def (:\n")
     assert not syn.parsed_ok and syn.error is not None
     assert syn.error.startswith("SyntaxError: line 1")
+
+
+def test_deeply_nested_source_is_a_recorded_failure() -> None:
+    elifs = "".join(f"    elif a == {i}:\n        pass\n" for i in range(400))
+    chain = ("def f(a):\n    if a == -1:\n        pass\n" + elifs).encode()
+    deep_if = extract_python("d.py", "s", chain)
+    assert not deep_if.parsed_ok and deep_if.error is not None
+    assert deep_if.error.startswith("RecursionError")
+    wide = extract_python("e.py", "s", ("x = " + "+".join(["a"] * 3000) + "\n").encode())
+    assert not wide.parsed_ok and wide.error is not None
+
+
+def test_utf8_bom_file_parses() -> None:
+    f = extract_python("b.py", "s", b"\xef\xbb\xbfx = 1\n")
+    assert f.parsed_ok and f.error is None
+
+
+def test_error_without_line_number_does_not_print_none() -> None:
+    nul = extract_python("b.py", "s", b"x = 1\x00\n")
+    assert nul.error is not None and "None" not in nul.error
