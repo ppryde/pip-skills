@@ -121,7 +121,8 @@ def test_ra_post_inline_pr_is_read_only_when_selected():
     assert "Only when the selected output is `post-inline-pr`" in review
     assert reads(review, "references/post-inline-pr.md")
     post = read_lf(RA / "references/post-inline-pr.md")
-    for needle in ("[From <alias>]:", "Confirmation gate (never auto-post)", "--input", "422"):
+    for needle in ("[From <alias>]:", "Confirmation gate (never auto-post)", "prreview.py plan",
+                   "prreview.py post", "--confirmed", "fallback_summary"):
         assert needle in post, needle
     assert "Confirmation gate" not in review
 
