@@ -5,10 +5,15 @@ Subcommands
   build [--check]        write (or verify) doctrines/INDEX.md
   lint [--overlaps]      structural checks on every doctrine; exit 1 on any error
   select ...             the active checklist for a config (never reads config files)
+  batches ...            the active rules split into audit batches (one per doctrine, <= BATCH_CAP rules;
+                         `select --ids` / `scan --ids` then give a subagent just its batch)
   show ID [ID...]        the full rule block(s), with file:line
   constraints ...        Scribe view: binding statements only (honours gen=no)
-  fire FILE...           ids of regex rules whose patterns hit the files (line by line;
-                         the seed of PR 2's `scan`, used by the golden test)
+  scan --files F... ...  Phase 1 for a config: file:line | id | matched line for every active
+                         regex rule (line by line; binary, >2 MiB, symlinked and outside-repo files are listed as skipped;
+                         5 s per-file timer on POSIX; matched lines cut to 200 characters)
+  savepath PATH          ok | exists | outside-repo for a save target (exit 0 | 3 | 4); symlinks resolved
+  fire FILE...           first hit per regex rule, ignoring config (used by the golden test)
 
 The doctrine markdown stays canonical. This script only parses it. `--doctrines-dir`
 points every subcommand at another copy (the golden test uses an export of old doctrines).
@@ -17,8 +22,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
 import signal
+import stat
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +49,8 @@ KINDS = ("core", "language")
 SCRIBE_VALUES = ("constraints", "skip")
 FLAGS = ("verify", "multiline")
 FRONT_KEYS = ("doctrine", "prefix", "kind", "templating", "scribe")
+BATCH_CAP = 30     # max selected rules per audit batch (provisional; designs/subagents.md may tune it)
+BATCH_SMALL = 8    # doctrines with fewer selected rules than this may share a batch
 REGEX_BUDGET_S = 0.100
 HOSTILE_LEN = 64 * 1024
 
@@ -473,6 +483,7 @@ class Config:
     templating: str = ""
     targets: tuple = ()
     doctrine: str = ""
+    ids: tuple = ()
 
 
 def _csv(s):
@@ -533,7 +544,88 @@ def select_rules(docs, cfg: Config):
                 filt["type"] += 1
                 continue
             active.append(r)
+    if cfg.ids:
+        wanted = set(cfg.ids)
+        unknown = sorted(wanted - {r.id for r in active})
+        if unknown:
+            warnings.append(f"warning: --ids not in the active set: {', '.join(unknown)}")
+        active = [r for r in active if r.id in wanted]
     return active, filt, warnings
+
+
+def _sections(path: Path):
+    """Line numbers of the markdown headings in a doctrine file (section boundaries)."""
+    out = []
+    for n, l in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+        if re.match(r"^#{2,4} ", l):
+            out.append(n)
+    return out
+
+
+def _even_chunks(items, cap):
+    """Split into the fewest chunks of <= cap, as even as possible, order kept."""
+    k = -(-len(items) // cap)
+    size, extra = divmod(len(items), k)
+    out, i = [], 0
+    for c in range(k):
+        n = size + (1 if c < extra else 0)
+        out.append(items[i:i + n])
+        i += n
+    return out
+
+
+def make_batches(active, cap: int = BATCH_CAP, small: int = BATCH_SMALL):
+    """Deterministic audit batches over the active rules: list of (doctrines, [rules]).
+
+    One batch per doctrine; a doctrine over `cap` is split along its section (heading)
+    boundaries, packing whole sections up to `cap` and splitting a section only when it
+    alone exceeds `cap`; doctrines under `small` rules share a batch up to `cap`.
+    Order follows the doctrine order of `active`, then document order: stable."""
+    by_doc = {}
+    for r in active:
+        by_doc.setdefault(r.doctrine, []).append(r)
+    units = []   # (doctrine name, [rules]) in order
+    for name, rules in by_doc.items():
+        if len(rules) <= cap:
+            units.append((name, rules))
+            continue
+        heads = _sections(rules[0].file)
+        groups = {}
+        for r in rules:
+            key = max([h for h in heads if h < r.line], default=0)
+            groups.setdefault(key, []).append(r)
+        cur = []
+        parts = []
+        for g in (groups[k] for k in sorted(groups)):
+            for piece in (_even_chunks(g, cap) if len(g) > cap else [g]):
+                if cur and len(cur) + len(piece) > cap:
+                    parts.append(cur)
+                    cur = []
+                cur = cur + piece
+        if cur:
+            parts.append(cur)
+        units += [(name, part) for part in parts]
+    out = []   # [names, rules, mergeable]
+    for name, rules in units:
+        whole = len(rules) == len(by_doc[name])
+        mergeable = whole and len(rules) < small
+        if out and mergeable and out[-1][2] and len(out[-1][1]) + len(rules) <= cap:
+            out[-1][0].append(name)
+            out[-1][1].extend(rules)
+        else:
+            out.append([[name], list(rules), mergeable])
+    return [(n, r) for n, r, _ in out]
+
+
+def render_batches(docs, cfg: Config, cap: int = BATCH_CAP) -> str:
+    active, _filt, warnings = select_rules(docs, cfg)
+    bs = make_batches(active, cap)
+    out = list(warnings)
+    out.append(f"# batches: {len(bs)} | cap {cap} | {len(active)} active rules | "
+               "batch | doctrines | count | ids (pass the ids to `select --ids` / `scan --ids`)")
+    for n, (names, rules) in enumerate(bs, 1):
+        out.append(f"batch {n} | {'+'.join(names)} | {len(rules)} | {','.join(r.id for r in rules)}")
+    return "\n".join(out) + "\n"
 
 
 def _check_text(r: Rule) -> str:
@@ -567,7 +659,7 @@ def render_select(docs, cfg: Config) -> str:
     out.append("## REGEX   (id | sev | flags | pattern)")
     for r in rx:
         for row in _pattern_rows(r):
-            out.append(f"{r.id} | {r.severity(cfg.email_type)} | {','.join(r.flags) or '-'} | {row}")
+            out.append(f"{r.id} | {r.severity(cfg.email_type)} | {','.join(verify_flags(r)) or '-'} | {row}")
     out.append("## CONTEXTUAL   (id | sev | check)")
     for r in cx:
         tag = " [advisory]" if r.detect.advisory else ""
@@ -639,15 +731,50 @@ def resolve_overrides(overrides: dict, docs):
 MAX_SCAN_BYTES = 2 * 1024 * 1024
 
 
-def read_scannable(path: Path):
-    """(text, skipped_reason). Binary (NUL in the first 8 KB) and >2 MiB files are skipped, never silently."""
+def repo_root() -> str:
+    """Realpath of the git toplevel of the cwd, or of the cwd when there is no repository."""
+    cwd = os.getcwd()
     try:
-        size = path.stat().st_size
-        if size > MAX_SCAN_BYTES:
-            return "", f"over {MAX_SCAN_BYTES // (1024 * 1024)} MiB"
-        raw = path.read_bytes()
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                             timeout=10, cwd=cwd)
+        top = out.stdout.strip()
+        if out.returncode == 0 and top:
+            return os.path.realpath(top)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return os.path.realpath(cwd)
+
+
+def inside_repo(path) -> bool:
+    root = repo_root()
+    real = os.path.realpath(path)
+    return real == root or real.startswith(root.rstrip(os.sep) + os.sep)
+
+
+def read_scannable(path: Path):
+    """(text, skipped_reason). Symlinks, paths resolving outside the repo, non-regular files, binary (NUL in the first 8 KB) and >2 MiB files are skipped, never silently.
+
+    A scanned path may come from an untrusted branch, so it is never followed (a symlink to
+    /dev/zero or ~/.ssh/id_rsa) and st_size is never trusted: at most cap+1 bytes are read
+    from the opened regular file.
+    """
+    try:
+        st = os.lstat(path)
+        if stat.S_ISLNK(st.st_mode):
+            return "", "symlink"
+        if not stat.S_ISREG(st.st_mode):
+            return "", "not a regular file"
+        if not inside_repo(path):
+            return "", "outside repo"
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(fd, "rb") as fh:
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                return "", "not a regular file"
+            raw = fh.read(MAX_SCAN_BYTES + 1)
     except OSError as e:
         return "", f"unreadable: {e.strerror or e}"
+    if len(raw) > MAX_SCAN_BYTES:
+        return "", f"over {MAX_SCAN_BYTES // (1024 * 1024)} MiB"
     if b"\0" in raw[:8192]:
         return "", "binary"
     return raw.decode("utf-8", errors="replace"), ""
@@ -681,6 +808,133 @@ def fire_ids(rules, text: str) -> dict:
                         hits.setdefault(r.id, n)
                         break
     return hits
+
+
+# --------------------------------------------------------------------------- scan
+
+SCAN_FILE_TIMEOUT_S = 5.0   # per file, POSIX only (setitimer)
+SCAN_LINE_CHARS = 200       # echoed matched lines are truncated: template content is data
+SCAN_MAX_HITS = 20          # per rule per file; the rest is summarised, not listed
+
+
+class ScanTimeout(Exception):
+    pass
+
+
+def _short(line: str) -> str:
+    line = line.strip()
+    return line if len(line) <= SCAN_LINE_CHARS else line[: SCAN_LINE_CHARS - 1] + "…"
+
+
+def verify_flags(r: Rule) -> list:
+    """The rule's flags, plus `verify` when its detect note says "check ..." (the pattern then only nominates)."""
+    flags = list(r.flags)
+    if "verify" not in flags and r.detect is not None and r.detect.note and re.search(r"\bcheck\b", r.detect.note, re.I):
+        flags.append("verify")
+    return flags
+
+
+def scan_text(rules, text: str):
+    """Phase 1 over one file's text: [(line, id, matched line, flags)] plus {id: extra hits not listed}.
+
+    Line by line, so a pattern's backtracking is bounded by one line. A rule flagged
+    `multiline` is matched against the whole text instead. Absence rules report line 1
+    when the trigger is present and the required pattern is not. Aliases and contextual
+    rules never run; `gen` is ignored (an audit checks everything). A rule flagged `verify`,
+    or whose detect note says "check ...", only nominates: scan marks it `[verify]`.
+    """
+    lines = text.split("\n")
+    out, extra = [], {}
+    for r in rules:
+        if r.is_alias or r.detect is None or r.detect.kind == "contextual":
+            continue
+        d = r.detect
+        # a detect note that says "check ..." means the pattern only nominates (as `flags: verify`)
+        flags = ",".join(verify_flags(r))
+        if d.absence:
+            if re.search(d.absence[0], text) and not re.search(d.absence[1], text):
+                out.append((1, r.id, "absence: trigger present, required pattern missing", flags))
+            continue
+        seen = set()
+        for pat in d.patterns:
+            c = re.compile(pat)
+            if "multiline" in r.flags:
+                for m in c.finditer(text):
+                    n = text.count("\n", 0, m.start()) + 1
+                    seen.add((n, _short(lines[n - 1])))
+            else:
+                for n, ln in enumerate(lines, 1):
+                    if c.search(ln):
+                        seen.add((n, _short(ln)))
+        hits = sorted(seen)
+        for n, shown in hits[:SCAN_MAX_HITS]:
+            out.append((n, r.id, shown, flags))
+        if len(hits) > SCAN_MAX_HITS:
+            extra[r.id] = len(hits) - SCAN_MAX_HITS
+    out.sort(key=lambda h: (h[0], h[1]))
+    return out, extra
+
+
+def scan_with_timeout(rules, text: str, seconds: float = None):
+    """scan_text under a per-file interval timer; raises ScanTimeout. Without setitimer (Windows) no timer runs."""
+    seconds = SCAN_FILE_TIMEOUT_S if seconds is None else seconds
+    if not hasattr(signal, "setitimer"):
+        return scan_text(rules, text)
+
+    def _alarm(signum, frame):
+        raise ScanTimeout()
+
+    old = signal.signal(signal.SIGALRM, _alarm)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        return scan_text(rules, text)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old)
+
+
+def render_scan(docs, cfg: Config, files) -> str:
+    active, _filt, warnings = select_rules(docs, cfg)
+    rx = [r for r in active if r.detect is not None and r.detect.kind in ("regex", "hybrid")]
+    out = list(warnings)
+    out.append(f"# scan: {len(rx)} regex rules x {len(files)} file(s) | file:line | id | matched line "
+               "([verify] = read the line and confirm before recording a finding)")
+    skipped, timed_out, total = [], [], 0
+    for fp in files:
+        text, why = read_scannable(Path(fp))
+        if why:
+            skipped.append(f"skipped: {fp} ({why})")
+            continue
+        try:
+            hits, extra = scan_with_timeout(rx, text)
+        except ScanTimeout:
+            timed_out.append(fp)
+            continue
+        for n, rid, shown, flags in hits:
+            out.append(f"{fp}:{n} | {rid} | {shown}" + (" [verify]" if "verify" in flags else ""))
+            total += 1
+        for rid, more in sorted(extra.items()):
+            out.append(f"{fp} | {rid} | (+{more} more matching lines not listed)")
+    out += skipped
+    out += [f"scan timed out: {fp} (apply Phase 1 to this file by hand)" for fp in timed_out]
+    out.append(f"# scan done: {total} hit(s), {len(skipped)} skipped, {len(timed_out)} timed out")
+    return "\n".join(out) + "\n"
+
+
+# --------------------------------------------------------------------------- savepath
+
+SAVE_OK, SAVE_EXISTS, SAVE_OUTSIDE = "ok", "exists", "outside-repo"
+SAVE_CODES = {SAVE_OK: 0, SAVE_EXISTS: 3, SAVE_OUTSIDE: 4}
+
+
+def save_status(path: str) -> str:
+    """'outside-repo' if the target (symlinks resolved, even through a missing tail) leaves the repo root,
+    'exists' if something is already there (a dangling symlink counts), else 'ok'. Outside wins."""
+    if not inside_repo(path):
+        return SAVE_OUTSIDE
+    if os.path.lexists(path):
+        return SAVE_EXISTS
+    return SAVE_OK
 
 
 # --------------------------------------------------------------------------- index
@@ -745,10 +999,11 @@ def _add_cfg(p):
     p.add_argument("--templating", default="")
     p.add_argument("--targets", default="", help="comma list of rendering_targets")
     p.add_argument("--doctrine", default="")
+    p.add_argument("--ids", default="", help="comma list of rule ids: keep only these active rules")
 
 
 def _cfg(a) -> Config:
-    return Config(a.email_type, a.esp, a.templating, _csv(a.targets), a.doctrine)
+    return Config(a.email_type, a.esp, a.templating, _csv(a.targets), a.doctrine, _csv(a.ids))
 
 
 def main(argv=None) -> int:
@@ -760,9 +1015,15 @@ def main(argv=None) -> int:
     lp = sub.add_parser("lint")
     lp.add_argument("--overlaps", action="store_true")
     _add_cfg(sub.add_parser("select"))
+    _add_cfg(sub.add_parser("batches"))
     _add_cfg(sub.add_parser("constraints"))
+    sc = sub.add_parser("scan")
+    _add_cfg(sc)
+    sc.add_argument("--files", nargs="+", required=True)
     s = sub.add_parser("show")
     s.add_argument("ids", nargs="+")
+    sp = sub.add_parser("savepath", help="ok | exists | outside-repo for a Scribe save target (exit 0 | 3 | 4)")
+    sp.add_argument("path")
     f = sub.add_parser("fire")
     f.add_argument("files", nargs="+")
     a = ap.parse_args(argv)
@@ -790,6 +1051,10 @@ def main(argv=None) -> int:
         docs, _ = load(ddir)
         print(f"lint: ok ({len(all_rules(docs))} rules, {len(docs)} doctrines)")
         return 0
+    if a.cmd == "savepath":
+        status = save_status(a.path)
+        print(status)
+        return SAVE_CODES[status]
     docs, problems = load(ddir)
     if problems:
         for name, line, msg in problems:
@@ -798,8 +1063,14 @@ def main(argv=None) -> int:
     if a.cmd == "select":
         sys.stdout.write(render_select(docs, _cfg(a)))
         return 0
+    if a.cmd == "batches":
+        sys.stdout.write(render_batches(docs, _cfg(a)))
+        return 0
     if a.cmd == "constraints":
         sys.stdout.write(render_constraints(docs, _cfg(a)))
+        return 0
+    if a.cmd == "scan":
+        sys.stdout.write(render_scan(docs, _cfg(a), a.files))
         return 0
     if a.cmd == "show":
         text, missing = render_show(docs, a.ids)
