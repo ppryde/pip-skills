@@ -22,6 +22,7 @@ export const V = {
   lastLightOff: '🌅 Last light is off for this session — 5-minute prompt cache (/vigil-setup last-light)',
   lastLightBackOn: '🌅 Last light is back on — 1-hour prompt cache',
   nudge: (pct: number) => `🕯️ Context at ${pct}% — say "hand over" (or /vho) when you're ready 📜`,
+  nudgeAsk: (pct: number) => `🕯️ Context is at ${pct}%. Hand over now?`,
   handoverSaved: (path: string) => `📜 Handover saved — ${path}`,
   clearSkippedAttended: '📜 Handover saved — you came back, so nothing was cleared; /vho or /clear when you are ready',
   clearSkippedAutoOff: '📜 Handover saved — auto mode was switched off, so nothing was cleared; /vho or /clear when you are ready',

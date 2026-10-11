@@ -84,6 +84,7 @@ Terminal only. Shown from the threshold crossing until you choose or a handover 
 `🕯️ context 41% · threshold 35%   📜 Hand over now · ⏰ Remind me at 45% · ✖ Dismiss`, with hotkeys `1`, `2`, `0` on the three buttons (the label names the absolute next step).
 
 - `1` starts a handover; `2` hides it until the next step; `0` hides it silently until a `/clear`.
+- On the phone (last prompt from Remote Control) the bar never arrives, so the same three choices come as a dialog instead ("🕯️ Context is at 41%. Hand over now?"), which raises Remote Control's "action required" push. A dismissed dialog counts as Remind me; one dialog at a time.
 - A bare digit typed into an **empty** prompt box presses a button, so the bar is threshold-only, never always-on.
 - It **yields to the feedback survey** (`hasSurvey`) and returns after it.
 - Off via `/vigil-setup bar`: a toast and log line (fired from the context measure) still mark the threshold and every step after. Notices (`ui.toast`/`ui.log`) show in the terminal only: they do not reach Remote Control yet (PROBES.md §1).
