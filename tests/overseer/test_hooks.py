@@ -727,6 +727,54 @@ class TestPrepushSnapshotHook:
         assert result.returncode == 0
         assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
 
+    def test_noop_when_push_is_only_inside_a_heredoc_body(self, git_repo):
+        # WF-265: the old shlex tokenizer read heredoc bodies as shell words.
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": "cat > /tmp/notes.md <<'EOF'\ngit push origin main\nEOF"}},
+            git_repo,
+        )
+
+        assert result.returncode == 0
+        assert self._log_messages(git_repo) == []
+
+    def test_snapshots_when_push_follows_a_heredoc(self, git_repo):
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": "cat > /tmp/n.md <<'EOF'\nbody\nEOF\ngit push origin main"}},
+            git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+
+    def test_noop_when_the_command_cannot_be_parsed(self, git_repo):
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script({"tool_input": {"command": "echo 'git push"}}, git_repo)
+
+        assert result.returncode == 0
+        assert self._log_messages(git_repo) == []
+
+    def test_one_python_start_decides_a_non_push(self, git_repo, tmp_path):
+        # WF-265: the old hook started jq or two python3, then a third for detection.
+        log = tmp_path / "py.log"
+        stub = tmp_path / "stubpy"
+        stub.write_text(f'#!/bin/sh\necho "$@" >> {log}\nexec {sys.executable} "$@"\n')
+        stub.chmod(0o755)
+        env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(PLUGIN_ROOT), "OVERSEER_PYTHON": str(stub)}
+        result = subprocess.run(
+            [BASH, str(PREPUSH_HOOK_SCRIPT)], input=json.dumps({"tool_input": {"command": "ls"}}),
+            env=env, cwd=git_repo, capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert len(log.read_text().splitlines()) == 1
+
     def test_no_empty_commit_when_board_unchanged(self, git_repo):
         assert main(["--root", str(git_repo), "init"]) == 0
         assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
