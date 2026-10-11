@@ -1,6 +1,8 @@
-"""Sprint files: parse/serialise and card-table rollup."""
+"""Sprints: the dataclass (with its legacy file form), board.db persistence and
+card-table rollup. The ``sprints/<id>.md`` files are generated views."""
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass, replace as dc_replace
 from pathlib import Path
 
@@ -13,6 +15,8 @@ from scripts.models import (
     parse_tokens,
     split_frontmatter,
 )
+from scripts.db import commit_unless_txn
+from scripts.store import check_id
 
 SPRINT_STATUSES = {"planned", "active", "closed"}
 
@@ -109,37 +113,44 @@ def retro_rollup(sprint: Sprint, cards: list[Card]) -> Sprint:
     )
 
 
-def sprint_path(root: Path, sprint_id: str) -> Path:
-    from scripts.store import check_id
-
-    return root / "sprints" / f"{check_id(sprint_id, 'sprint id')}.md"
-
-
-def load_sprint(path: Path) -> Sprint:
-    return Sprint.from_text(path.read_text())
+def _row_to_sprint(row) -> Sprint:
+    return Sprint(
+        id=row["id"], status=row["status"], budget_estimate=row["budget_estimate"],
+        budget_actual=row["budget_actual"] or 0, started=row["started"] or "",
+        body=row["body"] or "",
+    )
 
 
-def save_sprint(root: Path, sprint: Sprint) -> Path:
-    path = sprint_path(root, sprint.id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(sprint.to_text())
-    return path
+def sprint_exists(conn: sqlite3.Connection, sprint_id: str) -> bool:
+    return conn.execute("SELECT 1 FROM sprints WHERE id = ?", (sprint_id,)).fetchone() is not None
 
 
-def load_sprints(root: Path) -> tuple[list[Sprint], list[Path]]:
-    """Load all sprint files from sprints/ directory.
+def load_sprint(conn: sqlite3.Connection, sprint_id: str) -> Sprint:
+    """One sprint; ``FileNotFoundError`` (the CLI's exit-1 'unknown id') if absent."""
+    check_id(sprint_id, "sprint id")
+    row = conn.execute("SELECT * FROM sprints WHERE id = ?", (sprint_id,)).fetchone()
+    if row is None:
+        raise FileNotFoundError(f"no sprint with id {sprint_id}")
+    return _row_to_sprint(row)
 
-    Returns (sprints, quarantined_paths).
-    Corrupt sprints are quarantined via store.quarantine() and paths returned.
-    """
-    from scripts.store import quarantine
 
-    sprints: list[Sprint] = []
-    quarantined: list[Path] = []
-    for path in sorted((root / "sprints").glob("*.md")):
-        try:
-            sprints.append(load_sprint(path))
-        except CardParseError:
-            quarantined.append(quarantine(root, path))
-    sprints.sort(key=lambda s: s.id)
-    return sprints, quarantined
+def save_sprint(conn: sqlite3.Connection, sprint: Sprint, now: str = "") -> None:
+    """Upsert one sprint. Call inside ``db.txn`` when it follows a load."""
+    check_id(sprint.id, "sprint id")
+    conn.execute(
+        "INSERT INTO sprints(id, status, budget_estimate, budget_actual, started, body, updated) "
+        "VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status, "
+        "budget_estimate=excluded.budget_estimate, budget_actual=excluded.budget_actual, "
+        "started=excluded.started, body=excluded.body, updated=excluded.updated",
+        (sprint.id, sprint.status, sprint.budget_estimate, sprint.budget_actual,
+         sprint.started, sprint.body, now),
+    )
+    commit_unless_txn(conn)
+
+
+def load_sprints(conn: sqlite3.Connection) -> tuple[list[Sprint], list[Path]]:
+    """All sprints, by id. Reads never mutate (OL-10): the second element is
+    always empty now -- a typed row cannot be corrupt, and unparseable legacy
+    files are reported by the importer and left in place."""
+    rows = conn.execute("SELECT * FROM sprints ORDER BY id").fetchall()
+    return [_row_to_sprint(r) for r in rows], []
