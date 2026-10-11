@@ -8,7 +8,7 @@ _CENSUS_CLI = Path(__file__).resolve().parents[2] / "plugins" / "census" / "scri
 
 
 @pytest.fixture(autouse=True)
-def _no_real_tmux(monkeypatch):
+def _no_real_tmux(monkeypatch, tmp_path_factory):
     """Strip every env var the tmux-touching code paths read, for EVERY test.
 
     The developer runs this suite from inside a live tmux session, so tests
@@ -25,8 +25,17 @@ def _no_real_tmux(monkeypatch):
     those paths. monkeypatch scopes the deletion per-test, and it also cleans
     os.environ for subprocess-based tests that build their env from it.
     """
-    for var in ("TMUX", "TMUX_PANE", "VIGIL_TMUX_BIN", "VIGIL_KICK_DELAY"):
+    for var in ("TMUX", "TMUX_PANE", "VIGIL_TMUX_BIN", "VIGIL_KICK_DELAY",
+                "VIGIL_PYTHON", "CLAUDE_PROJECT_DIR"):
         monkeypatch.delenv(var, raising=False)
+    # Vigil state lives under the config dir: pin it (and HOME, and the other
+    # state roots) to a throwaway dir so no test touches real user state.
+    sandbox = tmp_path_factory.mktemp("vigil-sandbox")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(sandbox / "config"))
+    monkeypatch.setenv("HOME", str(sandbox / "home"))
+    monkeypatch.setenv("OVERSEER_CENTRAL", str(sandbox / "overseer"))
+    monkeypatch.setenv("OVERSEER_DB", str(sandbox / "overseer" / "board.db"))
+    monkeypatch.setenv("TMPDIR", str(sandbox))
     # Hermetic census lookup: the repo's own CLI, never a real pointer or PATH entry.
     monkeypatch.setenv("CENSUS_CLI", str(_CENSUS_CLI))
 

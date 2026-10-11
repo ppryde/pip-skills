@@ -361,3 +361,41 @@ class TestClearRequested:
         assert st.clear_requested(tmp_path) is True
         assert st.clear_requested(tmp_path) is True  # non-consuming: repeatable
         assert st.clear_flag(tmp_path).exists()  # still there for the real consumer
+
+
+class TestArchiveRetention:
+    """VG-13: timestamped archive names, newest 20 kept, no sequential probing."""
+
+    def test_archive_names_are_timestamped_not_numbered(self, tmp_path):
+        st.begin(tmp_path)
+        for i in range(3):
+            st.request_clear(tmp_path, f"H{i}")
+            st.consume_handoff(tmp_path)
+            st.cooldown_marker(tmp_path).unlink(missing_ok=True)
+        names = sorted(p.name for p in st.handoff_archive_dir(tmp_path).iterdir())
+        assert len(names) == 3
+        assert all(n.startswith("handoff-") and n.endswith(".md") for n in names)
+        assert not any(n.startswith("handoff.") for n in names)
+
+    def test_keeps_only_newest_twenty(self, tmp_path):
+        st.begin(tmp_path)
+        for i in range(25):
+            st.request_clear(tmp_path, f"H{i}")
+            st.consume_handoff(tmp_path)
+            st.cooldown_marker(tmp_path).unlink(missing_ok=True)
+        kept = sorted(st.handoff_archive_dir(tmp_path).iterdir(), key=lambda p: p.name)
+        assert len(kept) == st.ARCHIVE_KEEP == 20
+        assert {p.read_text() for p in kept} == {f"H{i}" for i in range(5, 25)}
+
+    def test_does_not_probe_for_free_names(self, tmp_path, monkeypatch):
+        st.begin(tmp_path)
+        for i in range(5):
+            st.request_clear(tmp_path, f"H{i}")
+            st.consume_handoff(tmp_path)
+        calls = []
+        real = Path.exists
+        monkeypatch.setattr(Path, "exists", lambda self: calls.append(self) or real(self))
+        st.request_clear(tmp_path, "LAST")
+        calls.clear()
+        st.consume_handoff(tmp_path)
+        assert [c for c in calls if c.parent.name == "archive"] == []

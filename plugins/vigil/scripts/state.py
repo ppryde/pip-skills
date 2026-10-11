@@ -1,4 +1,4 @@
-"""Vigil runtime state under `.claude/vigil/`, keyed by the repo root (cwd).
+"""Vigil runtime state under `$CLAUDE_CONFIG_DIR/vigil/<repo-key>/`, keyed by the repo root.
 
 The vigil root is the per-session key: one root, one watch. Every function is
 quarantine-safe — it only touches its own marker files and never raises on a
@@ -6,7 +6,7 @@ missing path.
 
 Single-writer assumption: these markers (`active`, `paused`, `cooldown`,
 `clear-requested`, `handover-gate`, `handoff.md`) live under one
-`.claude/vigil/` per root and carry no session identity. If two live sessions share a single root
+state dir per root and carry no session identity. If two live sessions share a single root
 they share — and race on — the same markers: one session's nudge gates the
 other, one session's `/clear` cooldown silences the other. Vigil therefore
 assumes exactly one session per root, which the intended per-worktree session
@@ -15,13 +15,22 @@ sessions is unsupported.
 """
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
-from scripts.store import _uniquify, ensure_root, vigil_root
+from scripts.store import (
+    PRIVATE_FILE_MODE,
+    ensure_root,
+    read_private,
+    touch_private,
+    vigil_root,
+    write_private,
+)
 
 COOLDOWN_TTL_SECONDS = 300
 GATE_TTL_SECONDS = 6 * 60 * 60  # 6h self-heal: mirrors COOLDOWN_TTL_SECONDS's pattern
+ARCHIVE_KEEP = 20  # consumed handoffs kept in archive/ (newest first)
 MAX_TITLE_LENGTH = 60  # keeps a tmux window title readable in the status bar
 
 
@@ -80,7 +89,7 @@ def handoff_archive_dir(repo_root: Path) -> Path:
 
 def begin(repo_root: Path) -> None:
     ensure_root(repo_root)
-    active_marker(repo_root).touch()
+    touch_private(active_marker(repo_root))
 
 
 def is_active(repo_root: Path) -> bool:
@@ -93,7 +102,7 @@ def is_paused(repo_root: Path) -> bool:
 
 def pause(repo_root: Path) -> None:
     ensure_root(repo_root)
-    paused_flag(repo_root).touch()
+    touch_private(paused_flag(repo_root))
 
 
 def resume(repo_root: Path) -> None:
@@ -129,7 +138,7 @@ def cooldown_active(repo_root: Path) -> bool:
 
 def set_gate(repo_root: Path) -> None:
     ensure_root(repo_root)
-    gate_marker(repo_root).touch()
+    touch_private(gate_marker(repo_root))
 
 
 def gate_active(repo_root: Path) -> bool:
@@ -162,28 +171,25 @@ def request_clear(repo_root: Path, handoff_text: str, title: str | None = None) 
     if _cooldown_active(repo_root):
         return "cooldown"
     ensure_root(repo_root)
-    handoff_path(repo_root).write_text(handoff_text)
+    write_private(handoff_path(repo_root), handoff_text)
     sanitized = _sanitize_title(title) if title else None
     if sanitized:
-        rename_title_path(repo_root).write_text(sanitized)
+        write_private(rename_title_path(repo_root), sanitized)
     else:
         # A stale title from an earlier arm must not bleed into this one.
         rename_title_path(repo_root).unlink(missing_ok=True)
-    clear_flag(repo_root).touch()
+    touch_private(clear_flag(repo_root))
     return "armed"
 
 
 def consume_rename_title(repo_root: Path) -> str | None:
     """Read the pending window-rename title, then delete it (at most once)."""
     path = rename_title_path(repo_root)
-    if not path.exists():
-        return None
-    try:
-        text = path.read_text().strip()
-    except OSError:
+    text = read_private(path)
+    if text is None:
         return None
     path.unlink(missing_ok=True)
-    return text or None
+    return text.strip() or None
 
 
 def consume_clear_flag(repo_root: Path) -> bool:
@@ -193,7 +199,7 @@ def consume_clear_flag(repo_root: Path) -> bool:
         return False
     clear_flag(repo_root).unlink(missing_ok=True)  # remove FIRST: cannot re-fire
     ensure_root(repo_root)
-    cooldown_marker(repo_root).touch()
+    touch_private(cooldown_marker(repo_root))
     return True
 
 
@@ -218,35 +224,43 @@ def begin_cycle(repo_root: Path) -> None:
     clear_flag(repo_root).unlink(missing_ok=True)
     rename_title_path(repo_root).unlink(missing_ok=True)
     clear_gate(repo_root)
-    cooldown_marker(repo_root).touch()
+    touch_private(cooldown_marker(repo_root))
 
 
 def read_handoff(repo_root: Path) -> str | None:
-    path = handoff_path(repo_root)
-    if not path.exists():
-        return None
+    return read_private(handoff_path(repo_root))
+
+
+def prune_archive(repo_root: Path, keep: int = ARCHIVE_KEEP) -> None:
+    """Keep only the newest ``keep`` archived handoffs. Never raises."""
     try:
-        return path.read_text()
+        files = sorted(
+            (f for f in handoff_archive_dir(repo_root).iterdir() if f.is_file()),
+            key=lambda f: (f.stat().st_mtime_ns, f.name),
+            reverse=True,
+        )
     except OSError:
-        return None
+        return
+    for old in files[max(keep, 0):]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
 
 
 def consume_handoff(repo_root: Path) -> str | None:
     """Read the pending handoff, then archive it so it injects at most once.
 
     Returns the handoff text, or None if there is no pending handoff. Archiving
-    (move to <vigil_root>/archive/, uniquified) clears the re-injection gate —
+    (move to <vigil_root>/archive/ as a timestamped name, newest 20 kept) clears the re-injection gate —
     the handoff file's presence IS that gate — so a later unrelated launch will
     not re-inject a stale briefing. Quarantine-safe: on any archive failure it
     still removes the live handoff so re-injection cannot repeat, and never
     raises.
     """
     path = handoff_path(repo_root)
-    if not path.exists():
-        return None
-    try:
-        text = path.read_text()
-    except OSError:
+    text = read_private(path)  # no-follow: a planted symlink reads as nothing
+    if text is None:
         return None
     # The text is now in hand — from here we MUST return it, never raise
     # (the docstring's contract). Archiving is best-effort; if it fails we
@@ -255,8 +269,13 @@ def consume_handoff(repo_root: Path) -> str | None:
     try:
         archive = handoff_archive_dir(repo_root)
         archive.mkdir(parents=True, exist_ok=True)
-        target = _uniquify(archive / "handoff.md")
+        target = archive / f"handoff-{time.time_ns()}.md"
         path.rename(target)
+        try:
+            os.chmod(target, PRIVATE_FILE_MODE)
+        except OSError:
+            pass
+        prune_archive(repo_root)
     except OSError:
         try:
             path.unlink(missing_ok=True)

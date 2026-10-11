@@ -1,10 +1,14 @@
-"""Per-repo runtime config for context stewardship. Single-writer, under the vigil root."""
+"""Per-repo runtime config for context stewardship. Single-writer, under the vigil root.
+
+`context.window` defaults to 200000 only as the last resort: when it is not set
+explicitly, the transcript fallback detects the real window (see context.py).
+"""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from scripts.store import ensure_root, vigil_root
+from scripts.store import ensure_root, read_private, vigil_root, write_private
 
 DEFAULTS: dict[str, object] = {
     "context.threshold": 35,
@@ -23,19 +27,26 @@ def config_path(repo_root: Path) -> Path:
     return vigil_root(repo_root) / "config.json"
 
 
+def _stored(repo_root: Path) -> dict[str, object]:
+    """Only the keys explicitly set (never the defaults); {} if absent or corrupt."""
+    text = read_private(config_path(repo_root))
+    if text is None:
+        return {}
+    try:
+        stored = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return {k: v for k, v in stored.items() if k in DEFAULTS} if isinstance(stored, dict) else {}
+
+
 def load_config(repo_root: Path) -> dict[str, object]:
-    merged = dict(DEFAULTS)
-    path = config_path(repo_root)
-    if path.exists():
-        try:
-            stored = json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            return merged
-        if isinstance(stored, dict):
-            for key in DEFAULTS:
-                if key in stored:
-                    merged[key] = stored[key]
-    return merged
+    return {**DEFAULTS, **_stored(repo_root)}
+
+
+def stored_window(repo_root: Path) -> int | None:
+    """The explicitly configured `context.window`, or None when it was never set."""
+    window = _stored(repo_root).get("context.window")
+    return window if isinstance(window, int) and not isinstance(window, bool) and window > 0 else None
 
 
 def get_config(repo_root: Path, key: str) -> object:
@@ -66,8 +77,8 @@ def set_config(repo_root: Path, key: str, value: str) -> object:
     if key not in DEFAULTS:
         raise ConfigError(f"unknown config key: {key}")
     coerced = _coerce(key, value)
-    stored = load_config(repo_root)
+    stored = _stored(repo_root)  # explicit keys only: a default is never persisted as a choice
     stored[key] = coerced
     ensure_root(repo_root)
-    config_path(repo_root).write_text(json.dumps(stored, indent=2, sort_keys=True) + "\n")
+    write_private(config_path(repo_root), json.dumps(stored, indent=2, sort_keys=True) + "\n")
     return coerced
