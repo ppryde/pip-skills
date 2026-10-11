@@ -7,33 +7,40 @@ its turns re-reads ~240k of context. This guard stops it doing work itself
 orchestrator share its ``session_id`` but carry ``agent_id``, which is how
 they are told apart (verified on Claude Code 2.1.273).
 
-This is a cost guard, not a security boundary: command parsing is
-best-effort and every doubt fails open.
+This is a cost guard, not a security boundary. Command parsing is done by
+``scripts/shellscan.py`` and FAILS CLOSED: a command whose quote or heredoc
+state the scanner cannot model exactly is denied (a bash syntax error costs
+the orchestrator nothing). An internal error while judging a Bash command, or any
+tool of an orchestrating session, DENIES (``decide`` catches it); only the
+Read limit and a crash in a session that orchestrates nothing fail open.
+
+The module is stdlib-only (no PyYAML, no card model): ``hookfast.py`` imports
+it on every guarded tool call.
 """
 from __future__ import annotations
 
+import dataclasses
+import functools
+import json
 import os
 import re
-import shlex
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts import shellscan
 from scripts.dispatch import is_hub_agent, role_of
-from scripts.models import Card, format_tokens
+from scripts.tokens import format_tokens
 
 READ_LIMIT_DEFAULT = 400
 _UNLIMITED_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".ipynb")
 # Edit/NotebookEdit are denied outright — there is no scratch-path exception
 # for them (Edit needs an existing file; a scratch notebook isn't a real use
 # case). Write gets the scratch-path exception below; it is not in this set.
-_HARD_DENY_WRITE_TOOLS = {"Edit", "NotebookEdit"}
+_HARD_DENY_WRITE_TOOLS = {"Edit", "MultiEdit", "NotebookEdit"}
 _PATH_TOOLS = {"Read", "Grep", "Glob"}
-_OPERATORS = {"&&", "||", ";", "|", "&", ";;", "|&"}
 _ASSIGNMENT = re.compile(r"\A[A-Za-z_][A-Za-z0-9_]*=")
-_LEDGER_CLI = re.compile(
-    r"(?:(?:\A|/)(?:overseer|vigil)/(?:[^/\s]+/)?|\$\{?CLAUDE_PLUGIN_ROOT\}?/)scripts/cli\.py\Z"
-)
 _GIT_SUBCOMMANDS = {
     "add", "branch", "commit", "diff", "fetch", "log", "merge-base", "pull", "push",
     "remote", "rev-parse", "show", "stash", "status", "symbolic-ref", "worktree",
@@ -47,11 +54,52 @@ _READ_ONLY_INSPECT = {"grep", "rg", "cat", "head", "tail", "less", "wc"}
 # overseer state root (never the repo worktree) — the orchestrator's way to
 # stage a --file input without editing repo source.
 _SCRATCH_WRITE_HEADS = {"cat", "echo", "printf", "tee"}
-_REDIRECT_OPS = (">", ">>")
-# Command substitution can smuggle a repo-source read (or worse) through an
-# otherwise-allowed head (`echo $(cat secret) > /tmp/x`). Fail closed on any
-# sign of it rather than trying to parse what it resolves to.
-_SUBSTITUTION_RE = re.compile(r"\$\(|`")
+# Interpreter flags that take no argument and do not change which file runs.
+_PY_FLAGS = {"-I", "-u", "-B", "-E", "-s", "-S", "-O", "-OO", "-q"}
+_CLI_MANIFEST_NAMES = {"overseer", "vigil"}
+_MSG_SUBSTITUTION = (
+    "GUARD: live command substitution ($(...), backticks, <(...)) — put the text in a file "
+    "and pass --text-file / --brief-file, pipe it with --text - / --brief - and a quoted "
+    "heredoc, or single-quote it"
+)
+_MSG_GLOBS = "GUARD: no globs in a read-only or scratch-write command — name the file"
+_MSG_VARS = (
+    "GUARD: no $variables in a path or in any word of a read-only or scratch-write command "
+    "(a redirect target, CLI script, operand) — write the literal path"
+)
+# ``VAR=value`` assignments the orchestrator genuinely needs in front of a
+# command: none (the skill documents no such command), so every leading or
+# standalone assignment denies — PYTHONUSERBASE, PYTHONHOME, DYLD_*,
+# LD_PRELOAD, BASH_ENV, CDPATH, OVERSEER_DB ... are all ways to make a
+# trusted command run somebody else's code. An allowlist, never a blocklist.
+_ALLOWED_ASSIGNMENTS: frozenset[str] = frozenset()
+# Short options that consume a value (the value is not an operand/path).
+_VALUE_FLAGS = {
+    "grep": "efmABC", "rg": "efmABCgtTjM", "head": "nc", "tail": "nc",
+}
+_MSG_TILDE = (
+    "GUARD: only `~` and `~/...` may start a word (`~+`, `~-` and `~user` expand to places "
+    "the guard cannot vouch for) — write the literal path"
+)
+_MSG_INTERNAL = "GUARD: internal error while judging this command (denied, fail closed)"
+
+
+@dataclass(frozen=True)
+class GuardCard:
+    """The four card fields the guard reads — what ``hookfast`` selects from
+    ``board.db`` without loading a full ``Card``. ``Card`` duck-types this."""
+
+    id: str
+    worktree: str | None
+    budget_estimate: int | None
+    budget_actual: int
+
+    @property
+    def tripwire_breached(self) -> bool:
+        # Same rule as ``Card.tripwire_breached`` (parity-tested).
+        if self.budget_estimate is None:
+            return False
+        return self.budget_actual >= 2 * self.budget_estimate
 
 
 @dataclass(frozen=True)
@@ -60,20 +108,149 @@ class Verdict:
     updated_input: dict[str, object] | None = None
 
 
-def _segments(command: str) -> list[list[str]] | None:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
+def _own_cli() -> Path:
+    """The real path of THIS plugin's ``scripts/cli.py``."""
+    return _own_cli_cached()
+
+
+@functools.lru_cache(maxsize=1)
+def _own_cli_cached() -> Path:
+    return Path(os.path.realpath(Path(__file__).resolve().parent / "cli.py"))
+
+
+def _config_dir() -> Path:
+    override = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(override) if override else Path.home() / ".claude"
+
+
+def _plugin_dirs() -> list[Path]:
+    """Where an overseer/vigil plugin root may live (verdict change 7).
+
+    ``own.parent.parent.parent`` is the *versions folder*
+    (``.../cache/pip-skills/overseer``) in a marketplace install — so it
+    covers other installed versions of overseer — and ``repos/pip-skills/
+    plugins`` in a ``--plugin-dir`` dev install, where it covers the sibling
+    ``vigil``. A sibling plugin in the marketplace cache
+    (``.../cache/pip-skills/vigil/0.2.0``) is covered only by
+    ``<config dir>/plugins``.
+    """
+    own = _own_cli()
+    return [
+        Path(os.path.realpath(own.parent.parent.parent)),
+        Path(os.path.realpath(_config_dir() / "plugins")),
+    ]
+
+
+@functools.lru_cache(maxsize=64)
+def _manifest_name(root: Path) -> str | None:
+    """``name`` from ``<root>/.claude-plugin/plugin.json`` of THIS root only
+    (never walks up). Missing or unparseable -> None, which denies."""
     try:
-        tokens = list(lexer)
-    except ValueError:
+        data = json.loads((root / ".claude-plugin" / "plugin.json").read_text())
+    except (OSError, ValueError):
         return None
-    segments: list[list[str]] = [[]]
-    for token in tokens:
-        if token in _OPERATORS:
-            segments.append([])
-        else:
-            segments[-1].append(token)
-    return [s for s in segments if s]
+    name = data.get("name") if isinstance(data, dict) else None
+    return name if isinstance(name, str) else None
+
+
+def is_cli(real: Path) -> bool:
+    """Is ``real`` (an already-resolved path) an overseer/vigil ledger CLI?
+    Real-path identity only — no lexical normalisation anywhere: a symlink
+    trick resolves to the real file, which must be this plugin's own CLI or a
+    manifest-named overseer/vigil ``scripts/cli.py`` inside an installed
+    plugin tree. A dangling symlink still "resolves", hence ``is_file``."""
+    if not real.is_file():
+        return False
+    if real == _own_cli():
+        return True
+    if real.name != "cli.py" or real.parent.name != "scripts":
+        return False
+    root = real.parent.parent
+    if not any(root.is_relative_to(d) for d in _plugin_dirs()):
+        return False
+    return _manifest_name(root) in _CLI_MANIFEST_NAMES
+
+
+def _manifest_version(root: Path) -> tuple[int, ...]:
+    try:
+        data = json.loads((root / ".claude-plugin" / "plugin.json").read_text())
+        return tuple(int(p) for p in str(data.get("version", "0")).split("."))
+    except (OSError, ValueError, AttributeError):
+        return (0,)
+
+
+def find_sibling_cli(name: str) -> Path | None:
+    """The newest installed ``scripts/cli.py`` of the sibling plugin ``name``
+    (``vigil``), found under the same ``_plugin_dirs()`` the guard trusts and
+    verified by manifest name (verdict change 8). Repo layout:
+    ``<plugins>/vigil``; marketplace cache: ``.../cache/<market>/vigil/<ver>``.
+    Newest manifest version wins, so a session that outlives an update still
+    finds one."""
+    found: list[tuple[tuple[int, ...], Path]] = []
+    for base in _plugin_dirs():
+        patterns = (f"{name}", f"{name}/*", f"cache/*/{name}/*")
+        for pattern in patterns:
+            for root in base.glob(pattern):
+                cli = Path(os.path.realpath(root / "scripts" / "cli.py"))
+                if _manifest_name(root.resolve()) == name and cli.is_file():
+                    found.append((_manifest_version(root), cli))
+    if not found:
+        return None
+    return max(found, key=lambda item: item[0])[1]
+
+
+def tilde_ok(word: str) -> bool:
+    """A leading ``~`` is only understood as exactly ``~`` or ``~/...``."""
+    return not word.startswith("~") or word == "~" or word.startswith("~/")
+
+
+def expand_user(word: str) -> Path | None:
+    """``Path(word).expanduser()``, or None when it cannot be done safely
+    (``~+``, ``~-``, ``~user``, no home directory): callers treat None as
+    "not inside anything" and so deny."""
+    if not tilde_ok(word):
+        return None
+    try:
+        return Path(word).expanduser()
+    except (RuntimeError, OSError):
+        return None
+
+
+def _expand_cli_word(word: str) -> str:
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT") or str(_own_cli().parent.parent)
+    word = word.replace("${CLAUDE_PLUGIN_ROOT}", plugin_root).replace(
+        "$CLAUDE_PLUGIN_ROOT", plugin_root
+    )
+    if not word.startswith("~"):
+        return word
+    expanded = expand_user(word)
+    return str(expanded) if expanded is not None else word
+
+
+def _cli_denial(words: list[str], cwd: object) -> str | None:
+    """None = ``words`` is a ``python[3] <ledger cli> ...`` call. Otherwise
+    the reason it is not (the deny message names the resolved path)."""
+    i = 1
+    while i < len(words) and words[i] in _PY_FLAGS:
+        i += 1
+    if i >= len(words) or words[i].startswith("-"):
+        return "GUARD: not a ledger CLI (python -c / -m / no script)"
+    script = _expand_cli_word(words[i])
+    if "$" in script or "`" in script:
+        return f"GUARD: not a ledger CLI (cannot resolve {script!r})"
+    if not os.path.isabs(script):
+        if not isinstance(cwd, str) or not cwd:
+            return f"GUARD: not a ledger CLI (relative path {script!r} and no working directory)"
+        script = os.path.join(cwd, script)
+    real = Path(os.path.realpath(script))
+    if not real.exists():
+        return f"GUARD: cli not found at {real}"
+    if is_cli(real):
+        return None
+    return (
+        f"GUARD: not a ledger CLI ({real} is not an installed overseer/vigil scripts/cli.py "
+        f"under {', '.join(str(d) for d in _plugin_dirs())})"
+    )
 
 
 def tmp_roots() -> list[Path]:
@@ -103,7 +280,9 @@ def _within(path: Path, roots: list[Path]) -> bool:
 
 
 def _word_within(word: str, cwd: object, roots: list[Path]) -> bool:
-    path = Path(word).expanduser()
+    path = expand_user(word)
+    if path is None:
+        return False
     if not path.is_absolute():
         if not isinstance(cwd, str):
             return False
@@ -111,16 +290,22 @@ def _word_within(word: str, cwd: object, roots: list[Path]) -> bool:
     return _within(path, roots)
 
 
-def protected_roots(repo_root: Path | None, cards: list[Card]) -> list[Path]:
+def protected_roots(
+    repo_root: Path | None, cards: Sequence[GuardCard], extra: Sequence[Path] = ()
+) -> list[Path]:
     """Real source, never scratch space regardless of where it happens to
-    live: the orchestrator's own repo root, and every live card's worktree.
-    Needed because scratch space (``tmp_roots()``) is a SYSTEM location, not
-    a project one — a repo or worktree checked out under ``/tmp``/``$TMPDIR``
-    (a benchmark fixture did exactly this) would otherwise fall inside it."""
+    live: the orchestrator's own repo root (and ``extra`` — the canonical root
+    the marker names, when the payload ``cwd`` is somewhere else), and every
+    live card's worktree. Needed because scratch space (``tmp_roots()``) is a
+    SYSTEM location, not a project one — a repo or worktree checked out under
+    ``/tmp``/``$TMPDIR`` (a benchmark fixture did exactly this) would
+    otherwise fall inside it."""
     protected: list[Path] = []
-    if repo_root is not None:
+    for root in (repo_root, *extra):
+        if root is None:
+            continue
         try:
-            protected.append(Path(repo_root).resolve())
+            protected.append(Path(root).resolve())
         except OSError:
             pass
     for card in cards:
@@ -136,7 +321,9 @@ def protected_roots(repo_root: Path | None, cards: list[Card]) -> list[Path]:
 def _word_is_scratch(word: str, cwd: object, scratch: list[Path], protected: list[Path]) -> bool:
     """Inside scratch space AND not inside the repo root or a card worktree
     — the repo-under-/tmp exclusion, applied per word."""
-    path = Path(word).expanduser()
+    path = expand_user(word)
+    if path is None:
+        return False
     if not path.is_absolute():
         if not isinstance(cwd, str):
             return False
@@ -144,32 +331,78 @@ def _word_is_scratch(word: str, cwd: object, scratch: list[Path], protected: lis
     return _within(path, scratch) and not _within(path, protected)
 
 
-def _is_path_like(word: str) -> bool:
-    return not word.startswith("-") and ("/" in word or word.startswith("~"))
+def _operands(head: str, words: list[str]) -> list[str]:
+    """The non-option words of ``head``'s argument list: every one is a path
+    candidate (a bare ``README.md`` is as much a read of the repo as
+    ``./README.md``). Skips option values (``head -n 5``), a lone ``-`` and
+    grep/rg's pattern word; ``echo``/``printf`` take text, not files."""
+    if head in {"echo", "printf"}:
+        return []
+    value_chars = _VALUE_FLAGS.get(head, "")
+    patterned = False
+    skip = False
+    ended = False
+    ops: list[str] = []
+    for w in words[1:]:
+        if skip:
+            skip = False
+            continue
+        if not ended and w == "--":
+            ended = True
+            continue
+        if not ended and w == "-":
+            continue
+        if not ended and w.startswith("--"):
+            name = w.split("=", 1)[0]
+            if head in {"grep", "rg"} and name in {"--regexp", "--file"}:
+                patterned = True
+                skip = "=" not in w
+            continue
+        if not ended and w.startswith("-"):
+            for pos, ch in enumerate(w[1:], start=1):
+                if ch in value_chars:
+                    if ch in "ef" and head in {"grep", "rg"}:
+                        patterned = True
+                    skip = pos == len(w) - 1  # value is the next word, else glued on
+                    break
+            continue
+        ops.append(w)
+    if head in {"grep", "rg"} and not patterned and ops:
+        ops = ops[1:]  # the pattern
+    return ops
 
 
-def _redirect_targets(words: list[str]) -> list[str]:
-    return [words[i + 1] for i, w in enumerate(words) if w in _REDIRECT_OPS and i + 1 < len(words)]
+def _file_writes(command: shellscan.Command) -> list[shellscan.Redirect]:
+    """Redirects that open a file for writing, other than ``/dev/null``."""
+    return [r for r in command.redirects if r.writes and r.target != "/dev/null"]
 
 
 def _read_only_allowed(
-    words: list[str], cwd: object, roots: list[Path] | None, protected: list[Path]
+    command: shellscan.Command,
+    words: list[str],
+    cwd: object,
+    roots: list[Path] | None,
+    protected: list[Path],
 ) -> bool:
     """``grep``/``cat``/... of the orchestrator's own allowed roots (its
     state dir, the installed plugins, the config dir) — never a write, never
     a repo-source read. ``protected`` excludes the repo/worktree in case one
     of them happens to sit under an allowed root (shouldn't normally, but the
     scratch-write exclusion below needs the same check, so it's shared)."""
-    if roots is None or any(w in _REDIRECT_OPS for w in words):
+    if roots is None or _file_writes(command):
         return False
-    paths = [w for w in words[1:] if _is_path_like(w)]
+    paths = _operands(Path(words[0]).name, words)
     return bool(paths) and all(
         _word_within(w, cwd, roots) and not _word_within(w, cwd, protected) for w in paths
     )
 
 
 def _scratch_write_allowed(
-    words: list[str], cwd: object, roots: list[Path] | None, protected: list[Path]
+    command: shellscan.Command,
+    words: list[str],
+    cwd: object,
+    roots: list[Path] | None,
+    protected: list[Path],
 ) -> bool:
     """A heredoc/echo/tee write, ONLY when every redirect target — and any
     other path-like word in the segment (e.g. a file it also reads) —
@@ -179,17 +412,161 @@ def _scratch_write_allowed(
     them fall inside the repo root or a live card's worktree, even if that
     worktree happens to live under scratch space (e.g. checked out under
     ``/tmp``)."""
-    targets = _redirect_targets(words)
+    targets = [r.target for r in _file_writes(command)]
     if not targets:
         return False
     scratch = tmp_roots() + ([roots[0]] if roots else [])
     if not all(_word_is_scratch(t, cwd, scratch, protected) for t in targets):
         return False
     readable = scratch + (roots or [])
-    others = [w for w in words[1:] if _is_path_like(w) and w not in targets]
+    others = [w for w in _operands(Path(words[0]).name, words) if w not in targets]
     return all(
         _word_within(w, cwd, readable) and not _word_within(w, cwd, protected) for w in others
     )
+
+
+def _redirect_denial(
+    command: shellscan.Command, cwd: object, roots: list[Path] | None, protected: list[Path]
+) -> str | None:
+    """Every redirect on EVERY command (a ledger-CLI or version-control
+    segment included, verdict change 3): an output target must be scratch or
+    ``/dev/null``; an input target must be readable scratch or an allowed
+    root, never repo source. fd duplications (``2>&1``, ``>&2``) involve no
+    file."""
+    scratch = tmp_roots() + ([roots[0]] if roots else [])
+    readable = scratch + (roots or [])
+    for r in command.redirects:
+        if r.lead == "~" and not tilde_ok(r.target):
+            return _MSG_TILDE
+        if r.fd_dup or r.target == "/dev/null":
+            continue
+        if r.glob:
+            return _MSG_GLOBS
+        if "$" in r.target:
+            return _MSG_VARS
+        if r.target.startswith("~") and r.lead != "~":
+            r = dataclasses.replace(r, target="./" + r.target)  # quoted: a literal name
+        if r.writes:
+            if not _word_is_scratch(r.target, cwd, scratch, protected):
+                return f"GUARD: redirect to {r.target} — output may only go to scratch or /dev/null"
+        elif not (
+            _word_within(r.target, cwd, readable) and not _word_within(r.target, cwd, protected)
+        ):
+            return (
+                f"GUARD: redirect from {r.target} — input may only come from scratch "
+                "or an allowed root"
+            )
+    return None
+
+
+def bash_check(
+    command: str,
+    *,
+    cwd: object = None,
+    roots: list[Path] | None = None,
+    protected: list[Path] | None = None,
+) -> tuple[bool, str | None]:
+    """``(allowed, reason)``. ``reason`` is a specific ``GUARD: ...`` line, or
+    None for the generic denial. Every segment of the command must be
+    ledger/vigil CLI (by real path), plumbing the orchestrator needs for
+    branches/PRs, ``gh pr``, a bare ``cd``, read-only inspection of its own
+    allowed roots, or a scratch-space write. Live command substitution
+    (``$(...)``, backticks, ``<(...)``, ``>(...)``) and anything the scanner
+    cannot model deny the whole command — it can smuggle a repo-source read
+    through an otherwise-allowed head."""
+    protected = protected or []
+    scanned = shellscan.scan(command)
+    if scanned.live:
+        return False, _MSG_SUBSTITUTION
+    if scanned.error:
+        return False, f"GUARD: cannot parse command ({scanned.error})"
+    cur_cwd = cwd
+    prev_sep = ";"  # what preceded the current command ("start" behaves like ";")
+    for cmd in scanned.commands:
+        before, prev_sep = prev_sep, cmd.sep
+        denial = _redirect_denial(cmd, cur_cwd, roots, protected)
+        if denial:
+            return False, denial
+        words, globs = list(cmd.words), list(cmd.globs)
+        leads = list(cmd.leads) + [""] * (len(words) - len(cmd.leads))
+        for n, (w, lead) in enumerate(zip(words, leads, strict=True)):
+            if lead == "~" and not tilde_ok(w):
+                return False, _MSG_TILDE
+            if w.startswith("~") and lead != "~":
+                words[n] = "./" + w  # a quoted tilde is a literal name, not $HOME
+        while words and _ASSIGNMENT.match(words[0]):
+            name = words[0].split("=", 1)[0]
+            if name not in _ALLOWED_ASSIGNMENTS:
+                return False, (
+                    f"GUARD: assignment to {name} is not allowed — environment prefixes "
+                    "change what a trusted command runs; call the command bare"
+                )
+            words, globs = words[1:], globs[1:]
+        if not words:
+            continue
+        head = Path(words[0]).name
+        if head in {"cd", "pwd"} and len(words) <= 2:
+            if head == "cd":
+                # A cd only takes effect in the shell when it runs unconditionally
+                # and in the main shell: preceded by nothing/`;`/newline AND
+                # followed by `;`/newline/`&&`/nothing. Anything else (`A || cd`,
+                # `A && cd`, `A | cd`, `cd &`) may or may not run, so the cwd is
+                # unknowable and relative CLI paths are denied.
+                trusted = before in (";", "\n") and cmd.sep in (";", "\n", "&&", "")
+                cur_cwd = _cd_target(words, globs, cur_cwd) if trusted else None
+            continue
+        if head == "git":
+            rest = words[1:]
+            while rest and rest[0].startswith("-"):
+                rest = rest[2:] if rest[0] in {"-C", "-c"} else rest[1:]
+            if rest and rest[0] in _GIT_SUBCOMMANDS:
+                continue
+            return False, None
+        if head == "gh" and words[1:2] == ["pr"]:
+            continue
+        if head.startswith("python") and len(words) > 1:
+            why = _cli_denial(words, cur_cwd)
+            if why is None:
+                continue
+            return False, why
+        if head in _READ_ONLY_INSPECT or head in _SCRATCH_WRITE_HEADS:
+            if any(globs):
+                return False, _MSG_GLOBS
+            if any("$" in w for w in words[1:]):
+                return False, _MSG_VARS
+            if head in _READ_ONLY_INSPECT and _read_only_allowed(
+                cmd, words, cur_cwd, roots, protected
+            ):
+                continue
+            if head in _SCRATCH_WRITE_HEADS and _scratch_write_allowed(
+                cmd, words, cur_cwd, roots, protected
+            ):
+                continue
+        return False, None
+    return True, None
+
+
+def _cd_target(words: list[str], globs: list[bool], cwd: object) -> str | None:
+    """The working directory after ``cd <dir>``; None when it cannot be known
+    (``cd``, ``cd -``, a variable or glob, or a relative dir with no cwd)."""
+    if len(words) != 2:
+        return None
+    target = words[1]
+    if target.startswith("-") or "$" in target or globs[1]:
+        return None
+    path = expand_user(target)
+    if path is None:
+        return None
+    if not path.is_absolute():
+        if not isinstance(cwd, str):
+            return None
+        path = Path(cwd) / path
+    # bash's cd is LOGICAL (`cd link/..` lands in link's lexical parent), the
+    # guard resolves PHYSICALLY: only trust a target where both agree.
+    lexical = os.path.normpath(str(path))
+    if lexical != os.path.realpath(lexical) or not os.path.isdir(lexical):
+        return None  # a failed cd never moves the shell
+    return lexical
 
 
 def bash_allowed(
@@ -199,42 +576,7 @@ def bash_allowed(
     roots: list[Path] | None = None,
     protected: list[Path] | None = None,
 ) -> bool:
-    """Every segment of the command must be ledger/vigil CLI, git plumbing
-    the orchestrator needs for branches/PRs, ``gh pr``, a bare ``cd``,
-    read-only inspection of its own allowed roots, or a scratch-space write.
-    ``$(...)``/backtick command substitution denies the whole command: it can
-    smuggle a repo-source read through an otherwise-allowed head."""
-    if _SUBSTITUTION_RE.search(command):
-        return False
-    protected = protected or []
-    segments = _segments(command)
-    if segments is None:
-        return True
-    for words in segments:
-        while words and _ASSIGNMENT.match(words[0]):
-            words = words[1:]
-        if not words:
-            continue
-        head = Path(words[0]).name
-        if head in {"cd", "pwd"} and len(words) <= 2:
-            continue
-        if head == "git":
-            rest = words[1:]
-            while rest and rest[0].startswith("-"):
-                rest = rest[2:] if rest[0] in {"-C", "-c"} else rest[1:]
-            if rest and rest[0] in _GIT_SUBCOMMANDS:
-                continue
-            return False
-        if head == "gh" and words[1:2] == ["pr"]:
-            continue
-        if head.startswith("python") and len(words) > 1 and _LEDGER_CLI.search(words[1]):
-            continue
-        if head in _READ_ONLY_INSPECT and _read_only_allowed(words, cwd, roots, protected):
-            continue
-        if head in _SCRATCH_WRITE_HEADS and _scratch_write_allowed(words, cwd, roots, protected):
-            continue
-        return False
-    return True
+    return bash_check(command, cwd=cwd, roots=roots, protected=protected)[0]
 
 
 def allowed_roots(state: Path, plugin_root: Path, config_dir: Path) -> list[Path]:
@@ -245,7 +587,7 @@ def allowed_roots(state: Path, plugin_root: Path, config_dir: Path) -> list[Path
 
 
 def _hub_denial(
-    cards: list[Card],
+    cards: Sequence[GuardCard],
     tool: str,
     tool_input: dict[str, object],
     cwd: object,
@@ -284,15 +626,20 @@ def _hub_denial(
         raw = tool_input.get("file_path") or tool_input.get("path")
         if not isinstance(raw, str) or not raw:
             return work
-        path = Path(raw).expanduser()
+        path = expand_user(raw)
+        if path is None:
+            return work
         if not path.is_absolute() and isinstance(cwd, str):
             path = Path(cwd) / path
         return None if _within(path, roots) else work
     if tool == "Bash":
         command = tool_input.get("command")
-        return None if isinstance(command, str) and bash_allowed(
-            command, cwd=cwd, roots=roots, protected=protected
-        ) else work
+        if not isinstance(command, str):
+            return work
+        allowed, why = bash_check(command, cwd=cwd, roots=roots, protected=protected)
+        if allowed:
+            return None
+        return work if why is None else f"{card.id} in flight: {why}. (Escape hatch: {_ESCAPES}.)"
     return None
 
 
@@ -313,16 +660,18 @@ def _limited_read(
 
 def decide(
     payload: dict[str, object],
-    cards: list[Card],
+    cards: Sequence[GuardCard],
     roots: list[Path],
     *,
     read_limit: int = READ_LIMIT_DEFAULT,
     repo_root: Path | None = None,
+    extra_protected: Sequence[Path] = (),
 ) -> Verdict:
     """``cards`` = live cards whose orchestrator is this payload's session
     (empty when the guard is off). Deny beats the Read limit. ``repo_root``
     (with every live card's worktree) is excluded from the scratch-space
-    write exceptions — see ``protected_roots``."""
+    write exceptions — see ``protected_roots`` (``extra_protected`` is the
+    marker's canonical root, protected alongside the payload ``cwd``)."""
     tool_raw = payload.get("tool_name")
     tool = tool_raw if isinstance(tool_raw, str) else ""
     input_raw = payload.get("tool_input")
@@ -335,8 +684,16 @@ def decide(
             )
         is_hub = not payload.get("agent_id") or is_hub_agent(payload.get("agent_type"))
         if is_hub:
-            protected = protected_roots(repo_root, cards)
-            reason = _hub_denial(cards, tool, tool_input, payload.get("cwd"), roots, protected)
+            try:
+                protected = protected_roots(repo_root, cards, extra_protected)
+                reason = _hub_denial(
+                    cards, tool, tool_input, payload.get("cwd"), roots, protected
+                )
+            except Exception as exc:  # noqa: BLE001 — fail CLOSED while orchestrating
+                reason = (
+                    f"{cards[0].id} in flight: {_MSG_INTERNAL} [{type(exc).__name__}]. "
+                    f"(Escape hatch: {_ESCAPES}.)"
+                )
             if reason:
                 return Verdict(reason)
     return Verdict(updated_input=_limited_read(tool, tool_input, payload, read_limit))

@@ -26,7 +26,45 @@ def workflow_root(repo_root: Path) -> Path:
     return repo_root / WORKFLOW_DIRNAME
 
 
+# Per-invocation memo (WF-265 OL-7). ``cli.main`` turns it on for the life of
+# ONE verb, so the 5-7 identical ``git rev-parse --git-common-dir`` calls a verb
+# used to make (label, root, config, central, identity guard) collapse to one.
+# It is OFF by default: a library caller or a test that ``git init``s a repo
+# between two calls must see the new answer. Only successes are cached.
+_MEMO: dict[object, object] | None = None
+
+
+def memo_begin() -> None:
+    global _MEMO
+    _MEMO = {}
+
+
+def memo_end() -> None:
+    global _MEMO
+    _MEMO = None
+
+
+def memo_reset() -> None:
+    """Forget cached answers (a verb that rewrites config calls this)."""
+    if _MEMO is not None:
+        _MEMO.clear()
+
+
+def memo() -> dict[object, object] | None:
+    return _MEMO
+
+
 def _git_common_dir(repo_root: Path) -> Path | None:
+    key = ("git-common-dir", str(repo_root.resolve()))
+    if _MEMO is not None and key in _MEMO:
+        return _MEMO[key]  # type: ignore[return-value]
+    found = _git_common_dir_uncached(repo_root)
+    if _MEMO is not None and found is not None:
+        _MEMO[key] = found
+    return found
+
+
+def _git_common_dir_uncached(repo_root: Path) -> Path | None:
     """Resolve ``git rev-parse --git-common-dir`` for ``repo_root`` to an
     absolute path; shared resolution step behind ``derive_repo_label`` and
     ``derive_repo_root`` — see ``derive_repo_label``'s docstring for the

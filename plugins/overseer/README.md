@@ -78,9 +78,9 @@ genuine collision gets a hashed folder. Display labels (backup manifest,
 dashboard repo switcher) always stay clean — the hash lives only in the folder
 name. `ledger.md` — a generated Markdown view of the board — is **retired**
 (WF-072); `board.db` is the sole source of truth and the CLI, dashboard and
-`resume` all read it directly. `rebuild-index` still runs on every mutation
-to surface quarantined cards and delete any stale `ledger.md` left over
-from before the retirement.
+`resume` all read it directly. Mutations no longer reconcile the board
+(`rebuild-index` is deprecated and kept for one release); quarantined cards
+are surfaced by `resume` and `board`.
 
 `.workflow/` is **retired**: it is only ever read once, as a one-time import
 source. On first connect after upgrading, any existing `.workflow/` sprint,
@@ -169,8 +169,9 @@ see `dashboard/README.md`.
 ### Pre-push board snapshot (opt-in)
 
 Once a repo has run `overseer init` (i.e. `.overseer/config.json` exists),
-the plugin's `PreToolUse` hook (`hooks/prepush-snapshot.sh`, matcher `Bash`)
-watches for Claude-issued `git push` commands. Before the push runs, it:
+the plugin's `PreToolUse` hook (`hooks/pretool.sh`, which runs
+`hooks/prepush-snapshot.sh` for a Bash command that mentions a push) watches
+for Claude-issued `git push` commands. Before the push runs, it:
 
 1. Runs `overseer backup`, writing into the CURRENT working tree's
    `.overseer/backups/` (see Storage above — this deliberately does not
@@ -184,6 +185,20 @@ not opted in, backup failure) — it never blocks the tool call, it only ever
 adds a commit. It covers pushes Claude issues on your behalf; it is not a
 git-native `pre-push` hook, so a `git push` run outside Claude Code is not
 gated by it.
+
+### Orchestrator guard: failure modes
+
+For a session that orchestrates a card (a local marker under
+`<config dir>/overseer/.orchestrating/`), the same hook denies a guarded tool
+(`Bash`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `Agent`, `Task`, any
+`mcp__*`) with "overseer guard unavailable" if its interpreter is missing or
+crashes: it fails closed, not open. `Read`/`Grep`/`Glob` and sessions without
+a marker stay open.
+
+Known limit: with `OVERSEER_REMOTE` set, the guard decision is forwarded to
+the host and the orchestrator marker lives on the host, so there is no local
+marker to key a deny on. If the forwarded call fails (host CLI unreachable,
+interpreter missing), the hook fails open for every tool.
 
 ## Skills
 
