@@ -4,6 +4,8 @@
 
 ### 1 — Compute the diff
 
+If the persona's `private_source` is true, say once that it comes from a private repo and its review text should stay private (do not paste it into public places).
+
 Resolve the base branch: `gh pr view --json baseRefName -q .baseRefName` if a PR exists, else `git symbolic-ref --short refs/remotes/origin/HEAD` (strip the `origin/` prefix). Call it `<base>`. If the persona's `repo` differs from this checkout's `origin`, warn the user before reviewing.
 
 ```bash
@@ -56,9 +58,9 @@ Read `output_default` from frontmatter:
   3. **All in file** (`all-file`)
   4. **Post inline to PR** (`post-inline-pr`) — see Step 6b
 
-  Plus a toggle: "Make this the default for /review-as-<alias>?" If yes, write `output_default` back to PERSONA frontmatter using `persona_io.write_persona`.
+  Plus a toggle: "Make this the default for /review-as-<alias>?" If yes, write `output_default` back with `python3 <plugin>/scripts/persona_io.py update --alias '<alias>' --set <part.json>` (`{"output_default": "<value>"}` in a temp file written with the Write tool).
 
-  File path when used: `.review-clone/last-review-<alias>.md` in repo root. Create `.review-clone/` via `mkdir -p .review-clone/` if it doesn't exist before writing.
+  File path when used: `.review-clone/last-review-<alias>.md` in repo root. Create `.review-clone/` via `mkdir -p .review-clone/` if it doesn't exist before writing. That file holds derived opinions on unpublished code: the first time you create the directory, print the hint "Add `.review-clone/` to `.gitignore` (or `.git/info/exclude`) so it is not committed." Do not edit any ignore file yourself.
 
 ### 6a — Emit to chat / file
 

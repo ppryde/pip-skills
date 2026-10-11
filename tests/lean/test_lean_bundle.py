@@ -162,7 +162,9 @@ def test_shared_reference_carries_every_collector_and_render_rule():
 
 def test_clone_reviewer_no_longer_restates_the_collector_or_render_text():
     text = read_lf(CR / "SKILL.md")
-    assert "python3 <plugin>/scripts/collect.py" not in text
+    # the collect dispatch lives in the shared reference; the SKILL may name the small
+    # `check` and `cleanup` subcommands but never the full collect invocation
+    assert "--handles" not in text and "--months" not in text
     assert "| `{{RULE_COUNT}}` |" not in text
     assert reads(text, "references/persona-format.md")
     assert "disclaimer:" in read_lf(CR / "references/persona-format.md")
