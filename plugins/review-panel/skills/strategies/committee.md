@@ -19,8 +19,7 @@ for context. No spec/architecture unless the profile sets `context:`.
    Output: the finding contract JSON.
 
 ## Reconciliation
-None beyond collation: all findings are kept and grouped by reviewer →
-severity. Strictness and decisions overrides are then applied.
+Run `reconcile` (SKILL Step 5). No verdict stage, so every finding is kept.
 
 ## Cost
 Baseline. N reviewers ≈ N parallel subagents, one pass.
