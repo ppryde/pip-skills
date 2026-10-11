@@ -134,6 +134,7 @@ class TestIdleFlag:
         would make every comparison false and pin it non-idle forever."""
         for bad in (True, float("nan"), "700"):
             shutil.rmtree(st.census_dir(), ignore_errors=True)  # else the first seed's migration shadows the rest
+            st.reset_account_cache()   # and a fresh process checks for a legacy file again
             self._seed(store_file, active_at=bad, updated_at=100.0)
             assert st.for_session("s1", now=100.0 + 60)["idle"] is False, bad
             horizon = 100.0 + st.IDLE_HORIZON_SECONDS + 1

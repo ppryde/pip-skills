@@ -157,7 +157,8 @@ _ACCOUNTS: dict[str, dict[str, Any]] = {}
 
 
 def reset_account_cache() -> None:
-    """Forget resolved accounts (tests; a process normally resolves once)."""
+    """Forget resolved accounts and the migration check (tests; a process normally resolves once)."""
+    _MIGRATION_CHECKED.clear()
     _ACCOUNTS.clear()
 
 
@@ -927,6 +928,10 @@ def _session_files() -> list[Path]:
 _STRAY_TMP_SECONDS = 3600
 
 
+# census dirs whose migration this process has already settled (nothing left to migrate, or migrated):
+# the status line asks several times per render (ingest, then the draw's limits read), and a process lives one render.
+_MIGRATION_CHECKED: set[tuple[str, str]] = set()
+
 MIGRATED_SUFFIX = ".v1-migrated"
 MIGRATED_KEEP_SECONDS = 7 * 24 * 3600
 _MIGRATE_LOCK = ".migrate.lock"
@@ -943,6 +948,9 @@ def migrate(now: float | None = None) -> bool:
     if now is None:
         now = time.time()
     lock: Path | None = None
+    checked = (str(census_dir()), str(store_path()))
+    if checked in _MIGRATION_CHECKED:
+        return False
     try:
         _migrate_limits_json(now)
     except Exception:  # noqa: BLE001, S110 - a reader must never fail on migration
@@ -950,6 +958,7 @@ def migrate(now: float | None = None) -> bool:
     try:
         legacy = store_path()
         if not legacy.exists():
+            _MIGRATION_CHECKED.add(checked)
             return False
         lock = census_dir() / _MIGRATE_LOCK
         # Lock age is wall-clock time.time() on purpose (mtime is wall-clock), unlike `now`.
@@ -978,6 +987,7 @@ def migrate(now: float | None = None) -> bool:
         _unlink(legacy.with_name(legacy.name + ".lock"))
         for stray in census_dir().glob(".status.*.tmp"):
             _unlink(stray)
+        _MIGRATION_CHECKED.add(checked)
         return True
     except Exception:  # noqa: BLE001 - never raise from a reader
         return False
@@ -985,10 +995,29 @@ def migrate(now: float | None = None) -> bool:
         _unlink(lock)
 
 
+SWEEP_MARKER = ".sweep"
+SWEEP_INTERVAL_SECONDS = 300   # the sweep parses every session file: not on every render
+
+
+def _sweep_due() -> bool:
+    """True when the marker is missing, older than the interval, or from the future (a clock that went back)."""
+    try:
+        age = time.time() - (census_dir() / SWEEP_MARKER).stat().st_mtime
+    except OSError:
+        return True
+    return age < 0 or age >= SWEEP_INTERVAL_SECONDS
+
+
 def _sweep(now: float) -> None:
-    """Ingest-side housekeeping: prune session files past the TTL (by their own
-    ``updated_at`` against this ingest's ``now``, as v1 did) and delete stray temp
-    files older than an hour (by mtime)."""
+    """Ingest-side housekeeping, at most once per ``SWEEP_INTERVAL_SECONDS`` (the marker's mtime says when it last
+    ran): prune session files past the TTL (by their own ``updated_at`` against this ingest's ``now``, as v1 did) and
+    delete stray temp files older than an hour (by mtime)."""
+    if not _sweep_due():
+        return
+    try:
+        (census_dir() / SWEEP_MARKER).write_bytes(b"")   # first: concurrent renders skip while this one works
+    except OSError:
+        pass
     for path in _session_files():
         entry = _read_json(path)
         if entry is None:

@@ -505,6 +505,7 @@ _OWNED_FILES = (
     "status.json.lock",
     "status.json.v1-migrated",
     ".migrate.lock",
+    ".sweep",
 )
 # the temp-file prefixes census itself uses in its folder (the sessions/, limits/ and
 # gitcache/ subfolders are removed whole); any other hidden *.tmp belongs to someone else

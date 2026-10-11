@@ -140,6 +140,7 @@ def test_v2_limits_json_migrates_into_account_file(shared, monkeypatch, capsys):
     body = json.loads((folder / "limits" / "uuid-a.json").read_text())
     assert body["account"] == "uuid-a" and body["org"] == "org-a"
     # forward-only merge into an existing account file: a lower reading never wins
+    st.reset_account_cache()   # a later run is a new process, which checks for a legacy file again
     (folder / "limits.json").write_text(json.dumps(
         {"version": 2, "five_hour": {"used_percentage": 5, "resets_at": reset}, "updated_at": 1}))
     assert _read(capsys, "--limits")["five_hour"]["used_percentage"] == 33

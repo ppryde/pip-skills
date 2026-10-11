@@ -41,6 +41,9 @@ def _isolated_account(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", os.devnull)
+    # the sweep is throttled in production; tests sweep on every ingest unless they say otherwise
+    if hasattr(store, "SWEEP_INTERVAL_SECONDS"):
+        monkeypatch.setattr(store, "SWEEP_INTERVAL_SECONDS", 0)
     reset = getattr(store, "reset_account_cache", None)
     if reset:
         reset()
