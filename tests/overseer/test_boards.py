@@ -312,3 +312,36 @@ class TestMergeSchemaV2State:
         assert absorbed["facts"] >= 1
         conn = db.connect(repo)
         assert {r[0] for r in conn.execute("SELECT statement FROM facts")} == {"theirs", "mine"}
+
+
+class TestMergeFactIdCollision:
+    def test_colliding_fact_id_with_other_statement_is_reminted_not_dropped(self, tmp_path, monkeypatch):
+        from scripts import views
+        from scripts.knowledge import Fact, save_fact
+
+        primary, personal, repo = _setup(tmp_path, monkeypatch)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(personal))
+        src = db.connect(repo)
+        db.save_card(src, make_card("WF-1"))
+        save_fact(src, Fact(id="KB-001", statement="theirs", created="2026-09-01",
+                            verified="2026-09-01", superseded_by="KB-002"))
+        save_fact(src, Fact(id="KB-002", statement="theirs two", created="2026-09-01",
+                            verified="2026-09-01"))
+        views.export(src, config.central_root(repo))
+        src.close()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(primary))
+        tgt = db.connect(repo)
+        save_fact(tgt, Fact(id="KB-001", statement="mine", created="2026-09-01",
+                            verified="2026-09-01"))
+        tgt.close()
+        config.add_claude_dir(personal)
+
+        [absorbed] = boards.merge_boards(repo)["absorbed"]
+        assert absorbed["facts"] == 2
+        assert {m["from"] for m in absorbed["facts_reminted"]} == {"KB-001", "KB-002"}
+        conn = db.connect(repo)
+        rows = {r["statement"]: r for r in conn.execute("SELECT * FROM facts")}
+        assert set(rows) == {"mine", "theirs", "theirs two"}
+        assert rows["mine"]["id"] == "KB-001"
+        assert len({r["id"] for r in rows.values()}) == 3
+        assert rows["theirs"]["superseded_by"] == rows["theirs two"]["id"]
