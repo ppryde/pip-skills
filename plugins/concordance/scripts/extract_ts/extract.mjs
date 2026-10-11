@@ -143,7 +143,9 @@ function extractFile({ path: p, content }) {
     return rest ? `?.${rest.split(".").pop()}` : null;
   }
   function signature(params) {
-    return params.map((prm, i) => [
+    // a leading `this: T` is a type annotation, not an argument
+    const real = params.filter((prm) => !(ts.isIdentifier(prm.name) && prm.name.text === "this"));
+    return real.map((prm, i) => [
       ts.isIdentifier(prm.name) ? prm.name.text : `_arg${i}`,
       prm.dotDotDotToken ? "vararg" : "pos",
       Boolean(prm.questionToken || prm.initializer || prm.dotDotDotToken),

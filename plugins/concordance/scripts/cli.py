@@ -191,7 +191,7 @@ def _record_review(args: argparse.Namespace, cwd: Path) -> int:
     try:
         usage.record("record-review", _repo(cwd), None, 0, 0, 0,
                      {"findings": args.findings, "via_index": args.via_index, "steps": steps},
-                     session=os.environ.get("CLAUDE_SESSION_ID", ""))
+                     session=_session())
     except Exception as exc:  # noqa: BLE001 - unusable usage log: exit 2, never a traceback
         print(f"concordance: usage log unavailable: {exc!r}", file=sys.stderr)
         return 2
@@ -213,12 +213,16 @@ def _stats(args: argparse.Namespace, cwd: Path) -> int:
     return 0
 
 
+def _session() -> str:
+    return os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CLAUDE_SESSION_ID", "")
+
+
 def _log(command: str, cwd: Path, view_id: str | None, started: float, text: str, code: int,
          payload: dict[str, object]) -> None:
     try:
         usage.record(command, _repo(cwd), view_id, int((time.monotonic() - started) * 1000),
                      est_tokens(text), code, payload,
-                     session=os.environ.get("CLAUDE_SESSION_ID", ""))
+                     session=_session())
     except Exception:  # noqa: BLE001, S110 - the usage log must never fail a query
         pass
 

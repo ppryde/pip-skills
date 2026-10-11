@@ -133,3 +133,9 @@ def test_ts_is_indexed_in_chunks_so_a_deadline_keeps_progress(
 def test_anonymous_default_function_has_no_self_alias() -> None:
     f = extract("a.ts", "export default function () {}\n")
     assert not any(s.kind == "alias" and s.alias_of == s.qualname for s in f.symbols)
+
+
+def test_this_parameter_is_not_a_positional_parameter() -> None:
+    f = extract("w.ts", "export function f(this: Window, a: number): number { return a; }\n")
+    sig = next(s for s in f.symbols if s.qualname.endswith(".f")).signature
+    assert [p.name for p in sig] == ["a"]

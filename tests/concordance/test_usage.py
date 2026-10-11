@@ -162,3 +162,19 @@ def test_record_review_rejects_steps_exceeding_findings(make_repo) -> None:
     out = cli(repo.root, "record-review", "--findings", "1", "--via-index", "1",
               "--steps", "1:1,3:1")
     assert out.returncode == 2 and "--steps" in out.stderr and "Traceback" not in out.stderr
+
+
+def test_session_comes_from_claude_code_session_id(make_repo, monkeypatch) -> None:
+    repo = make_repo({"a.py": "x = 1\n"})
+    monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-1")
+    env = dict(os.environ)
+    out = cli(repo.root, "touched", env=env)
+    assert out.returncode == 0, out.stderr
+    assert usage.report()["commands"]["touched"]["sessions"] == 1
+    out = cli(repo.root, "record-review", "--findings", "1", "--via-index", "1", env=env)
+    assert out.returncode == 0, out.stderr
+    conn = sqlite3.connect(usage.usage_path())
+    sessions = {r[0] for r in conn.execute("SELECT session FROM events")}
+    conn.close()
+    assert sessions == {"sess-1"}
