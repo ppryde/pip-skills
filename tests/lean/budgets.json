@@ -40,7 +40,7 @@
     "plugins/review-panel/commands/review-panel.md": 831,
     "plugins/review-panel/skills/convene/SKILL.md": 5840,
     "plugins/test-crucible/skills/test-suite-health/SKILL.md": 28228,
-    "plugins/tribunal/skills/reckoning/SKILL.md": 38891,
+    "plugins/tribunal/skills/reckoning/SKILL.md": 6062,
     "plugins/vigil/commands/handover.md": 1513,
     "plugins/vigil/skills/vigil/SKILL.md": 4765,
     "skills/context-vigil/SKILL.md": 9179
@@ -56,7 +56,6 @@
     "plugins/puritan/skills/scriptorium/SKILL.md": "WF-268 puritan PR: covenant, inquisition and scriptorium are split into references; budget ratchets down there",
     "plugins/review-clone/skills/clone-reviewer/SKILL.md": "WF-268 sweep (deferral-only PR); seeded at current size, ratchets down when its sweep PR lands",
     "plugins/review-clone/skills/review-as/SKILL.md": "WF-268 sweep (deferral-only PR); seeded at current size, ratchets down when its sweep PR lands",
-    "plugins/test-crucible/skills/test-suite-health/SKILL.md": "WF-268 test-crucible PR: phases defer to references/",
-    "plugins/tribunal/skills/reckoning/SKILL.md": "own stream (tribunal redesign); seeded at current size, only ratchets down"
+    "plugins/test-crucible/skills/test-suite-health/SKILL.md": "WF-268 test-crucible PR: phases defer to references/"
   }
 }

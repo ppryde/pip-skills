@@ -58,6 +58,7 @@ HOSTILE = [
     "gh pr view 1 --web",
     "gh pr view 1 --comments",
     "gh pr view 1 -- --web",
+    "gh pr checkout 12",
     "gh pr checkout 1 --force",
     "gh pr checkout 1 -f",
     "gh pr checkout 1;x",
