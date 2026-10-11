@@ -5,15 +5,23 @@ checks:
   - id: JOIN-001
     title: Chained M2M .filter() produces row explosion
     severity_base: high
+    kind: perf
+    trigger: '\)\s*\.filter\(|^\s*\.filter\('
   - id: JOIN-002
     title: .distinct() masking a join explosion
     severity_base: medium
+    kind: perf
+    trigger: '\.distinct\('
   - id: JOIN-010
     title: Multi-condition relation filter done in Python
     severity_base: medium
+    kind: perf
+    trigger: '\.all\(\)'
   - id: JOIN-011
     title: FilteredRelation for one conditioned relation (never several on one multi-valued relation)
     severity_base: low
+    kind: perf
+    trigger: '\.annotate\(|\bFilteredRelation\b'
 ---
 
 # Joins

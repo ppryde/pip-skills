@@ -72,7 +72,7 @@ def test_spans_match_headings_and_cover_read_window(root):
     cdir = root / SOURCES["optimise-orm"]
     rows = re.findall(r"^\| ([A-Z]+-\d+) \|.*\| (\w+\.md) L(\d+)-(\d+) \|$",
                       (cdir / "INDEX.md").read_text(), re.M)
-    assert len(rows) >= 72
+    assert len(rows) >= 70
     assert [r[0] for r in rows] == [r[0] for r in sorted(rows, key=lambda r: (r[1], r[0]))]
     for code, fname, a, b in rows:
         lines = (cdir / fname).read_text().split("\n")
@@ -197,3 +197,59 @@ def test_quoted_value_stops_at_closing_quote(tmp_path):
     assert run("optimise-orm", "--root", str(root)).returncode == 0
     text = (root / SOURCES["optimise-orm"] / "INDEX.md").read_text()
     assert "| Two |" in text and "# c" not in text
+
+
+# ---- optimise-orm: triggers, kind, aliases (WF-268 django-inquisition PR) ----
+
+def _orm_index_text(root):
+    run("optimise-orm", "--root", str(root))
+    return (root / SOURCES["optimise-orm"] / "INDEX.md").read_text()
+
+
+def test_every_committed_check_has_a_trigger_and_a_known_kind():
+    cdir = REPO / SOURCES["optimise-orm"]
+    rows = re.findall(r"^\| ([A-Z]+-\d+) \| (\w+) \| (\w*) \| .*? \| (`.*`|) \| \w+\.md L\d+-\d+ \|$",
+                      (cdir / "INDEX.md").read_text(), re.M)
+    assert len(rows) == 70
+    assert [c for c, _, _, t in rows if not t] == []
+    assert {k for _, _, k, _ in rows} <= {"", "correctness"}  # blank means perf
+    assert {c for c, _, k, _ in rows if k == "correctness"} == {"WRITE-030", "WRITE-031"}
+    assert {s for _, s, _, _ in rows} <= {"critical", "high", "medium", "low", "info"}
+
+
+def test_critical_rows_exist_for_the_always_open_rule():
+    text = (REPO / SOURCES["optimise-orm"] / "INDEX.md").read_text()
+    assert re.findall(r"^\| ([A-Z]+-\d+) \| critical \|", text, re.M) == ["FETCH-030", "FETCH-031", "WRITE-001"]
+
+
+def test_committed_triggers_are_valid_regexes():
+    text = (REPO / SOURCES["optimise-orm"] / "INDEX.md").read_text()
+    found = re.findall(r"^\| ([A-Z]+-\d+) \|.*\| `(.*)` \| \w+\.md L", text, re.M)
+    assert len(found) == 70
+    for _, trig in found:
+        re.compile(trig.replace("\\|", "|"))  # markdown-escaped alternation
+
+
+def test_aliases_are_retired_codes_pointing_at_live_checks():
+    text = (REPO / SOURCES["optimise-orm"] / "INDEX.md").read_text()
+    assert re.findall(r"^- ([A-Z]+-\d+) -> ([A-Z]+-\d+)$", text, re.M) == [("PAT-010", "IDX-040"), ("PAT-020", "IDX-020")]
+    live = set(re.findall(r"^\| ([A-Z]+-\d+) \|", text, re.M))
+    assert not {"PAT-010", "PAT-020"} & live and {"IDX-040", "IDX-020"} <= live
+
+
+def test_alias_with_unknown_target_or_live_code_exits_2(tmp_path):
+    raw = GROUP.replace("---\n# G", "aliases:\n  - id: G-009\n    of: NOPE-001\n---\n# G", 1).format(body="x")
+    r = run("optimise-orm", "--root", str(_scratch(tmp_path, raw)))
+    assert r.returncode == 2 and "unknown check NOPE-001" in r.stderr
+    raw = GROUP.replace("---\n# G", "aliases:\n  - id: G-002\n    of: G-001\n---\n# G", 1).format(body="x")
+    r = run("optimise-orm", "--root", str(_scratch(tmp_path / "b", raw)))
+    assert r.returncode == 2 and "also a live check" in r.stderr
+
+
+def test_kind_trigger_and_alias_render(tmp_path):
+    raw = (GROUP.replace("severity_base: high", "severity_base: high\n    kind: correctness\n    trigger: 'a|b'", 1)
+           .replace("---\n# G", "aliases:\n  - id: G-009\n    of: G-001\n---\n# G", 1).format(body="x"))
+    text = _orm_index_text(_scratch(tmp_path, raw))
+    assert "| G-001 | high | correctness | One | `a\\|b` | g.md L" in text
+    assert "## Correctness (outside the perf scope)" in text and "G-001" in text.split("## Correctness")[1]
+    assert "- G-009 -> G-001" in text

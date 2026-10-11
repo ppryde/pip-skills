@@ -5,24 +5,38 @@ checks:
   - id: CARD-001
     title: len(qs) evaluates entire queryset
     severity_base: high
+    kind: perf
+    trigger: '\blen\(\s*\w+\s*\)'
   - id: CARD-002
     title: qs.count() > 0 should be qs.exists()
     severity_base: medium
+    kind: perf
+    trigger: '\.count\(\)\s*(>|!=|==|<=|>=)\s*[01]\b'
   - id: CARD-003
     title: if qs triggers full evaluation
     severity_base: high
+    kind: perf
+    trigger: '\b(if|elif|while)\s+(not\s+)?\w+\s*:|\bbool\(\w+\)'
   - id: CARD-010
     title: Loop of .get(pk=…) should be in_bulk()
     severity_base: high
+    kind: perf
+    trigger: '\.get\(\s*(pk|id)\s*='
   - id: CARD-011
     title: filter(pk__in=…) then dict-build → use in_bulk()
     severity_base: low
+    kind: perf
+    trigger: '\.filter\(\s*pk__in='
   - id: CARD-020
     title: Paginator on huge table without .count override
     severity_base: medium
+    kind: perf
+    trigger: '\bPaginator\(|paginate_by|pagination_class'
   - id: CARD-021
     title: Deep OFFSET paging
     severity_base: medium
+    kind: perf
+    trigger: '\[\s*\d{3,}\s*:|page_number|\boffset\b|\.page\('
 ---
 
 # Cardinality

@@ -12,7 +12,18 @@
 # Live invocation against a single fixture
 ./run.sh --live --fixture 01
 ./run.sh --live --fixture 06
+
+# A/B: pin the plugin under test and repeat each fixture
+./run.sh --live --runs 5 --plugin-dir <plugin root> --log-dir /tmp/arm-lean
+CLAUDE_MODEL=sonnet ./run.sh --live --runs 5 --plugin-dir /tmp/main-export/plugins/django-inquisition
 ```
+
+Live mode always passes `--plugin-dir` to `claude -p`, so an installed copy of the plugin is never what runs.
+Before the first fixture it starts a throwaway headless session and checks the init event: if Claude Code did not load
+django-inquisition from the directory you named, the run fails. The plugin version and git SHA (or `PLUGIN_SHA` for an export
+that has no `.git`) are printed and written to `<log-dir>/arm.txt`. Each run keeps its stream-json transcript, final text and
+`run<N>.meta.json` (tokens, cost, bytes read from `checks/` and `references/`) under `<log-dir>/<fixture>/`, and the script
+ends with a per-code detection tally.
 
 ---
 
@@ -27,10 +38,9 @@ Runs without invoking Claude. Checks structural invariants that should be true r
 | `SKILL.md` exists | Orchestrator file is present |
 | All 8 `checks/<group>.md` files exist | Per-check files written by Django teammate are present |
 | Each check file has required frontmatter | `name`, `title`, `checks` fields in YAML front matter |
-| `SKILL.md` references all 8 group files | Orchestrator enumerates `checks/fetching.md` … `checks/patterns.md` |
-| `SKILL.md` references all 70 check codes | Every `FETCH-001` … `PAT-070` appears at least once in the orchestrator |
+| `SKILL.md` wires `checks/INDEX.md` and every `references/*.md` | The orchestrator names the index and each reference it loads |
+| `checks/INDEX.md` agrees with the group files | Every INDEX row's span starts on its `### CODE` heading; frontmatter ids, section headings and INDEX rows are the same set per group; every row has a trigger; alias targets are live checks; the committed INDEX equals `tools/build_index.py optimise-orm` output |
 | Severity mapping rules present | `savings_midpoint`, `confidence_weight`, `sort_key`, `noqa` handling |
-| Each group file contains its assigned codes | e.g. `checks/fetching.md` contains `FETCH-001` through `FETCH-032` |
 | Fixture directories exist | Warns (not fails) if a fixture dir is missing — Django teammate may not have created it yet |
 | Each present fixture has `target.py` and `expected.json` | Fixture is minimally complete for live testing |
 
@@ -38,7 +48,7 @@ Static-shape tests pass quickly and are suitable for CI.
 
 ### Live mode
 
-Invokes `claude "/django-inquisition:optimise-orm <target> --report --no-explain"` against each fixture, then:
+Invokes `claude -p --plugin-dir <plugin> "/django-inquisition:optimise-orm <target> --report --no-explain"` against a scratch copy of each fixture, then:
 
 1. Parses the report frontmatter to extract `findings_count`.
 2. Compares against the fixture's `expected.json`.
