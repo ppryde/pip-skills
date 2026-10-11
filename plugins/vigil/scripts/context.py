@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 
 DEFAULT_WINDOW = 200000
+EXTENDED_WINDOW = 1_000_000
 
 _USAGE_FIELDS = (
     "input_tokens",
@@ -43,7 +44,11 @@ def _usage_of(line: str) -> dict | None:
         return None
     message = record.get("message") if isinstance(record, dict) else None
     usage = message.get("usage") if isinstance(message, dict) else None
-    return usage if isinstance(usage, dict) else None
+    if not isinstance(usage, dict) or not isinstance(message, dict):
+        return None
+    model = message.get("model")
+    # carry the record's model next to its usage (for window detection)
+    return {**usage, "_model": model} if isinstance(model, str) else usage
 
 
 _FIRST_CHUNK = 64 * 1024
@@ -88,6 +93,49 @@ def context_tokens(transcript_path: Path) -> int | None:
         return sum(int(latest.get(field, 0) or 0) for field in _USAGE_FIELDS)
     except (ValueError, TypeError):
         return None
+
+
+def context_reading(transcript_path: Path) -> tuple[int, str | None] | None:
+    """(context tokens, model id of that record) for the newest usage record."""
+    try:
+        latest = _latest_usage(transcript_path)
+    except OSError:
+        return None
+    if latest is None:
+        return None
+    try:
+        tokens = sum(int(latest.get(field, 0) or 0) for field in _USAGE_FIELDS)
+    except (ValueError, TypeError):
+        return None
+    model = latest.get("_model")
+    return tokens, model if isinstance(model, str) else None
+
+
+def payload_model_id(payload: dict) -> str | None:
+    """The model id a hook payload carries (a string, or ``{"id": ...}``), if any."""
+    model = payload.get("model")
+    if isinstance(model, dict):
+        model = model.get("id")
+    return model if isinstance(model, str) and model else None
+
+
+def detect_window(
+    tokens: int, model_ids: list[str | None], configured: int | None = None
+) -> int:
+    """The session's context window for the transcript-based fallback.
+
+    Order: an explicitly configured ``context.window`` wins; then a ``[1m]``
+    suffix on any known model id (hook payload or transcript); then evidence
+    (more than 200k tokens in context cannot fit a standard window); else 200k,
+    used only when the window is unknown.
+    """
+    if configured:
+        return configured
+    if any(m and "[1m]" in m.lower() for m in model_ids):
+        return EXTENDED_WINDOW
+    if tokens > DEFAULT_WINDOW:
+        return EXTENDED_WINDOW
+    return DEFAULT_WINDOW
 
 
 def context_percent(tokens: int, window: int = DEFAULT_WINDOW) -> int:
