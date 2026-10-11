@@ -84,9 +84,7 @@ and removes nothing. Two questions come before `--yes`, and both are the person'
    (another account's `settings.json` still runs it), ask which they want, and never pick for them:
    uninstall for this account only (`--this-account-only`: the launcher stays for the others) or
    everywhere (`--all-accounts`: it also restores those accounts' status lines and removes the
-   launcher). `--yes` without one of the two changes nothing. Neither flag touches another account's data.
-   The check is not exhaustive: it finds other accounts only under `~/.claude*`, so tell the person that an
-   account kept elsewhere (a custom `CLAUDE_CONFIG_DIR` or `CENSUS_STORE`) is not seen.
+   launcher). `--yes` without one of the two changes nothing. It sees only `~/.claude*` accounts; say so.
 2. **Saved data. Always ask**, even when nothing is shared: delete this account's saved census data
    (sessions, limits, git cache), or keep it? Warn that if they delete it the history cannot be
    recovered. Keep is the default and needs no flag; delete is `--purge`. When several accounts share
