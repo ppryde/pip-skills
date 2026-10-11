@@ -175,7 +175,8 @@ function extractFile({ path: p, content }) {
     const qual = `${current()}.${name}`;
     addSymbol(qual, k, node, signature(params));
     decorators(node, qual);
-    if (k === "function" && hasDefaultExport(node) && stack.length === 0) {
+    if (k === "function" && hasDefaultExport(node) && stack.length === 0 &&
+        qual !== `${mod}.default`) {
       addAlias(`${mod}.default`, qual);
     }
     stack.push({ qual, kind: k });

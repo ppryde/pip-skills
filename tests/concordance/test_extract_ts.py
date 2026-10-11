@@ -128,3 +128,8 @@ def test_ts_is_indexed_in_chunks_so_a_deadline_keeps_progress(
     report = ensure_view(Store(tmp_path / "i.db"), worktree_view(repo.root))
     assert calls == [1, 1] and report.parsed == 1
     assert list(report.skipped.values()) == ["deadline"]
+
+
+def test_anonymous_default_function_has_no_self_alias() -> None:
+    f = extract("a.ts", "export default function () {}\n")
+    assert not any(s.kind == "alias" and s.alias_of == s.qualname for s in f.symbols)
