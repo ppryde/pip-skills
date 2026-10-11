@@ -364,6 +364,26 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     # distinct from the write-once `owner_account_uuid` (the FIRST owner),
     # which must stay untouched.
     ("sessions", "bridge_owner_uuid", "TEXT"),
+    # What became of each tool call (scripts.permits): a fixed outcome category
+    # (ok / error:* / denied:* / prompted:*), a fixed reason, the closed-
+    # vocabulary permissionDecision ("accept:user_temporary/-"), whether a person
+    # was prompted, and the command SHAPE (a program + subcommand from an
+    # allowlist, never an argument). NULL = not stated: a transcript from before
+    # CLI 2.1.295 has no decision, a pruned one was never re-read, and a redacted
+    # remote keeps `shape` only at `titles`. Backfilled by `chronicle sync --full`.
+    ("tool_calls", "outcome", "TEXT"),
+    ("tool_calls", "reason", "TEXT"),
+    ("tool_calls", "decision", "TEXT"),
+    ("tool_calls", "prompted", "INTEGER"),
+    ("tool_calls", "shape", "TEXT"),
+    # A subagent's identity from its meta sidecar and stamps: the agent type (an
+    # ad-hoc name is stored folded to "(ad-hoc)" below `titles` fidelity), the
+    # skill in scope, whether it ran non-interactive (no one to prompt) and its
+    # model. Backfilled by `chronicle sync --full`.
+    ("agents", "agent_type", "TEXT"),
+    ("agents", "skill", "TEXT"),
+    ("agents", "non_interactive", "INTEGER"),
+    ("agents", "model", "TEXT"),
 )
 
 

@@ -239,9 +239,9 @@ against a real transcript sample from an actual prod-access box:
 
 | Fidelity | Keeps, beyond the previous level | Loses (until you opt up) |
 |---|---|---|
-| `minimal` | ids, timestamps, session/agent ids, cwd, git branch, model, the API `usage` block, stop_reason, tool NAMES (no inputs), bridge/cost-state account ids, turn durations | effort; skill/plugin/mcp/agent-type attribution; qualifiers (which skill, which agent type); tool result SIZES; file edits and their line churn; Artifact publishes; usage-limit banners; titles; subagent task lines |
-| `attribution` | effort, the attribution stamps, Skill name, Agent `subagent_type`, MCP tool names, each tool result's LENGTH (a number, never its text), Edit/Write's file path + added/removed line COUNTS (content never kept), Artifact facts (action, file path, favicon, published URL), usage-limit banners | titles; subagent task lines; Artifact title/description (falls back to the file's stem) |
-| `titles` | session titles, and subagent task lines truncated to ~80 characters | — (this is the top level) |
+| `minimal` | ids, timestamps, session/agent ids, cwd, git branch, model, the API `usage` block, stop_reason, tool NAMES (no inputs), each tool result's OUTCOME as a fixed category (`ok`, `error:*`, `denied:*`, `prompted:*`) and its permission decision reduced to a closed vocabulary, bridge/cost-state account ids, turn durations | effort; skill/plugin/mcp/agent-type attribution; qualifiers (which skill, which agent type); tool result SIZES; file edits and their line churn; Artifact publishes; usage-limit banners; titles; subagent task lines |
+| `attribution` | effort, the attribution stamps, Skill name, Agent `subagent_type`, MCP tool names, each tool result's LENGTH (a number, never its text), Edit/Write's file path + added/removed line COUNTS (content never kept), Artifact facts (action, file path, favicon, published URL), usage-limit banners, per subagent its type (a built-in or `<plugin>:<name>`; any other name is folded to `(ad-hoc)`), whether it ran non-interactive, and its model | titles; subagent task lines; Artifact title/description (falls back to the file's stem); Bash command shapes |
+| `titles` | session titles, and subagent task lines truncated to ~80 characters, the raw agent-type name, and each Bash command's SHAPE (below) | — (this is the top level) |
 
 `titles` is the one level that knowingly admits customer or production detail: a session title
 or a subagent's opening line is model- or user-written prose, and can say anything. Opt into it
@@ -278,6 +278,34 @@ disabled, never `/dev/null` known_hosts), no agent or X11 forwarding, and the ho
 a literal `--` — a hostile-looking (but regex-validated) host string can never be read as an
 option. The remote script only reads: it opens nothing for writing, deletes nothing, and makes
 no network call of its own. Nothing is ever left on the remote box.
+
+### Outcomes, decisions and command shapes (permits)
+
+Every tool call also records what became of it, so the question "which permissions do my
+subagents actually need" is answered from data instead of from memory. The transcript's tool
+result is read ONCE to put the call in a fixed category, and the text is then dropped:
+
+- `tool_calls.outcome`: `ok`, `error:<kind>`, `denied:<cause>` (`classifier`, `safety-check`,
+  `worktree-guard`, `sleep-guard`, `file-outside-root`, `hook`, `config-rule`, ...) or
+  `prompted:approved|rejected|interrupted`. An unrecognised harness phrase is `error:other`
+  (counted, never dropped), so a Claude Code wording change shows up as a number.
+- `tool_calls.reason`: the classifier's label as an enum (`modify-shared-resources`, ...,
+  `other`) or the worktree guard's sub-cause (`wt:too-complex`, ...). The captured text is never stored.
+- `tool_calls.decision` and `prompted`: Claude Code 2.1.295+ writes a structured
+  `permissionDecision` on the tool result; it is stored as `<accept|reject>:<source>/<reasonType>`
+  from fixed lists (anything else is `other`), and `prompted` is 1 when a person was asked.
+- `tool_calls.shape`: a Bash command as a program from a fixed allowlist plus an allowlisted
+  subcommand (`git status`, `python3 -m pytest`, `poetry run pytest +compound`). Any other first
+  token prints `(script)` (a script or path) or `(other)`; no argument, path, value or
+  assignment is ever kept. Other tools are their own name.
+- `agents.agent_type`, `skill`, `non_interactive`, `model`: from the agent's meta sidecar and the
+  attribution stamps.
+
+All of it is filled by `sync`, and backfilled by `sync --full` for older rows (rows whose
+transcripts Claude Code has since pruned stay empty). A remote box keeps the outcome and the
+decision at every fidelity (they are fixed categories), the agent type and mode from
+`attribution`, and a command shape only at `titles`: on a production-access box even the program
+a command ran is a fact about what ran there.
 
 ### Sessions from a container
 

@@ -110,26 +110,28 @@ def ssh_argv(remote: store.Remote, request_b64: str | None = None) -> list[str]:
     return argv
 
 
+def _without_future_import(source: str) -> str:
+    return "\n".join(line for line in source.splitlines()
+                     if line.strip() != "from __future__ import annotations")
+
+
 def bundle_source(request_b64: str | None = None) -> str:
-    """``redact.py`` + `remote_agent.py``'s source, concatenated into one
-    Python 3.8-compatible script: `remote_agent.py` uses `redact`'s names
-    directly (no `import redact` — there is nothing on the remote disk to
-    import it from), and its own leading ``from __future__ import
-    annotations`` is dropped so the bundle carries exactly one (redact.py's,
-    at the very top — a `from __future__` after other statements is a
-    SyntaxError).
+    """``redact.py`` + ``permits.py`` + `remote_agent.py``'s source,
+    concatenated into one Python 3.8-compatible script: `permits.py` and
+    `remote_agent.py` use `redact`'s names (and `redact` the few of `permits`
+    it guards an import of) directly — there is nothing on the remote disk to
+    import them from — and their own ``from __future__ import annotations``
+    lines are dropped so the bundle carries exactly one (redact.py's, at the
+    very top — a `from __future__` after other statements is a SyntaxError).
 
     ``request_b64`` (the base64 request) is prepended to the agent half as a
     ``REQUEST_B64 = '...'`` literal, which `remote_agent.main` reads: stdin is
     the one channel with no size limit."""
     redact_src = (_SCRIPTS_DIR / "redact.py").read_text()
-    agent_src = (_SCRIPTS_DIR / "remote_agent.py").read_text()
-    agent_lines = [
-        line for line in agent_src.splitlines()
-        if line.strip() != "from __future__ import annotations"
-    ]
+    permits_src = _without_future_import((_SCRIPTS_DIR / "permits.py").read_text())
+    agent_src = _without_future_import((_SCRIPTS_DIR / "remote_agent.py").read_text())
     literal = f"REQUEST_B64 = {request_b64!r}\n\n" if request_b64 is not None else ""
-    return redact_src + "\n\n" + literal + "\n".join(agent_lines) + "\n"
+    return redact_src + "\n\n" + permits_src + "\n\n" + literal + agent_src + "\n"
 
 
 # ---------------------------------------------------------------------------
