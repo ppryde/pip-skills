@@ -85,3 +85,18 @@ def test_missing_or_empty_index_errors(tmp_path):
     empty.write_text("# nothing\n")
     r = run(src, "--index", empty)
     assert r.returncode == 2 and "no check rows" in r.stderr
+
+
+def test_empty_groups_is_an_error_not_no_filter():
+    for arg in ("--groups=", "--groups=,"):
+        r = run(FIXTURES / "05-missing-index-postgres" / "target.py", arg)
+        assert r.returncode == 2 and "--groups is empty" in r.stderr
+
+
+def test_write_005_needs_the_listener_file_fixture_06_layout():
+    f = FIXTURES / "06-audit-framework-bypass"
+    assert "@receiver" in (f / "signals.py").read_text()
+    without = run(f / "target.py", f / "settings.py")
+    assert "PAT-070" in ids(without.stdout) and "WRITE-005" not in ids(without.stdout)
+    with_listeners = run(f / "target.py", f / "settings.py", f / "signals.py")
+    assert "WRITE-005" in ids(with_listeners.stdout)

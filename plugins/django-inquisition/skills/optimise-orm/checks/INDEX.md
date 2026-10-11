@@ -6,7 +6,7 @@
 
 Line ranges are 1-based, as `Read` displays them. `L<start>-<end>` means `Read(file, offset=<start>, limit=<end>-<start>+1)`: the range runs from the `### CODE` heading line to the line before the next heading.
 
-`Trigger` is a ripgrep regex for the `Grep` tool, run over the target and the model, template and settings files it references; `\|` in a cell is a markdown-escaped `|` (alternation). An empty trigger means the check declares none. A blank `Kind` means `perf`. `Severity` is the check's default internal severity; the tier mapping lives in SKILL.md.
+`Trigger` is a Python `re` pattern, run line by line by `scripts/triggers.py` over the target and the model, template and settings files it references (never grepped by hand); `\|` in a cell is a markdown-escaped `|` (alternation). An empty trigger means the check declares none. A blank `Kind` means `perf`. `Severity` is the check's default internal severity; the tier mapping lives in SKILL.md.
 
 | ID | Severity | Kind | Check | Trigger | Span |
 |---|---|---|---|---|---|

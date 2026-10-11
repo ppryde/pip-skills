@@ -111,8 +111,11 @@ def main(argv=None):
     try:
         rows = load_rows(Path(a.index))
         files = collect(a.paths)
-        groups = set(a.groups.split(",")) if a.groups else None
-        if groups is not None:
+        groups = None
+        if a.groups is not None:
+            groups = {g for g in a.groups.split(",") if g}
+            if not groups:
+                raise Bad("--groups is empty: name at least one group, or omit the option")
             known = {Path(r["file"]).stem for r in rows}
             if groups - known:
                 raise Bad(f"unknown group(s): {', '.join(sorted(groups - known))}")
