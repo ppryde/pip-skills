@@ -7,10 +7,8 @@ trap 'exit 0' EXIT
 
 input="$(cat)"
 
-py="python3"
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/../../.venv/bin/python" ]; then
-  py="${CLAUDE_PLUGIN_ROOT}/../../.venv/bin/python"
-fi
+# PATH python3, or the interpreter named by VIGIL_PYTHON. Never a repo-adjacent interpreter.
+py="${VIGIL_PYTHON:-python3}"
 
 # Loud manual fallback: consume nothing, force no continuation. When a handover
 # is armed, tell the *user* to type /clear via the systemMessage channel — plain

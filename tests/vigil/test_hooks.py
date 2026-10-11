@@ -353,3 +353,67 @@ class TestPackaging:
     def test_skill_and_command_present(self):
         assert (PLUGIN_ROOT / "skills" / "vigil" / "SKILL.md").exists()
         assert (PLUGIN_ROOT / "commands" / "handover.md").exists()
+
+
+class TestInterpreterChoice:
+    """VG-15: PATH python3 (or VIGIL_PYTHON); never a repo-adjacent .venv."""
+
+    def _shim(self, path, marker):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f'#!/usr/bin/env bash\necho "$0" >> "{marker}"\nexit 0\n')
+        path.chmod(0o755)
+
+    def test_repo_adjacent_venv_is_not_used(self, tmp_path):
+        plugin = tmp_path / "a" / "b" / "plugin"
+        shutil.copytree(PLUGIN_ROOT, plugin, ignore=shutil.ignore_patterns("__pycache__"))
+        marker = tmp_path / "venv-ran"
+        self._shim(tmp_path / ".venv" / "bin" / "python", marker)
+        for name in ("nudge-hook.sh", "session-start.sh", "stop.sh"):
+            env = _base_env({"CLAUDE_PLUGIN_ROOT": str(plugin)})
+            _run(plugin / "hooks" / name, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert not marker.exists()
+
+    def test_vigil_python_override_is_used_by_every_hook(self, tmp_path):
+        marker = tmp_path / "override-ran"
+        shim = tmp_path / "py" / "mypython"
+        self._shim(shim, marker)
+        env = _base_env({"VIGIL_PYTHON": str(shim)})
+        for script in (NUDGE, SESSION_START):
+            _run(script, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert len(marker.read_text().split()) == 2
+        # stop.sh only reaches python when armed under tmux; the manual path asks it
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        tmux = fake_bin / "tmux"
+        tmux.write_text("#!/usr/bin/env bash\nexit 0\n")
+        tmux.chmod(0o755)
+        env = _base_env({"VIGIL_PYTHON": str(shim), "TMUX": "/x,1,0",
+                         "PATH": f"{fake_bin}:{os.environ['PATH']}", "VIGIL_CLEAR_DELAY": "0"})
+        _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert len(marker.read_text().split()) == 3
+
+    def test_bin_vigil_honours_override(self, tmp_path):
+        marker = tmp_path / "bin-ran"
+        shim = tmp_path / "mypython"
+        self._shim(shim, marker)
+        env = _base_env({"VIGIL_PYTHON": str(shim)})
+        subprocess.run([str(PLUGIN_ROOT / "bin" / "vigil"), "context"], env=env, check=False,
+                       capture_output=True, text=True)
+        assert marker.exists()
+
+    def test_no_script_probes_for_a_venv(self):
+        for name in ("nudge-hook.sh", "session-start.sh", "stop.sh"):
+            assert ".venv" not in (PLUGIN_ROOT / "hooks" / name).read_text()
+        assert ".venv" not in (PLUGIN_ROOT / "bin" / "vigil").read_text()
+
+
+class TestNudgeMatcherDocs:
+    """VG-2: the docs say what hooks.json does (PostToolUse only on Task tools)."""
+
+    def test_matcher_and_docs_agree(self):
+        hooks = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+        assert hooks["PostToolUse"][0]["matcher"] == "TaskCreate|TaskUpdate"
+        for doc in (PLUGIN_ROOT / "hooks" / "nudge-hook.sh", PLUGIN_ROOT / "scripts" / "cli.py"):
+            text = doc.read_text()
+            assert "TaskCreate|TaskUpdate" in text
+            assert "after every tool call" not in text
