@@ -79,16 +79,20 @@ Arms: baseline = `c5aa3430` (0.3.1), lean = `15831bff` (0.4.0). Model `sonnet`, 
 
 Lean costs about 30% more per run in this harness: the lean skill makes the model run the INDEX trigger greps, and a `-p` Sonnet issues them one per turn. Detection is not worse.
 
-### Trigger-grep compliance
+### Trigger scan (`scripts/triggers.py`)
 
-Metric: at least 3 `Grep` (or bash grep) calls before the first `Read` of a `checks/` group file.
+The INDEX-trigger greps cost the lean arm its savings: a `-p` Sonnet issues them one per turn (17/48 runs compliant as shipped in `15831bff`; the "one explicit Grep per trigger" rewording was compliant but ran 51-65 greps, 66-83 turns, 0.40-0.52 USD, and is not shipped). Step 5 now runs `scripts/triggers.py` once: it applies every INDEX trigger to the target files in one process and prints the nominated checks with `Read` offsets. Live re-run, fixtures 01 and 05, N=2 per fixture, sonnet, personal Max account, mean per run:
 
-| Skill state | Runs compliant | Notes |
-|---|---|---|
-| Lean 0.4.0 Step 5 as shipped in `15831bff` | 17/48 (41 of 48 ran at least one grep) | 01 and 05 only: 5/10 |
-| Lean with Step 5 tightened (one explicit Grep per INDEX trigger, issued before any check is opened) | 4/4 (fixtures 01 and 05, N=2 each; 51-65 greps per run) | detection 2/2 on every code of 01 and 05 |
+| Fixture | Arm | Runs | Turns | Cost (USD) | Recall |
+|---|---|---|---|---|---|
+| 01-basic-n-plus-one | Baseline (`c5aa3430`) | 5 | 10.8 | 0.267 | FETCH-001 5/5, FETCH-030 5/5 |
+| 01-basic-n-plus-one | Lean `15831bff` | 5 | 28.8 | 0.327 | FETCH-001 5/5, FETCH-030 5/5 |
+| 01-basic-n-plus-one | Lean + `triggers.py` | 2 | 9.5 | 0.231 | FETCH-001 2/2, FETCH-030 2/2 |
+| 05-missing-index-postgres | Baseline (`c5aa3430`) | 5 | 10.8 | 0.277 | IDX-001/002/010/040 5/5 each |
+| 05-missing-index-postgres | Lean `15831bff` | 5 | 35.0 | 0.347 | IDX-001/002/010/040 5/5 each |
+| 05-missing-index-postgres | Lean + `triggers.py` | 2 | 19.0 | 0.267 | IDX-001/002/010/040 2/2 each |
 
-The tightened wording is compliant every time but the model issues the greps serially (about 60), so those runs took 66-83 turns, 0.40-0.52 USD each. The parallel batch the skill asks for is not honoured by `claude -p`. The 4-run sample is small; a full N=5 re-run was not done (usage).
+Cost is at or below baseline on both fixtures with recall unchanged; turns are still higher on 05 (the model opens 7-11 nominated spans one `Read` at a time). N=2 is a small sample; the other fixtures were not re-run with the scanner.
 
 ---
 

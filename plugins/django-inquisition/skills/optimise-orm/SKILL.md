@@ -5,7 +5,7 @@ description: Use when the user wants to audit a Django Python file, view, model,
 
 # optimise-orm — Django ORM Performance Auditor
 
-Audits a Django file or symbol against ~70 ORM-performance heuristics, ranks findings into three tiers, prints a compact report, and optionally writes a full markdown report. The checks live in `checks/<group>.md`; **do not read them whole**. `checks/INDEX.md` gives each check a trigger regex and a line range, and you open only the matching sections (Step 5).
+Audits a Django file or symbol against ~70 ORM-performance heuristics, ranks findings into three tiers, prints a compact report, and optionally writes a full markdown report. The checks live in `checks/<group>.md`; **do not read them whole**. `scripts/triggers.py` runs each check's trigger regex (from `checks/INDEX.md`) in one call, and you open only the nominated sections (Step 5).
 
 ## Invocation
 
@@ -55,14 +55,11 @@ Read the resolved file(s) and list candidate sites: QuerySet expressions, model 
 For FETCH-020/022. Take the models the target references; run an **import scan** (files importing them) and an **attribute scan** (attribute access on instances in those files); build `{model → {field → [callers]}}`. Zero hits: downgrade FETCH-020/022 to `confidence: low` (keep them). Over 300 LoC or 20 models: use a subagent for the greps.
 
 ### Step 5: Check execution
-Read `checks/INDEX.md` once; its header says how a `Span` becomes a `Read` call.
+1. **Triggers: run the scanner once, before any check is opened.** `python3 ${CLAUDE_PLUGIN_ROOT}/skills/optimise-orm/scripts/triggers.py <target> <model, template and settings files Steps 3-4 resolved> [--groups=<active groups, comma-separated>]`. It runs every `checks/INDEX.md` trigger and prints one line per nominated check: `CODE severity group.md offset limit | file:lines`. Every `critical` row is nominated even without a hit. Never grep triggers yourself, read INDEX.md, or guess checks. Step 2 also nominates PAT-070 and WRITE-005 (`audit_framework`/`signals_safe` set, or a non-empty signal map); pass the settings file so the scanner prints them.
+2. **Open** each nominated check: `Read(checks/<group.md>, offset, limit)` using the printed numbers. Apply its Signature, Confidence rules and Savings formula with the Step 2-4 context. A trigger hit only nominates; the signature decides.
+3. Never report a code you did not open. Aliases (INDEX) are never run.
 
-1. **Triggers: one Grep batch, before any check is opened.** Right after INDEX.md, make one `Grep` call per distinct `Trigger` regex of the active groups' rows (a dozen or more), all in one parallel message, `output_mode: count`, over the target plus the model, template and settings files Steps 3-4 resolved. No `checks/` group `Read` until they return. A hit nominates. Never guess checks from reading the target, or judge a trigger "plausible": grep it. PAT-070 and WRITE-005 are nominated by Step 2 instead (`audit_framework`/`signals_safe` set, or a non-empty signal map). Then note `Nominated: <codes>`.
-2. **Always nominate every `critical` row**, hit or not.
-3. **Open** each nominated check: `Read` its INDEX `Span` (adjacent spans in one file may share a call). Apply its Signature, Confidence rules and Savings formula with the Step 2-4 context. A trigger hit only nominates; the signature decides.
-4. Never report a code you did not open. Aliases are never run.
-
-`--thorough`: skip 1-2 and read every active group file whole, evaluating all checks. `--parallel`: give each group's subagent its INDEX rows, the Step 2-4 context and these rules; it opens only its own nominees (all of them under `--thorough`). On failure continue and note `Note: <group> check-group failed (<reason>). Results may be incomplete.`
+`--thorough`: skip 1 and read every active group file whole, evaluating all checks. `--parallel`: give each group's subagent its scanner lines, the Step 2-4 context and these rules; it opens only those (all of its group under `--thorough`). On failure continue and note `Note: <group> check-group failed (<reason>). Results may be incomplete.`
 
 Finding contract:
 ```json
@@ -114,7 +111,7 @@ Total = sum of midpoints; range = sum of the low ends to sum of the high ends (n
 
 | Mistake | Fix |
 |---|---|
-| Whole group files without `--thorough`, or no trigger greps | Grep the triggers first; `Read` only nominated spans |
+| Whole group files without `--thorough`, or no scanner run | Run `triggers.py` once first; `Read` only nominated spans |
 | EXPLAIN ANALYZE on a write | EXPLAIN without ANALYZE; wrap SELECT EXPLAIN in BEGIN…ROLLBACK |
 | FETCH-020/022 with zero caller evidence | `confidence: low`; do not drop |
 | Escalating WRITE-006/007 without an audit package | Only when `audit_framework=true`; never for plain listeners or `pghistory` |
