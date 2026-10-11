@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from scripts.discovery import discover_strategies
 from scripts.discovery import discover_builtin_reviewers
 from scripts.doclint import required_sections, lint_doc
@@ -40,8 +42,9 @@ def test_builtin_reviewers_present():
     assert discover_builtin_reviewers(REVIEWERS) == ["blast-radius", "general"]
 
 
-def test_general_reviewer_has_required_sections():
-    assert lint_doc(REVIEWERS / "general.md", "reviewer") == []
+@pytest.mark.parametrize("name", discover_builtin_reviewers(REVIEWERS))
+def test_every_builtin_reviewer_has_required_sections(name):
+    assert lint_doc(REVIEWERS / f"{name}.md", "reviewer") == []
 
 
 def test_shipped_profiles_all_resolve():
