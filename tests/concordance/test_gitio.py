@@ -79,3 +79,21 @@ def test_non_utf8_paths_are_skipped_in_every_listing(tmp_path: Path, make_repo) 
     assert gitio.ls_tree(repo.root, "HEAD") == {"ok.py": blob}
     assert gitio.changed_paths(repo.root) == []
     assert gitio.deleted_paths(repo.root) == set()
+
+
+def test_non_utf8_paths_in_the_modified_and_untracked_branches(
+        make_repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = make_repo({"ok.py": "x = 1\n"})
+    real = gitio.git
+
+    def fake(cwd: Path, *args: str, input: bytes | None = None) -> bytes:
+        if args[:2] == ("diff", "--name-only"):
+            return b"ok.py\0mod\xff.py\0"
+        if args[:2] == ("ls-files", "-o"):
+            return b"new\xfe.py\0new.py\0"
+        return real(cwd, *args, input=input)
+
+    monkeypatch.setattr(gitio, "git", fake)
+    skipped: dict[str, str] = {}
+    assert gitio.changed_paths(repo.root, skipped) == ["ok.py", "new.py"]
+    assert skipped == {"mod\\xff.py": "non-UTF-8 path", "new\\xfe.py": "non-UTF-8 path"}

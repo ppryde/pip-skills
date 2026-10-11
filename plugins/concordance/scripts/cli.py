@@ -121,7 +121,8 @@ def _name_command(args: argparse.Namespace, cwd: Path,
         cov = store.coverage(view.view_id)
         lines = [f"coverage: {cov.total - len(cov.not_indexed)}/{cov.total} files indexed",
                  *[f"  failed: {p} ({err})" for p, err in cov.failed],
-                 *[f"  not indexed: {p}" for p in cov.not_indexed]]
+                 *[f"  not indexed: {p}" for p in cov.not_indexed],
+                 *[f"  not indexed ({why}): {p}" for p, why in sorted(view.skipped.items())]]
         return "\n".join(lines), 0, view.view_id
     found = vi.lookup(args.name)
     if found.target is None:

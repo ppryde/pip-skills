@@ -137,3 +137,37 @@ def test_removed_guards_render_as_one_row_not_one_per_test(make_repo) -> None:
     assert out.stdout.count("[removed guards] app.f") == 1
     assert "## Removed contract (1)" in out.stdout
     assert "+2 more site(s) (exact)" in out.stdout  # 5 tests, top 3 shown, exact total
+
+
+def _repo_with_bad_path(make_repo):
+    repo = make_repo({"ok.py": "x = 1\n"})
+    blob = repo.git("hash-object", "-w", "ok.py").strip()
+    subprocess.run(["git", "-C", str(repo.root), "update-index", "--add", "--index-info"],
+                   input=f"100644 {blob}\tapp/bad\xff.py\n".encode("latin-1"), check=True)
+    return repo
+
+
+def test_footer_and_check_list_a_non_utf8_path_and_still_exit_zero(make_repo) -> None:
+    repo = _repo_with_bad_path(make_repo)
+    ctx = cli(repo.root, "review-context")
+    assert ctx.returncode == 0, ctx.stderr
+    assert "not indexed (non-UTF-8 path)" in ctx.stdout and "bad\\xff.py" in ctx.stdout
+    check = cli(repo.root, "check")
+    assert check.returncode == 0
+    assert "check: clean" in check.stdout
+    assert "not indexed (non-UTF-8 path), head view: app/bad\\xff.py" in check.stdout
+
+
+def test_footer_lists_an_unreadable_dirty_file(make_repo) -> None:
+    import os
+    repo = make_repo({"a.py": "x = 1\n", "b.py": "y = 1\n"})
+    repo.write({"a.py": "x = 2\n"})
+    (repo.root / "a.py").chmod(0)
+    try:
+        if os.access(repo.root / "a.py", os.R_OK):
+            return  # running as a user that ignores permissions (root): nothing to prove
+        out = cli(repo.root, "check")
+    finally:
+        (repo.root / "a.py").chmod(0o644)
+    assert out.returncode == 0, out.stderr
+    assert "not indexed (unreadable), head view: a.py" in out.stdout

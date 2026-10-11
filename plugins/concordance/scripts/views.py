@@ -7,7 +7,7 @@ objects, so the base never has to be checked out.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from scripts import gitio
@@ -33,6 +33,7 @@ class View:
     root: Path
     ref: str | None
     files: dict[str, str]
+    skipped: dict[str, str] = field(default_factory=dict)  # path -> why it is not indexed
 
     def read(self, paths: list[str]) -> dict[str, bytes]:
         if self.kind == "base":
@@ -66,9 +67,10 @@ def worktree_view_id(root: Path) -> str:
 def worktree_view(cwd: Path) -> View:
     root = gitio.worktree_root(cwd)
     deleted = gitio.deleted_paths(root)
-    files = {p: s for p, s in gitio.ls_files_stage(root).items()
+    skipped: dict[str, str] = {}
+    files = {p: s for p, s in gitio.ls_files_stage(root, skipped).items()
              if p not in deleted and lang_of(p)}
-    for p in gitio.changed_paths(root):
+    for p in gitio.changed_paths(root, skipped):
         if p in deleted or not lang_of(p):
             continue
         full = root / p
@@ -79,11 +81,15 @@ def worktree_view(cwd: Path) -> View:
             files[p] = blob_sha(full.read_bytes())
         except OSError:  # unreadable or renamed away mid-scan: its index sha would be stale
             files.pop(p, None)
-    return View(worktree_view_id(root), "wt", root, None, files)
+            skipped[p] = "unreadable"
+    skipped = {p: why for p, why in skipped.items() if lang_of(p)}
+    return View(worktree_view_id(root), "wt", root, None, files, skipped)
 
 
 def base_view(cwd: Path, commit: str) -> View:
     root = gitio.worktree_root(cwd)
     sha = gitio.rev_parse(root, commit)
-    files = {p: s for p, s in gitio.ls_tree(root, sha).items() if lang_of(p)}
-    return View(f"base-{sha}", "base", root, sha, files)
+    skipped: dict[str, str] = {}
+    files = {p: s for p, s in gitio.ls_tree(root, sha, skipped).items() if lang_of(p)}
+    skipped = {p: why for p, why in skipped.items() if lang_of(p)}
+    return View(f"base-{sha}", "base", root, sha, files, skipped)

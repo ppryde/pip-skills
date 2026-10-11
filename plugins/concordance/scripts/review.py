@@ -141,6 +141,14 @@ def footer(ctx: Context) -> list[str]:
         more = f" +{len(cov.not_indexed) - 5} more" if len(cov.not_indexed) > 5 else ""
         lines.append(f"  not indexed ({'; '.join(reasons)}): {shown}{more}"
                      " — for these files do steps 1-4 by grep")
+    for label, view in (("head", ctx.head), ("base", ctx.base)):
+        by_reason: dict[str, list[str]] = {}
+        for path, why in sorted(view.skipped.items()):
+            by_reason.setdefault(why, []).append(path)
+        for why, paths in by_reason.items():
+            more = f" +{len(paths) - 5} more" if len(paths) > 5 else ""
+            lines.append(f"  not indexed ({why}), {label} view: {', '.join(paths[:5])}{more}"
+                         " — for these files do steps 1-4 by grep")
     if ctx.base_cov.not_indexed:
         lines.append(f"  base view: {len(ctx.base_cov.not_indexed)} files not indexed; "
                      "removed-item detection is incomplete for them")

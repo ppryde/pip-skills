@@ -61,16 +61,21 @@ def _split_z(out: bytes) -> list[bytes]:
     return [entry for entry in out.split(b"\0") if entry]
 
 
-def _path(raw: bytes) -> str | None:
-    """A path as text, or None when it is not valid UTF-8 (such a file is not indexed: its
-    name could not be stored or shown faithfully)."""
+NON_UTF8 = "non-UTF-8 path"
+
+
+def _path(raw: bytes, skipped: dict[str, str] | None = None) -> str | None:
+    """A path as text, or None when it is not valid UTF-8: such a file cannot be stored, so it
+    is not indexed. It is recorded (escaped, with the reason) in `skipped` for the footer."""
     try:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
+        if skipped is not None:
+            skipped[raw.decode("utf-8", "backslashreplace")] = NON_UTF8
         return None
 
 
-def ls_files_stage(cwd: Path) -> dict[str, str]:
+def ls_files_stage(cwd: Path, skipped: dict[str, str] | None = None) -> dict[str, str]:
     """Tracked files -> index blob sha (symlinks and submodules skipped)."""
     result: dict[str, str] = {}
     for entry in _split_z(git(cwd, "ls-files", "-s", "-z")):
@@ -78,31 +83,31 @@ def ls_files_stage(cwd: Path) -> dict[str, str]:
         mode, sha, _stage = meta.split()
         if mode in _SKIP_MODES:
             continue
-        name = _path(path)
+        name = _path(path, skipped)
         if name is not None:
             result[name] = sha.decode()
     return result
 
 
-def changed_paths(cwd: Path) -> list[str]:
+def changed_paths(cwd: Path, skipped: dict[str, str] | None = None) -> list[str]:
     """Paths whose working-tree content differs from the index, plus untracked non-ignored files."""
     modified = _split_z(git(cwd, "diff", "--name-only", "-z"))
     untracked = _split_z(git(cwd, "ls-files", "-o", "--exclude-standard", "-z"))
-    return [n for p in [*modified, *untracked] if (n := _path(p)) is not None]
+    return [n for p in [*modified, *untracked] if (n := _path(p, skipped)) is not None]
 
 
 def deleted_paths(cwd: Path) -> set[str]:
     return {n for p in _split_z(git(cwd, "ls-files", "-d", "-z")) if (n := _path(p)) is not None}
 
 
-def ls_tree(cwd: Path, commit: str) -> dict[str, str]:
+def ls_tree(cwd: Path, commit: str, skipped: dict[str, str] | None = None) -> dict[str, str]:
     result: dict[str, str] = {}
     for entry in _split_z(git(cwd, "ls-tree", "-r", "-z", commit)):
         meta, path = entry.split(b"\t", 1)
         mode, kind, sha = meta.split()
         if kind != b"blob" or mode in _SKIP_MODES:
             continue
-        name = _path(path)
+        name = _path(path, skipped)
         if name is not None:
             result[name] = sha.decode()
     return result
