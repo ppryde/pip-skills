@@ -100,6 +100,38 @@ def census_dir() -> Path:
     return config_dir() / "census"
 
 
+def census_dir_is_config() -> bool:
+    """Is census's folder the Claude config dir itself? Only a mis-set ``CENSUS_STORE`` gets there (the legacy
+    ``<dir>/x.json`` spelling names ``<dir>``), and then census's ``sessions/`` would be Claude Code's own pid
+    registry, which a sweep or a purge must never touch."""
+    try:
+        return os.path.realpath(census_dir()) == os.path.realpath(config_dir())
+    except OSError:
+        return False
+
+
+def census_dir_is_config_message() -> str:
+    return (
+        f"the census dir is the Claude config dir ({census_dir()}): census would share sessions/ with Claude Code's "
+        "own session registry. Point CENSUS_STORE at a folder of its own (or unset it); nothing is recorded, "
+        "installed or purged here until then"
+    )
+
+
+def is_session_record(entry: Any) -> bool:
+    """Does this parsed file look like a census session record (and not, say, Claude Code's ``sessions/<pid>.json``)?"""
+    return (
+        isinstance(entry, dict)
+        and isinstance(entry.get("payload"), dict)
+        and _number(entry.get("updated_at")) is not None
+    )
+
+
+def is_limits_record(entry: Any) -> bool:
+    """Does this parsed file look like a census ``limits/<account>.json``?"""
+    return isinstance(entry, dict) and "version" in entry and "account" in entry
+
+
 def pointer_path() -> Path:
     """Where census publishes its own CLI location, for other tools to find."""
     return census_dir() / "cli.path"
@@ -1028,6 +1060,8 @@ def _sweep(now: float) -> None:
             except OSError:
                 pass
             continue
+        if not is_session_record(entry):
+            continue   # not ours to age out (a file census did not write)
         if now - (_number(entry.get("updated_at")) or 0.0) > SESSION_TTL_SECONDS:
             _unlink(path)
     wall = time.time()
@@ -1065,6 +1099,8 @@ def ingest(raw: str, now: float | None = None) -> None:
 
 
 def _ingest(raw: str, now: float) -> None:
+    if census_dir_is_config():
+        return   # see census_dir_is_config: recording here would mingle with Claude Code's own registry
     migrate(now)
     payload = json.loads(raw)
     if not isinstance(payload, dict):

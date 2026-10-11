@@ -95,6 +95,8 @@ def report(active: bool = True) -> dict[str, Any]:
             "census-mod is installed — use /census-setup instead; install one or the other "
             "(census and census-mod are alternatives)."
         )
+    if st.census_dir_is_config():
+        notes.append(st.census_dir_is_config_message())
     return {
         "notes": notes,
         "config_dir": str(config),

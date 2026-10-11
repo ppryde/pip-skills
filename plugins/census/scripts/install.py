@@ -512,11 +512,28 @@ _OWNED_FILES = (
 _TMP_PREFIXES = (".cli.path.", ".statusline.", ".status.", ".limits.")
 
 
+def _own_records(folder: Path, shaped: Any) -> list[Path]:
+    """``folder`` itself when every entry in it is census's (a census-shaped record or a census temp file), else only
+    those entries: a file census did not write (Claude Code's own ``sessions/<pid>.json``) is never ours to delete."""
+    try:
+        names = sorted(folder.iterdir())
+    except OSError:
+        return [folder]
+    mine = [
+        p for p in names
+        if (p.name.endswith(".json") and not p.name.startswith(".") and shaped(_read_json_file(p)))
+        or (p.name.endswith(".tmp") and p.name.startswith(_TMP_PREFIXES))
+    ]
+    return [folder] if len(mine) == len(names) else mine
+
+
 def _owned_entries(directory: Path) -> list[Path]:
     """Census's own entries inside ``directory`` — never anything else."""
+    from scripts import store as st
+
     found = [directory / name for name in _OWNED_FILES]
-    found.append(directory / "sessions")
-    found.append(directory / "limits")
+    found.extend(_own_records(directory / "sessions", st.is_session_record))
+    found.extend(_own_records(directory / "limits", st.is_limits_record))
     found.append(directory / "gitcache")
     try:
         found.extend(

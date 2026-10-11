@@ -171,7 +171,17 @@ def _with_account(args: argparse.Namespace, lines: list[str]) -> list[str]:
     return lines if args.yes else [f"config dir: {st.config_dir()}", *lines]
 
 
+def _refuse_config_dir_census() -> int | None:
+    """1 (after saying why) when census's folder is the Claude config dir; None when all is well."""
+    if not st.census_dir_is_config():
+        return None
+    print(f"refused: {st.census_dir_is_config_message()}")
+    return 1
+
+
 def cmd_install(args: argparse.Namespace) -> int:
+    if (refused := _refuse_config_dir_census()) is not None:
+        return refused
     shim = Path(args.shim) if args.shim else _default_shim()
     if args.statusline:
         code, lines = ins.install_statusline(
@@ -195,6 +205,8 @@ def cmd_install(args: argparse.Namespace) -> int:
 
 
 def cmd_uninstall(args: argparse.Namespace) -> int:
+    if args.purge and (refused := _refuse_config_dir_census()) is not None:
+        return refused
     code, lines = ins.uninstall(
         Path(args.shim) if args.shim else _default_shim(),
         Path(args.script) if args.script else _statusline_path(),
