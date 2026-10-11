@@ -821,13 +821,33 @@ async function cancelCountdown($: EngineInterface) {
 }
 
 async function showNudge($: EngineInterface, pct: number) {
-  if (settings.bar && !onPhone(activity)) {
+  if (settings.bar) {
     if (await read($, barDismissedA)) return          // 0 hid it for this cycle: silent
+    if (onPhone(activity)) { void askNudge($, pct); return }
     await update($, barShownA, () => true)
     await log($, 'bar', { action: 'shown', pct })
     return
   }
   await notify($, V.nudge(pct))
+}
+
+// On the phone the bar and toasts never arrive; a dialog does (it raises Remote Control's
+// "action required" push, PROBES.md §1). Same three choices as the bar. One ask at a time: a later
+// threshold while one is open is not asked again. A dismissed dialog or free text is "remind me later".
+let nudgeAsking = false
+async function askNudge($: EngineInterface, pct: number) {
+  if (nudgeAsking) return
+  nudgeAsking = true
+  try {
+    const { nudgeAt, step: every } = (await thresholds($)).values
+    const next = ((await read($, lastNudgedA)) ?? nudgeAt) + every
+    await log($, 'bar', { action: 'asked', pct })
+    const options = [V.barHandover, V.barLater(next), V.barDismiss]
+    const choice = String(await $.ui.ask(V.nudgeAsk(pct), options).catch(() => V.barLater(next)))
+    await barChoice($, choice === V.barHandover ? 'handover' : choice === V.barDismiss ? 'dismiss' : 'later')
+  } finally {
+    nudgeAsking = false
+  }
 }
 
 async function barChoice($: EngineInterface, action: 'handover' | 'later' | 'dismiss') {
