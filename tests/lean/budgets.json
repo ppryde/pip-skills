@@ -6,8 +6,8 @@
   },
   "indexes": {
     "optimise-orm": {
-      "enforced": false,
-      "reason": "checks/INDEX.md is still hand-written on main; the django-inquisition PR commits the generated one and sets enforced to true."
+      "enforced": true,
+      "reason": "generated checks/INDEX.md is committed (WF-268 django-inquisition PR)"
     },
     "doctrines": {
       "enforced": true,
@@ -24,7 +24,7 @@
     "plugins/census/skills/vitals-lean/SKILL.md": 1938,
     "plugins/chronicle/skills/chronicle/SKILL.md": 5629,
     "plugins/chronicle/skills/reconcile/SKILL.md": 9963,
-    "plugins/django-inquisition/skills/optimise-orm/SKILL.md": 17652,
+    "plugins/django-inquisition/skills/optimise-orm/SKILL.md": 10115,
     "plugins/email-absolution/skills/elder/SKILL.md": 5968,
     "plugins/email-absolution/skills/scribe/SKILL.md": 6329,
     "plugins/email-absolution/skills/visitation/SKILL.md": 3632,
@@ -46,7 +46,6 @@
     "skills/context-vigil/SKILL.md": 9179
   },
   "exemptions": {
-    "plugins/django-inquisition/skills/optimise-orm/SKILL.md": "WF-268 django-inquisition PR: restructured around the generated checks INDEX; budget ratchets down there",
     "plugins/overseer/skills/orchestrate/SKILL.md": "own stream (overseer redesign); seeded at current size, only ratchets down",
     "plugins/review-clone/skills/clone-reviewer/SKILL.md": "WF-268 sweep (deferral-only PR); seeded at current size, ratchets down when its sweep PR lands",
     "plugins/review-clone/skills/review-as/SKILL.md": "WF-268 sweep (deferral-only PR); seeded at current size, ratchets down when its sweep PR lands",
