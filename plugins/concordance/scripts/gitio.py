@@ -1,6 +1,7 @@
 """Every git call concordance makes. Argv only (no shell); listings use -z so any path survives."""
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -12,7 +13,8 @@ class GitError(RuntimeError):
 
 
 def git(cwd: Path, *args: str, input: bytes | None = None) -> bytes:
-    proc = subprocess.run(["git", "-C", str(cwd), *args], input=input, capture_output=True, check=False)
+    proc = subprocess.run(["git", "-C", str(cwd), *args], input=input, capture_output=True,
+                          check=False)
     if proc.returncode != 0:
         err = proc.stderr.decode(errors="replace").strip()
         raise GitError(f"git {' '.join(args)}: {err}")
@@ -20,7 +22,7 @@ def git(cwd: Path, *args: str, input: bytes | None = None) -> bytes:
 
 
 def git_text(cwd: Path, *args: str) -> str:
-    return git(cwd, *args).decode()
+    return os.fsdecode(git(cwd, *args))
 
 
 def worktree_root(cwd: Path) -> Path:
@@ -59,6 +61,15 @@ def _split_z(out: bytes) -> list[bytes]:
     return [entry for entry in out.split(b"\0") if entry]
 
 
+def _path(raw: bytes) -> str | None:
+    """A path as text, or None when it is not valid UTF-8 (such a file is not indexed: its
+    name could not be stored or shown faithfully)."""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def ls_files_stage(cwd: Path) -> dict[str, str]:
     """Tracked files -> index blob sha (symlinks and submodules skipped)."""
     result: dict[str, str] = {}
@@ -67,7 +78,9 @@ def ls_files_stage(cwd: Path) -> dict[str, str]:
         mode, sha, _stage = meta.split()
         if mode in _SKIP_MODES:
             continue
-        result[path.decode()] = sha.decode()
+        name = _path(path)
+        if name is not None:
+            result[name] = sha.decode()
     return result
 
 
@@ -75,11 +88,11 @@ def changed_paths(cwd: Path) -> list[str]:
     """Paths whose working-tree content differs from the index, plus untracked non-ignored files."""
     modified = _split_z(git(cwd, "diff", "--name-only", "-z"))
     untracked = _split_z(git(cwd, "ls-files", "-o", "--exclude-standard", "-z"))
-    return [p.decode() for p in [*modified, *untracked]]
+    return [n for p in [*modified, *untracked] if (n := _path(p)) is not None]
 
 
 def deleted_paths(cwd: Path) -> set[str]:
-    return {p.decode() for p in _split_z(git(cwd, "ls-files", "-d", "-z"))}
+    return {n for p in _split_z(git(cwd, "ls-files", "-d", "-z")) if (n := _path(p)) is not None}
 
 
 def ls_tree(cwd: Path, commit: str) -> dict[str, str]:
@@ -89,7 +102,9 @@ def ls_tree(cwd: Path, commit: str) -> dict[str, str]:
         mode, kind, sha = meta.split()
         if kind != b"blob" or mode in _SKIP_MODES:
             continue
-        result[path.decode()] = sha.decode()
+        name = _path(path)
+        if name is not None:
+            result[name] = sha.decode()
     return result
 
 

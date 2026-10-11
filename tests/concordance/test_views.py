@@ -59,3 +59,19 @@ def test_symlinks_are_skipped(make_repo) -> None:  # Review Focus 5
     assert set(worktree_view(repo.root).files) == {"a.py"}
     sha = repo.git("rev-parse", "HEAD").strip()
     assert set(base_view(repo.root, sha).files) == {"a.py"}
+
+
+def test_unreadable_dirty_file_is_skipped_not_fatal(make_repo, monkeypatch) -> None:
+    from pathlib import Path
+    repo = make_repo({"a.py": "x = 1\n", "b.py": "y = 1\n"})
+    repo.write({"a.py": "x = 2\n"})
+    real = Path.read_bytes
+
+    def flaky(self: Path) -> bytes:
+        if self.name == "a.py":
+            raise PermissionError(13, "denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", flaky)
+    v = worktree_view(repo.root)
+    assert "a.py" not in v.files and "b.py" in v.files  # never the stale index sha

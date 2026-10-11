@@ -90,3 +90,12 @@ def test_file_facts_from_dict() -> None:
     ff = file_facts_from_dict(d, "sha")
     assert ff.blob_sha == "sha" and ff.symbols[0].signature == (Param("a", "pos", False),)
     assert ff.refs[0].args == CallShape(2, (), False, False)
+
+
+def test_lone_surrogate_text_does_not_break_storage(tmp_path: Path) -> None:
+    st = Store(tmp_path / "i.db")
+    ff = sample()
+    ff.literals.append(Literal("string", "\ud800abc", 3, "a.f"))
+    assert st.put_facts(ff) is True  # used to raise UnicodeEncodeError and roll back
+    stored = st.file_facts("a.py", "s1")
+    assert stored is not None and any("abc" in x.text for x in stored.literals)

@@ -108,3 +108,10 @@ def test_gc_keeps_facts_still_referenced_by_a_surviving_view(
     report = maybe_gc(st, repo.root, now=time.time() + 7200)
     assert report is not None and report.views_removed == 1 and report.facts_removed == 0
     assert st.file_facts("m0.py", sha) is not None
+
+
+def test_lone_surrogate_literal_in_source_still_indexes(tmp_path: Path, make_repo) -> None:
+    repo = make_repo({"s.py": 'S = "\\ud800abc"\n', "ok.py": "x = 1\n"})
+    st = Store(tmp_path / "i.db")
+    report = ensure_view(st, worktree_view(repo.root))
+    assert report.failed == [] and report.parsed == 2

@@ -65,3 +65,17 @@ def test_live_worktrees_lists_resolved_paths(make_repo) -> None:
 def test_git_error_names_the_command(tmp_path: Path) -> None:
     with pytest.raises(gitio.GitError, match="rev-parse"):
         gitio.worktree_root(tmp_path)
+
+
+def test_non_utf8_paths_are_skipped_in_every_listing(tmp_path: Path, make_repo) -> None:
+    import subprocess
+    repo = make_repo({"ok.py": "x = 1\n"})
+    blob = repo.git("hash-object", "-w", "ok.py").strip()
+    info = f"100644 {blob}\t".encode() + b"app/bad\xff.py\n"
+    subprocess.run(["git", "-C", str(repo.root), "update-index", "--add", "--index-info"],
+                   input=info, check=True)
+    assert gitio.ls_files_stage(repo.root) == {"ok.py": blob}
+    repo.git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "bad")
+    assert gitio.ls_tree(repo.root, "HEAD") == {"ok.py": blob}
+    assert gitio.changed_paths(repo.root) == []
+    assert gitio.deleted_paths(repo.root) == set()

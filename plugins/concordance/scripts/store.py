@@ -9,7 +9,7 @@ import sqlite3
 import time
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from scripts.facts import (
@@ -77,6 +77,24 @@ class ViewRow:
     built_at: float
 
 
+def _clean(text: str) -> str:
+    """A lone surrogate (`"\\ud800"` in source) cannot be encoded as UTF-8, so SQLite would
+    reject the whole file. Keep it as its escape text instead."""
+    return text.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def _storable(ff: FileFacts) -> FileFacts:
+    return FileFacts(
+        ff.path, ff.blob_sha, ff.lang, ff.parsed_ok,
+        None if ff.error is None else _clean(ff.error),
+        [replace(s, qualname=_clean(s.qualname), alias_of=s.alias_of and _clean(s.alias_of))
+         for s in ff.symbols],
+        [replace(r, src=_clean(r.src), target=_clean(r.target)) for r in ff.refs],
+        [replace(x, text=_clean(x.text), symbol=_clean(x.symbol)) for x in ff.literals],
+        [replace(g, symbol=_clean(g.symbol), text=_clean(g.text)) for g in ff.guards],
+    )
+
+
 class Store:
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,6 +147,7 @@ class Store:
 
     def put_facts(self, ff: FileFacts) -> bool:
         """Store one file's facts. False when another writer already stored this (path, sha)."""
+        ff = _storable(ff)
         key = (ff.path, ff.blob_sha)
         with self._tx():
             cur = self.conn.execute(

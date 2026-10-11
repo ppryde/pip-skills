@@ -18,7 +18,7 @@ def config_dir() -> Path:
 def repo_key(common_dir: Path) -> str:
     common = common_dir.resolve()
     name = common.parent.name if common.name == ".git" else common.name.removesuffix(".git")
-    digest = hashlib.sha1(str(common).encode()).hexdigest()[:8]
+    digest = hashlib.sha1(os.fsencode(str(common))).hexdigest()[:8]
     return f"{name}-{digest}"
 
 

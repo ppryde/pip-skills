@@ -75,7 +75,10 @@ def worktree_view(cwd: Path) -> View:
         if full.is_symlink() or not full.is_file():
             files.pop(p, None)
             continue
-        files[p] = blob_sha(full.read_bytes())
+        try:
+            files[p] = blob_sha(full.read_bytes())
+        except OSError:  # unreadable or renamed away mid-scan: its index sha would be stale
+            files.pop(p, None)
     return View(worktree_view_id(root), "wt", root, None, files)
 
 
