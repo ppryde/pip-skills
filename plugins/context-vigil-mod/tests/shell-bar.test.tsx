@@ -258,15 +258,61 @@ test('hotkeys are 1 / 2 / 0', async ($, on) => {
   await ui.unmount()
 })
 
-test('on the phone: a notice instead of the bar', async ($, on) => {
+// On the phone the bar and toasts never arrive; a dialog does (Remote Control's "action required").
+const PHONE_Q = '🕯️ Context is at 36%. Hand over now?'
+const PHONE_OPTS = ['📜 Hand over now', '⏰ Remind me at 40%', '✖ Dismiss'] as const
+
+test('on the phone: a dialog with the bar\'s three choices, and no bar', async ($, on) => {
   const w = world(on)
+  w.askAnswer.value = PHONE_OPTS[1]
   await $.session.start(START)
   await $.prompt.submit(human('hi', 'bridge'))
   await $.session.measure(measure(36))
+  await w.clock.settle()
+  expect(w.asks.map(q => q.question)).toEqual([PHONE_Q])
+  expect(w.asks[0]?.options).toEqual(PHONE_OPTS)
   const ui = await $.ui.mount(BAND())
   expect(await ui.find({ key: 'handover' })).toBeUndefined()
   await ui.unmount()
-  expect(w.notices).toContain('🕯️ Context at 36% — say "hand over" (or /vho) when you\'re ready 📜')
+  expect(w.notices).not.toContain('🕯️ Context at 36% — say "hand over" (or /vho) when you\'re ready 📜')
+})
+
+test('on the phone: "Hand over now" starts the handover', async ($, on) => {
+  const w = world(on)
+  w.askAnswer.value = PHONE_OPTS[0]
+  await $.session.start(START)
+  await $.prompt.submit(human('hi', 'bridge'))
+  await $.session.measure(measure(36))
+  await w.clock.settle()
+  expect(w.submits.at(-1)?.text).toContain(TOOL)
+})
+
+test('on the phone: "Remind me" asks again at the next step; a dismissed dialog counts as remind me', async ($, on) => {
+  const w = world(on)
+  w.askAnswer.value = null                                     // dismissed
+  await $.session.start(START)
+  await $.prompt.submit(human('hi', 'bridge'))
+  await $.session.measure(measure(36))
+  await w.clock.settle()
+  expect(w.asks).toHaveLength(1)
+  w.askAnswer.value = '⏰ Remind me at 45%'
+  await $.session.measure(measure(41))
+  await w.clock.settle()
+  expect(w.asks.map(q => q.question)).toEqual([PHONE_Q, '🕯️ Context is at 41%. Hand over now?'])
+  expect(w.state.get('context-vigil-mod.barDismissed')).not.toBe(true)
+})
+
+test('on the phone: Dismiss stays silent until a clear', async ($, on) => {
+  const w = world(on)
+  w.askAnswer.value = PHONE_OPTS[2]
+  await $.session.start(START)
+  await $.prompt.submit(human('hi', 'bridge'))
+  await $.session.measure(measure(36))
+  await w.clock.settle()
+  await $.session.measure(measure(46))
+  await w.clock.settle()
+  expect(w.asks).toHaveLength(1)
+  expect(w.state.get('context-vigil-mod.barDismissed')).toBe(true)
 })
 
 test('with the bar switched off: a notice instead of the bar, in the terminal too', async ($, on) => {
