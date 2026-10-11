@@ -12,22 +12,15 @@ built-in `/statusline`; this is census's, as `/census:setup-statusline`.
 
 ## Running census
 
-Every command below is complete on its own: nothing carries over between shell
-calls. They run this plugin's own copy, `${CLAUDE_PLUGIN_ROOT}/scripts/cli.py`,
-never a `census` already on `PATH`, which may be another plugin's launcher. Use
-`python3` on macOS and Linux and `python` on Windows. In the commands, `CENSUS`
-stands for `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py"` (or the `python`
-form); write the whole thing out each time.
+Every command below is complete on its own (nothing carries over between shell calls) and runs this
+plugin's own copy, never a `census` on `PATH`, which may be another plugin's launcher. `CENSUS` stands
+for `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py"` (`python` on Windows); write it out each time.
 
-Use no shell variables in any command, except `${CLAUDE_PLUGIN_ROOT}`, which Claude
-Code substitutes before you see it. Never compose a config path with a default
-value (a dollar sign, a brace and a colon-dash fallback): Claude Code stops to ask
-about "a variable in braces" even for a read-only check. Every path you need (the
-config dir, the census dir, `settings.json`) comes from `CENSUS where` below.
-To act on another account than the one you are running in, add
-`--config-dir <dir>` to `where`, `install`, `uninstall` and `statusline --preview`
-(so the preview shows that account's limits too); a dry run's first line says
-which account it touches.
+Use no shell variables except `${CLAUDE_PLUGIN_ROOT}`, which Claude Code substitutes first, and never
+compose a path with a default value (dollar, brace, colon-dash): Claude Code stops to ask even for a read-only check. Every
+path you need (config dir, census dir, `settings.json`) comes from `CENSUS where`. To act on another
+account add `--config-dir <dir>` to `where`, `install`, `uninstall` and `statusline --preview`; a dry
+run's first line says which account it touches.
 
 ## Steps
 
@@ -35,49 +28,39 @@ which account it touches.
    object: `config_dir`, `census_dir`, `settings_path`, the current `status_line`
    command, every census in the plugin cache (`census_installs`, with
    `enabled_census`), and `census_mod` (installed, enabled).
-   - **census-mod first.** census and census-mod are alternatives: install one or the
-     other. If `notes` in the output says census-mod is installed (or
-     `census_mod.enabled` is true), say so: census-mod records sessions and draws the status
-     line from inside Claude Code, above the input or below it, with no status
-     line command at all. Recommend `/census-setup` (its guided setup: record,
-     band, placement, layout) instead of installing a command status line. Only
-     carry on with this skill if the person still wants the command status line,
-     and tell them not to run both against the same store (census-mod's setup
-     can remove an existing one).
-   - **Two censuses.** The same plugin is published twice, as `census@pip-skills`
-     and `census@wf-claude-market`. If `enabled_census` shows both enabled, tell
-     the person to disable the one this skill is not part of (the other
-     marketplace's, not the copy you are running): both write the same
-     launcher, `~/.local/bin/census`, and the last installer wins, so the launcher
-     can end up pointing at the copy that is later disabled or upgraded away. Do
-     not continue until they have.
+   - **census-mod first.** census and census-mod are alternatives: install one. If
+     `notes` says census-mod is installed (or `census_mod.enabled` is true), say so:
+     it records and draws from inside Claude Code, above or below the input, with no
+     status line command. Recommend `/census-setup` (guided: record, band, placement,
+     layout) instead. Carry on here only if the person still wants the command status
+     line, and tell them not to run both against one store.
+   - **Two censuses.** The plugin is published twice (`census@pip-skills`,
+     `census@wf-claude-market`). If `enabled_census` shows both enabled, tell the
+     person to disable the other marketplace's copy, not the one you are running:
+     both write `~/.local/bin/census` and the last installer wins, so it can end up
+     pointing at a copy later disabled or upgraded away. Do not continue until they have.
 
-2. **Preview.** Run `CENSUS statusline --preview` (for another account the person
-   named: `CENSUS statusline --preview --config-dir <dir>`) and show the output. It draws
-   a canned payload (including a canned PR, so the `pr` segment shows) plus the
-   live census store (their real rate limits). It does not ingest anything and
-   reads nothing from stdin (it may cache git state for the current directory).
+2. **Preview.** Run `CENSUS statusline --preview` (another account: `CENSUS statusline --preview --config-dir <dir>`) and show the output. It draws a canned payload (with a PR)
+   plus the live store (their real rate limits); it ingests nothing and reads no stdin.
 
-3. **Choose segments.** Ask which segments they want and in what order. The
-   names are `context`, `cache`, `limits`, `cost`, `model`, `git`, `dir`,
-   `changes`, `pr`. A `/` starts a new line. The default is
-   `context,cache,limits,cost/model,git,dir,changes,pr`. `git` is the branch;
-   `changes` is the uncommitted and unpushed counts; `pr` is the branch's open
-   PR and its review state (from the payload, hidden without one). Re-run the preview with
-   `CENSUS statusline --preview --segments "<list>"` until
-   they are happy. Keeping the default is fine: then pass no `--segments`.
+3. **Choose segments.** Ask which segments they want and in what order. The names are `context`, `cache`,
+   `limits`, `cost`, `model`, `git`, `dir`, `changes`, `pr`. A `/` starts a new line.
+   The default is `context,cache,limits,cost/model,git,dir,changes,pr`. `git` is the
+   branch; `changes` the uncommitted and unpushed counts; `pr` the branch's open PR
+   and review state (from the payload, hidden without one). Re-run
+   `CENSUS statusline --preview --segments "<list>"` until they are happy; the
+   default needs no `--segments`.
 
 4. **Dry run.** Run `CENSUS install --statusline [--segments "<list>"]` (no
    `--yes`) and show what it would do. It sets `statusLine` in the `settings_path`
    from step 1, with a 60 second refresh interval, and installs the launcher.
-   - If it refuses because a `statusLine` already exists, say what is there and
-     that `--replace` backs it up to `<census dir>/statusline.previous.json` and
-     swaps; only add `--replace` if they agree.
-   - If it refuses because `settings.json` is missing or not valid JSON, report
-     that and stop. Do not create or repair the file.
+   - If it refuses because a `statusLine` exists, say what is there and that
+     `--replace` backs it up to `<census dir>/statusline.previous.json` and swaps;
+     add it only if they agree.
+   - If it refuses because `settings.json` is missing or not valid JSON, report that
+     and stop. Do not create or repair the file.
 
-5. **Apply.** On their approval re-run the same command with `--yes`. Tell them
-   to restart Claude Code or wait one refresh for the line to appear.
+5. **Apply.** On approval re-run it with `--yes`; the line appears after a restart or one refresh.
 
 ## Options worth mentioning
 
@@ -91,10 +74,20 @@ Set in `settings.json` under `env`, all optional:
 
 ## Undo
 
-`CENSUS uninstall` (add `--purge` to also delete census data) prints what it would
-do; show that plan, then re-run with `--yes` once they approve. `--yes` restores the
-`statusLine` that was replaced (or removes the one census added), and removes `CENSUS_STATUSLINE_SEGMENTS` if census wrote it.
-If they have changed `statusLine` since, it leaves it alone and says so. `--purge` (irreversible) also deletes this account's census data; when several accounts share
-one `CENSUS_STORE`, only this account's limits and sessions are deleted and the
-rest is kept. If the status line cannot be restored (an unreadable backup or
-settings file) it stops and removes nothing.
+Run `CENSUS uninstall` first: it prints the plan and changes nothing. `--yes` then restores the
+`statusLine` that was replaced (or removes the one census added), removes `CENSUS_STATUSLINE_SEGMENTS`
+if census wrote it, and removes the launcher. If they changed `statusLine` since, it leaves it alone
+and says so. If the status line cannot be restored (an unreadable backup or settings file) it stops
+and removes nothing. Two questions come before `--yes`, and both are the person's to answer:
+
+1. **Other accounts.** The launcher is one file for every account. If the plan says `needs a choice`
+   (another account's `settings.json` still runs it), ask which they want, and never pick for them:
+   uninstall for this account only (`--this-account-only`: the launcher stays for the others) or
+   everywhere (`--all-accounts`: it also restores those accounts' status lines and removes the
+   launcher). `--yes` without one of the two changes nothing. Neither flag touches another account's data.
+2. **Saved data. Always ask**, even when nothing is shared: delete this account's saved census data
+   (sessions, limits, git cache), or keep it? Warn that if they delete it the history cannot be
+   recovered. Keep is the default and needs no flag; delete is `--purge`. When several accounts share
+   one `CENSUS_STORE`, `--purge` removes only this account's limits and sessions.
+
+Show the final plan (re-run the dry run with the chosen flags) and apply it with `--yes` once they approve.

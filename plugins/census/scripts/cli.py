@@ -214,6 +214,8 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
         apply=args.yes,
         settings=_settings_path(args),
         census=st.census_dir(),
+        config=st.config_dir(),
+        launcher_scope="everywhere" if args.all_accounts else "this" if args.this_account_only else None,
     )
     print("\n".join(_with_account(args, lines)))
     return code
@@ -274,6 +276,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     uninst = sub.add_parser("uninstall", help="remove the launcher and status-line block")
     uninst.add_argument("--purge", action="store_true", help="also delete this account's census data")
+    scope = uninst.add_mutually_exclusive_group()
+    scope.add_argument("--this-account-only", action="store_true", help="when other accounts still use the launcher: leave it for them")
+    scope.add_argument("--all-accounts", action="store_true", help="when other accounts still use the launcher: restore their status lines and remove it")
     uninst.add_argument("--yes", action="store_true", help="apply (default is a dry run)")
     uninst.add_argument("--shim", help="launcher path (default ~/.local/bin/census)")
     uninst.add_argument("--script", help="status-line script (default $CLAUDE_CONFIG_DIR/statusline-command.sh, else ~/.claude/)")

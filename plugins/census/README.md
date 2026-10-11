@@ -225,7 +225,9 @@ traceback. `census statusline --preview` draws a canned payload against the live
 census install            # dry run: what it would add or replace
 census install --yes      # launcher at ~/.local/bin/census + ingest block in a bash status-line script (prints the line to add by hand when there is no script)
 census install --statusline [--replace] [--segments LIST] --yes   # set settings.json statusLine to `census statusline`
-census uninstall --yes    # remove the launcher and block; restore a replaced statusLine; --purge also deletes data
+census uninstall --yes    # remove the launcher and block; restore a replaced statusLine; --purge also deletes data (irreversible)
+census uninstall --this-account-only --yes   # the launcher is shared: another account still runs it, so leave it for them
+census uninstall --all-accounts --yes        # ...or restore their status lines too and remove it (they are found under ~/.claude*)
 census statusline --preview [--segments LIST] [--config-dir DIR]   # a canned preview; both flags are valid only with --preview
 census where              # (where, install, uninstall and `statusline --preview` take --config-dir DIR: that account, for that run) read-only JSON: config dir, census dir, settings path, status line, plugin installs, census-mod enabled, and `vitals` (whether this census ships /census:vitals)
 ```
@@ -234,7 +236,7 @@ census where              # (where, install, uninstall and `statusline --preview
 (`$CLAUDE_CONFIG_DIR/settings.json`, override with `--settings`). An existing `statusLine` is refused unless
 `--replace`, which saves it verbatim to `<census dir>/statusline.previous.json`. `--segments` writes
 `env.CENSUS_STATUSLINE_SEGMENTS` in the same atomic write. Uninstall restores the saved value (or removes the one
-census added) before any purge, only while the `statusLine` is exactly the command census generated; if it cannot restore, it stops and removes nothing. `--purge` on a folder shared by several accounts deletes only this account's limits and sessions.
+census added) before any purge, only while the `statusLine` is exactly the command census generated; if it cannot restore, it stops and removes nothing. The launcher is one file for every account: when another account's `settings.json` still runs it, `uninstall --yes` changes nothing until you pass `--this-account-only` or `--all-accounts`, and neither touches that account's data. Saved data is kept unless `--purge`; its history cannot be recovered. A census dir that is the Claude config dir (a mis-set `CENSUS_STORE`) is refused for recording, install and purge, and `where` says so; a purge or sweep only ever removes census-shaped records. The status-line sweep runs at most every 5 minutes (a `.sweep` marker's mtime). `--purge` on a folder shared by several accounts deletes only this account's limits and sessions.
 
 In a marketplace install the launcher follows census upgrades on its own: if the version directory it was installed from is gone it runs the newest live one. Re-run `census install --yes` only if the plugin moves. `--purge` deletes only census's own files (`sessions/`, `limits/`, `limits.json`, `status.json*`, lock and temp files) and removes the directory only if that leaves it empty.
 

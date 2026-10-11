@@ -451,6 +451,27 @@ def restore_statusline(
     return True, lines, has_previous and not ours
 
 
+def other_launcher_users(shim: Path, config: Path) -> list[Path]:
+    """Config dirs of OTHER accounts (``~/.claude*``) whose ``settings.json`` runs this launcher as its status line.
+
+    The launcher is one user-wide file, so removing it breaks every account that still points at it."""
+    try:
+        here = os.path.realpath(config)
+        candidates = sorted(Path.home().glob(".claude*"))
+    except (OSError, RuntimeError):
+        return []
+    found: list[Path] = []
+    for cfg in candidates:
+        if not cfg.is_dir() or os.path.realpath(cfg) == here:
+            continue
+        data = _read_json_file(cfg / "settings.json")
+        line = data.get("statusLine") if isinstance(data, dict) else None
+        command = line.get("command") if isinstance(line, dict) else None
+        if isinstance(command, str) and str(shim) in _tokens(command):
+            found.append(cfg)
+    return found
+
+
 def uninstall(
     shim: Path,
     statusline: Path,
@@ -459,10 +480,27 @@ def uninstall(
     *,
     settings: Path | None = None,
     census: Path | None = None,
+    config: Path | None = None,
+    launcher_scope: str | None = None,
 ) -> tuple[int, list[str]]:
+    """Undo this account's install. The launcher is shared by every account, so when another account's status line
+    still runs it ``launcher_scope`` must say what to do: ``"this"`` keeps the launcher for them, ``"everywhere"``
+    restores their status lines too and removes it. With no scope an apply changes nothing and says what to pass."""
     lines: list[str] = []
     verb = "" if apply else "would "
     keep_backup = False
+    others = other_launcher_users(shim, config) if config is not None and _shim_owner(shim)[0] == "ours" else []
+    if others:
+        names = ", ".join(str(o) for o in others)
+        if launcher_scope is None:
+            question = (
+                f"the launcher {shim} is also used by {len(others)} other account(s): {names}. "
+                "Choose --this-account-only (leave the launcher for them) or --all-accounts "
+                "(restore their status lines too and remove it)"
+            )
+            if apply:
+                return 1, [f"refused: {question} — nothing changed"]
+            lines.append(f"needs a choice: {question}")
     if settings is not None and census is not None:
         # first: a purge would delete the backup the restore needs
         ok, restored, keep_backup = restore_statusline(shim, settings, census, apply)
@@ -470,8 +508,18 @@ def uninstall(
         if not ok:
             lines.append("stopped: the status line could not be restored, so nothing else was removed")
             return 1, lines
+    if others and launcher_scope == "everywhere":
+        for other in others:
+            ok, restored, _ = restore_statusline(shim, other / "settings.json", other / "census", apply)
+            lines.append(f"account {other}:")
+            lines.extend(f"  {line}" for line in restored)
+            if not ok:
+                lines.append("stopped: another account's status line could not be restored, so the launcher was kept")
+                return 1, lines
     owner, _ = _shim_owner(shim)
-    if owner == "ours":
+    if owner == "ours" and others and launcher_scope != "everywhere":
+        lines.append(f"launcher {shim}: left in place — still used by {', '.join(str(o) for o in others)}")
+    elif owner == "ours":
         lines.append(f"launcher {shim}: {verb}remove")
         if apply:
             shim.unlink()
@@ -487,7 +535,10 @@ def uninstall(
             if apply:
                 _write_text(statusline, stripped)
     if purge_dir is not None and purge_dir.exists():
+        lines.append("saved census data: deleting it cannot be undone — the history cannot be recovered")
         lines.extend(_purge(purge_dir, apply, keep_backup))
+    elif purge_dir is None and census is not None and census.exists():
+        lines.append(f"saved census data {census}: kept — pass --purge to delete it (the history cannot be recovered)")
     if not lines:
         lines.append("nothing to remove")
     if not apply:

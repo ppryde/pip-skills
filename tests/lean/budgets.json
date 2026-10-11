@@ -15,7 +15,7 @@
     }
   },
   "budgets": {
-    "plugins/census/skills/setup-statusline/SKILL.md": 6233,
+    "plugins/census/skills/setup-statusline/SKILL.md": 6184,
     "plugins/chronicle/skills/chronicle/SKILL.md": 5629,
     "plugins/chronicle/skills/reconcile/SKILL.md": 9963,
     "plugins/django-inquisition/skills/optimise-orm/SKILL.md": 10115,
