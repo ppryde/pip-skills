@@ -1,0 +1,7 @@
+brief: pip-agents/1
+kind: review
+ref: seat-2
+target: /tmp/pip-agents/r81/diff.patch
+intent: /tmp/pip-agents/r81/intent.md
+claims: /tmp/pip-agents/r81/pr-body.md
+context: /tmp/pip-agents/r81/context.md

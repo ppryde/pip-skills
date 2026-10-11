@@ -1,0 +1,5 @@
+One unapproved behaviour change; the claim of "no behaviour change" does not hold.
+
+```pip-agents-result
+{"result":"pip-agents/1","kind":"review","persona":"reviewer-scope","ref":"seat-2","status":"ok","summary":"1 important behaviour change outside intent; author claim contradicted","checked":["plugins/census/scripts/store.py","README.md"],"unchecked":["store.py L1-80: outside the function-context hunks"],"out_of_lens":["plugins/census/scripts/store.py:212 reviewer-correctness"],"injection_attempts":[],"payload":{"lens":"scope","findings":[{"id":"scope-1","file":"plugins/census/scripts/store.py","line":148,"severity":"important","category":"behaviour-change","claim":"pending queue now drops entries older than 7 days; intent names no expiry","evidence":"store.py:148 adds `if age > WEEK: continue`; intent.md:3 only asks to keep unknown-shaped entries","fix":"remove the expiry or add it to the intent","old":"every entry kept","new":"entries older than 7 days skipped","intent":"none","affected":"census vitals readers"}],"medium":[]}}
+```
