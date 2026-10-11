@@ -1,5 +1,6 @@
 ---
 name: chronicle-reconcile
+disable-model-invocation: true
 description: >
   Ad-hoc audit of the chronicle store against reality: why do chronicle's totals not match the
   Anthropic console, where is usage missing, is anything double counted or on the wrong account,
@@ -40,13 +41,13 @@ like-for-like daily comparison use the UTC variant in `references/queries.md`.
    honours `CLAUDE_CONFIG_DIRS`, configured remotes and volumes, and the daily price refresh). Touch
    the real store only for a step you have already proved on the copy.
 2. **Never delete or rebuild the store.** Claude Code prunes old transcripts and chronicle keeps the
-   rows it already ingested, so some sessions exist ONLY in the store (174 of them on the author's
-   machine, 54k turns). Count them first (`references/queries.md`, "DB-only sessions") and keep a
-   copy of them in the archive.
+   rows it already ingested, so some sessions exist ONLY in the store. Count them first (`references/queries.md`, "DB-only sessions") and keep a
+   copy of them in the archive. (`references/queries.md` ends with a worked example of the
+   size this can reach.)
 3. **Read-only until told.** Docker volumes are read with `:ro`, remote boxes only through the
    redacting `remotes` transport, transcripts are copied not moved. Never point a tool at a
    production-access host without the user configuring it (`chronicle remotes add` is the standing
-   authorization; an agent must not open ssh to `*.wayflyer.team` on its own).
+   authorization; an agent must not open ssh to any production-access host on its own).
 4. **Verify claims yourself.** Re-run the tests and re-measure on a copy before merging what a
    subagent reports. (This caught a >200 s query regression once.)
 
@@ -92,8 +93,8 @@ when the transcript cannot settle it, say so and ask the user what they were sig
 A resumed agent re-writes its whole history into a NEW agent file, so one API call can sit in dozens
 of snapshot files. Chronicle counts one call once per session (`chronicle dedupe`, dry-run first, then
 `--apply`, which is transactional and idempotent). Measure with `references/queries.md` "Duplicate
-groups"; expect it to matter on agent-team sessions and to be ~0 elsewhere. It inflated one account by
-~$14k of $31k before the fix.
+groups"; expect it to matter on agent-team sessions and to be ~0 elsewhere. (It once inflated one
+account by roughly half its total before the fix: see the worked example.)
 
 ### 4. Are the rates right for the date?
 `chronicle pricing status` (rows, `pricing_as_of`, last refresh) and `pricing refresh --dry-run`
@@ -101,6 +102,9 @@ groups"; expect it to matter on agent-team sessions and to be ~0 elsewhere. It i
 transcript records are a useful cross-check where present (they are periodic snapshots, so long sessions
 lag) but are NOT a ledger and chronicle deliberately does not use them.
 Unknown model ids show as unpriced; a prefix match can silently price a new model at its parent's rate.
+`pricing status` lists both: `unpriced_models` (no rate) and `prefix_priced` (each model priced at a
+parent's rate, with the key it resolved to and its turn count); check every entry there against the
+live pricing page before trusting a cost.
 Chronicle prices every turn at the standard list rate: it does not model fast-mode, regional-inference,
 long-context or tool-fee premiums. On an expensive day with a uniform shortfall, check
 `usage.speed` / `usage.inference_geo` in the transcripts before blaming the rate table.

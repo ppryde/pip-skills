@@ -443,20 +443,9 @@ def cmd_session(args: argparse.Namespace) -> int:
     return 0
 
 
-# A docker volume name, and the path within it. Validated rather than trusted:
-# both are interpolated into a `docker run` argv, and a value starting with "-"
-# would be read by docker as an option rather than as a name.
-_VOLUME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-# Leading dot allowed — the default source is `.config/claude/projects`. A `..`
-# segment is not: the helper mounts the volume read-only, but a traversal would
-# still let the copy read the helper image's own filesystem.
-_SOURCE_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9_./-]*$")
-# The helper image, validated for the same reason and more urgently: it sits at
-# the one argv position where docker is still parsing its OWN options, so an
-# unvalidated value is the easiest of the three to turn into a flag. Registry
-# host, port, path segments, a `:tag` and an `@sha256:` digest all pass; a
-# space or a leading dash does not.
-_IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-/:@]*$")
+# The pull-volume inputs are validated with the same patterns the config loader
+# and `volumes` use (one definition each): the volume name and path land in a
+# `docker run` argv, where a leading "-" would be read as an option.
 _PULL_TIMEOUT_SECONDS = 900
 
 
@@ -478,7 +467,7 @@ def _pull_account_profile(args: argparse.Namespace, dest: Path) -> str | None:
     from scripts import store
     # ".../projects" -> "...", and a single-segment source -> "" (the volume
     # root). `rsplit` alone returns the input unchanged when there is no "/",
-    # so `--source projects` — which `_SOURCE_RE` accepts — read
+    # so `--source projects` — which `store._CLAUDE_DIR_RE` accepts — read
     # `/v/projects/.claude.json` instead of `/v/.claude.json`, soft-failed to
     # None, and reported no plan: the exact unattributable-sessions failure
     # this function exists to fix.
@@ -486,7 +475,7 @@ def _pull_account_profile(args: argparse.Namespace, dest: Path) -> str | None:
     config_root = source.rsplit("/", 1)[0] if "/" in source else ""
     try:
         read = subprocess.run(
-            ["docker", "run", "--rm", "-v", f"{args.volume}:/v:ro", args.image,
+            ["docker", "run", "--rm", "--network", "none", "-v", f"{args.volume}:/v:ro", args.image,
              "cat", f"/v/{config_root}/.claude.json" if config_root else "/v/.claude.json"],
             capture_output=True, text=True, timeout=60, check=False,
         )
@@ -529,16 +518,20 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
 
     Pull only, like every other verb here: nothing watches, nothing daemonises.
     """
-    if not _VOLUME_RE.match(args.volume):
+    if not store._VOLUME_NAME_RE.match(args.volume):
         return _fail(f"invalid volume name: {args.volume!r}", code=INVALID_INPUT)
     source = args.source.strip("/")
-    if not _SOURCE_RE.match(source) or ".." in Path(source).parts:
+    if not store._CLAUDE_DIR_RE.match(source) or ".." in Path(source).parts:
         return _fail(f"invalid source path: {args.source!r}", code=INVALID_INPUT)
-    if not _IMAGE_RE.match(args.image):
+    if not volumes._IMAGE_RE.match(args.image):
         return _fail(f"invalid image: {args.image!r}", code=INVALID_INPUT)
     dest = Path(args.dest).expanduser()
     if not dest.is_absolute():
         return _fail("dest must be an absolute path (docker requires one)", code=INVALID_INPUT)
+    if ":" in str(dest):
+        # docker reads ":" in a bind mount as the option separator.
+        return _fail(f"invalid dest: {args.dest!r} (a ':' is a docker mount-option separator)",
+                     code=INVALID_INPUT)
     # Created HERE, not by the container: the container needs no shell to
     # mkdir, so nothing is interpolated into one.
     #
@@ -557,7 +550,7 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
     except OSError as exc:
         return _fail(f"cannot create {projects}: {exc}")
     cmd = [
-        "docker", "run", "--rm",
+        "docker", "run", "--rm", "--network", "none",
         "-v", f"{args.volume}:/v:ro",
         "-v", f"{dest}:/out",
         args.image,

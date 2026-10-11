@@ -89,16 +89,36 @@ def resolve_on_host(cwd: str | None) -> str | None:
     return None
 
 
+# `repo_root_of` results for this process, keyed by the cwd AFTER it was resolved
+# onto this filesystem. A first backfill of N sessions in a handful of repos
+# would otherwise spawn N git processes, and a poll every minute respawns one per
+# live session. Cleared at the start of every `sync`, so a long-lived caller
+# (the dashboard) re-asks git at least once a sync and never trusts a stale
+# "not a repo" for long.
+_REPO_ROOTS: dict[str, str | None] = {}
+
+
+def clear_repo_root_cache() -> None:
+    _REPO_ROOTS.clear()
+
+
 def repo_root_of(cwd: str | None) -> str | None:
     """The MAIN repo root ``cwd`` belongs to (worktrees resolve to their
     primary checkout via the shared git common dir), or None outside git /
     on any failure. Bounded so a stalled git never stalls a hook.
 
     ``cwd`` is first resolved onto this filesystem (see ``resolve_on_host``):
-    it may name a container path, or a worktree that no longer exists."""
+    it may name a container path, or a worktree that no longer exists. The
+    answer is remembered per resolved path until `clear_repo_root_cache`."""
     cwd = resolve_on_host(cwd)
     if not cwd:
         return None
+    if cwd not in _REPO_ROOTS:
+        _REPO_ROOTS[cwd] = _git_repo_root(cwd)
+    return _REPO_ROOTS[cwd]
+
+
+def _git_repo_root(cwd: str) -> str | None:
     try:
         result = subprocess.run(
             ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -173,16 +193,30 @@ def _stat(path: Path) -> tuple[float, int] | None:
     return (st.st_mtime, st.st_size)
 
 
-def file_changed(conn: sqlite3.Connection, path: Path) -> bool:
+def load_cursor_stats(conn: sqlite3.Connection) -> dict[str, tuple[float, int]]:
+    """Every cursor's last-seen ``(mtime, size)`` in one query, for a sync that
+    would otherwise ask once per transcript file."""
+    return {str(path): (float(mtime), int(size))
+            for path, mtime, size in conn.execute("SELECT path, mtime, size FROM cursors")}
+
+
+def file_changed(conn: sqlite3.Connection, path: Path,
+                 seen: dict[str, tuple[float, int]] | None = None) -> bool:
     """Whether ``path``'s mtime or size differs from what the cursor last saw
-    (a never-seen file counts as changed; a vanished one does not)."""
+    (a never-seen file counts as changed; a vanished one does not). ``seen``
+    is a `load_cursor_stats` snapshot; without one the cursor is queried."""
     current = _stat(path)
     if current is None:
         return False
-    row = conn.execute("SELECT mtime, size FROM cursors WHERE path = ?", (str(path),)).fetchone()
-    if row is None:
+    if seen is not None:
+        last = seen.get(str(path))
+    else:
+        row = conn.execute("SELECT mtime, size FROM cursors WHERE path = ?",
+                           (str(path),)).fetchone()
+        last = (float(row[0]), int(row[1])) if row is not None else None
+    if last is None:
         return True
-    return (float(row[0]), int(row[1])) != current
+    return last != current
 
 
 def _owned_elsewhere(conn: sqlite3.Connection, table: str, column: str,
@@ -542,12 +576,12 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
         "entrypoint": facts.entrypoint,
         "title": facts.title,
     }
-    for column, value in updates.items():
-        if value is None:
-            continue
-        conn.execute(
-            f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
-        )
+    known = {column: value for column, value in updates.items() if value is not None}
+    if known:
+        # Column names come from the fixed dict above, never from a transcript.
+        assignments = ", ".join(f"{column} = ?" for column in known)
+        conn.execute(f"UPDATE sessions SET {assignments} WHERE session_id = ?",
+                     (*known.values(), session_id))
     # Write-once, unlike every column above. The plan columns, account_uuid,
     # AND owner_account_uuid record what was true WHEN THE SESSION WAS FIRST
     # SEEN; re-stamping them on a later ingest would let `sync --full` quietly
@@ -1107,11 +1141,13 @@ def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | 
     scanned = 0
     lines = 0
     changed: list[str] = []
+    clear_repo_root_cache()
+    seen = load_cursor_stats(conn)
     for transcript in (t for root in roots for t in scan_transcripts(root)):
         sid = transcript.stem
         files = [transcript, *(path for path, _ in subagent_files(transcript, sid))]
         scanned += len(files)
-        if not any(file_changed(conn, path) for path in files):
+        if not any(file_changed(conn, path, seen) for path in files):
             continue
         result = ingest_session(conn, transcript, sid, now=now)
         lines += result["lines"]
