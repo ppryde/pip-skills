@@ -64,40 +64,9 @@ Continue without confirmation — non-blocking by design.
 
 ### Step 3 — Run the collector (Haiku subagent)
 
-Data collection is pure I/O — `gh` API calls, file writes, no reasoning. **Dispatch it to a Haiku subagent** so the main (Opus) session keeps its context budget for theme extraction in Step 5. Do not run `collect.py` directly from this session.
+Data collection is pure I/O — `gh` API calls, file writes, no reasoning. **Read `<plugin>/references/collect-and-render.md`** (shared with `review-as` refresh) and follow its "Collect" section as the **clone** variant: dispatch to a Haiku subagent, never run `collect.py` directly from this session. Its quoting and validation rules apply to `<handles>`, `<repo>`, `<paths>` and `<extensions>`.
 
-**Quoting untrusted values.** `<handles>`, `<repo>`, `<paths>` and `<extensions>` are user-supplied (or derived from the checkout's `origin`), so treat them as hostile. Put each in **single quotes**, escaping any embedded `'` as `'\''`; never double quotes (those still run `$(...)` and backticks). Before building the command, validate `<repo>` as `owner/name` (`[A-Za-z0-9._-]+/[A-Za-z0-9._-]+`) and each handle as `[A-Za-z0-9-]+`; if a value fails or contains a newline or NUL, stop and say so.
-
-Before dispatching, tell the user:
-
-> Pulling `<handle>`'s comments via a Haiku subagent. No live progress — I'll surface the summary when it finishes.
-
-Then call the `Agent` tool:
-
-- `subagent_type: "general-purpose"`
-- `model: "haiku"`
-- `description: "Scrape <handle> review history"`
-- `prompt`: instruct the subagent to run the exact `collect.py` command below and return its stdout verbatim. **The subagent must not interpret, summarise, or post-process the output** — its only job is to run the script and report what came back.
-
-Prompt body to send to the subagent:
-
-> Run this command exactly and return its stdout verbatim — it is a single line of JSON (the snapshot).
->
-> ```bash
-> python3 <plugin>/scripts/collect.py \
->   --alias '<alias>' \
->   --handles '<handles>' \
->   --repo '<repo>' \
->   --months <months> \
->   --paths='<paths>' \
->   --extensions='<extensions>'
-> ```
->
-> Pass `--paths=''` / `--extensions=''` (empty strings) when there is no filter — never omit the value after the flag. Requires `gh` >= 2.48.
->
-> The script writes raw scrape files and `snapshot.json` to `~/.claude/review-clone/<alias>/` and prints per-PR progress to stderr — you do not need to relay the stderr lines. When the command exits, reply with ONLY the JSON snapshot from stdout. If the command fails, reply with the stderr output prefixed `ERROR:`.
-
-The subagent's final message is the snapshot JSON. Parse it (or re-read `~/.claude/review-clone/<alias>/snapshot.json` from disk) and continue from Step 4. Theme extraction stays on the main session — Haiku fetches, Opus reasons.
+The subagent's final message is the snapshot JSON. Parse it (or re-read `~/.claude/review-clone/<alias>/snapshot.json` from disk) and continue from Step 4.
 
 ### Step 4 — Pre-extract gate
 
@@ -132,54 +101,11 @@ Derive:
 
 ### Step 6 — Write PERSONA.md
 
-Use the persona_io helpers (`from scripts.persona_io import write_persona, persona_path`). Frontmatter shape:
-
-```yaml
-alias: <alias>
-handles:
-  - <handle1>
-repo: <repo>
-filters:
-  paths: [...]
-  extensions: [...]
-window:
-  months: <n>
-  since: "<iso>"
-tone: <copy|neutral>
-authoring_voice: <true|false>
-last_scanned_at: "<iso>"
-snapshot:
-  prs: <n>
-  review_comments: <n>
-  issue_comments: <n>
-  pr_descriptions: <n>
-output_default: null
-drift_log: []
-drift_log_archived_count: 0
-disclaimer: "Derived from public GitHub review history of <handles>. Not endorsed by them."
-```
-
-Body sections: `## Voice & tone`, `## Rules` (one ### per rule, with severity/citation/examples), `## What they let go`, `## Drift log`.
+Use the persona_io helpers (`from scripts.persona_io import write_persona, persona_path`). **Read `references/persona-format.md`** for the frontmatter shape and body sections.
 
 ### Step 7 — Write the per-persona slash command
 
-Render `<plugin>/templates/review-as-command.md.tmpl` and write the result to `~/.claude/commands/review-as-<alias>.md`. Create the `~/.claude/commands/` dir if missing.
-
-The template's `description` field encodes the persona summary so it shows up in the slash-command palette. Substitute every placeholder:
-
-| Placeholder | Source |
-|---|---|
-| `{{ALIAS}}` | Step 1.1 |
-| `{{REPO}}` | Step 1.3 (e.g. `wayflyer/wayflyer`) |
-| `{{RULE_COUNT}}` | count of rules derived in Step 5 |
-| `{{COMMENT_COUNT}}` | `snapshot.counts.review_comments + snapshot.counts.issue_comments` |
-| `{{PR_COUNT}}` | `snapshot.counts.prs` |
-| `{{WINDOW_MONTHS}}` | Step 1.6 |
-| `{{LAST_SCANNED_AT}}` | the ISO timestamp written into PERSONA frontmatter in Step 6 |
-
-The description sits inside a double-quoted YAML string, so substituted values must not contain `"`, `\` or newlines: `{{ALIAS}}` is a validated slug, `{{REPO}}` must match `owner/name` (letters, digits, `.`, `_`, `-`), the counts are integers. If any value fails, stop and ask rather than escaping it.
-
-All placeholders are required — do not leave any unsubstituted, and do not invent extra fields. If `{{RULE_COUNT}}` is 0, the persona is unusable; surface that as a warning before writing the file rather than emitting a zero-rule description.
+Render `<plugin>/templates/review-as-command.md.tmpl` and write the result to `~/.claude/commands/review-as-<alias>.md` (create `~/.claude/commands/` if missing), following "Render the per-persona slash command" in `<plugin>/references/collect-and-render.md` (placeholder table, YAML-string safety, all placeholders required, zero-rule warning).
 
 ### Step 8 — Final summary
 
