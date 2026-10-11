@@ -24,13 +24,19 @@ other plugin.
   the pending `handoff.md` (archived to `archive/` after it injects once, as
   `handoff-<timestamp>.md`, newest 20 kept). `<repo-key>` is the repo name plus
   a hash of its root, resolved once for CLI and hooks (`$CLAUDE_PROJECT_DIR`,
-  else the enclosing git work tree).
+  else the enclosing git work tree). An explicit `vigil --root <dir>` is
+  authoritative and overrides `$CLAUDE_PROJECT_DIR`. State is per repo root, not
+  per session: two live sessions in one root share markers and the handoff.
 - `vigil begin` activates the watch (auto under tmux, else manual).
 - `vigil context` reports `ctx NN%` against a configured threshold.
 - A `UserPromptSubmit` hook (`vigil nudge-hook`) watches ctx% every turn
   (census-backed; without census it detects a 1M window from a `[1m]` model id or
-  usage over 200k, assuming 200k only when unknown, unless `context.window` is
-  set). A `PostToolUse` registration matched to `TaskCreate|TaskUpdate` runs the
+  usage over 200k, or the configured model (`ANTHROPIC_MODEL`, `model` in
+  settings.json), assuming 200k only when unknown, unless `context.window` is
+  set). Limit: hook payloads and transcripts carry no `[1m]` suffix, so a 1M
+  session below 200k tokens, with no `[1m]` in your configured model and no
+  census, reads against 200k; set `vigil config set context.window 1000000`
+  or use census there. A `PostToolUse` registration matched to `TaskCreate|TaskUpdate` runs the
   same hook at task boundaries, so unattended runs are nudged only if they use
   the Task tools. The hook nudges the agent once, at the threshold, to write a
   handover — not a blind auto-handover; the agent still judges the stopping
@@ -62,6 +68,10 @@ State used to live in `<repo>/.claude/vigil/`. It now lives under the config dir
 never injected. Run `vigil begin` once per repo to start watching again, re-set
 any `vigil config` values, and delete the old `.claude/vigil/` directory (it can
 hold a stale `handoff.md` full of `git status` output).
+
+A pending handoff survives a crash or plain restart until the next `/clear` in
+that repo root, which then injects it (there is no expiry). To discard a stale
+one, delete `handoff.md` in the state dir (`<config dir>/vigil/<repo-key>/`).
 
 ## Composability
 

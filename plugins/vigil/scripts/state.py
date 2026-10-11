@@ -1,6 +1,6 @@
 """Vigil runtime state under `$CLAUDE_CONFIG_DIR/vigil/<repo-key>/`, keyed by the repo root.
 
-The vigil root is the per-session key: one root, one watch. Every function is
+The vigil root is the key (per repo root, not per session): one root, one watch. Every function is
 quarantine-safe — it only touches its own marker files and never raises on a
 missing path.
 
