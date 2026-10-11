@@ -73,7 +73,11 @@ def _current_context_percent(
         tokens, transcript_model = reading
         # The window is detected (explicit config, [1m] model id, usage over
         # 200k); 200k is assumed only when it is unknown.
-        window = ctx.detect_window(tokens, [payload_model, transcript_model], stored_window(root))
+        window = ctx.detect_window(
+            tokens,
+            [payload_model, transcript_model, *ctx.configured_model_ids(root)],
+            stored_window(root),
+        )
         pct = ctx.context_percent(tokens, window)
     return pct
 
@@ -409,7 +413,11 @@ def cmd_nudge_hook(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="vigil", description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path("."))
+    parser.add_argument(
+        "--root", type=Path, default=None,
+        help="state root (default: $CLAUDE_PROJECT_DIR, else the enclosing git work "
+             "tree of the cwd); an explicit --root overrides $CLAUDE_PROJECT_DIR",
+    )
     parser.add_argument(
         "--session-id", dest="session_id", default=None,
         help="census lookup key for this session (defaults to hook stdin's "
@@ -456,7 +464,9 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return 0 if not exc.code else 1
-    args.root = resolve_root(args.root)
+    args.root = (
+        resolve_root(Path(".")) if args.root is None else resolve_root(args.root, honour_env=False)
+    )
     try:
         result: int = args.func(args)
         return result

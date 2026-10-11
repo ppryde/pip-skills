@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from scripts.context import (
     context_line,
@@ -182,3 +183,37 @@ class TestWindowDetection:
         st.begin(repo)
         assert main(["--root", str(repo), "nudge-hook"]) == 0
         assert "25%" in capsys.readouterr().out
+
+
+class TestConfiguredModelSignals:
+    """VG-4: hook payloads and transcripts carry no [1m] suffix, so the window
+    below 200k is only knowable from configuration (or census / context.window)."""
+
+    def test_realistic_payload_without_signal_stays_200k(self, tmp_path):
+        from scripts.context import configured_model_ids, detect_window
+        assert configured_model_ids(tmp_path) == []
+        assert detect_window(100000, [None, "claude-opus-4-1-20250805"] + configured_model_ids(tmp_path)) == 200000
+
+    def test_env_model_suffix(self, tmp_path, monkeypatch):
+        from scripts.context import configured_model_ids, detect_window
+        monkeypatch.setenv("ANTHROPIC_MODEL", "opus[1m]")
+        assert detect_window(100000, configured_model_ids(tmp_path)) == 1_000_000
+
+    def test_settings_model_suffix(self, tmp_path, monkeypatch):
+        import os
+        from scripts.context import configured_model_ids
+        cfg = Path(os.environ["CLAUDE_CONFIG_DIR"])
+        cfg.mkdir(parents=True)
+        (cfg / "settings.json").write_text(json.dumps({"model": "sonnet[1m]"}))
+        proj = tmp_path / "proj"
+        (proj / ".claude").mkdir(parents=True)
+        (proj / ".claude" / "settings.local.json").write_text(json.dumps({"model": "opus"}))
+        assert configured_model_ids(proj) == ["sonnet[1m]", "opus"]
+
+    def test_garbage_settings_ignored(self, tmp_path):
+        import os
+        from scripts.context import configured_model_ids
+        cfg = Path(os.environ["CLAUDE_CONFIG_DIR"])
+        cfg.mkdir(parents=True)
+        (cfg / "settings.json").write_text("{not json")
+        assert configured_model_ids(tmp_path) == []

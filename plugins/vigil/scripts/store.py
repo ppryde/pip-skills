@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import stat
 from pathlib import Path
 
 VIGIL_DIRNAME = "vigil"
@@ -26,12 +27,14 @@ def config_dir() -> Path:
     return Path(override) if override else Path.home() / ".claude"
 
 
-def resolve_root(path: Path) -> Path:
-    """The one state root for ``path``: ``$CLAUDE_PROJECT_DIR`` when set, else the
-    nearest enclosing git work tree (a ``.git`` dir or file, so worktrees are
-    their own root), else ``path`` itself. CLI (``--root .``) and hooks (payload
-    cwd) therefore agree even when the shell sits in a subdirectory."""
-    project = os.environ.get("CLAUDE_PROJECT_DIR")
+def resolve_root(path: Path, honour_env: bool = True) -> Path:
+    """The one state root for ``path``: ``$CLAUDE_PROJECT_DIR`` when set (and
+    ``honour_env``), else the nearest enclosing git work tree (a ``.git`` dir or
+    file, so worktrees are their own root), else ``path`` itself. CLI (default
+    ``--root``) and hooks (payload cwd) therefore agree even when the shell sits
+    in a subdirectory. An explicit ``--root`` calls this with ``honour_env=False``
+    so it stays authoritative over the session's project dir."""
+    project = os.environ.get("CLAUDE_PROJECT_DIR") if honour_env else None
     if project:
         return Path(os.path.realpath(project))
     start = Path(os.path.realpath(path))
@@ -42,7 +45,7 @@ def resolve_root(path: Path) -> Path:
 
 
 def repo_key(repo_root: Path) -> str:
-    resolved = resolve_root(repo_root)
+    resolved = resolve_root(repo_root, honour_env=False)  # callers already resolved it
     digest = hashlib.sha256(str(resolved).encode("utf-8", "surrogateescape")).hexdigest()[:16]
     name = _UNSAFE.sub("-", resolved.name)[:40] or "root"
     return f"{name}-{digest}"
@@ -98,6 +101,14 @@ def touch_private(path: Path) -> None:
         os.utime(fd, None)
     finally:
         os.close(fd)
+
+
+def marker_exists(path: Path) -> bool:
+    """True only for a regular file; a symlink (even to a real file) is not a marker."""
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
 
 
 def read_private(path: Path) -> str | None:

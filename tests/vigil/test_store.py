@@ -139,7 +139,55 @@ class TestResolveRoot:
         proj.mkdir()
         other.mkdir()
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
-        assert vigil_root(other) == vigil_root(proj)
+        assert resolve_root(other) == proj.resolve()
+
+    def test_explicit_root_beats_claude_project_dir(self, tmp_path, monkeypatch):
+        from scripts import cli
+
+        proj = tmp_path / "proj"
+        other = tmp_path / "other"
+        proj.mkdir()
+        other.mkdir()
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+        assert resolve_root(other, honour_env=False) == other.resolve()
+        assert vigil_root(other) != vigil_root(proj)
+        assert cli.main(["--root", str(other), "begin"]) == 0
+        assert st.is_active(other)
+        assert not st.is_active(proj)
+
+    def test_default_root_uses_claude_project_dir(self, tmp_path, monkeypatch):
+        from scripts import cli
+
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+        assert cli.main(["begin"]) == 0
+        assert st.is_active(proj)
+
+    def test_symlinked_marker_is_not_a_marker(self, tmp_path):
+        st.begin(tmp_path)
+        real = tmp_path / "real"
+        real.write_text("x")
+        marker = st.active_marker(tmp_path)
+        marker.unlink()
+        marker.symlink_to(real)
+        assert not st.is_active(tmp_path)
+
+    def test_archive_dir_is_private_and_symlink_refused(self, tmp_path):
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "handoff text")
+        assert "handoff text" in st.consume_handoff(tmp_path)
+        archive = st.handoff_archive_dir(tmp_path)
+        assert archive.stat().st_mode & 0o777 == 0o700
+        # a symlinked archive/ is refused: the live handoff is dropped, not followed
+        import shutil
+        shutil.rmtree(archive)
+        target = tmp_path / "elsewhere"
+        target.mkdir()
+        archive.symlink_to(target)
+        st.request_clear(tmp_path, "second")
+        assert "second" in st.consume_handoff(tmp_path)
+        assert list(target.iterdir()) == []
 
     def test_no_git_uses_path_itself(self, tmp_path):
         assert resolve_root(tmp_path) == tmp_path.resolve()

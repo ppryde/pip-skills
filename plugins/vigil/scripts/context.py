@@ -6,6 +6,7 @@ exception — a context read must never break the CLI command it piggybacks on.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -117,6 +118,32 @@ def payload_model_id(payload: dict) -> str | None:
     if isinstance(model, dict):
         model = model.get("id")
     return model if isinstance(model, str) and model else None
+
+
+def configured_model_ids(root: Path) -> list[str]:
+    """Model ids the user configured for this session: ``ANTHROPIC_MODEL`` and the
+    ``model`` key of the config-dir / project settings files. Hook payloads and
+    transcripts do not carry the ``[1m]`` suffix, so these are the only live
+    signals for a 1M session below 200k tokens when census is absent."""
+    found: list[str] = []
+    env_model = os.environ.get("ANTHROPIC_MODEL")
+    if env_model:
+        found.append(env_model)
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    base = Path(cfg) if cfg else Path.home() / ".claude"
+    for settings in (
+        base / "settings.json",
+        root / ".claude" / "settings.json",
+        root / ".claude" / "settings.local.json",
+    ):
+        try:
+            data = json.loads(settings.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        model = data.get("model") if isinstance(data, dict) else None
+        if isinstance(model, str) and model:
+            found.append(model)
+    return found
 
 
 def detect_window(

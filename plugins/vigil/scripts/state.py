@@ -21,7 +21,9 @@ from pathlib import Path
 
 from scripts.store import (
     PRIVATE_FILE_MODE,
+    _private_dir,
     ensure_root,
+    marker_exists,
     read_private,
     touch_private,
     vigil_root,
@@ -93,11 +95,11 @@ def begin(repo_root: Path) -> None:
 
 
 def is_active(repo_root: Path) -> bool:
-    return active_marker(repo_root).exists()
+    return marker_exists(active_marker(repo_root))
 
 
 def is_paused(repo_root: Path) -> bool:
-    return paused_flag(repo_root).exists()
+    return marker_exists(paused_flag(repo_root))
 
 
 def pause(repo_root: Path) -> None:
@@ -110,15 +112,15 @@ def resume(repo_root: Path) -> None:
     # Do not clear the gate while a handover is queued: the gate is what stops
     # the trigger re-nudging over an already-armed `clear-requested`. Clearing it
     # here would fire a redundant nudge on top of the pending handover.
-    if not clear_flag(repo_root).exists():
+    if not marker_exists(clear_flag(repo_root)):
         clear_gate(repo_root)
 
 
 def _marker_active(marker: Path, ttl_seconds: float) -> bool:
-    if not marker.exists():
+    if not marker_exists(marker):
         return False
     try:
-        age = time.time() - marker.stat().st_mtime
+        age = time.time() - os.lstat(marker).st_mtime
     except OSError:
         return False
     if age >= ttl_seconds:
@@ -160,7 +162,7 @@ def clear_requested(repo_root: Path) -> bool:
     """
     if not is_active(repo_root) or is_paused(repo_root):
         return False
-    return clear_flag(repo_root).exists()
+    return marker_exists(clear_flag(repo_root))
 
 
 def request_clear(repo_root: Path, handoff_text: str, title: str | None = None) -> str:
@@ -195,7 +197,7 @@ def consume_rename_title(repo_root: Path) -> str | None:
 def consume_clear_flag(repo_root: Path) -> bool:
     if not is_active(repo_root) or is_paused(repo_root):
         return False
-    if not clear_flag(repo_root).exists():
+    if not marker_exists(clear_flag(repo_root)):
         return False
     clear_flag(repo_root).unlink(missing_ok=True)  # remove FIRST: cannot re-fire
     ensure_root(repo_root)
@@ -268,7 +270,7 @@ def consume_handoff(repo_root: Path) -> str | None:
     # and even that removal is guarded.
     try:
         archive = handoff_archive_dir(repo_root)
-        archive.mkdir(parents=True, exist_ok=True)
+        _private_dir(archive)  # 0700, symlink and owner checked
         target = archive / f"handoff-{time.time_ns()}.md"
         path.rename(target)
         try:
