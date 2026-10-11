@@ -89,3 +89,19 @@ def test_duplicate_qualnames_do_not_crash(tmp_path: Path, make_repo) -> None:
     d = run(tmp_path, make_repo, {"m.py": src}, {"m.py": src.replace("pass", "print(x)")},
             name="dup")
     assert d.changed_files == ["m.py"]
+
+
+def test_decorator_swap_touches_the_method(tmp_path: Path, make_repo) -> None:
+    src = ("from functools import cache, lru_cache\n\n\nclass C:\n    @cache\n"
+           "    def m(self):\n        return 1\n")
+    d = run(tmp_path, make_repo, {"m.py": src}, {"m.py": src.replace("@cache", "@lru_cache")},
+            name="deco")
+    by = {t.qualname: t for t in d.touched}
+    assert by["m.C.m"].behaviour_changed
+
+
+def test_removed_decorator_touches_the_function(tmp_path: Path, make_repo) -> None:
+    src = "import functools\n\n\n@functools.cache\ndef f():\n    return 1\n"
+    d = run(tmp_path, make_repo, {"m.py": src}, {"m.py": src.replace("@functools.cache\n", "")},
+            name="decorm")
+    assert {t.qualname for t in d.touched if t.behaviour_changed} == {"m.f"}

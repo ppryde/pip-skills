@@ -3,6 +3,7 @@ things an index cannot judge (changed literals, reordered statements, removed co
 """
 from __future__ import annotations
 
+import ast
 import difflib
 from collections import Counter
 from dataclasses import dataclass, field
@@ -79,7 +80,20 @@ class DiffResult:
     removed_comments: list[RemovedComment] = field(default_factory=list)
 
 
-def _changed_lines(base_text: str, head_text: str) -> tuple[set[int], set[int]]:
+def _decorator_starts(source: str) -> dict[int, int]:
+    """Map a definition's own line to its first decorator line (symbols start at the def)."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return {}
+    return {n.lineno: min(d.lineno for d in n.decorator_list)
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and n.decorator_list}
+
+
+def _changed_lines(base_text: str, head_text: str,
+                   def_lines: frozenset[int] = frozenset()) -> tuple[set[int], set[int]]:
     a, b = base_text.splitlines(), head_text.splitlines()
     base_lines: set[int] = set()
     head_lines: set[int] = set()
@@ -91,14 +105,22 @@ def _changed_lines(base_text: str, head_text: str) -> tuple[set[int], set[int]]:
             head_lines.update(range(j1 + 1, j2 + 1))
         else:
             head_lines.add(max(j1, 1))  # a pure deletion touches the line before the gap
+            if j1 + 1 in def_lines:  # ...and a definition right after it (removed decorator)
+                head_lines.add(j1 + 1)
     return base_lines, head_lines
 
 
-def _innermost(symbols: list[Symbol], lines: set[int]) -> list[Symbol]:
+def _innermost(symbols: list[Symbol], lines: set[int],
+               starts: dict[int, int] | None = None) -> list[Symbol]:
+    starts = starts or {}
+
+    def first(s: Symbol) -> int:
+        return starts.get(s.line_start, s.line_start)
+
     claimed: set[int] = set()
     out: list[Symbol] = []
-    for s in sorted(symbols, key=lambda s: s.line_end - s.line_start):
-        mine = {n for n in lines if s.line_start <= n <= s.line_end} - claimed
+    for s in sorted(symbols, key=lambda s: s.line_end - first(s)):
+        mine = {n for n in lines if first(s) <= n <= s.line_end} - claimed
         if mine:
             out.append(s)
             claimed |= mine
@@ -127,9 +149,11 @@ def analyse(store: Store, base: View, head: View, head_vi: ViewIndex) -> DiffRes
         bff = store.file_facts(p, base.files[p]) if p in base.files else None
         hff = store.file_facts(p, head.files[p]) if p in head.files else None
         b_text, h_text = base_src.get(p, ""), head_src.get(p, "")
-        _, h_lines = _changed_lines(b_text, h_text)
         b_syms, h_syms = _code_symbols(bff), _code_symbols(hff)
-        _touched(result, p, b_text, h_text, b_syms, h_syms, h_lines)
+        defs = frozenset(s.line_start for s in h_syms.values())
+        _, h_lines = _changed_lines(b_text, h_text, defs)
+        starts = _decorator_starts(h_text) if lang_of(p) == "python" else {}
+        _touched(result, p, b_text, h_text, b_syms, h_syms, h_lines, starts)
         for q, s in b_syms.items():
             if q not in head_vi.symbols:
                 result.removed.append(RemovedItem("symbol", q, last(q), p, s.line_start, ""))
@@ -141,9 +165,9 @@ def analyse(store: Store, base: View, head: View, head_vi: ViewIndex) -> DiffRes
 
 
 def _touched(result: DiffResult, p: str, b_text: str, h_text: str, b_syms: dict[str, Symbol],
-             h_syms: dict[str, Symbol], h_lines: set[int]) -> None:
+             h_syms: dict[str, Symbol], h_lines: set[int], starts: dict[int, int]) -> None:
     is_python = lang_of(p) == "python"
-    for s in _innermost(list(h_syms.values()), h_lines):
+    for s in _innermost(list(h_syms.values()), h_lines, starts):
         old = b_syms.get(s.qualname)
         if old is None:
             changed, new = True, True

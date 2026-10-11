@@ -48,6 +48,9 @@ def fingerprint(source: str, line: int) -> str | None:
     node.name = "_"
     if not isinstance(node, ast.ClassDef):
         params = {a.arg for a in ast.walk(node.args) if isinstance(a, ast.arg)}
+        for n in ast.walk(node):  # global/nonlocal names are not locals: never rename them
+            if isinstance(n, (ast.Global, ast.Nonlocal)):
+                params.update(n.names)
         order: list[str] = []
         for n in ast.walk(node):
             if (isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
