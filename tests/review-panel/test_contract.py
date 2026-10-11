@@ -32,13 +32,13 @@ def test_parse_rejects_bad_severity():
         {"id": "X", "file": "a", "rule": "r", "actual": "a",
          "severity": "nuclear", "category": "c", "suggestion": "s"}]}
     with pytest.raises(ContractError, match="severity"):
-        parse_reviewer_result(bad)
+        parse_reviewer_result(bad, strict=True)
 
 
 def test_parse_rejects_missing_field():
     bad = {"reviewer": "general", "findings": [{"id": "X"}]}
     with pytest.raises(ContractError, match="missing"):
-        parse_reviewer_result(bad)
+        parse_reviewer_result(bad, strict=True)
 
 
 def test_collate_groups_by_reviewer_then_severity():
