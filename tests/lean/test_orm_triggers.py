@@ -100,3 +100,63 @@ def test_write_005_needs_the_listener_file_fixture_06_layout():
     assert "PAT-070" in ids(without.stdout) and "WRITE-005" not in ids(without.stdout)
     with_listeners = run(f / "target.py", f / "settings.py", f / "signals.py")
     assert "WRITE-005" in ids(with_listeners.stdout)
+
+
+# ---- round 2: long lines, skipped files, pruning -------------------------------
+
+
+def test_one_big_line_file_scans_fast(tmp_path):
+    import time
+
+    f = tmp_path / "blob.txt"
+    f.write_text("a" * 1_900_000)
+    t = time.monotonic()
+    r = run(f)
+    assert r.returncode == 0, r.stderr
+    assert time.monotonic() - t < 1.5  # interpreter start-up included
+    assert "truncated:" in r.stdout and "blob.txt" in r.stdout
+
+
+def test_every_trigger_survives_a_100kb_adversarial_line():
+    import time
+
+    rows = trig.load_rows(INDEX)
+    shapes = ["a" * 100_000, "a.b " * 25_000, "x.y or " * 15_000, "(" * 100_000, " " * 100_000, "a_1." * 25_000]
+    for r in rows:
+        for line in shapes:
+            t = time.monotonic()
+            r["rx"].search(line[: trig.MAX_LINE])  # what scan() feeds a trigger
+            assert time.monotonic() - t < 0.2, (r["id"], line[:10])
+    agg = next(r for r in rows if r["id"] == "AGG-011")
+    t = time.monotonic()
+    agg["rx"].search("a" * 100_000)  # even the untruncated pattern is linear now
+    assert time.monotonic() - t < 0.5
+
+
+def test_skipped_files_are_listed_and_not_counted(tmp_path):
+    (tmp_path / "ok.py").write_text("x = 1\n")
+    (tmp_path / "bin.py").write_bytes(b"\0\1\2 data")
+    big = tmp_path / "big.py"
+    big.write_bytes(b"#" * (trig.MAX_BYTES + 1))
+    r = run(tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert f"skipped: {big} (over 2 MB)" in r.stdout
+    assert f"skipped: {tmp_path / 'bin.py'} (binary)" in r.stdout
+    assert "over 1 file(s)" in r.stdout
+
+
+def test_directory_scan_prunes_vendor_and_migration_dirs(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "views.py").write_text("x = 1\n")
+    for d in (".venv", "node_modules", "migrations", ".git", "__pycache__"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "junk.py").write_text("x = 1\n")
+    r = run(tmp_path)
+    assert "over 1 file(s)" in r.stdout
+
+
+def test_explicit_file_in_pruned_dir_is_still_scanned(tmp_path):
+    (tmp_path / "migrations").mkdir()
+    f = tmp_path / "migrations" / "0001.py"
+    f.write_text("x = 1\n")
+    assert "over 1 file(s)" in run(f).stdout

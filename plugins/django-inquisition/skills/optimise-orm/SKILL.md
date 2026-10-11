@@ -32,7 +32,7 @@ Audits a Django file or symbol against ~70 ORM-performance heuristics, ranks fin
 Parse the target shape and validate flags. `--only` with `--skip`: halt with `Conflicting flags: --only and --skip cannot be used together.` Apply them to get the active groups (group = `checks/<group>.md` stem). Dotted form: resolve through `import` statements (`from <prefix> import`). Bareword: grep `class <name>` / `def <name>`. Unresolvable: `Symbol not found.` Missing file: `Target not found: <path>. Did you mean <closest>?` Stop on either.
 
 ### Step 2: Environment
-Once, before any check; shared with all groups.
+Once, before any check.
 - **DB engine**, in order: `ENGINE` in `DATABASES` (`settings*.py`, `local_settings.py`); driver packages in `pyproject.toml` / `requirements*.txt` (`psycopg2`, `mysqlclient`, `cx_Oracle`); DB-specific migration operations; else ask the user once. `--engine=` overrides all.
 - **Django version:** `Django==x.y.z` from `pyproject.toml` (`[tool.poetry.dependencies]`) or `pip freeze`.
 - **EXPLAIN reachability:** `python manage.py shell -c "from django.db import connection; connection.ensure_connection()"`; non-zero exit means unreachable (never `dbshell --version`, it does not connect). Unreachable: `EXPLAIN unavailable: <reason>. Falling back to static heuristics.` `--no-explain` skips the probe.
@@ -52,14 +52,14 @@ Read the resolved file(s) and list candidate sites: QuerySet expressions, model 
 **Suppression:** `# noqa: optimise-orm <CODE>` suppresses that code on that line; a bare `# noqa: optimise-orm` suppresses every code on it. An alias code (INDEX) suppresses its canonical code. Suppressed findings are counted (`suppressed: N`) and never shown in the body.
 
 ### Step 4: Caller-discovery
-For FETCH-020/022. Take the models the target references; run an **import scan** (files importing them) and an **attribute scan** (attribute access on instances in those files); build `{model → {field → [callers]}}`. Zero hits: downgrade FETCH-020/022 to `confidence: low` (keep them). Over 300 LoC or 20 models: use a subagent for the greps.
+For FETCH-020/022. Take the models the target references; run an **import scan** (files importing them) and an **attribute scan** (attribute access on instances in those files); build `{model → {field → [callers]}}`. Zero hits: downgrade FETCH-020/022 to `confidence: low` (keep them). Over 300 LoC or 20 models: delegate the greps.
 
 ### Step 5: Check execution
-1. **Triggers: run the scanner once, before any check is opened.** `python3 ${CLAUDE_PLUGIN_ROOT}/skills/optimise-orm/scripts/triggers.py <target> <model, template and settings files Steps 3-4 resolved> [--groups=<active groups, comma-separated>]`. It runs every `checks/INDEX.md` trigger and prints one line per nominated check: `CODE severity group.md offset limit | file:lines`. Every `critical` row is nominated even without a hit. Never grep triggers yourself, read INDEX.md, or guess checks. PAT-070/WRITE-005 print only if you also pass the settings file and every file where Step 2 found a `@receiver` or `save()`/`delete()` override.
+1. **Triggers: run the scanner once, before any check is opened.** `python3 ${CLAUDE_PLUGIN_ROOT}/skills/optimise-orm/scripts/triggers.py <target> <model, template and settings files Steps 3-4 resolved> [--groups=<active groups, comma-separated>]`. It runs every `checks/INDEX.md` trigger and prints one line per nominated check: `CODE severity group.md offset limit | file:lines`. Every `critical` row is nominated even without a hit. Never grep triggers, read INDEX.md or guess checks. PAT-070/WRITE-005 print only if you also pass the settings file and every file where Step 2 found a `@receiver` or `save()`/`delete()` override. A `skipped:` line means that file was not scanned: use `--thorough` for it.
 2. **Open** each nominated check: `Read(checks/<group.md>, offset, limit)` using the printed numbers. Apply its Signature, Confidence rules and Savings formula with the Step 2-4 context. A trigger hit only nominates; the signature decides.
 3. Never report a code you did not open. Aliases (INDEX) are never run.
 
-`--thorough`: skip 1 and read every active group file whole, evaluating all checks. `--parallel`: give each group's subagent its scanner lines, the Step 2-4 context and these rules; it opens only those (all of its group under `--thorough`). On failure continue and note `Note: <group> check-group failed (<reason>). Results may be incomplete.`
+`--thorough`: skip 1 and read every active group file whole, evaluating all checks. `--parallel`: give each group's subagent its scanner lines, the Step 2-4 context and these rules; it opens only those (all of its group under `--thorough`). On failure continue, noting `Note: <group> check-group failed (<reason>). Results may be incomplete.`
 
 Finding contract:
 ```json
@@ -96,22 +96,22 @@ unknown savings (`?`)                          → internal-severity tier as-is
 
 **Correctness checks** (INDEX `Kind` = `correctness`: WRITE-030/031) are listed after the tiers under a **Correctness (outside the perf scope)** banner section, outside tier counts and the savings total.
 
-Within a tier, sort by `sort_key = (-savings_midpoint_ms, -confidence_weight, location)` with `confidence_weight` high=3, medium=2, low=1 and `location` = file:line. **Unknown savings count as 0, so they sort after every known estimate.** Number findings from 1 within each tier. Savings display: `explain` → `~5–8 ms`; `static` → `~50–200 ms`; `unknown` → `?`.
+Within a tier `sort_key = (-savings_midpoint_ms, -confidence_weight, location)`; weights high=3, medium=2, low=1; location = file:line. **Unknown savings count as 0, so they sort after every known estimate.** Number findings from 1 within each tier. Savings display: `explain` → `~5–8 ms`; `static` → `~50–200 ms`; `unknown` → `?`.
 
 ### Step 8: Output
-Compact tiered list, one line per finding: code, summary, file:line, savings, confidence. No excerpts, EXPLAIN bodies or fix templates. Info findings (PAT-070, WRITE-005, engine mismatches) form a header banner. Then:
+One line per finding: code, summary, file:line, savings, confidence. No excerpts, EXPLAIN bodies or fix templates. Info findings form a header banner, one line each led by its code: `[INFO] PAT-070 Audit/history framework detected: pghistory`. Then:
 ```
 Found 6 findings on apps/orders/views.py
 🔥 2 critical · 🟠 2 medium · 🔵 2 low
 Estimated savings if all addressed: ~770–1665 ms
 ```
-Total = sum of midpoints; range = sum of the low ends to sum of the high ends (not min/max). With `--report`, **read `references/output-file.md`** and write the file as it says.
+Total = sum of midpoints; range = sum of lows to sum of highs. With `--report`, **read `references/output-file.md`** and write the file as it says.
 
 ## Common Mistakes
 
 | Mistake | Fix |
 |---|---|
-| Whole group files without `--thorough`, or no scanner run | Run `triggers.py` once first; `Read` only nominated spans |
+| Whole group files without `--thorough`, or no scanner run | Run `triggers.py` first; `Read` nominated spans only |
 | EXPLAIN ANALYZE on a write | EXPLAIN without ANALYZE; wrap SELECT EXPLAIN in BEGIN…ROLLBACK |
 | FETCH-020/022 with zero caller evidence | `confidence: low`; do not drop |
 | Escalating WRITE-006/007 without an audit package | Only when `audit_framework=true`; never for plain listeners or `pghistory` |

@@ -49,6 +49,15 @@ Or reference the plugin directory directly in your Claude Code settings.
 | `--only=<group,group>` | all groups | Run only the named check-groups |
 | `--skip=<group,group>` | none | Skip the named check-groups (`--only` and `--skip` cannot be combined) |
 
+### What the default run evaluates
+
+The default run is trigger-gated. `scripts/triggers.py` runs every check's trigger over the target and the files it references, and only checks with a hit (plus every `critical` check, always) are opened and evaluated. **Non-critical checks with no trigger hit are not evaluated by default; use `--thorough` to evaluate everything.** Other defaults:
+
+- Findings with unknown savings (`?`) sort last within their tier.
+- The PAT-070 (audit framework) and WRITE-005 (signal listener) banners only appear when the settings file and every file containing a `@receiver` or a `save()`/`delete()` override are passed to the scanner; the banner line starts with its code, e.g. `[INFO] PAT-070 Audit/history framework detected: pghistory`.
+- The scanner truncates lines over 2000 characters (minified assets, data blobs) and says so; it lists every skipped file (over 2 MB, binary) and does not count it as scanned. For a skipped target, use `--thorough`.
+- Directory scans prune `.venv`, `venv`, `node_modules`, `migrations`, `.git` and `__pycache__`; a file passed explicitly is always scanned.
+
 ---
 
 ## Example output

@@ -13,7 +13,7 @@ Line ranges are 1-based, as `Read` displays them. `L<start>-<end>` means `Read(f
 | AGG-001 | high |  | Python sum/max/min over queryset — push to DB | `\b(sum\|max\|min)\(\s*\w+\.\w+\s+for\s+\w+\s+in\b` | aggregation.md L51-81 |
 | AGG-002 | medium |  | Counter()/groupby on queryset rows — push to DB | `\bCounter\(\|\bgroupby\(` | aggregation.md L82-113 |
 | AGG-010 | medium |  | Python if/else over rows — use Case/When | `\bfor\s+\w+\s+in\b` | aggregation.md L114-151 |
-| AGG-011 | low |  | Coalesce/Greatest/Least opportunities | `\w+\.\w+\s+or\s+\w+\.\w+\|\b(max\|min)\(\w+\.\w+,\s*\w+\.\w+\)` | aggregation.md L152-183 |
+| AGG-011 | low |  | Coalesce/Greatest/Least opportunities | `(?<!\w)\w+\.\w+\s+or\s+\w+\.\w+\|\b(max\|min)\(\w+\.\w+,\s*\w+\.\w+\)` | aggregation.md L152-183 |
 | AGG-020 | low |  | Python date/string ops should be DB-side | `\.(year\|month\|day\|hour\|weekday\|lower\|upper\|strip\|casefold)\b` | aggregation.md L184-222 |
 | AGG-030 | medium |  | filter(pk__in=other.values('pk')) → Exists() | `__in=.*\.values\(` | aggregation.md L223-255 |
 | AGG-031 | high |  | Per-row filter().first() in loop → Subquery annotation | `\.first\(\)\|\.last\(\)` | aggregation.md L256-288 |

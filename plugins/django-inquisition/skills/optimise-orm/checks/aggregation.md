@@ -21,7 +21,7 @@ checks:
     title: Coalesce/Greatest/Least opportunities
     severity_base: low
     kind: perf
-    trigger: '\w+\.\w+\s+or\s+\w+\.\w+|\b(max|min)\(\w+\.\w+,\s*\w+\.\w+\)'
+    trigger: '(?<!\w)\w+\.\w+\s+or\s+\w+\.\w+|\b(max|min)\(\w+\.\w+,\s*\w+\.\w+\)'
   - id: AGG-020
     title: Python date/string ops should be DB-side
     severity_base: low

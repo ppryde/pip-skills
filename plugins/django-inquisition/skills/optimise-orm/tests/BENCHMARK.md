@@ -117,7 +117,7 @@ Recall for lean + `triggers.py` (relaxed grader; the `--strict` exact-line colum
 | 11 | PAT-070 banner | 1/5 | 0/2 / 0/2 |
 | 12 | PAT-050 (three sites) | 5/5 each | 2/2 each / 2/2 each |
 
-Every critical code is 2/2. The three sub-parity cells are all in the unenforced banner or medium tier, at N=2 (one run of difference): the PAT-070 banner is a model-variance cell on both arms (one fixture 11 run printed the banner as `[INFO] Audit/history framework detected: pghistory` without the code, which the grader counts as a miss), and fixture 11 WRITE-007 missed once. Cost is at or below baseline on 04, 06 and 11 and 7% above it on 12 (0.231 vs 0.215); turns stay higher on all four.
+Every critical code is 2/2. The three sub-parity cells are all in the unenforced banner or medium tier, at N=2 (one run of difference): the PAT-070 banner cell is a grader artefact on both arms (both fixture 11 runs and one fixture 06 run printed the banner as `[INFO] Audit/history framework detected: pghistory` without the code `PAT-070`, which the grader counts as a miss: a grader artefact, not model variance; the 0.4.3 banner now leads with its code, not re-run live), and fixture 11 WRITE-007 missed once. Cost is at or below baseline on 04, 06 and 11 and 7% above it on 12 (0.231 vs 0.215); turns stay higher on all four.
 
 Grader note: the relaxed grader credits a code when a numbered or headed finding names the code and the file basename, so a multi-site code (03 FETCH-010 @20/@30, 12 PAT-050 @19/@25/@32) is credited at every site by one finding; only `--strict` checks location. WRITE-005 is not in any fixture's `expected.json`, so no live run measures it; `tests/lean/test_orm_triggers.py` covers its nomination with fixture 06's layout.
 
