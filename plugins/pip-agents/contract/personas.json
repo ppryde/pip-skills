@@ -1,0 +1,27 @@
+{
+  "explorer": {
+    "kind": "locate"
+  },
+  "gatekeeper": {
+    "kind": "run"
+  },
+  "reviewer-correctness": {
+    "kind": "review",
+    "lens": "correctness"
+  },
+  "reviewer-rules": {
+    "kind": "review",
+    "lens": "rules"
+  },
+  "reviewer-scope": {
+    "kind": "review",
+    "lens": "scope"
+  },
+  "reviewer-security": {
+    "kind": "review",
+    "lens": "security"
+  },
+  "validator": {
+    "kind": "validate"
+  }
+}

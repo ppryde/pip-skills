@@ -18,6 +18,7 @@ Each entry names the plugin and, in brackets, the skills it provides.
 - **django-inquisition** — Django ORM performance audit against ~70 heuristics, ranked by impact (optimise-orm)
 - **email-absolution** — righteous HTML email construction (elder, scribe, visitation)
 - **overseer** — per-repo ledger of cards, sprints and token budgets, plus an orchestrator that drives a card end-to-end with delegated agents and adversarial review (ledger, orchestrate)
+- **pip-agents** — shared subagent personas (reviewer-correctness, -security, -scope, -rules, validator, explorer, gatekeeper) built from one base by `tools/build_agents.py`, with one brief/result JSON contract and its validator; consumers declare it as a dependency; no skills
 - **puritan** — architectural doctrine suite (covenant, doctrines, inquisition, scriptorium)
 - **review-clone** — clone a reviewer's voice and rules from their public GitHub review history, every finding citing a real comment (clone-reviewer, review-as)
 - **review-panel** — composable code review: reviewer lenses × orchestration strategies, composed into named profiles (convene, reviewers, strategies)
@@ -66,6 +67,10 @@ Using Bash for these triggers permission prompts on every call. Dedicated tools 
 ## Lean skills
 
 SKILL.md <= 10 KB target; procedures for one mode or phase go in `references/` with an explicit read instruction, and big rule corpora get a generated compact INDEX (`tools/build_index.py`, see `tools/README.md`; generators live in `tools/`, the generated file is committed inside the plugin). `tests/lean/` enforces per-file budgets (`budgets.json`), reference wiring and index drift; budgets are meant to only ratchet down, which is a review convention (the test does not compare against the merge base), so a raised number in `budgets.json` needs a stated reason in the PR.
+
+## Subagents
+
+Dispatch a `pip-agents:` persona with a `pip-agents/1` brief of paths, never pasted rule text; at most 30 judgement rules per agent (`tools/batching.py`). `agents/` is generated: edit `plugins/pip-agents/personas/` and run `python3 tools/build_agents.py` (`--check` is the drift test).
 
 ## Test isolation — clean up after yourself
 

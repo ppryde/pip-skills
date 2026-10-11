@@ -1,0 +1,7 @@
+brief: pip-agents/1
+kind: locate
+ref: django-callers
+question: Which files import these models, and where do they read or write these fields on instances?
+names: Order,Order.total,Order.status,Customer
+target: /tmp/pip-agents/d12/scope.txt
+limit: 200
