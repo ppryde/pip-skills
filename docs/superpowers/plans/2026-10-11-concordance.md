@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Python runtime code is **stdlib only**. No third-party Python imports under `plugins/concordance/scripts/`.
+- Python ≥ 3.11.4 (the bench uses `tarfile` `filter="data"`). Python runtime code is **stdlib only**. No third-party Python imports under `plugins/concordance/scripts/`.
 - The only non-stdlib runtime dependency is `typescript` **5.6.3 exact**, installed by `cli.py setup-ts` with `npm ci --ignore-scripts` from a committed `package-lock.json`. Missing Node/typescript must degrade (TS files reported "not indexed"), never crash.
 - The store lives at `$CLAUDE_CONFIG_DIR/concordance/<repo-key>/index.db` (`CLAUDE_CONFIG_DIR` defaulting to `~/.claude`), overridable by `CONCORDANCE_DB`. **Nothing is ever written into the repo** being indexed.
 - Repo identity is `git rev-parse --git-common-dir`; all worktrees of a repo share one store.
@@ -67,6 +67,7 @@ plugins/concordance/
     render.py                      # budgeted sections
     review.py                      # review-context assembly, verdicts
     cli.py                         # argparse entry point
+    usage.py                       # account-wide usage log + stats report (Task 14)
   skills/review-procedure/SKILL.md
 plugins/review-panel/skills/reviewers/blast-radius.md
 tests/concordance/
@@ -75,6 +76,7 @@ tests/concordance/
   test_gitio.py  test_store.py  test_extract_py.py  test_views.py  test_index.py
   test_resolve.py  test_classify.py  test_diff.py  test_query.py  test_render.py
   test_cli.py  test_extract_ts.py
+  test_usage.py  test_bench.py
   bench/README.md  bench/make_case.py  bench/tools-concordance.md  bench/judge.md
 ```
 
@@ -1694,7 +1696,7 @@ git commit -m "feat(concordance): worktree and base views"
 **Interfaces:**
 - Consumes: `Store` (Task 2), `extract_python` (Task 3), `View`, `lang_of` (Task 4), `gitio.live_worktrees` (Task 1).
 - Produces: `index.LockTimeout`, `index.view_lock(store_path: Path, view_id: str, wait_s: float, stale_s: float = 300.0)` (context manager), `index.BuildReport(view_id: str, files: int, reused: int, parsed: int = 0, failed: list[tuple[str, str]], skipped: dict[str, str])` (skipped maps path → reason), `index.ensure_view(store: Store, view: View, deadline_s: float = 60.0) -> BuildReport`, `index.GcReport(views_removed: int, facts_removed: int)`, `index.maybe_gc(store: Store, root: Path, now: float | None = None, interval_s: float = 3600.0) -> GcReport | None`.
-- Produces (stub, for Task 11 to replace): `extract_ts.DeadlineExceeded`, `extract_ts.unavailable_reason() -> str | None`, `extract_ts.extract_batch(items: list[tuple[str, str, bytes]], timeout_s: float) -> list[FileFacts]`.
+- Produces (stub, for Task 11 to replace): `extract_ts.DeadlineExceeded`, `extract_ts.unavailable_reason() -> str | None`, `extract_ts.extract_batch(items: list[tuple[str, str, bytes]], timeout_s: float) -> list[FileFacts]`, `extract_ts.setup() -> int`; `index.TS_CHUNK = 200` (TS files per Node run; each chunk is stored before the next starts, so a deadline keeps the progress made).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1807,6 +1809,8 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.index'`
 """Bridge to the Node TypeScript extractor. Stub until the extractor lands (plan Task 11)."""
 from __future__ import annotations
 
+import sys
+
 from scripts.facts import FileFacts
 
 
@@ -1820,6 +1824,11 @@ def unavailable_reason() -> str | None:
 
 def extract_batch(items: list[tuple[str, str, bytes]], timeout_s: float) -> list[FileFacts]:
     raise RuntimeError("TypeScript extractor not built yet")
+
+
+def setup() -> int:
+    print("concordance: TypeScript extractor not built yet", file=sys.stderr)
+    return 2
 ```
 
 - [ ] **Step 4: Implement `index.py`**
@@ -1841,6 +1850,8 @@ from scripts import extract_ts, gitio
 from scripts.extract_py import extract_python
 from scripts.store import Store
 from scripts.views import View, lang_of
+
+TS_CHUNK = 200  # TypeScript files per Node run
 
 BATCH = 200
 BASE_VIEW_TTL_S = 7 * 86400
@@ -1938,21 +1949,27 @@ def _index_typescript(store: Store, view: View, items: list[tuple[str, str]],
     if reason is not None:
         report.skipped.update({p: reason for p, _ in items})
         return
-    data = view.read([p for p, _ in items])
-    batch = [(p, s, data[p]) for p, s in items if p in data]
-    try:
-        facts = extract_ts.extract_batch(batch, timeout_s=remaining)
-    except extract_ts.DeadlineExceeded:
-        report.skipped.update({p: "deadline" for p, _ in items})
-        return
-    except RuntimeError as exc:
-        report.skipped.update({p: str(exc) for p, _ in items})
-        return
-    for ff in facts:
-        store.put_facts(ff)
-        report.parsed += 1
-        if not ff.parsed_ok:
-            report.failed.append((ff.path, ff.error or "parse failed"))
+    for i in range(0, len(items), TS_CHUNK):  # chunked: a deadline keeps the chunks done
+        chunk = items[i:i + TS_CHUNK]
+        remaining = deadline_s - (time.monotonic() - start)
+        if remaining <= 0:
+            report.skipped.update({p: "deadline" for p, _ in items[i:]})
+            return
+        data = view.read([p for p, _ in chunk])
+        batch = [(p, s, data[p]) for p, s in chunk if p in data]
+        try:
+            facts = extract_ts.extract_batch(batch, timeout_s=remaining)
+        except extract_ts.DeadlineExceeded:
+            report.skipped.update({p: "deadline" for p, _ in items[i:]})
+            return
+        except RuntimeError as exc:
+            report.skipped.update({p: str(exc) for p, _ in items[i:]})
+            return
+        for ff in facts:
+            store.put_facts(ff)
+            report.parsed += 1
+            if not ff.parsed_ok:
+                report.failed.append((ff.path, ff.error or "parse failed"))
 
 
 @dataclass(frozen=True)
@@ -2782,7 +2799,7 @@ def _literals_and_comments(result: DiffResult, p: str, bff: FileFacts, hff: File
         return Counter(x.text for x in ff.literals if x.kind == "string")
 
     b_str, h_str = strings(bff), strings(hff)
-    first_line = {}
+    first_line: dict[tuple[bool, str], int] = {}
     for ff in (hff, bff):
         for x in ff.literals:
             if x.kind == "string":
@@ -3439,6 +3456,15 @@ def test_no_default_branch_exits_2_with_hint(make_repo) -> None:  # Review Focus
     assert out.returncode == 2 and "--base" in out.stderr and "Traceback" not in out.stderr
 
 
+def test_check_names_files_it_could_not_parse(make_repo) -> None:  # Review Focus 2
+    repo = make_repo(BASE)
+    repo.git("checkout", "-q", "-b", "feat")
+    repo.write({"app/broken.py": "def (:\n"})
+    out = cli(repo.root, "check")
+    assert out.returncode == 0 and "check: clean" in out.stdout
+    assert "failed to parse: app/broken.py" in out.stdout
+
+
 def test_outside_a_repo_exits_2(tmp_path: Path) -> None:
     out = cli(tmp_path, "check")
     assert out.returncode == 2 and "Traceback" not in out.stderr
@@ -3708,6 +3734,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 if __package__ in (None, ""):  # direct invocation: put the plugin root on sys.path
@@ -3765,16 +3792,16 @@ def _diff_command(args: argparse.Namespace, cwd: Path,
     ctx = build(cwd, args.base, args.deadline)
     view_id = ctx.head.view_id
     stats.update(touched=len(ctx.diff.touched), files=ctx.head_cov.total)
-    by_command = {
-        "removed": [contract_section(ctx)],
-        "sig-drift": [verdict_section(ctx), drift_section(ctx)],
-        "literals": blindspot_sections(ctx),
-        "touched": [touched_section(ctx), callers_section(ctx), tests_section(ctx)],
+    by_command: dict[str, Callable[[], list[Section]]] = {
+        "removed": lambda: [contract_section(ctx)],
+        "sig-drift": lambda: [verdict_section(ctx), drift_section(ctx)],
+        "literals": lambda: blindspot_sections(ctx),
+        "touched": lambda: [touched_section(ctx), callers_section(ctx), tests_section(ctx)],
     }
     if args.command == "review-context":
         return render_context(ctx, args.budget, stats), 0, view_id
     if args.command in by_command:
-        sections = by_command[args.command]
+        sections = by_command[args.command]()
         return render(header(ctx), sections, footer(ctx), args.budget, stats), 0, view_id
     if args.command == "check":
         return _check(ctx), (1 if verdicts(ctx) else 0), view_id
@@ -3786,10 +3813,9 @@ def _diff_command(args: argparse.Namespace, cwd: Path,
 
 
 def _check(ctx: Context) -> str:
-    found = verdicts(ctx)
-    if not found:
-        return "check: clean"
-    return "\n".join(f"[{v.rule}] {v.path}:{v.line}  {v.message}" for v in found)
+    lines = [f"[{v.rule}] {v.path}:{v.line}  {v.message}" for v in verdicts(ctx)]
+    cov = footer(ctx)  # its first line is the summary; any more lines are coverage gaps
+    return "\n".join((lines or ["check: clean"]) + (cov if len(cov) > 1 else []))
 
 
 def _name_command(args: argparse.Namespace, cwd: Path,
@@ -4026,6 +4052,26 @@ def test_end_to_end_callers_tsconfig_paths_and_drift(tmp_path: Path, make_repo) 
     d = analyse(st, base, head, vi)
     drift = sig_drift(vi, d.signatures, Snippets(head))
     assert any(x.verdict == "error" and "3 positional" in x.reason for x in drift)
+
+
+def test_ts_is_indexed_in_chunks_so_a_deadline_keeps_progress(
+        tmp_path: Path, make_repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import index
+    repo = make_repo({"a.ts": "export const a = 1;\n", "b.ts": "export const b = 2;\n"})
+    real = extract_ts.extract_batch
+    calls: list[int] = []
+
+    def flaky(items: list[tuple[str, str, bytes]], timeout_s: float) -> list:
+        calls.append(len(items))
+        if len(calls) > 1:
+            raise extract_ts.DeadlineExceeded("simulated")
+        return real(items, timeout_s)
+
+    monkeypatch.setattr(index, "TS_CHUNK", 1)
+    monkeypatch.setattr(extract_ts, "extract_batch", flaky)
+    report = ensure_view(Store(tmp_path / "i.db"), worktree_view(repo.root))
+    assert calls == [1, 1] and report.parsed == 1
+    assert list(report.skipped.values()) == ["deadline"]
 ```
 
 - [ ] **Step 3: Run them to verify they fail**
@@ -4374,13 +4420,16 @@ def extract_batch(items: list[tuple[str, str, bytes]], timeout_s: float) -> list
         raise DeadlineExceeded(f"TypeScript extraction exceeded {timeout_s:.0f}s") from exc
     if proc.returncode != 0:
         raise RuntimeError(f"TypeScript extractor failed: {proc.stderr.strip()[:500]}")
-    raw = json.loads(proc.stdout)
+    try:
+        raw = json.loads(proc.stdout)
+    except ValueError as exc:  # garbled output degrades to "not indexed", never a crash
+        raise RuntimeError(f"TypeScript extractor returned invalid JSON: {exc}") from exc
     return [file_facts_from_dict(d, sha) for d, (_, sha, _) in zip(raw, items)]
 
 
 def setup() -> int:
     if shutil.which("npm") is None:
-        print("npm not found on PATH; install Node.js 18+ first")
+        print("concordance: npm not found on PATH; install Node.js 18+ first", file=sys.stderr)
         return 2
     return subprocess.run(["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
                           cwd=NODE_DIR).returncode
@@ -4389,7 +4438,7 @@ def setup() -> int:
 - [ ] **Step 6: Run the TS tests and the whole suite**
 
 Run: `cd plugins/concordance && ../../.venv/bin/python -m pytest -q && ../../.venv/bin/ruff check scripts ../../tests/concordance && ../../.venv/bin/mypy scripts`
-Expected: all pass, `test_extract_ts.py` 5 passed (not skipped); ruff and mypy clean.
+Expected: all pass, `test_extract_ts.py` 6 passed (not skipped); ruff and mypy clean.
 
 - [ ] **Step 7: Commit**
 
@@ -4405,6 +4454,7 @@ git commit -m "feat(concordance): TypeScript extractor on the pinned compiler pa
 **Files:**
 - Create: `plugins/concordance/skills/review-procedure/SKILL.md`, `plugins/concordance/README.md`, `plugins/review-panel/skills/reviewers/blast-radius.md`
 - Modify: `.claude-plugin/marketplace.json` (new entry; `version` 1.67.0 → 1.68.0), `plugins/review-panel/.claude-plugin/plugin.json` (`version` 0.1.0 → 0.2.0), `CLAUDE.md` (Plugins list)
+- Modify: `plugins/review-panel/tests/test_docs.py`: `test_general_reviewer_present` pinned the old one-reviewer catalogue; rename it `test_builtin_reviewers_present` and assert `discover_builtin_reviewers(REVIEWERS) == ["blast-radius", "general"]`
 - Test: existing `plugins/review-panel/tests/test_docs.py` (lints every reviewer doc) and `test_discovery.py`
 
 **Interfaces:**
@@ -4877,7 +4927,432 @@ git commit -m "test(concordance): bench harness for baseline vs review-procedure
 
 ---
 
-### Task 14: Verification: performance and the bench replay
+### Task 14: Long-term usage log and the stats report
+
+Moves the events log out of the per-repo index (a cache, safe to delete) into one account-wide
+`usage.db` that is kept forever, records every query's cost, budget cuts, diff size and verdict
+count there, adds `record-review` (the reviewer's one-line effectiveness record) and
+`stats` (the report for the user). Nothing in the usage log is ever printed into an agent's
+context: only `stats` reads it, and `stats` is run by the user (or chronicle, via `--json`).
+
+**Files:**
+- Create: `plugins/concordance/scripts/usage.py`, `tests/concordance/test_usage.py`
+- Modify: `plugins/concordance/scripts/store.py` (drop the `events` table and `record_event`), `tests/concordance/test_store.py` (`test_meta_and_events` → `test_meta`), `plugins/concordance/scripts/review.py` (nothing; `verdicts` is reused), `plugins/concordance/scripts/cli.py` (record to `usage`, new subcommands), `tests/concordance/test_cli.py` (event assertions read `usage.db`), `plugins/concordance/skills/review-procedure/SKILL.md` (the `record-review` call), `plugins/concordance/README.md` (Use + a "Usage log" section)
+
+**Interfaces:**
+- Consumes: `paths.config_dir()`, `paths.repo_key(common_dir)`, `gitio.common_dir`, `review.verdicts`.
+- Produces (`usage.py`): `usage_path() -> Path` (`$CONCORDANCE_USAGE_DB`, else `<config_dir>/concordance/usage.db`); `record(command: str, repo: str, view_id: str | None, latency_ms: int, est_tokens: int, exit_code: int, payload: dict[str, object], session: str = "", path: Path | None = None) -> None`; `report(days: int = 30, repo: str | None = None, now: float | None = None, path: Path | None = None) -> dict[str, object]`; `format_report(rep: dict[str, object]) -> str`; `size_bucket(touched: int) -> str` (`"1-5"`, `"6-20"`, `"21+"`, or `"0"`).
+- Produces (`cli.py`): subcommands `record-review --findings N --via-index M [--steps 1:2,3:1]` and `stats [--days 30] [--repo this|all] [--json]`. Every other command records one usage event, including failures (exit 2, `payload.error` = the exception type). Diff commands add `verdicts` (count) to the payload. `stats` records nothing.
+
+Payload keys, all optional: `budget`, `cut` (section → rows hidden), `omitted` (sections), `touched`, `files`, `verdicts`, `repo_name`, `error`; for `record-review`: `findings`, `via_index`, `steps` (step → findings).
+
+- [ ] **Step 1: Write the failing tests**
+
+`tests/concordance/test_usage.py`:
+```python
+import json
+import sqlite3
+import subprocess
+import sys
+from pathlib import Path
+
+from scripts import gitio, paths, usage
+
+CLI = Path(__file__).resolve().parents[2] / "plugins" / "concordance" / "scripts" / "cli.py"
+DAY = 86400.0
+
+
+def cli(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, str(CLI), *args], cwd=cwd, capture_output=True,
+                          text=True)
+
+
+def test_usage_log_lives_apart_from_the_index(tmp_path: Path, make_repo) -> None:
+    repo = make_repo({"a.py": "x = 1\n"})
+    assert usage.usage_path() == tmp_path / "config" / "concordance" / "usage.db"
+    assert usage.usage_path().parent != paths.store_path(gitio.common_dir(repo.root)).parent
+
+
+def test_size_buckets() -> None:
+    assert [usage.size_bucket(n) for n in (0, 1, 5, 6, 20, 21)] == \
+        ["0", "1-5", "1-5", "6-20", "6-20", "21+"]
+
+
+def test_report_aggregates_cost_budget_verdicts_and_reviews(tmp_path: Path) -> None:
+    db = tmp_path / "u.db"
+    now = 1_000 * DAY
+    for i, (touched, cut) in enumerate([(2, {}), (3, {"Callers": 4}), (30, {"Callers": 9})]):
+        usage.record("review-context", "repo-a", "wt", 100 * (i + 1), 1000 + i, 0,
+                     {"budget": 4000, "cut": cut, "omitted": [], "touched": touched,
+                      "verdicts": i}, session=f"s{i}", path=db)
+    usage.record("check", "repo-b", "wt", 50, 10, 1, {"verdicts": 2}, path=db)
+    usage.record("record-review", "repo-a", None, 0, 0, 0,
+                 {"findings": 3, "via_index": 2, "steps": {"1": 1, "3": 1}}, path=db)
+    usage.record("record-review", "repo-a", None, 0, 0, 0,
+                 {"findings": 0, "via_index": 0, "steps": {}}, path=db)
+    usage.record("review-context", "repo-a", "wt", 1, 1, 0, {"touched": 1}, path=db)
+    con = sqlite3.connect(db)
+    con.execute("UPDATE events SET ts=? WHERE latency_ms=1", (now - 40 * DAY,))
+    con.execute("UPDATE events SET ts=? WHERE ts>?", (now - DAY, now - 30 * DAY))
+    con.commit()
+    con.close()
+
+    rep = usage.report(days=30, now=now, path=db)
+    runs = rep["commands"]["review-context"]
+    assert runs["runs"] == 3 and runs["sessions"] == 3
+    assert runs["tokens_p50"] == 1001 and runs["latency_p90"] == 300
+    budget = rep["budget"]
+    assert budget["review_runs"] == 3 and budget["cut_runs"] == 2
+    assert budget["by_size"]["1-5"] == {"runs": 2, "cut": 1}
+    assert budget["by_size"]["21+"] == {"runs": 1, "cut": 1}
+    assert budget["sections_cut"] == {"Callers": 2}
+    assert rep["verdicts"] == {"runs": 4, "runs_with_verdicts": 3, "total": 5}
+    assert rep["reviews"] == {"count": 2, "clean": 1, "findings": 3, "via_index": 2,
+                              "by_step": {"1": 1, "3": 1}}
+    assert usage.report(days=30, repo="repo-b", now=now, path=db)["commands"].keys() == {"check"}
+
+
+def test_format_report_is_readable_and_handles_an_empty_log(tmp_path: Path) -> None:
+    empty = usage.format_report(usage.report(path=tmp_path / "none.db"))
+    assert "no concordance usage" in empty
+    db = tmp_path / "u.db"
+    usage.record("review-context", "repo-a", "wt", 120, 900, 0,
+                 {"budget": 4000, "cut": {"Callers": 3}, "touched": 4, "verdicts": 1}, path=db)
+    usage.record("record-review", "repo-a", None, 0, 0, 0,
+                 {"findings": 2, "via_index": 1, "steps": {"3": 1}}, path=db)
+    text = usage.format_report(usage.report(path=db))
+    for heading in ("## Usage", "## Budget pressure", "## Effectiveness"):
+        assert heading in text
+    assert "Callers" in text and "1 of 2 findings via concordance" in text
+
+
+def test_cli_records_queries_and_failures_but_not_stats(tmp_path: Path, make_repo) -> None:
+    repo = make_repo({"app/m.py": "def f():\n    return 1\n"})
+    assert cli(repo.root, "callers", "f").returncode == 0
+    assert cli(tmp_path, "check").returncode == 2
+    assert cli(repo.root, "stats").returncode == 0
+    rows = sqlite3.connect(usage.usage_path()).execute(
+        "SELECT command, exit_code, payload FROM events ORDER BY ts").fetchall()
+    assert [(c, e) for c, e, _ in rows] == [("callers", 0), ("check", 2)]
+    assert "error" in json.loads(rows[1][2])
+
+
+def test_record_review_then_stats_json(make_repo) -> None:
+    repo = make_repo({"a.py": "x = 1\n"})
+    out = cli(repo.root, "record-review", "--findings", "3", "--via-index", "2",
+              "--steps", "1:1,3:1")
+    assert out.returncode == 0 and out.stdout.strip() == \
+        "recorded review: 3 findings (2 via concordance)"
+    rep = json.loads(cli(repo.root, "stats", "--json", "--repo", "this").stdout)
+    assert rep["reviews"]["via_index"] == 2 and rep["reviews"]["by_step"] == {"1": 1, "3": 1}
+
+
+def test_record_review_rejects_impossible_counts(make_repo) -> None:
+    repo = make_repo({"a.py": "x = 1\n"})
+    bad = cli(repo.root, "record-review", "--findings", "1", "--via-index", "2")
+    assert bad.returncode == 2 and "Traceback" not in bad.stderr
+    bad_steps = cli(repo.root, "record-review", "--findings", "1", "--via-index", "1",
+                    "--steps", "one")
+    assert bad_steps.returncode == 2 and "--steps" in bad_steps.stderr
+```
+
+In `tests/concordance/test_store.py`, replace `test_meta_and_events` with:
+```python
+def test_meta(tmp_path: Path) -> None:
+    st = Store(tmp_path / "i.db")
+    assert st.meta_get("schema_version") == "1"
+    st.meta_set("last_gc", "5")
+    assert st.meta_get("last_gc") == "5"
+    assert not hasattr(st, "record_event")
+```
+
+In `tests/concordance/test_cli.py`, the two tests that read `events` read the usage log instead: replace `open_store(repo.root).conn` with `sqlite3.connect(usage.usage_path())` (add `import sqlite3` and `from scripts import usage`; drop the `open_store` import if unused) in `test_queries_are_recorded_as_events` and `test_review_context_logs_budget_cuts_and_diff_size`. In the latter, also assert `logged["verdicts"] == 0` is an `int` key present (`"verdicts" in logged`).
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `cd plugins/concordance && ../../.venv/bin/python -m pytest ../../tests/concordance/test_usage.py ../../tests/concordance/test_store.py ../../tests/concordance/test_cli.py -q`
+Expected: FAIL (`ModuleNotFoundError: No module named 'scripts.usage'` / `ImportError`)
+
+- [ ] **Step 3: Implement `usage.py`**
+
+```python
+"""The long-term usage log: one SQLite file per Claude account, apart from the per-repo index
+caches, so deleting an index never loses history. The CLI appends one event per query; only
+`concordance stats` reads it back. Nothing here is printed into an agent's context.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import time
+from collections import Counter
+from pathlib import Path
+
+from scripts.paths import config_dir
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS events(
+  ts REAL NOT NULL, session TEXT, repo TEXT, command TEXT NOT NULL, view_id TEXT,
+  latency_ms INTEGER, est_tokens INTEGER, exit_code INTEGER, payload TEXT);
+CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
+"""
+DAY_S = 86400.0
+BUCKETS = ("1-5", "6-20", "21+")
+
+
+def usage_path() -> Path:
+    override = os.environ.get("CONCORDANCE_USAGE_DB")
+    return Path(override) if override else config_dir() / "concordance" / "usage.db"
+
+
+def _connect(path: Path) -> sqlite3.Connection:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=5)
+    conn.executescript(SCHEMA)
+    return conn
+
+
+def record(command: str, repo: str, view_id: str | None, latency_ms: int, est_tokens: int,
+           exit_code: int, payload: dict[str, object], session: str = "",
+           path: Path | None = None) -> None:
+    conn = _connect(path or usage_path())
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO events(ts, session, repo, command, view_id, latency_ms, "
+                "est_tokens, exit_code, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (time.time(), session, repo, command, view_id, latency_ms, est_tokens,
+                 exit_code, json.dumps(payload, sort_keys=True)))
+    finally:
+        conn.close()
+
+
+def size_bucket(touched: int) -> str:
+    if touched <= 0:
+        return "0"
+    return "1-5" if touched <= 5 else "6-20" if touched <= 20 else "21+"
+
+
+def _pct(values: list[int], q: float) -> int:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, max(0, int(q * len(ordered) + 0.5) - 1))]
+
+
+def report(days: int = 30, repo: str | None = None, now: float | None = None,
+           path: Path | None = None) -> dict[str, object]:
+    path = path or usage_path()
+    since = (now if now is not None else time.time()) - days * DAY_S
+    rows: list[tuple[str, str, int, int, str]] = []
+    if path.exists():
+        conn = _connect(path)
+        try:
+            sql = ("SELECT command, session, latency_ms, est_tokens, payload FROM events "
+                   "WHERE ts >= ?" + (" AND repo = ?" if repo else "") + " ORDER BY ts")
+            rows = conn.execute(sql, (since, repo) if repo else (since,)).fetchall()
+        finally:
+            conn.close()
+    commands: dict[str, dict[str, int]] = {}
+    by_size = {b: {"runs": 0, "cut": 0} for b in BUCKETS}
+    sections_cut: Counter[str] = Counter()
+    budget = {"review_runs": 0, "cut_runs": 0, "omitted_runs": 0}
+    verdicts = {"runs": 0, "runs_with_verdicts": 0, "total": 0}
+    reviews = {"count": 0, "clean": 0, "findings": 0, "via_index": 0}
+    by_step: Counter[str] = Counter()
+    grouped: dict[str, list[tuple[str, int, int]]] = {}
+    for command, session, latency, tokens, raw in rows:
+        p = json.loads(raw or "{}")
+        if command == "record-review":
+            reviews["count"] += 1
+            reviews["findings"] += int(p.get("findings", 0))
+            reviews["via_index"] += int(p.get("via_index", 0))
+            reviews["clean"] += int(p.get("findings", 0)) == 0
+            by_step.update({k: int(v) for k, v in p.get("steps", {}).items()})
+            continue
+        grouped.setdefault(command, []).append((session or "", latency or 0, tokens or 0))
+        if "verdicts" in p:
+            verdicts["runs"] += 1
+            verdicts["runs_with_verdicts"] += int(p["verdicts"]) > 0
+            verdicts["total"] += int(p["verdicts"])
+        if command == "review-context" and "budget" in p:
+            cut, omitted = p.get("cut", {}), p.get("omitted", [])
+            budget["review_runs"] += 1
+            budget["cut_runs"] += bool(cut or omitted)
+            budget["omitted_runs"] += bool(omitted)
+            sections_cut.update(set(cut) | set(omitted))
+            bucket = size_bucket(int(p.get("touched", 0)))
+            if bucket in by_size:
+                by_size[bucket]["runs"] += 1
+                by_size[bucket]["cut"] += bool(cut or omitted)
+    for command, items in grouped.items():
+        lat = [x[1] for x in items]
+        tok = [x[2] for x in items]
+        commands[command] = {
+            "runs": len(items), "sessions": len({x[0] for x in items if x[0]}),
+            "tokens_p50": _pct(tok, 0.5), "tokens_p90": _pct(tok, 0.9),
+            "latency_p50": _pct(lat, 0.5), "latency_p90": _pct(lat, 0.9)}
+    return {"days": days, "repo": repo or "all", "commands": commands,
+            "budget": {**budget, "by_size": by_size, "sections_cut": dict(sections_cut)},
+            "verdicts": verdicts, "reviews": {**reviews, "by_step": dict(sorted(by_step.items()))}}
+
+
+def format_report(rep: dict[str, object]) -> str:
+    commands = rep["commands"]
+    reviews = rep["reviews"]
+    assert isinstance(commands, dict) and isinstance(reviews, dict)
+    title = f"# concordance usage, last {rep['days']} days ({rep['repo']})"
+    if not commands and not reviews["count"]:
+        return f"{title}\n\nno concordance usage recorded in this window"
+    out = [title, "", "## Usage", "",
+           "| command | runs | sessions | tokens p50/p90 | ms p50/p90 |", "|---|---|---|---|---|"]
+    for name, c in sorted(commands.items()):
+        out.append(f"| {name} | {c['runs']} | {c['sessions']} | {c['tokens_p50']}/"
+                   f"{c['tokens_p90']} | {c['latency_p50']}/{c['latency_p90']} |")
+    budget = rep["budget"]
+    verdicts = rep["verdicts"]
+    assert isinstance(budget, dict) and isinstance(verdicts, dict)
+    out += ["", "## Budget pressure", "",
+            (f"review-context runs cut: {budget['cut_runs']} of {budget['review_runs']} "
+             f"({budget['omitted_runs']} with whole sections omitted)")]
+    out += [f"- {b} touched symbols: {v['cut']} of {v['runs']} cut"
+            for b, v in budget["by_size"].items() if v["runs"]]
+    if budget["sections_cut"]:
+        out.append("most cut: " + ", ".join(
+            f"{s} ({n})" for s, n in sorted(budget["sections_cut"].items(),
+                                            key=lambda kv: (-kv[1], kv[0]))))
+    out += ["", "## Effectiveness", "",
+            (f"verdicts raised on {verdicts['runs_with_verdicts']} of {verdicts['runs']} runs "
+             f"({verdicts['total']} in all)"),
+            (f"reviews recorded: {reviews['count']} ({reviews['clean']} clean); "
+             f"{reviews['via_index']} of {reviews['findings']} findings via concordance")]
+    if reviews["by_step"]:
+        out.append("findings by step: " + ", ".join(
+            f"step {k}: {v}" for k, v in reviews["by_step"].items()))
+    return "\n".join(out)
+```
+
+- [ ] **Step 4: Drop the events table from the store**
+
+In `store.py`, delete the `CREATE TABLE IF NOT EXISTS events(...)` statement from the schema and the `record_event` method (and any now-unused import, e.g. `time`, if nothing else uses it).
+
+- [ ] **Step 5: Wire the CLI**
+
+In `cli.py`:
+- Imports: add `from scripts import paths, usage` (keep `extract_ts, gitio`); `open_store` stays imported only if still used.
+- `_diff_command`: extend the `stats.update(...)` line with `verdicts=len(verdicts(ctx))` and `repo_name=ctx.root.name`.
+- Parser: add
+  ```python
+      rr = sub.add_parser("record-review", help="record a finished review's findings (usage log)")
+      rr.add_argument("--findings", type=int, required=True)
+      rr.add_argument("--via-index", type=int, required=True)
+      rr.add_argument("--steps", default="", help="findings per procedure step, e.g. 1:2,3:1")
+      st = sub.add_parser("stats", help="usage and effectiveness report from the usage log")
+      st.add_argument("--days", type=int, default=30)
+      st.add_argument("--repo", choices=("this", "all"), default="all")
+      st.add_argument("--json", action="store_true")
+  ```
+- Add helpers:
+  ```python
+  def _repo(cwd: Path) -> str:
+      try:
+          return paths.repo_key(gitio.common_dir(cwd))
+      except gitio.GitError:
+          return ""
+
+
+  def _parse_steps(text: str) -> dict[str, int]:
+      steps: dict[str, int] = {}
+      for part in filter(None, text.split(",")):
+          step, sep, count = part.partition(":")
+          if not sep or not step.strip().isdigit() or not count.strip().isdigit():
+              raise ValueError(f"--steps expects step:count pairs like 1:2,3:1, got {part!r}")
+          steps[step.strip()] = int(count)
+      return steps
+
+
+  def _record_review(args: argparse.Namespace, cwd: Path) -> int:
+      if not 0 <= args.via_index <= args.findings:
+          print("concordance: --via-index must be between 0 and --findings", file=sys.stderr)
+          return 2
+      try:
+          steps = _parse_steps(args.steps)
+      except ValueError as exc:
+          print(f"concordance: {exc}", file=sys.stderr)
+          return 2
+      usage.record("record-review", _repo(cwd), None, 0, 0, 0,
+                   {"findings": args.findings, "via_index": args.via_index, "steps": steps},
+                   session=os.environ.get("CLAUDE_SESSION_ID", ""))
+      print(f"recorded review: {args.findings} findings ({args.via_index} via concordance)")
+      return 0
+
+
+  def _stats(args: argparse.Namespace, cwd: Path) -> int:
+      repo = _repo(cwd) if args.repo == "this" else None
+      if args.repo == "this" and not repo:
+          print("concordance: --repo this needs a git repository", file=sys.stderr)
+          return 2
+      rep = usage.report(days=args.days, repo=repo)
+      print(json.dumps(rep, indent=2) if args.json else usage.format_report(rep))
+      return 0
+  ```
+- `main`: handle `record-review` and `stats` right after `setup-ts` (`return _record_review(args, cwd)` / `return _stats(args, cwd)`, with `cwd = Path.cwd()` moved above them). Replace the `open_store(cwd).record_event(...)` telemetry block with one `_log` helper called on both paths:
+  ```python
+  def _log(command: str, cwd: Path, view_id: str | None, started: float, text: str, code: int,
+           payload: dict[str, object]) -> None:
+      try:
+          usage.record(command, _repo(cwd), view_id, int((time.monotonic() - started) * 1000),
+                       est_tokens(text), code, payload,
+                       session=os.environ.get("CLAUDE_SESSION_ID", ""))
+      except Exception:  # the usage log must never fail a query
+          pass
+  ```
+  In each `except` branch of `main`, call `_log(args.command, cwd, None, started, "", 2, {"error": type(exc).__name__})` before `return 2`; on success, `_log(args.command, cwd, view_id, started, text, code, stats)` after printing.
+
+- [ ] **Step 6: The review procedure records its outcome**
+
+In `skills/review-procedure/SKILL.md`, append to the `## Output` section, after the tool-log block:
+
+````markdown
+Finally, record the outcome once (it feeds the user's `stats` report, never your context):
+
+```bash
+python …/scripts/cli.py record-review --findings <N> --via-index <M> --steps <step:count,...>
+```
+
+`N` is every finding you report; `M` is how many came from a concordance section or command
+(steps 1-5 rows, verdicts, drill-downs), not from your own reading or a grep fallback; `--steps`
+counts findings per procedure step (e.g. `1:1,3:2`; omit when there are none).
+````
+
+- [ ] **Step 7: README**
+
+In `README.md`, add `python plugins/concordance/scripts/cli.py stats [--days 30] [--repo this|all] [--json]` to **Use**, and a section:
+
+```markdown
+## Usage log
+
+Every query appends one row to `$CLAUDE_CONFIG_DIR/concordance/usage.db` (override:
+`CONCORDANCE_USAGE_DB`): command, repo, latency, tokens returned, budget cuts, diff size and
+verdicts. Reviews add one `record-review` row with their findings. The log is kept for good and
+is separate from the per-repo index caches, so deleting an index loses no history. `stats`
+reports usage, budget pressure by diff size and effectiveness; `--json` is for chronicle.
+```
+
+- [ ] **Step 8: Run the tests to verify they pass**
+
+Run: `cd plugins/concordance && ../../.venv/bin/python -m pytest -q && ../../.venv/bin/ruff check scripts ../../tests/concordance && ../../.venv/bin/mypy scripts`
+Expected: the whole concordance suite passes (test_usage: 7 passed); ruff and mypy clean.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add plugins/concordance tests/concordance
+git commit -m "feat(concordance): account-wide usage log, record-review and the stats report"
+```
+
+---
+
+### Task 15: Verification: performance and the bench replay
 
 This task is run by the controller session, not delegated as a TDD task: it measures and
 judges, it does not change code (any defect it finds becomes a fix task with a covering test).
@@ -4897,6 +5372,7 @@ Locate the ledger-poc checkout (`~/repos/ledger-poc`; ask the user if it is else
 ```bash
 cd ~/repos/ledger-poc
 export CONCORDANCE_DB="$(mktemp -d)/bench.db"
+export CONCORDANCE_USAGE_DB="$CONCORDANCE_BENCH_DIR/usage.db"  # bench runs never enter the real usage log
 /usr/bin/time -p python ~/repos/pip-skills/plugins/concordance/scripts/cli.py index --base HEAD
 echo "# touch" >> $(git ls-files '*.py' | head -1)
 /usr/bin/time -p python ~/repos/pip-skills/plugins/concordance/scripts/cli.py index --base HEAD
@@ -4921,6 +5397,8 @@ unchanged otherwise) and judge it the same way. Report, per case, whether 1500 c
 defects than 4000, and the `cut`/`omitted` payloads from the events table. If 1500 loses a catch,
 4000 stays; if 4000 also cut a section on any case, say which, with the diff size: that is the
 first data point for a size-aware budget.
+
+Every bench arm runs with `CONCORDANCE_USAGE_DB=$CONCORDANCE_BENCH_DIR/usage.db`; after the runs, paste `cli.py stats --days 1` (run with that variable set) into the card: it is the first real exercise of the usage log and the `record-review` effectiveness figures.
 
 - [ ] **Step 5: Verdict**
 

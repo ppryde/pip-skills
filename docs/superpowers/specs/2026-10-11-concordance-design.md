@@ -343,3 +343,12 @@ Refinements found while planning; each keeps the design's intent.
   diff and repo size in the events payload. The defaults are provisional: they
   are reviewed after dogfooding on the refactor work and then a full-size work
   repo, likely becoming size-aware. Bench step 4b compares 1500 against 4000.
+- Usage log (added after plan review): events move out of the per-repo
+  `index.db` (a cache, safe to delete) into one account-wide
+  `$CLAUDE_CONFIG_DIR/concordance/usage.db`, kept for good. Each query logs
+  cost, budget cuts, diff size and verdict count; the review procedure ends
+  with one `record-review` call (findings, how many came via concordance, per
+  step). `concordance stats [--days] [--repo this|all] [--json]` reports
+  usage, budget pressure by diff size, and effectiveness to the user; nothing
+  in the log is printed into an agent's context. Chronicle reads `usage.db`
+  (or `stats --json`) rather than per-repo events.
