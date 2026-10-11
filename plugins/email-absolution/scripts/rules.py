@@ -807,7 +807,7 @@ def read_blob(rev: str, path: str):
     if not _safe_repo_path(path):
         return "", "unsafe path"
     try:
-        ls = subprocess.run(["git", "ls-tree", "-z", rev, "--", path], capture_output=True, timeout=30)
+        ls = subprocess.run(["git", "ls-tree", "-z", "--full-tree", rev, "--", f":(top,literal){path}"], capture_output=True, timeout=30)
         if ls.returncode != 0 or not ls.stdout:
             return "", "not in that commit"
         mode = ls.stdout.split(b" ", 1)[0]
@@ -853,7 +853,7 @@ def render_hunks(base: str, rev: str, files) -> str:
         if not _safe_repo_path(fp):
             lines.append(f"{fp}: unknown")
             continue
-        cmd = ["git", "diff", "-U0", "--no-color", "--no-ext-diff", base] + ([rev] if rev else []) + ["--", fp]
+        cmd = ["git", "diff", "-U0", "--no-color", "--no-ext-diff", base] + ([rev] if rev else []) + ["--", f":(top,literal){fp}"]
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         except (OSError, subprocess.SubprocessError):

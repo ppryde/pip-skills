@@ -11,7 +11,7 @@ Elder against the same active rules: the scope is smaller, the standard is not.
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/common.md` and `${CLAUDE_PLUGIN_ROOT}/references/audit.md` before Step 1.
 Scripts: `${CLAUDE_PLUGIN_ROOT}/scripts/rules.py`
-`Bash` only for the read-only `git` / `gh` commands in `audit.md §Scope` and `rules.py` (`git show` of the PR head's files in PR mode). `Write` only for scaffolding `.email-absolution/config.yml` (when the caller agrees) and `.email-absolution/decisions.yml`; `Edit` on the audited template only when the caller chooses Fix in interactive mode.
+`Bash` only for read-only `git` / `gh` commands (`references/pr-scope.md`) and `rules.py`; the one exception is `git fetch origin 'pull/<n>/head'` in PR mode. `Write` only for scaffolding `.email-absolution/config.yml` (when the caller agrees) and `.email-absolution/decisions.yml`; `Edit` on the audited template only when the caller chooses Fix in interactive mode.
 
 ## Mode Detection
 
@@ -31,11 +31,11 @@ Scripts: `${CLAUDE_PLUGIN_ROOT}/scripts/rules.py`
 ## Workflow
 
 1. **Configuration.** Read `common.md`, then the config (`common.md §Config`): scaffold offer, `email_type` default, required `stack.templating`.
-2. **Scope.** `audit.md §Scope`, Visitation scope: branch diff, PR number (must match `^[0-9]+$`) or one file. Include added, modified, type-changed and renamed/copied files.
+2. **Scope.** Read `references/pr-scope.md`: branch diff, PR number (must match `^[0-9]+$`) or one file. Include added, modified, type-changed and renamed/copied files.
 3. **Checklist.** `rules.py select` with the config flags (`common.md §Rules`): the same active set the Elder applies, ESP and target filters included.
-4. **Audit.** The full two-phase pass on each template (`audit.md §Audit pass`), `scan` first. Get the changed lines (`audit.md §Changed lines`); violations introduced in this diff are the primary concern. In PR mode read the PR head commit, not the working tree (`audit.md §Scope`). Interactive mode: `audit.md §Interactive`.
+4. **Audit.** The full two-phase pass on each template (`audit.md §Audit pass`), `scan` first. Get the changed lines (`pr-scope.md`, Changed lines); violations introduced in this diff are the primary concern. In PR mode read the PR head commit, not the working tree. Interactive mode: `audit.md §Interactive`.
 5. **Overrides and merge.** `audit.md §Merge`, then `audit.md §Overrides`.
-6. **Verdict.** `audit.md §Verdict`, laid out as in `references/verdict-sample.md`, with the `(added)` / `(modified)` labels, `(pre-existing)` on mortal sins outside the diff, and an Existing Debt section for venial and counsel findings outside it.
+6. **Verdict.** `audit.md §Verdict`, laid out as in `references/verdict-sample.md`, with the `(added)` / `(modified)` labels, existing violations per `pr-scope.md`.
 
 ## Hard Rules
 

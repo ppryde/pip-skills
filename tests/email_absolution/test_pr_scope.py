@@ -1,4 +1,5 @@
 """WF-266 PR 3: Visitation reads the PR head (VI-1), tells changed lines from existing debt (VI-3)."""
+import os
 import re
 import subprocess
 
@@ -8,6 +9,7 @@ from conftest import PLUGIN
 
 CFG = dict(email_type="marketing", esp="", templating="html", targets=())
 AUDIT = (PLUGIN / "references" / "audit.md").read_text(encoding="utf-8")
+PRSCOPE = (PLUGIN / "skills" / "visitation" / "references" / "pr-scope.md").read_text(encoding="utf-8")
 SKILL = (PLUGIN / "skills" / "visitation" / "SKILL.md").read_text(encoding="utf-8")
 
 
@@ -42,6 +44,32 @@ def test_parse_hunks(R):
 def test_hunks_lists_added_lines(R, repo):
     _, base, head = repo
     assert R.render_hunks(base, head, ["a.html"]) == "a.html: 4\n"
+
+
+def test_hunks_and_blob_work_from_a_subdirectory(R, repo):
+    root, base, head = repo
+    (root / "src").mkdir()
+    git(root, "checkout", "-q", "pr")
+    (root / "src" / "s.html").write_text("<p>x</p>\n<p>y</p>\n")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "sub")
+    head2 = git(root, "rev-parse", "HEAD")
+    os.chdir(root / "src")
+    assert R.render_hunks(base, head2, ["src/s.html"]) == "src/s.html: 1-2\n"
+    text, why = R.read_blob(head2, "src/s.html")
+    assert why == "" and "<p>y</p>" in text
+
+
+def test_hunks_treat_paths_literally(R, repo):
+    root, base, _ = repo
+    git(root, "checkout", "-q", "pr")
+    (root / "we*rd.html").write_text("<p>1</p>\n")
+    (root / "weird.html").write_text("<p>1</p>\n<p>2</p>\n<p>3</p>\n")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "weird")
+    head2 = git(root, "rev-parse", "HEAD")
+    git(root, "checkout", "-q", "main")
+    assert R.render_hunks(base, head2, ["we*rd.html"]) == "we*rd.html: 1\n"
 
 
 def test_hunks_unknown_and_refusals(R, repo):
@@ -97,14 +125,21 @@ def test_cli_hunks_and_scan_rev(repo):
 # ---- policy text (VI-1 / VI-3)
 
 def test_pr_mode_reads_the_head_commit():
-    assert "gh pr view '<number>' --json headRefOid,baseRefName,files" in AUDIT
-    assert "DELETED" in AUDIT and "git fetch origin 'pull/<number>/head'" in AUDIT
-    assert "git show '<oid>:<path>'" in AUDIT and "scan --rev '<oid>'" in AUDIT
-    assert "gh pr diff" not in AUDIT
+    assert "gh pr view '<number>' --json headRefOid,baseRefName,files" in PRSCOPE
+    assert "DELETED" in PRSCOPE and "git fetch origin 'pull/<number>/head'" in PRSCOPE
+    assert "git show '<oid>:<path>'" in PRSCOPE and "scan --rev '<oid>'" in PRSCOPE
+    assert "gh pr diff" not in PRSCOPE
+
+
+def test_pr_mode_material_is_not_in_the_shared_audit_reference():
+    for s in ("gh pr view", "pull/<number>/head", "EXISTING DEBT"):
+        assert s not in AUDIT
+    assert "references/pr-scope.md" in SKILL
+    assert "git fetch origin 'pull/<n>/head'" in SKILL and "exception" in SKILL
 
 
 def test_preexisting_policy_is_stated_in_audit_and_skill():
-    assert "(pre-existing)" in AUDIT and "existing debt" in AUDIT
+    assert "(pre-existing)" in PRSCOPE and "existing debt" in PRSCOPE
     assert "blocks" in SKILL and "(pre-existing)" in SKILL
     assert "does not block the change" not in SKILL
     sample = (PLUGIN / "skills" / "visitation" / "references" / "verdict-sample.md").read_text(encoding="utf-8")
