@@ -304,6 +304,29 @@ labels are already v1.)
   baseline arm vs lens arm, Sonnet reviewers, the spike's reviewer brief output
   shape. Run on demand, not in the unit suite.
 
+## Implementation notes (added with the plan, 2026-10-11)
+
+Refinements found while planning; each keeps the design's intent.
+
+1. **Layout follows repo convention:** the package is `plugins/concordance/scripts/`
+   (import name `scripts`, as census/chronicle), run as
+   `python <plugin>/scripts/cli.py`; tests live in `tests/concordance/`.
+2. **TypeScript uses the compiler's parser per file, not the type checker.** The
+   checker resolves across files, which would make a file's facts depend on other
+   files and break content keying (the worktree design). Imports, re-exports and
+   `tsconfig.json` `paths` are resolved by concordance at query time, as for
+   Python. Calls on values (`obj.m()`) are `inferred`/`ambiguous`, as in Python.
+3. **Package roots without reading `pyproject.toml`:** module names are the file
+   path (minus a leading `src/`); absolute imports map to modules by dotted-path
+   suffix at query time, `ambiguous` when two roots match.
+4. **Pure-refactor classifier is Python-only;** touched TypeScript symbols count as
+   behaviour-changed (conservative: more caller/test checks, never fewer).
+5. **"Removed comment adjacent to unchanged code"** is operationalised as "a comment
+   removed from a symbol that still exists in head".
+6. **Schema additions:** a `guards` table (if/raise/assert per symbol) and an
+   `alias_of` column on `symbols` (module-level imports and re-exports, followed by
+   the resolver).
+
 ## Open risks
 
 - The TS compiler on large repos may miss the cold-build target; mitigation is
