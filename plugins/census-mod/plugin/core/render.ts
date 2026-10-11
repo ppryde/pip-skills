@@ -165,9 +165,10 @@ function segChanges(i: RenderInput): Line[] {
 
 const REVIEW_TONE: Record<string, Tone> = { approved: 'green', pending: 'yellow', changes_requested: 'red' }
 
-/** The branch's open PR (from the mod's gh cache): `🔀 #12 approved`, the state coloured; hidden without one. */
+/** The branch's open PR (from tool events, else the gh cache): `🔀 #12 approved`, the state coloured, all grey when unconfirmed; hidden without one. */
 function segPr(i: RenderInput): Line[] {
   if (!i.pr || !(i.pr.number > 0)) return []
+  if (i.pr.stale) return [[{ t: `🔀 #${i.pr.number}${i.pr.reviewState ? ` ${i.pr.reviewState}` : ''}`, tone: 'grey' }]] // unconfirmed: dimmed
   const line: Line = [{ t: `🔀 #${i.pr.number}` }]
   if (i.pr.reviewState) line.push(sp, { t: i.pr.reviewState, tone: REVIEW_TONE[i.pr.reviewState] ?? 'grey' })
   return [line]

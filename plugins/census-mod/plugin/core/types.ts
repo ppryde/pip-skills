@@ -32,7 +32,8 @@ export type GitState = {
   hasUpstream: boolean
 }
 
-export type Pr = { number: number; url: string; reviewState?: string }
+/** `stale`: learned from a tool event and not confirmed since a push (or for a day); drawn dimmed. */
+export type Pr = { number: number; url: string; reviewState?: string; stale?: boolean }
 
 export type Proc = { pid: number; procStart: string; version?: string }
 

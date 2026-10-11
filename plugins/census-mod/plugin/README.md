@@ -62,7 +62,7 @@ continue anyway (two writers on one store: a warning, not a ban). Then:
    status line and not record, or keep both. The shared status-line script and the census
    launcher are never touched.
 4. **Layout** (band on): your two lines (the default), compact (one line), or minimal.
-5. **PR**: show the branch's PR using `gh`; No means `gh` is never called.
+5. **PR**: also look the branch's PR up with `gh` (review state, PRs opened elsewhere); No means `gh` is never called. The PR segment still follows PRs the session itself creates, readies, closes or merges (see "PR state from events").
 
 `/census-setup off` (or answering No to record and band) stops recording and drawing and puts
 a removed status line back exactly, but only if `settings.json` has no status line now (or
@@ -120,18 +120,40 @@ activity (idle) test. The per-turn hit ratio is `prompt_cache.hit_ratio`; the se
 typings), so both are ratios over a turn's requests, not per API call. `misses` is not
 measurable from a mod and is left out.
 
-## git and gh
+## git, gh and PR events
 
 - git: exactly `git --no-optional-locks status --porcelain=2 --branch -uno`, run at the
   start and after an Edit/Write/NotebookEdit/Bash call, a `.git/HEAD` or index change
   (watched through classic `SessionStart`'s `watchPaths`, resolved for worktrees), or a
   cwd change; at most one every 5 seconds. Detached and unborn HEAD follow census's rules.
-- gh: exactly `gh pr list --head <branch> --state open --limit 1 --json
+- gh (only when the PR answer is Yes): exactly `gh pr list --head <branch> --state open --limit 1 --json
   number,url,reviewDecision`, in the session's directory, 5 s timeout. Run on a branch
   change, after a Bash call containing `git push` or `gh pr`, and when the answer is over
   10 minutes old and the session was active in the last 10. Cached per repo and branch in
   `$.store`; a failure keeps the cached value and backs off 10 minutes. `review_state` is
   `approved`, `pending` (`REVIEW_REQUIRED`), `changes_requested`, or left out.
+
+### PR state from events
+
+The engine puts a `gitOperation` block on a Bash tool result for commits, pushes and PR-changing `gh` commands
+(`created`, `ready`, `draft`, `closed`, `merged`, `reopened`, `commented`, `edited`, auto-merge); `gh pr view` and
+checkout carry none. A local session gets no GitHub `session.receive`, and the status-line payload's `pr` is not
+readable by a mod, so this block is what a mod can learn without calling GitHub. The mod keeps one record per
+`pr:<owner>/<name>#<branch>` in `$.store` (owner/name from `git remote get-url origin`; no origin, no record):
+`{number, url?, state, review?, lastAction, source, at, sessionId, worktree}`, newest `at` wins and a field an event
+lacks keeps its old value.
+
+- `created` opens it (review `draft` when the command had `--draft`), on the current branch; the other actions match
+  by PR number first, so `gh pr close 9` run from another branch updates the branch PR 9 belongs to. An unknown
+  number is ignored. `ready` sets review `pending`, `draft` sets `draft`, `closed`/`merged`/`reopened` set the state;
+  `commented`, `edited` and auto-merge only touch `at` and `lastAction`.
+- A push marks the branch's record stale (a review may have moved); the segment draws grey until a PR event or a gh
+  answer confirms it, and also once the record is a day old.
+- Only open PRs reach the payload's `pr` and the segment. This works with the PR answer set to No.
+- gh, where it is on, is the newest word when it answers; an empty answer does not close an event record younger than
+  two minutes (GitHub may not have listed a new PR yet).
+- Gaps, which only gh covers: PRs opened outside the session, remote reviews, merges on github.com, and whether a
+  subagent's `gh` commands carry the block (not known).
 
 ## The band
 
@@ -155,7 +177,7 @@ Only the chosen site draws; the other passes through untouched. A 30 s tick redr
 countdowns; it never records.
 
 The `pr` segment, `🔀 #12 approved` (green approved, yellow pending, red changes_requested), ends
-line two and is hidden without a PR; the mod's data is its gh cache. Differences from
+line two and is hidden without a PR; the mod's data is the PR record kept from tool events (and the gh cache, where gh is on); grey when unconfirmed. Differences from
 `census statusline`: `spend_limit` is recorded but not drawn; colours are `Text` colours (green, red,
 gray, `yellowBright`, `#ff8700` for orange).
 

@@ -17,6 +17,8 @@ export type World = {
   ingests: { payload: Record<string, any>; argv: string[]; env?: Record<string, string>; timeoutMs?: number }[]
   git: { status: string; dir: string; exitCode: number }
   gh: { stdout: string; exitCode: number; throws: boolean }
+  remote: { value: string }            // `git remote get-url origin` ('' = no origin: exit 1)
+  toolResult: { value: unknown }        // what a non-AskUserQuestion tool call answers (a Bash result carries gitOperation)
   titles: Map<string, string>          // transcript path -> grep output
   tail: { value: string }              // transcript tail grep output
   logs: string[]
@@ -61,7 +63,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     model: { value: 'claude-opus-5-5[1m]' },
     runs: [], ingests: [],
     git: { status: '# branch.oid abc1234def\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +1 -0\n1 .M N... 100644 100644 100644 a b f.ts\n', dir: '/repo/.git\n/repo\n', exitCode: 0 },
-    gh: { stdout: '[]', exitCode: 0, throws: false },
+    gh: { stdout: '[]', exitCode: 0, throws: false }, remote: { value: '' }, toolResult: { value: 'ok' },
     titles: new Map(), tail: { value: '"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":100}\n' },
     logs: [], invalidations: { count: 0 }, lookups: [], surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, bundle: { present: true }, pythons: { value: ['python3'] }, shell: { value: true },
   }
@@ -101,6 +103,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     if (cmd === 'sh' && !w.shell.value) throw new Error('spawn sh ENOENT')
     if (cmd === 'sh' && e.argv[2] === 'exit 0') return { value: done(0) }
     if (cmd === 'git' && args.includes('status')) { await w.gitGate.value; return { value: done(w.git.exitCode, w.git.status) } }
+    if (cmd === 'git' && args.includes('remote')) return { value: w.remote.value ? done(0, w.remote.value) : done(1) }
     if (cmd === 'git' && args.includes('rev-parse')) return { value: done(w.git.exitCode, w.git.dir) }
     if (cmd === 'gh') {
       if (w.gh.throws) throw new Error('spawn gh ENOENT')
@@ -143,7 +146,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
   // $.ui.ask runs as an AskUserQuestion tool call; its answers sit on the result, keyed by question text.
   on('tool.call', async (_$, e) => {
     const input = e as unknown as { tool: string; questions?: { question: string; header?: string; options?: (string | { label: string })[] }[] }
-    if (input.tool !== 'AskUserQuestion') return { result: 'ok' } as never
+    if (input.tool !== 'AskUserQuestion') return { result: w.toolResult.value } as never
     await w.askGate.value
     const answers: Record<string, string> = {}
     for (const q of input.questions ?? []) {

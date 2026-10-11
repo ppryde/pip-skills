@@ -6,6 +6,8 @@ import { GH_TIMEOUT_MS, ghArgv, ghKey, parsePrList, shouldRefresh, touchesPr } f
 import type { GhEntry, Why } from '../core/gh'
 import { COALESCE_MS as GIT_COALESCE_MS, GIT_DIR_ARGV, GIT_STATUS_ARGV, parseStatus, touchesGit, watchPaths, worktreeOf } from '../core/git'
 import { homeOf, joinPath } from '../core/home'
+import { applyPatch, gitOperationOf, hasDraftFlag, markStale, patchFor, prKey, prPrefix, repoOf, toPr } from '../core/prstate'
+import type { PrRecord } from '../core/prstate'
 import { configRoot, transcriptPathFor } from '../core/name'
 import { PYTHON_CANDIDATES, cacheLinesFromText, copyModeArgv, moveArgv, pickPython, removeArgv, titleLinesFromText } from '../core/portable'
 import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
@@ -53,6 +55,7 @@ let saidNoCli = false
 let python: string[] | null | undefined // the launcher that ran --version, once; null = none found
 let shell: boolean | undefined // whether `sh` runs here (it does not on Windows)
 let saidNoGh = false
+const repoByDir = new Map<string, string | null>() // working dir -> owner/name of origin (null = none), asked once per dir
 
 const TICK_MS = 30_000
 
@@ -317,7 +320,7 @@ async function runGit($: EngineInterface) {
   const before = snap.git
   snap.git = r && r.exitCode === 0 ? parseStatus(r.stdout) : null
   if (before?.branch !== snap.git?.branch) {
-    snap.pr = null
+    snap.pr = await prFromEvents($) // a PR the mod saw on this branch (any session) draws at once; else none until gh says
     // The first sight of a branch is not a change of it.
     if (before !== null) record($, 'branch')
     scheduleGh($, before === null ? 'start' : 'branch')
@@ -338,7 +341,7 @@ async function refreshGh($: EngineInterface, why: Why) {
   const branch = snap.git.branch
   const now = await nowMs($)
   const cached = (await $.store.get(key).catch(() => undefined)) as GhEntry | undefined
-  if (cached) snap.pr = cached.pr
+  if (cached) snap.pr = (await prFromEvents($)) ?? cached.pr
   if (!shouldRefresh(why, cached, now, lastActiveAt)) return
   const before = snap.pr
   let entry: GhEntry
@@ -355,10 +358,114 @@ async function refreshGh($: EngineInterface, why: Why) {
   }
   await $.store.set(key, entry).catch(() => undefined)
   if (!snap || snap.git?.branch !== branch) return
-  snap.pr = entry.pr
+  snap.pr = (await recordGhAnswer($, branch, entry, now)) ?? entry.pr
   if (before?.number !== entry.pr?.number || before?.reviewState !== entry.pr?.reviewState) record($, 'pr')
   repaint($)
 }
+
+// ---- PR state from tool events (WF-269) ---------------------------------------------------------
+// The engine reports `gitOperation` on a Bash result: a created, readied, closed or merged PR and a push. That is
+// kept per repo+branch in $.store (shared by every session of the account), so the PR segment needs no gh call and
+// works with the PR setting off. gh, where it is on, only adds the review state and what happened outside the session.
+
+/** `owner/name` of the origin of the directory the session works in; null when there is none. Asked once per directory. */
+async function repoName($: EngineInterface): Promise<string | null> {
+  if (!snap) return null
+  const dir = snap.worktreePath ?? snap.cwd
+  if (repoByDir.has(dir)) return repoByDir.get(dir) ?? null
+  const r = await $.process.run(['git', 'remote', 'get-url', 'origin'], { cwd: dir, timeoutMs: 5000 }).catch(() => undefined)
+  const repo = r && r.exitCode === 0 ? repoOf(r.stdout) : null
+  repoByDir.set(dir, repo)
+
+  return repo
+}
+
+const currentBranch = (): string | null => (snap?.git?.branch && !snap.git.detached ? snap.git.branch : null)
+
+async function readRecord($: EngineInterface, key: string): Promise<PrRecord | undefined> {
+  const got = (await $.store.get(key).catch(() => undefined)) as PrRecord | undefined
+
+  return got && typeof got === 'object' && typeof got.number === 'number' ? got : undefined
+}
+
+/** The drawn PR of the current branch from its record; null when the record says none (or there is none). */
+async function prFromEvents($: EngineInterface): Promise<Snap['pr']> {
+  const branch = currentBranch()
+  const repo = branch ? await repoName($) : null
+  if (!branch || !repo) return null
+
+  return toPr(await readRecord($, prKey(repo, branch)), await nowMs($))
+}
+
+/** Every record of the repo, so a PR can be found by number whatever branch the command ran on. */
+async function recordsOf($: EngineInterface, repo: string): Promise<{ key: string; rec: PrRecord }[]> {
+  const keys = ((await $.store.keys().catch(() => [])) as string[]).filter(k => k.startsWith(prPrefix(repo)))
+  const out: { key: string; rec: PrRecord }[] = []
+  for (const key of keys) {
+    const rec = await readRecord($, key)
+    if (rec) out.push({ key, rec })
+  }
+
+  return out
+}
+
+/** Re-derive the snapshot's PR after a record moved, and record the change. */
+async function pushPrToSnap($: EngineInterface) {
+  if (!snap) return
+  const before = snap.pr
+  const after = await prFromEvents($)
+  if (!snap) return
+  snap.pr = after
+  if (before?.number !== after?.number || before?.reviewState !== after?.reviewState) record($, 'pr')
+  repaint($)
+}
+
+/** One Bash result's `gitOperation`: a PR action updates (or, when created, starts) the record; a push marks it stale. */
+async function applyGitOperation($: EngineInterface, result: unknown, command: string) {
+  const op = gitOperationOf(result)
+  if (!op || !snap) return
+  const repo = await repoName($)
+  if (!repo || !snap) return
+  const now = await nowMs($)
+  const ctx = { sessionId: snap.sessionId, worktree: snap.worktreePath ?? snap.cwd }
+  if (op.pr) {
+    const all = await recordsOf($, repo)
+    const byNumber = all.filter(r => r.rec.number === op.pr!.number).sort((a, b) => b.rec.at - a.rec.at)[0]
+    const branch = currentBranch()
+    // By number first; the current branch only for a creation (`gh pr close N` can run from any branch).
+    const key = byNumber?.key ?? (op.pr.action === 'created' && branch ? prKey(repo, branch) : null)
+    if (key) {
+      const next = applyPatch(byNumber?.rec, patchFor(op.pr, hasDraftFlag(command)), now, ctx)
+      if (next) await $.store.set(key, next).catch(() => undefined)
+    }
+  }
+  if (op.push) {
+    const key = prKey(repo, op.push.branch)
+    const old = await readRecord($, key)
+    if (old) await $.store.set(key, markStale(old)).catch(() => undefined)
+  }
+  await pushPrToSnap($)
+}
+
+/** gh's answer for the branch, as the newest word in its record. An empty answer closes an event record only once it has had time to be listed. */
+async function recordGhAnswer($: EngineInterface, branch: string, entry: GhEntry, now: number): Promise<Snap['pr']> {
+  const repo = await repoName($)
+  if (!repo) return null
+  const key = prKey(repo, branch)
+  const old = await readRecord($, key)
+  const ctx = { sessionId: snap?.sessionId ?? '', worktree: snap?.worktreePath ?? snap?.cwd ?? '', source: 'gh' as const }
+  let next: PrRecord | undefined = old
+  if (entry.pr) {
+    next = applyPatch(old, { number: entry.pr.number, ...(entry.pr.url ? { url: entry.pr.url } : {}), state: 'open', ...(entry.pr.reviewState ? { review: entry.pr.reviewState } : {}), lastAction: 'gh' }, now, ctx)
+  } else if (old && old.state === 'open' && !(old.source === 'event' && now - old.at < GH_LISTING_GRACE_MS)) {
+    next = applyPatch(old, { number: old.number, state: 'closed', lastAction: 'gh' }, now, ctx)
+  }
+  if (next && next !== old) await $.store.set(key, next).catch(() => undefined)
+
+  return toPr(next, now)
+}
+
+const GH_LISTING_GRACE_MS = 2 * 60_000
 
 async function readGitDir($: EngineInterface, cwd: string) {
   return $.process.run(GIT_DIR_ARGV, { cwd }).then(r => ({ exitCode: r.exitCode, stdout: r.stdout })).catch(() => ({ exitCode: 1, stdout: '' }))
@@ -957,7 +1064,10 @@ export const register: Register = on => {
       const call = e as unknown as { tool: string; command?: unknown }
       lastActiveAt = await nowMs($)
       if (touchesGit(call.tool)) scheduleGit($)
-      if (call.tool === 'Bash' && typeof call.command === 'string' && touchesPr(call.command)) scheduleGh($, 'push')
+      if (call.tool === 'Bash' && typeof call.command === 'string') {
+        await applyGitOperation($, (r as { result?: unknown }).result, call.command)
+        if (touchesPr(call.command)) scheduleGh($, 'push')
+      }
     })
     return r
   })
