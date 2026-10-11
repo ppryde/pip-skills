@@ -138,14 +138,14 @@ class TestSentinelOnlyAfterACompleteLookup:
         self, world, monkeypatch
     ):
         shutil.rmtree(marker.marker_dir())
-        real = marker.live_cards
-        monkeypatch.setattr(marker, "live_cards", lambda db, sid: None)  # locked
+        real = marker._live_cards
+        monkeypatch.setattr(marker, "_live_cards", lambda db, sid: (None, True))  # locked
         body = {"session_id": SESSION, "cwd": str(world["repo"]), "tool_name": "Bash",
                 "tool_input": {"command": "ls"}}
         hookfast.run(json.dumps(body))
         assert not marker.is_checked(SESSION)
         assert marker.read_boards(SESSION) == []
-        monkeypatch.setattr(marker, "live_cards", real)
+        monkeypatch.setattr(marker, "_live_cards", real)
         hookfast.run(json.dumps(body))
         assert marker.read_boards(SESSION), "the retry finds the board and writes the marker"
 
@@ -158,6 +158,58 @@ class TestSentinelOnlyAfterACompleteLookup:
     def test_a_missing_board_file_is_not_an_incomplete_lookup(self, tmp_path, monkeypatch):
         monkeypatch.setenv("OVERSEER_DB", str(tmp_path / "nope.db"))
         assert marker.lookup_boards("s1") == ([], True)
+
+
+class TestOnlyTransientErrorsAreIncomplete:
+    """r4 A1 low: a permanent bad board must not defeat the sentinel; a locked
+    one must be retried even when another board already produced a marker."""
+
+    @pytest.mark.parametrize("content", [b"not a sqlite database at all" * 40, b""])
+    def test_a_corrupt_board_is_complete_and_yields_no_marker(self, tmp_path, monkeypatch, content):
+        bad = tmp_path / "board.db"
+        bad.write_bytes(content)
+        monkeypatch.setenv("OVERSEER_DB", str(bad))
+        assert marker.lookup_boards("s1") == ([], True)
+
+    def test_a_schemaless_board_is_complete(self, tmp_path, monkeypatch):
+        import sqlite3
+        bad = tmp_path / "board.db"
+        sqlite3.connect(bad).close()
+        sqlite3.connect(bad).execute("CREATE TABLE other (x)").connection.commit()
+        monkeypatch.setenv("OVERSEER_DB", str(bad))
+        assert marker.lookup_boards("s1") == ([], True)
+
+    def test_a_corrupt_board_still_gets_the_sentinel(self, tmp_path, monkeypatch):
+        bad = tmp_path / "board.db"
+        bad.write_bytes(b"garbage" * 100)
+        monkeypatch.setenv("OVERSEER_DB", str(bad))
+        hookfast.run(json.dumps({"session_id": "sess-x", "cwd": str(tmp_path),
+                                 "tool_name": "Bash", "tool_input": {"command": "ls"}}))
+        assert marker.is_checked("sess-x")
+
+    @pytest.mark.parametrize("message,complete", [
+        ("database is locked", False), ("database table is locked", False),
+        ("database is busy", False), ("no such table: orchestrators", True),
+        ("unable to open database file", True)])
+    def test_only_lock_and_busy_errors_are_incomplete(self, world, monkeypatch, message, complete):
+        import sqlite3
+
+        def boom(*args, **kwargs):
+            raise sqlite3.OperationalError(message)
+
+        monkeypatch.setattr(marker.sqlite3, "connect", boom)
+        assert marker.lookup_boards(SESSION)[1] is complete
+
+    def test_lookup_reruns_while_unchecked_even_with_a_marker(self, world):
+        real = marker.find_boards_for_session(SESSION)[0]
+        other = marker.Board(real.db.parent / "elsewhere.db", real.repo, real.state)
+        shutil.rmtree(marker.marker_dir())
+        marker.write_marker(SESSION, other)  # a marker for one board; no sentinel yet
+        assert not marker.is_checked(SESSION)
+        hookfast.run(json.dumps({"session_id": SESSION, "cwd": str(world["repo"]),
+                                 "tool_name": "Bash", "tool_input": {"command": "ls"}}))
+        assert real.db in {b.db for b in marker.read_boards(SESSION)}
+        assert marker.is_checked(SESSION)
 
 
 class TestSweepOnTheFirstCallPath:
@@ -227,6 +279,33 @@ class TestCentralBoardsAreFoundInTheUpgradeWindow:
         monkeypatch.delenv("OVERSEER_CENTRAL")
         assert marker.find_boards_for_session(SESSION) == []  # no cwd, no config
         boards = marker.find_boards_for_session(SESSION, central_world["repo"])
+        assert [b.db for b in boards] == [central_world["central"] / "board.db"]
+
+    def _write_cfg(self, root, central_world):
+        cfg_dir = root / ".overseer"
+        cfg_dir.mkdir(exist_ok=True)
+        (cfg_dir / "config.json").write_text(
+            json.dumps({"central_dir": str(central_world["central"])}))
+
+    def test_config_is_found_from_a_subdirectory_of_the_repo(self, central_world, monkeypatch):
+        (central_world["repo"] / ".git").mkdir()
+        self._write_cfg(central_world["repo"], central_world)
+        monkeypatch.delenv("OVERSEER_CENTRAL")
+        sub = central_world["repo"] / "src" / "pkg"
+        sub.mkdir(parents=True)
+        boards = marker.find_boards_for_session(SESSION, sub)
+        assert [b.db for b in boards] == [central_world["central"] / "board.db"]
+
+    def test_config_is_found_from_a_linked_worktree(self, central_world, monkeypatch):
+        main = central_world["repo"]
+        (main / ".git" / "worktrees" / "wt").mkdir(parents=True)
+        self._write_cfg(main, central_world)  # the worktree has no .overseer of its own
+        wt = central_world["tmp"] / "wt"
+        (wt / "deep").mkdir(parents=True)
+        (wt / ".git").write_text(f"gitdir: {main}/.git/worktrees/wt\n")
+        monkeypatch.delenv("OVERSEER_CENTRAL")
+        assert marker._config_root(wt / "deep") == main.resolve()
+        boards = marker.find_boards_for_session(SESSION, wt / "deep")
         assert [b.db for b in boards] == [central_world["central"] / "board.db"]
 
 

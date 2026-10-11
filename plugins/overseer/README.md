@@ -186,6 +186,20 @@ adds a commit. It covers pushes Claude issues on your behalf; it is not a
 git-native `pre-push` hook, so a `git push` run outside Claude Code is not
 gated by it.
 
+### Orchestrator guard: failure modes
+
+For a session that orchestrates a card (a local marker under
+`<config dir>/overseer/.orchestrating/`), the same hook denies a guarded tool
+(`Bash`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `Agent`, `Task`, any
+`mcp__*`) with "overseer guard unavailable" if its interpreter is missing or
+crashes: it fails closed, not open. `Read`/`Grep`/`Glob` and sessions without
+a marker stay open.
+
+Known limit: with `OVERSEER_REMOTE` set, the guard decision is forwarded to
+the host and the orchestrator marker lives on the host, so there is no local
+marker to key a deny on. If the forwarded call fails (host CLI unreachable,
+interpreter missing), the hook fails open for every tool.
+
 ## Skills
 
 - **ledger** — drive cards (in `board.db`), the sprint/usage state, and the

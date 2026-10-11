@@ -109,16 +109,20 @@ def run(raw: str) -> dict[str, object] | None:
         pass
     boards = marker.read_boards(sid) if sid else []
     writable = os.access(directory, os.W_OK)
-    if sid and not boards and (not writable or not marker.is_checked(sid)):
+    if sid and (not writable or not marker.is_checked(sid)):
         # First call of THIS session (upgrade window: it may already be
         # orchestrating, with no marker yet) or an unwritable marker dir: the
         # shell had no marker to trust, so ask the boards themselves
         # (read-only, no git), leave a marker behind if there is something to
         # guard, and remember that this session has been looked up.
         cwd = payload.get("cwd")
-        boards, complete = marker.lookup_boards(
+        found, complete = marker.lookup_boards(
             sid, Path(cwd) if isinstance(cwd, str) and cwd else None)
-        for board in boards:
+        # While the sentinel is absent the lookup re-runs even when a marker
+        # exists, so a board that was locked on an earlier call is found later.
+        known = {b.db for b in boards}
+        boards = [*boards, *(b for b in found if b.db not in known)]
+        for board in found:
             try:
                 marker.write_marker(sid, board)
             except OSError as exc:

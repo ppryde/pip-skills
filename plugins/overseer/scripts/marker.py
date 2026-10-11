@@ -144,11 +144,43 @@ def load_repo_config(repo: Path | None) -> dict[str, object]:
     return merged
 
 
+def _config_root(cwd: Path | None) -> Path | None:
+    """The repo root whose ``.overseer/config*.json`` ``config.load_config``
+    would read for a session standing in ``cwd``, found WITHOUT a git
+    subprocess: walk up to the first directory holding ``.overseer`` or
+    ``.git``. A linked worktree's ``.git`` is a file naming
+    ``<main>/.git/worktrees/<name>``; the canonical root is ``<main>``."""
+    if cwd is None:
+        return None
+    try:
+        start = cwd.resolve()
+    except OSError:
+        return None
+    for directory in (start, *start.parents):
+        git = directory / ".git"
+        if git.is_file():
+            try:
+                text = git.read_text().strip()
+            except OSError:
+                return directory
+            if text.startswith("gitdir:"):
+                gitdir = Path(text[len("gitdir:"):].strip())
+                if not gitdir.is_absolute():
+                    gitdir = directory / gitdir
+                for ancestor in (gitdir, *gitdir.parents):
+                    if ancestor.name == ".git":
+                        return ancestor.parent  # the canonical (main) root
+            return directory
+        if git.exists() or (directory / ".overseer").is_dir():
+            return directory
+    return None
+
+
 def _candidate_dbs(cwd: Path | None) -> list[Path]:
     """Every board file this session could be orchestrating on, in the order
     ``db.board_db_path`` would resolve them: ``OVERSEER_DB`` (an override that
     excludes the rest), else ``$OVERSEER_CENTRAL/board.db``, the payload
-    cwd's ``central_dir`` from ``.overseer/config*.json``, and every
+    cwd's repo's ``central_dir`` from ``.overseer/config*.json``, and every
     ``<config dir>/overseer/*/board.db``."""
     override = os.environ.get("OVERSEER_DB")
     if override:
@@ -157,7 +189,7 @@ def _candidate_dbs(cwd: Path | None) -> list[Path]:
     central = os.environ.get("OVERSEER_CENTRAL")
     if central:
         candidates.append(Path(central) / "board.db")
-    cfg_central = load_repo_config(cwd).get("central_dir")
+    cfg_central = load_repo_config(_config_root(cwd)).get("central_dir")
     if isinstance(cfg_central, str) and cfg_central:
         candidates.append(Path(cfg_central) / "board.db")
     base = config_dir() / "overseer"
@@ -176,14 +208,16 @@ def _candidate_dbs(cwd: Path | None) -> list[Path]:
 def lookup_boards(session_id: str, cwd: Path | None = None) -> tuple[list[Board], bool]:
     """Boards on which ``session_id`` has a live orchestrated card, found with
     read-only opens and no git, plus whether the lookup was COMPLETE: False
-    when some candidate board file exists but could not be read (locked,
-    unreadable), so the caller must not record the session as checked."""
+    when some candidate board was transiently unavailable (locked or busy), so
+    the caller must not record the session as checked. A corrupt, foreign or
+    schema-less board file is permanent: it counts as complete and yields no
+    marker."""
     found: list[Board] = []
     complete = True
     for db in _candidate_dbs(cwd):
-        cards = live_cards(db, session_id)
+        cards, transient = _live_cards(db, session_id)
         if cards is None:
-            if db.is_file():
+            if transient:
                 complete = False
             continue
         if not cards:
@@ -212,17 +246,28 @@ def find_boards_for_session(session_id: str, cwd: Path | None = None) -> list[Bo
     return lookup_boards(session_id, cwd)[0]
 
 
+def _is_transient(exc: sqlite3.Error) -> bool:
+    text = str(exc).lower()
+    return isinstance(exc, sqlite3.OperationalError) and ("locked" in text or "busy" in text)
+
+
 def live_cards(db: Path, session_id: str) -> list[GuardCard] | None:
-    """Live cards ``session_id`` orchestrates, via a READ-ONLY connection: no
+    return _live_cards(db, session_id)[0]
+
+
+def _live_cards(db: Path, session_id: str) -> tuple[list[GuardCard] | None, bool]:
+    """``(cards, transient)``: ``cards`` is None when the board could not be
+    read, and ``transient`` says that was a lock/busy error worth retrying.
+    Live cards ``session_id`` orchestrates, via a READ-ONLY connection: no
     schema pass, no pragma writes, no git. Parked cards are shelved, so the
     guard lets go of them; blocked cards keep it. ``None`` = could not tell
     (no board file, locked, unreadable) — callers fail open."""
     if not db.is_file():
-        return None
+        return None, False
     try:
         conn = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=1.0)
-    except sqlite3.Error:
-        return None
+    except sqlite3.Error as exc:
+        return None, _is_transient(exc)
     try:
         rows = conn.execute(
             "SELECT c.id, c.worktree, c.budget_estimate, c.budget_actual "
@@ -231,11 +276,11 @@ def live_cards(db: Path, session_id: str) -> list[GuardCard] | None:
             "ORDER BY c.id",
             (session_id,),
         ).fetchall()
-    except sqlite3.Error:
-        return None
+    except sqlite3.Error as exc:
+        return None, _is_transient(exc)
     finally:
         conn.close()
-    return [GuardCard(r[0], r[1], r[2], r[3] or 0) for r in rows]
+    return [GuardCard(r[0], r[1], r[2], r[3] or 0) for r in rows], False
 
 
 SWEEP_STAMP = ".last-sweep"
