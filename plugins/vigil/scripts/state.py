@@ -1,21 +1,19 @@
 """Vigil runtime state under `$CLAUDE_CONFIG_DIR/vigil/<repo-key>/`, keyed by the repo root.
 
-The vigil root is the key (per repo root, not per session): one root, one watch. Every function is
-quarantine-safe — it only touches its own marker files and never raises on a
-missing path.
-
-Single-writer assumption: these markers (`active`, `paused`, `cooldown`,
-`clear-requested`, `handover-gate`, `handoff.md`) live under one
-state dir per root and carry no session identity. If two live sessions share a single root
-they share — and race on — the same markers: one session's nudge gates the
-other, one session's `/clear` cooldown silences the other. Vigil therefore
-assumes exactly one session per root, which the intended per-worktree session
-model (one checkout, one watch) gives for free. Sharing a root across concurrent
-sessions is unsupported.
+The vigil root is keyed per repo root: `active`, `paused` and `config.json` are
+repo-wide (one watch per root). Everything a handover moves through (`handoff.md`,
+`clear-requested`, `handover-gate`, `cooldown`, `rename-title`, `archive/`) lives
+per session lineage under `sessions/<lineage>/`, where the lineage is the tmux pane
+(stable across `/clear`, unlike the session id) or `default` outside tmux. Two
+sessions in different panes of one repo therefore never inject, consume or silence
+each other's handover. Two sessions sharing a pane lineage (both outside tmux) still
+share it. Every function is quarantine-safe — it only touches its own marker files
+and never raises on a missing path.
 """
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 
@@ -30,10 +28,34 @@ from scripts.store import (
     write_private,
 )
 
+_UNSAFE_LINEAGE = re.compile(r"[^A-Za-z0-9_-]")
+
 COOLDOWN_TTL_SECONDS = 300
 GATE_TTL_SECONDS = 6 * 60 * 60  # 6h self-heal: mirrors COOLDOWN_TTL_SECONDS's pattern
 ARCHIVE_KEEP = 20  # consumed handoffs kept in archive/ (newest first)
 MAX_TITLE_LENGTH = 60  # keeps a tmux window title readable in the status bar
+
+
+def lineage() -> str:
+    """The session lineage this process belongs to: its tmux pane (stable across
+    ``/clear``, which changes the session id), else ``default`` outside tmux."""
+    pane = os.environ.get("TMUX_PANE", "")
+    return _UNSAFE_LINEAGE.sub("", pane) or "default"
+
+
+def session_root(repo_root: Path) -> Path:
+    """Per-lineage state dir: ``<vigil_root>/sessions/<lineage>/``. Holds the
+    handoff, clear request, gate, cooldown and title, so two sessions in two
+    panes of one repo never inject or consume each other's handover."""
+    return vigil_root(repo_root) / "sessions" / lineage()
+
+
+def _ensure_session_root(repo_root: Path) -> Path:
+    ensure_root(repo_root)
+    sessions = vigil_root(repo_root) / "sessions"
+    _private_dir(sessions)
+    _private_dir(session_root(repo_root))
+    return session_root(repo_root)
 
 
 def active_marker(repo_root: Path) -> Path:
@@ -41,11 +63,11 @@ def active_marker(repo_root: Path) -> Path:
 
 
 def clear_flag(repo_root: Path) -> Path:
-    return vigil_root(repo_root) / "clear-requested"
+    return session_root(repo_root) / "clear-requested"
 
 
 def gate_marker(repo_root: Path) -> Path:
-    return vigil_root(repo_root) / "handover-gate"
+    return session_root(repo_root) / "handover-gate"
 
 
 def paused_flag(repo_root: Path) -> Path:
@@ -53,15 +75,15 @@ def paused_flag(repo_root: Path) -> Path:
 
 
 def cooldown_marker(repo_root: Path) -> Path:
-    return vigil_root(repo_root) / "cooldown"
+    return session_root(repo_root) / "cooldown"
 
 
 def handoff_path(repo_root: Path) -> Path:
-    return vigil_root(repo_root) / "handoff.md"
+    return session_root(repo_root) / "handoff.md"
 
 
 def rename_title_path(repo_root: Path) -> Path:
-    return vigil_root(repo_root) / "rename-title"
+    return session_root(repo_root) / "rename-title"
 
 
 def _sanitize_title(title: str) -> str | None:
@@ -86,7 +108,7 @@ def _sanitize_title(title: str) -> str | None:
 
 
 def handoff_archive_dir(repo_root: Path) -> Path:
-    return vigil_root(repo_root) / "archive"
+    return session_root(repo_root) / "archive"
 
 
 def begin(repo_root: Path) -> None:
@@ -139,7 +161,7 @@ def cooldown_active(repo_root: Path) -> bool:
 
 
 def set_gate(repo_root: Path) -> None:
-    ensure_root(repo_root)
+    _ensure_session_root(repo_root)
     touch_private(gate_marker(repo_root))
 
 
@@ -172,7 +194,7 @@ def request_clear(repo_root: Path, handoff_text: str, title: str | None = None) 
         return "paused"
     if _cooldown_active(repo_root):
         return "cooldown"
-    ensure_root(repo_root)
+    _ensure_session_root(repo_root)
     write_private(handoff_path(repo_root), handoff_text)
     sanitized = _sanitize_title(title) if title else None
     if sanitized:
@@ -200,7 +222,7 @@ def consume_clear_flag(repo_root: Path) -> bool:
     if not marker_exists(clear_flag(repo_root)):
         return False
     clear_flag(repo_root).unlink(missing_ok=True)  # remove FIRST: cannot re-fire
-    ensure_root(repo_root)
+    _ensure_session_root(repo_root)
     touch_private(cooldown_marker(repo_root))
     return True
 
@@ -222,7 +244,7 @@ def begin_cycle(repo_root: Path) -> None:
     outlives census's lag window and suppresses both the nudge and
     ``request_clear`` through the grace period.
     """
-    ensure_root(repo_root)
+    _ensure_session_root(repo_root)
     clear_flag(repo_root).unlink(missing_ok=True)
     rename_title_path(repo_root).unlink(missing_ok=True)
     clear_gate(repo_root)

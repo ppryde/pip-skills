@@ -35,10 +35,22 @@ def _base_env(extra):
     return env
 
 
-def _promote_and_arm(repo):
+def _promote_and_arm(repo, pane=None):
+    """Arm from the tmux pane lineage the hook will run in (None = outside tmux)."""
     from scripts import state as st
-    st.begin(repo)
-    st.request_clear(repo, "HANDOFF FROM HOOK TEST")
+    saved = os.environ.get("TMUX_PANE")
+    if pane is None:
+        os.environ.pop("TMUX_PANE", None)
+    else:
+        os.environ["TMUX_PANE"] = pane
+    try:
+        st.begin(repo)
+        st.request_clear(repo, "HANDOFF FROM HOOK TEST")
+    finally:
+        if saved is None:
+            os.environ.pop("TMUX_PANE", None)
+        else:
+            os.environ["TMUX_PANE"] = saved
     return st
 
 
@@ -86,11 +98,11 @@ class TestStopHook:
         assert "additionalContext" not in result.stdout  # never forces continuation
         assert st.clear_flag(tmp_path).exists()  # loud message never consumes the flag
 
-    def test_dead_tmux_server_falls_through_to_loud_manual(self, tmp_path):
+    def test_dead_tmux_server_falls_through_to_loud_manual(self, tmp_path, monkeypatch):
         # $TMUX is set but the server is dead: `tmux has-session` fails. The probe
         # must catch this BEFORE the consuming stop-hook runs, so the flag is
         # preserved and the user gets the same loud systemMessage as no-tmux.
-        st = _promote_and_arm(tmp_path)
+        st = _promote_and_arm(tmp_path, "%9")
         bindir = tmp_path / "bin"
         bindir.mkdir()
         fake = bindir / "tmux"
@@ -110,6 +122,7 @@ class TestStopHook:
         assert result.returncode == 0
         payload = json.loads(result.stdout.strip())
         assert "tmux is unavailable" in payload["systemMessage"]
+        monkeypatch.setenv("TMUX_PANE", "%9")
         assert st.clear_flag(tmp_path).exists()  # NOT consumed — dispatch impossible
 
     def test_manual_mode_unarmed_is_silent(self, tmp_path):
@@ -129,7 +142,7 @@ class TestStopHook:
         assert result.stdout.strip() == ""
 
     def test_auto_mode_sends_keys_and_exits_0(self, tmp_path):
-        st = _promote_and_arm(tmp_path)
+        st = _promote_and_arm(tmp_path, "%9")
         # fake tmux on PATH: the has-session liveness probe succeeds silently;
         # only send-keys records its argv to the marker (so the wait loop below
         # cannot race on the probe having merely created the file).
@@ -158,8 +171,9 @@ class TestStopHook:
         assert marker.exists()
         assert "/clear" in marker.read_text()
 
-    def test_auto_mode_renames_window_before_clear_when_title_armed(self, tmp_path):
+    def test_auto_mode_renames_window_before_clear_when_title_armed(self, tmp_path, monkeypatch):
         from scripts import state as st
+        monkeypatch.setenv("TMUX_PANE", "%9")  # arm from the pane the hook runs in
         st.begin(tmp_path)
         st.request_clear(tmp_path, "HANDOFF FROM HOOK TEST", title="fix the auth bug")
         # fake tmux on PATH: has-session succeeds silently; rename-window and
@@ -196,7 +210,7 @@ class TestStopHook:
         assert calls[1] == "send-keys -t %9 /clear Enter"
 
     def test_auto_mode_skips_rename_when_no_title_armed(self, tmp_path):
-        st = _promote_and_arm(tmp_path)  # no title
+        st = _promote_and_arm(tmp_path, "%9")  # no title
         bindir = tmp_path / "bin"
         bindir.mkdir()
         marker = tmp_path / "tmux-called"

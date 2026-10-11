@@ -399,3 +399,42 @@ class TestArchiveRetention:
         calls.clear()
         st.consume_handoff(tmp_path)
         assert [c for c in calls if c.parent.name == "archive"] == []
+
+
+class TestSessionLineage:
+    """VG-5: handover state is per session lineage (tmux pane), not shared by a repo."""
+
+    def test_two_panes_do_not_share_handoff_or_cooldown(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TMUX_PANE", "%1")
+        st.begin(tmp_path)
+        assert st.request_clear(tmp_path, "PANE ONE") == "armed"
+        monkeypatch.setenv("TMUX_PANE", "%2")
+        assert st.read_handoff(tmp_path) is None            # other pane sees nothing
+        assert st.consume_clear_flag(tmp_path) is False     # and cannot consume the request
+        assert st.request_clear(tmp_path, "PANE TWO") == "armed"  # no cooldown bleed
+        monkeypatch.setenv("TMUX_PANE", "%1")
+        assert st.consume_handoff(tmp_path) == "PANE ONE"
+
+    def test_lineage_is_sanitised(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TMUX_PANE", "../../%evil/..")
+        root = st.session_root(tmp_path)
+        assert root.parent.name == "sessions"
+        assert ".." not in root.name and "/" not in root.name
+
+    def test_no_pane_uses_default(self, tmp_path):
+        assert st.session_root(tmp_path).name == "default"
+
+    def test_active_and_pause_stay_repo_wide(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TMUX_PANE", "%1")
+        st.begin(tmp_path)
+        monkeypatch.setenv("TMUX_PANE", "%2")
+        assert st.is_active(tmp_path)
+        st.pause(tmp_path)
+        monkeypatch.setenv("TMUX_PANE", "%1")
+        assert st.is_paused(tmp_path)
+
+    def test_session_dirs_are_private(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TMUX_PANE", "%1")
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "H")
+        assert st.session_root(tmp_path).stat().st_mode & 0o777 == 0o700

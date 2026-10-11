@@ -70,14 +70,16 @@ class TestPrivateFiles:
         st.set_gate(tmp_path)
         root = vigil_root(tmp_path)
         files = [p for p in root.iterdir() if p.is_file()]
+        files += [p for p in st.session_root(tmp_path).iterdir() if p.is_file()]
         assert {p.name for p in files} >= {"active", "paused", "handoff.md", "handover-gate",
                                            "clear-requested", "rename-title"}
         for p in files:
             assert _mode(p) == 0o600, p.name
 
     def test_wider_existing_file_is_tightened(self, tmp_path):
-        ensure_root(tmp_path)
-        target = vigil_root(tmp_path) / "handoff.md"
+        st.begin(tmp_path)
+        st.set_gate(tmp_path)  # creates the per-session dir
+        target = st.handoff_path(tmp_path)
         target.write_text("x")
         target.chmod(0o644)
         write_private(target, "y")
@@ -109,6 +111,7 @@ class TestPrivateFiles:
 
     def test_symlinked_handoff_is_never_injected(self, tmp_path):
         st.begin(tmp_path)
+        st.set_gate(tmp_path)
         secret = tmp_path / "secret"
         secret.write_text("SSH PRIVATE KEY")
         handoff = st.handoff_path(tmp_path)

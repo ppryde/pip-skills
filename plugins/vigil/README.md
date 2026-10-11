@@ -25,8 +25,14 @@ other plugin.
   `handoff-<timestamp>.md`, newest 20 kept). `<repo-key>` is the repo name plus
   a hash of its root, resolved once for CLI and hooks (`$CLAUDE_PROJECT_DIR`,
   else the enclosing git work tree). An explicit `vigil --root <dir>` is
-  authoritative and overrides `$CLAUDE_PROJECT_DIR`. State is per repo root, not
-  per session: two live sessions in one root share markers and the handoff.
+  authoritative and overrides `$CLAUDE_PROJECT_DIR`. The `active` and
+  `paused` markers and the config are per repo root; the handover state (handoff,
+  armed flag, gate, cooldown, title, archive) is per session lineage under
+  `sessions/<lineage>/`, keyed by the tmux pane (stable across `/clear`, unlike the
+  session id), or `default` outside tmux. Two sessions in different panes of one repo
+  never inject or consume each other's handover; two sessions outside tmux share
+  the `default` lineage. Handoffs written by older versions (repo-level
+  `handoff.md`) are ignored.
 - `vigil begin` activates the watch (auto under tmux, else manual).
 - `vigil context` reports `ctx NN%` against a configured threshold.
 - A `UserPromptSubmit` hook (`vigil nudge-hook`) watches ctx% every turn

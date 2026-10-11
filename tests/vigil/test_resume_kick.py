@@ -40,13 +40,25 @@ def _stdin(monkeypatch, payload):
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
 
 
-def _arm_and_consume(repo):
+def _arm_and_consume(repo, pane="%9"):
     """Active root, handover armed then consumed by the Stop hook — the state
     a real `source=clear` SessionStart always finds: a pending, uninjected
-    handoff."""
-    st.begin(repo)
-    st.request_clear(repo, "KICK TEST HANDOFF")
-    st.consume_clear_flag(repo)
+    handoff. Armed from the same tmux pane lineage the SessionStart runs in
+    (``pane``; None = outside tmux)."""
+    saved = os.environ.get("TMUX_PANE")
+    if pane is None:
+        os.environ.pop("TMUX_PANE", None)
+    else:
+        os.environ["TMUX_PANE"] = pane
+    try:
+        st.begin(repo)
+        st.request_clear(repo, "KICK TEST HANDOFF")
+        st.consume_clear_flag(repo)
+    finally:
+        if saved is None:
+            os.environ.pop("TMUX_PANE", None)
+        else:
+            os.environ["TMUX_PANE"] = saved
 
 
 def _make_tmux_shim(bindir: Path, marker: Path, has_session_rc: int = 0) -> Path:
@@ -286,7 +298,7 @@ class TestResumeKickE2E:
         )
         wrapper.chmod(0o755)
 
-        _arm_and_consume(repo)
+        _arm_and_consume(repo, pane)
         monkeypatch.setenv("VIGIL_TMUX_BIN", str(wrapper))
         monkeypatch.setenv("VIGIL_KICK_DELAY", "0")
         monkeypatch.setenv("TMUX", "e2e-fake,1,0")  # only gates "is TMUX set"
