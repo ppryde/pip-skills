@@ -30,8 +30,8 @@ Guards against HTML structure and CSS usage patterns that produce broken, unstyl
 > `detect: hybrid` — pattern: `style="(?![^"]*mso-hide)[^"]*display:\s*none` + check: the pattern inspects the whole `style` attribute, so mso-hide before or after display:none is accepted; for every display:none inside a style block, check that the same rule also contains mso-hide: all
 > `flags: verify`
 
-**[HTML-004]** `transactional: mortal | marketing: mortal` — Do not nest `<table>` elements more than 3–4 levels deep (MSO ghost tables are not counted).
-> Deep table nesting causes rendering performance issues and layout glitches in older Outlook and Yahoo clients. Heavily nested tables also become unmaintainable. Flatten layout where possible; use padding and spacer rows for spacing rather than nested tables.
+**[HTML-004]** `transactional: venial | marketing: venial` — Do not nest `<table>` elements more than 3–4 levels deep (MSO ghost tables are not counted).
+> Deep table nesting is a maintainability and old-client performance heuristic, not a documented rendering break: a normal hybrid layout (wrapper, container, row, column, button) is already five tables deep, so a mortal sin would block sends for no client failure. Very deep nesting can slow older Outlook and Yahoo clients and becomes unmaintainable. Flatten layout where possible; use padding and spacer rows for spacing rather than nested tables.
 > `detect: contextual` — count table nesting depth, excluding tables inside MSO conditional comments (`<!--[if mso]>` ghost tables); flag structures exceeding 4 levels
 
 **[HTML-005]** `transactional: mortal | marketing: mortal` — `font-family` declarations must include at least one web-safe fallback.

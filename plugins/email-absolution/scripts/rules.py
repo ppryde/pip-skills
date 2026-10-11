@@ -12,6 +12,11 @@ Subcommands
   scan --files F... ...  Phase 1 for a config: file:line | id | matched line for every active
                          regex rule (line by line; binary, >2 MiB, symlinked and outside-repo files are listed as skipped;
                          5 s per-file timer on POSIX; matched lines cut to 200 characters)
+  scan --rev OID ...     the same, reading each --files path from commit OID (`git cat-file`) instead of the work tree
+                         (a PR head that is not checked out); only regular, non-symlink blobs are read
+  hunks --base B [--rev OID] --files F...
+                         added line ranges per file from `git diff -U0` (path: 12-15,40 | none | unknown);
+                         Visitation uses them to tell changed lines from existing debt
   savepath PATH          ok | exists | outside-repo for a save target (exit 0 | 3 | 4); symlinks resolved
   fire FILE...           first hit per regex rule, ignoring config (used by the golden test)
 
@@ -780,6 +785,88 @@ def read_scannable(path: Path):
     return raw.decode("utf-8", errors="replace"), ""
 
 
+REV_RE = re.compile(r"^[0-9a-f]{40}$")
+BASE_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._/~^@{}-]*$")
+
+
+def _safe_repo_path(path: str) -> bool:
+    """A repo-relative path usable as a git pathspec: no option look-alike, NUL, newline, absolute or `..` part."""
+    if not path or path.startswith(("-", "/", ":")) or "\0" in path or "\n" in path:
+        return False
+    return ".." not in path.replace("\\", "/").split("/")
+
+
+def read_blob(rev: str, path: str):
+    """(text, skipped_reason) for `path` at commit `rev`, with the same limits as read_scannable.
+
+    The blob may come from an untrusted PR: rev must be a full sha, the path a plain repo-relative
+    one, symlinks and submodules are skipped, and at most cap+1 bytes are read.
+    """
+    if not REV_RE.match(rev or ""):
+        return "", "bad revision (a full 40-hex commit id is required)"
+    if not _safe_repo_path(path):
+        return "", "unsafe path"
+    try:
+        ls = subprocess.run(["git", "ls-tree", "-z", "--full-tree", rev, "--", f":(top,literal){path}"], capture_output=True, timeout=30)
+        if ls.returncode != 0 or not ls.stdout:
+            return "", "not in that commit"
+        mode = ls.stdout.split(b" ", 1)[0]
+        if mode not in (b"100644", b"100755"):
+            return "", "symlink or not a regular file" if mode == b"120000" else "not a regular file"
+        proc = subprocess.Popen(["git", "cat-file", "blob", f"{rev}:{path}"], stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL)
+        raw = proc.stdout.read(MAX_SCAN_BYTES + 1)
+        proc.stdout.close()
+        if len(raw) > MAX_SCAN_BYTES:
+            proc.kill()
+        proc.wait(timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        return "", f"unreadable: {e}"
+    if len(raw) > MAX_SCAN_BYTES:
+        return "", f"over {MAX_SCAN_BYTES // (1024 * 1024)} MiB"
+    if b"\0" in raw[:8192]:
+        return "", "binary"
+    return raw.decode("utf-8", errors="replace"), ""
+
+
+HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def parse_hunks(diff_text: str) -> list:
+    """Added line ranges [(first, last)] of a `git diff -U0` text (pure deletions add none)."""
+    out = []
+    for ln in diff_text.splitlines():
+        m = HUNK_RE.match(ln)
+        if m:
+            start, count = int(m.group(1)), int(m.group(2)) if m.group(2) is not None else 1
+            if count:
+                out.append((start, start + count - 1))
+    return out
+
+
+def render_hunks(base: str, rev: str, files) -> str:
+    """`path: 3-9,40` | `path: none` (nothing added) | `path: unknown` (git could not say: treat every line as changed)."""
+    if not BASE_RE.match(base or "") or (rev and not REV_RE.match(rev)):
+        return "error: --base must be a plain ref or sha and --rev a full commit id\n"
+    lines = []
+    for fp in files:
+        if not _safe_repo_path(fp):
+            lines.append(f"{fp}: unknown")
+            continue
+        cmd = ["git", "diff", "-U0", "--no-color", "--no-ext-diff", base] + ([rev] if rev else []) + ["--", f":(top,literal){fp}"]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            lines.append(f"{fp}: unknown")
+            continue
+        if r.returncode != 0 or not r.stdout.strip():
+            lines.append(f"{fp}: unknown")
+            continue
+        spans = parse_hunks(r.stdout)
+        lines.append(f"{fp}: " + (",".join(str(a) if a == b else f"{a}-{b}" for a, b in spans) or "none"))
+    return "\n".join(lines) + "\n"
+
+
 def fire_ids(rules, text: str) -> dict:
     """{rule id: first matching line number} for regex/hybrid rules, line by line.
 
@@ -893,7 +980,7 @@ def scan_with_timeout(rules, text: str, seconds: float = None):
         signal.signal(signal.SIGALRM, old)
 
 
-def render_scan(docs, cfg: Config, files) -> str:
+def render_scan(docs, cfg: Config, files, rev: str = "") -> str:
     active, _filt, warnings = select_rules(docs, cfg)
     rx = [r for r in active if r.detect is not None and r.detect.kind in ("regex", "hybrid")]
     out = list(warnings)
@@ -901,7 +988,7 @@ def render_scan(docs, cfg: Config, files) -> str:
                "([verify] = read the line and confirm before recording a finding)")
     skipped, timed_out, total = [], [], 0
     for fp in files:
-        text, why = read_scannable(Path(fp))
+        text, why = read_blob(rev, fp) if rev else read_scannable(Path(fp))
         if why:
             skipped.append(f"skipped: {fp} ({why})")
             continue
@@ -1020,6 +1107,11 @@ def main(argv=None) -> int:
     sc = sub.add_parser("scan")
     _add_cfg(sc)
     sc.add_argument("--files", nargs="+", required=True)
+    sc.add_argument("--rev", default="", help="read the files from this commit (full sha) instead of the work tree")
+    hp = sub.add_parser("hunks")
+    hp.add_argument("--base", required=True)
+    hp.add_argument("--rev", default="")
+    hp.add_argument("--files", nargs="+", required=True)
     s = sub.add_parser("show")
     s.add_argument("ids", nargs="+")
     sp = sub.add_parser("savepath", help="ok | exists | outside-repo for a Scribe save target (exit 0 | 3 | 4)")
@@ -1055,6 +1147,10 @@ def main(argv=None) -> int:
         status = save_status(a.path)
         print(status)
         return SAVE_CODES[status]
+    if a.cmd == "hunks":
+        out = render_hunks(a.base, a.rev, a.files)
+        sys.stdout.write(out)
+        return 2 if out.startswith("error:") else 0
     docs, problems = load(ddir)
     if problems:
         for name, line, msg in problems:
@@ -1070,7 +1166,7 @@ def main(argv=None) -> int:
         sys.stdout.write(render_constraints(docs, _cfg(a)))
         return 0
     if a.cmd == "scan":
-        sys.stdout.write(render_scan(docs, _cfg(a), a.files))
+        sys.stdout.write(render_scan(docs, _cfg(a), a.files, a.rev))
         return 0
     if a.cmd == "show":
         text, missing = render_show(docs, a.ids)

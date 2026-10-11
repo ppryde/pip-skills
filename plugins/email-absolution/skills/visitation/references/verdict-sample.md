@@ -13,7 +13,7 @@ Doctrines: rendering, html-css, content-ux, accessibility,
            deliverability, gotchas, tooling, liquid
 Templates in scope: 2 changed, 1 added
 
-MORTAL SINS — must be absolved before merge (3):
+MORTAL SINS — must be absolved before merge (4):
 -------------------------------------------------
 [RENDER-002] Image missing display: block
   File: src/emails/order-confirmation.liquid:45 (modified)
@@ -30,6 +30,11 @@ MORTAL SINS — must be absolved before merge (3):
   Found: <table width="600" cellpadding="0" cellspacing="0" border="0">
   Requires: role="presentation" attribute added
 
+[RENDER-002] Image missing display: block (pre-existing)
+  File: src/emails/order-confirmation.liquid:12 (modified; line not in this diff)
+  Found: <img src="logo.png" width="120">
+  Requires: display: block in the image's inline style
+
 VENIAL SINS — should be absolved (1):
 --------------------------------------
 [HTML-008] Inline style uses CSS shorthand padding
@@ -37,13 +42,13 @@ VENIAL SINS — should be absolved (1):
   Found: style="padding: 16px 24px"
   Requires: padding-top/right/bottom/left longhand on <td>
 
-EXISTING DEBT (not introduced in this diff):
-  src/emails/order-confirmation.liquid — 2 pre-existing venial sins
-  (run /email-absolution:elder to see full list)
+EXISTING DEBT (venial and counsel on lines outside this diff):
+  src/emails/order-confirmation.liquid — 2 venial (HTML-006, ACCESS-012), 1 counsel (UX-004)
+  (run /email-absolution:elder to see the full list)
 
 FOUND RIGHTEOUS in this diff:
   src/emails/shipping-notification.liquid (modified — clean)
 
-VERDICT: The Visitation finds 3 mortal sins in this branch.
+VERDICT: The Visitation finds 4 mortal sins in this branch (1 pre-existing).
 Absolve them before this branch earns its place in the sanctum.
 ```

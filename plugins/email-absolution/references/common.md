@@ -10,7 +10,7 @@ Elder, Visitation and Scribe read this file at Step 1. Skills cite a section by 
 
 ## Tool discipline
 
-Use dedicated tools, not Bash equivalents: `Read` to read, `Glob` to find files, `Grep` to search content. `Bash` is only for the read-only `git` / `gh` commands in `audit.md §Scope` and for `rules.py` (see Rules). Each skill states its own `Write` / `Edit` allowance.
+Use dedicated tools, not Bash equivalents: `Read` to read, `Glob` to find files, `Grep` to search content. `Bash` is only for the read-only `git` / `gh` commands in `audit.md §Scope` (and Visitation's `pr-scope.md`) and for `rules.py` (see Rules). Each skill states its own `Write` / `Edit` allowance.
 
 ## Config
 
