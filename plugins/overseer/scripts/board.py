@@ -6,7 +6,6 @@ from pathlib import Path
 from scripts import db
 from scripts.relations import epic_rollup, is_epic, is_ready
 from scripts.sprints import load_sprints
-from scripts.store import state_root
 
 
 def board_data(repo_root: Path) -> dict:
@@ -61,7 +60,7 @@ def board_data(repo_root: Path) -> dict:
     conn = db.connect(repo_root)
     live_cards, card_quarantined = db.load_live_cards(conn)
     archived_cards = db.load_archived_cards(conn)
-    sprints, sprint_quarantined = load_sprints(state_root(repo_root))
+    sprints, sprint_quarantined = load_sprints(conn)
 
     # Pool = live + archived for ALL relation computes
     pool = live_cards + archived_cards

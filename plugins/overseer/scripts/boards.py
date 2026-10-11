@@ -12,7 +12,10 @@ stranded. ``merge_boards`` folds them into the resolved board:
 - label colours unioned (the target's win on a clash);
 - ``knowledge/`` and ``usage.jsonl`` MOVE to the target when the target has
   none of its own (the common case: an empty board that won the lookup);
-  when both sides have one, the source's stays where it is;
+  when both sides have one, the source's stays where it is. Schema v2 keeps
+  facts in board.db, so a moved ``knowledge/`` is imported into the target's
+  tables (never overwriting) and the views refreshed; sprints a v2 source holds
+  are added by id (the target's win);
 - each absorbed folder is RENAMED ``<name>.absorbed-<stamp>``, never deleted,
   so anything left behind is a folder rename away.
 
@@ -26,7 +29,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from scripts import config, db
+from scripts import config, db, knowledge, migrate, views
 from scripts.store import derive_repo_label, derive_repo_root, slugify
 
 # Per-board files beside board.db worth carrying across when the target has
@@ -188,6 +191,88 @@ def _merge_label_colors(target: sqlite3.Connection, source: sqlite3.Connection) 
     return n
 
 
+def _merge_sprints(target: sqlite3.Connection, folder: Path) -> int:
+    """Add the sprints a schema-v2 source board holds that the target lacks."""
+    source = _read_only(folder / "board.db")
+    if source is None:
+        return 0
+    try:
+        try:
+            rows = source.execute("SELECT * FROM sprints").fetchall()
+        except sqlite3.OperationalError:
+            return 0  # a v1 source: its sprint files stay in the absorbed folder
+        added = 0
+        with db.txn(target):
+            for r in rows:
+                cur = target.execute(
+                    "INSERT OR IGNORE INTO sprints(id, status, budget_estimate, budget_actual, "
+                    "started, body, updated) VALUES (?,?,?,?,?,?,?)",
+                    (r["id"], r["status"], r["budget_estimate"], r["budget_actual"],
+                     r["started"], r["body"], r["updated"]))
+                added += max(0, cur.rowcount)
+        return added
+    finally:
+        source.close()
+
+
+def _merge_knowledge_rows(target: sqlite3.Connection, folder: Path) -> tuple[int, list[dict[str, str]]]:
+    """Add the facts and pending facts a schema-v2 source board holds that the
+    target lacks. A fact whose id the target already holds with the SAME
+    statement is the same fact (skipped); with a DIFFERENT statement it is a
+    different fact that merely shares a per-board ``KB-nnn``, so it is re-minted
+    under the next free id (``superseded_by`` links follow). Returns the count
+    added and the ``[{"from", "to"}]`` re-mints."""
+    source = _read_only(folder / "board.db")
+    if source is None:
+        return 0, []
+    try:
+        try:
+            facts = source.execute("SELECT * FROM facts").fetchall()
+            pending = source.execute("SELECT * FROM pending_facts").fetchall()
+        except sqlite3.OperationalError:
+            return 0, []  # a v1 source: its knowledge/ files are imported instead
+        added = 0
+        remints: list[dict[str, str]] = []
+        with db.txn(target):
+            mapping: dict[str, str] = {}
+            inserted: set[str] = set()
+            for r in facts:
+                held = target.execute("SELECT statement FROM facts WHERE id = ?", (r["id"],)).fetchone()
+                if held is not None and held["statement"] != r["statement"]:
+                    mapping[r["id"]] = knowledge.mint_fact_id(target)
+                    remints.append({"from": r["id"], "to": mapping[r["id"]]})
+                    _insert_fact(target, r, mapping)
+                    added += 1
+                    inserted.add(r["id"])
+                else:
+                    if _insert_fact(target, r, mapping) > 0:
+                        added += 1
+                        inserted.add(r["id"])
+            for r in facts:  # supersession links follow a re-mint wherever it fell in the order
+                if r["id"] in inserted and r["superseded_by"] in mapping:
+                    target.execute("UPDATE facts SET superseded_by = ? WHERE id = ?",
+                                   (mapping[r["superseded_by"]], mapping.get(r["id"], r["id"])))
+            for r in pending:
+                cols = r.keys()
+                cur = target.execute(
+                    f"INSERT OR IGNORE INTO pending_facts({', '.join(chr(34) + c + chr(34) for c in cols)}) "
+                    f"VALUES ({', '.join('?' for _ in cols)})", tuple(r))
+                added += max(0, cur.rowcount)
+        return added, remints
+    finally:
+        source.close()
+
+
+def _insert_fact(target: sqlite3.Connection, r: sqlite3.Row, mapping: dict[str, str]) -> int:
+    values = {c: r[c] for c in r.keys()}
+    values["id"] = mapping.get(r["id"], r["id"])
+    cols = list(values)
+    cur = target.execute(
+        f"INSERT OR IGNORE INTO facts({', '.join(chr(34) + c + chr(34) for c in cols)}) "
+        f"VALUES ({', '.join('?' for _ in cols)})", tuple(values[c] for c in cols))
+    return cur.rowcount
+
+
 def merge_boards(repo_root: Path, *, dry_run: bool = False,
                  now: float | None = None) -> dict[str, Any]:
     """Fold every other board for ``repo_root`` into the resolved one (see
@@ -225,6 +310,8 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
             finally:
                 source.close()
             target_folder = Path(result["target"])
+            sprints_added = 0 if dry_run else _merge_sprints(target_conn, folder)
+            facts_added, remints = (0, []) if dry_run else _merge_knowledge_rows(target_conn, folder)
             moved: list[str] = []
             left_behind: list[str] = []
             for name in SIDECARS:
@@ -232,11 +319,21 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
                 if not src.exists():
                     continue
                 if dst.exists():
+                    if name == "knowledge" and not dry_run:
+                        # The target already has a knowledge/ (views): take the
+                        # source's legacy fact files into the tables by id.
+                        with db.txn(target_conn):
+                            report = migrate.import_state(target_conn, folder)
+                        facts_added += report.facts + report.retired + report.pending
+                        continue
                     left_behind.append(name)
                     continue
                 moved.append(name)
                 if not dry_run:
                     shutil.move(str(src), str(dst))
+            if moved and not dry_run:
+                with db.txn(target_conn):
+                    migrate.import_state(target_conn, target_folder)
             renamed = folder.with_name(f"{folder.name}.absorbed-{stamp}")
             if not dry_run:
                 folder.rename(renamed)
@@ -245,9 +342,14 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
                 "renamed_to": str(renamed),
                 **stats,
                 "label_colors": colours,
+                "sprints": sprints_added,
+                "facts": facts_added,
+                "facts_reminted": remints,
                 "moved": moved,
                 "left_behind": left_behind,
             })
+        if not dry_run and result["absorbed"]:
+            views.export(target_conn, Path(result["target"]))
     finally:
         target_conn.close()
     return result

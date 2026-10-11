@@ -2,14 +2,23 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 USAGE_FILENAME = "usage.jsonl"
 
 
 def append_usage(root: Path, entry: dict) -> None:
-    with (root / USAGE_FILENAME).open("a") as fh:
-        fh.write(json.dumps(entry) + "\n")
+    """Append one line with a single ``os.write`` on an ``O_APPEND`` descriptor:
+    the kernel positions and writes it atomically, so concurrent hooks cannot
+    interleave bytes. (A line over ``PIPE_BUF`` is still one write on a regular
+    file; real lines are ~200 bytes.)"""
+    line = (json.dumps(entry) + "\n").encode()
+    fd = os.open(root / USAGE_FILENAME, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    try:
+        os.write(fd, line)
+    finally:
+        os.close(fd)
 
 
 def load_usage(root: Path) -> tuple[list[dict], int]:

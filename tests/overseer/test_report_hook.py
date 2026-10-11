@@ -78,7 +78,7 @@ def test_reviewer_verdict_lands_in_review_log_usage_and_pending(repo, tmp_path, 
     assert entry["card"] == "WF-001" and entry["role"] == "reviewer" and entry["round"] == 1
     assert (entry["tokens"], entry["budget_tokens"]) == (9542, 542)
     assert entry["source"] == "hook"
-    [fact] = load_pending(repo)
+    [fact] = load_pending(db.connect(repo, migrate=False))
     assert (fact.statement, fact.tags, fact.source) == ("x is y", ["t"], str(path))
 
 
@@ -127,7 +127,7 @@ def test_planner_learned_comes_from_json_not_detail_text(repo, tmp_path, monkeyp
     })
     section = _card(repo).sections["## Plan"]
     assert section == "### Chunks\n1. build it"
-    [fact] = load_pending(repo)
+    [fact] = load_pending(db.connect(repo, migrate=False))
     assert fact.statement == "the calibration figure was stale"
 
 

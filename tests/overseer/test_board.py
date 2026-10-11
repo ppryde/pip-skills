@@ -85,7 +85,6 @@ class TestBoardData:
     def test_sprint_list(self, repo):
         from scripts.board import board_data
         from scripts.sprints import save_sprint, Sprint
-        root = state_root(repo)
         sprint_text = """---
 id: 2026-07-S1
 status: active
@@ -98,7 +97,7 @@ started: 2026-07-07
 ## Goal
 Test sprint."""
         sprint = Sprint.from_text(sprint_text)
-        save_sprint(root, sprint)
+        save_sprint(db.connect(repo, migrate=False), sprint)
 
         data = board_data(repo)
         assert len(data["sprints"]) == 1
@@ -109,19 +108,16 @@ Test sprint."""
         assert s["budget"]["estimate"] == 100_000
         assert s["budget"]["actual"] == 50_000
 
-    def test_quarantined_sprints(self, repo):
-        """Cards no longer quarantine at this layer — board.db rows are
-        always structurally valid, so ``board_data``'s ``quarantined`` list
-        can only ever carry corrupt SPRINT files now (sprints stay
-        file-based)."""
+    def test_a_corrupt_sprint_file_is_never_read_or_quarantined(self, repo):
+        """Sprints live in board.db now: a stray bad file in the sprints/ view
+        folder is neither parsed nor moved, so ``quarantined`` stays empty."""
         from scripts.board import board_data
         root = state_root(repo)
         (root / "sprints" / "corrupt-sprint.md").write_text("garbage")
 
         data = board_data(repo)
-        assert len(data["quarantined"]) == 1
-        quarantined_names = {p.split("/")[-1] for p in data["quarantined"]}
-        assert "corrupt-sprint.md" in quarantined_names
+        assert data["quarantined"] == []
+        assert (root / "sprints" / "corrupt-sprint.md").read_text() == "garbage"
 
     def test_card_fields_in_json(self, repo, conn):
         from scripts.board import board_data
