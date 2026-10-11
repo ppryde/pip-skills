@@ -78,3 +78,13 @@ TOOL LOG
 - step 5 blind spots: <finding ids | clean>
 - grep fallbacks: <files, or none>
 ```
+
+Finally, record the outcome once (it feeds the user's `stats` report, never your context):
+
+```bash
+python …/scripts/cli.py record-review --findings <N> --via-index <M> --steps <step:count,...>
+```
+
+`N` is every finding you report; `M` is how many came from a concordance section or command
+(steps 1-5 rows, verdicts, drill-downs), not from your own reading or a grep fallback; `--steps`
+counts findings per procedure step (e.g. `1:1,3:2`; omit when there are none).

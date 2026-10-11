@@ -1,9 +1,10 @@
 import json
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 
-from scripts.review import open_store
+from scripts import usage
 
 CLI = Path(__file__).resolve().parents[2] / "plugins" / "concordance" / "scripts" / "cli.py"
 
@@ -102,8 +103,8 @@ def test_outside_a_repo_exits_2(tmp_path: Path) -> None:
 def test_queries_are_recorded_as_events(make_repo) -> None:
     repo = make_repo(BASE)
     cli(repo.root, "callers", "refund")
-    st = open_store(repo.root)
-    assert st.conn.execute("SELECT command FROM events").fetchall() == [("callers",)]
+    rows = sqlite3.connect(usage.usage_path()).execute("SELECT command FROM events").fetchall()
+    assert rows == [("callers",)]
 
 
 def test_review_context_logs_budget_cuts_and_diff_size(make_repo) -> None:
@@ -113,9 +114,10 @@ def test_review_context_logs_budget_cuts_and_diff_size(make_repo) -> None:
     assert cli(repo.root, "touched").returncode == 0
     out = cli(repo.root, "review-context", "--budget", "40")
     assert out.returncode == 0, out.stderr
-    rows = open_store(repo.root).conn.execute(
+    rows = sqlite3.connect(usage.usage_path()).execute(
         "SELECT command, payload FROM events ORDER BY ts").fetchall()
     assert [c for c, _ in rows] == ["touched", "review-context"]
     logged = json.loads(rows[-1][1])
     assert logged["budget"] == 40 and logged["files"] == 3 and logged["touched"] >= 1
+    assert "verdicts" in logged
     assert logged["cut"] or logged["omitted"]

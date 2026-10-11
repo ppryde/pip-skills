@@ -27,11 +27,20 @@ python plugins/concordance/scripts/cli.py callers NAME     # did-you-mean on a m
 python plugins/concordance/scripts/cli.py tests NAME [--hops 2]
 python plugins/concordance/scripts/cli.py removed | sig-drift | literals | touched | coverage | index
 python plugins/concordance/scripts/cli.py setup-ts         # once, for TypeScript
+python plugins/concordance/scripts/cli.py stats [--days 30] [--repo this|all] [--json]
 ```
 
 The base defaults to the merge-base with the default branch. The index builds lazily on first
 use and only re-parses files whose content changed. `--budget` caps output size (default 4000
 for `review-context`, 1500 for the other commands).
+
+## Usage log
+
+Every query appends one row to `$CLAUDE_CONFIG_DIR/concordance/usage.db` (override:
+`CONCORDANCE_USAGE_DB`): command, repo, latency, tokens returned, budget cuts, diff size and
+verdicts. Reviews add one `record-review` row with their findings. The log is kept for good and
+is separate from the per-repo index caches, so deleting an index loses no history. `stats`
+reports usage, budget pressure by diff size and effectiveness; `--json` is for chronicle.
 
 ## Worktrees
 

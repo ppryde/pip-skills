@@ -56,9 +56,6 @@ CREATE TABLE IF NOT EXISTS view_files(
   view_id TEXT NOT NULL, path TEXT NOT NULL, blob_sha TEXT NOT NULL,
   PRIMARY KEY(view_id, path));
 CREATE INDEX IF NOT EXISTS view_files_fact ON view_files(path, blob_sha);
-CREATE TABLE IF NOT EXISTS events(
-  ts REAL NOT NULL, session TEXT, command TEXT NOT NULL, view_id TEXT,
-  latency_ms INTEGER, est_tokens INTEGER, payload TEXT);
 """
 
 _CHILD_TABLES = ("symbols", "refs", "literals", "guards")
@@ -284,11 +281,3 @@ class Store:
         failed = [(p, err or "parse failed") for p, ok, err in rows if ok == 0]
         missing = [p for p, ok, _ in rows if ok is None]
         return Coverage(len(rows), failed, missing)
-
-    def record_event(self, command: str, view_id: str | None, latency_ms: int, est_tokens: int,
-                     payload: str = "", session: str = "") -> None:
-        self.conn.execute(
-            "INSERT INTO events(ts, session, command, view_id, latency_ms, est_tokens, payload) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (time.time(), session, command, view_id, latency_ms, est_tokens, payload),
-        )

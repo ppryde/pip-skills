@@ -12,7 +12,7 @@ from pathlib import Path
 if __package__ in (None, ""):  # direct invocation: put the plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import extract_ts, gitio
+from scripts import extract_ts, gitio, paths, usage
 from scripts.index import LockTimeout, ensure_view
 from scripts.query import Snippets, callers, guarding_tests
 from scripts.render import Section, est_tokens, render
@@ -67,6 +67,14 @@ def _parser() -> argparse.ArgumentParser:
     sub.choices["tests"].add_argument("--hops", type=int, default=2)
     add("coverage", "files indexed, failed and skipped in this worktree's view", diff=False)
     sub.add_parser("setup-ts", help="install the pinned TypeScript parser (npm ci)")
+    rr = sub.add_parser("record-review", help="record a finished review's findings (usage log)")
+    rr.add_argument("--findings", type=int, required=True)
+    rr.add_argument("--via-index", type=int, required=True)
+    rr.add_argument("--steps", default="", help="findings per procedure step, e.g. 1:2,3:1")
+    st = sub.add_parser("stats", help="usage and effectiveness report from the usage log")
+    st.add_argument("--days", type=int, default=30)
+    st.add_argument("--repo", choices=("this", "all"), default="all")
+    st.add_argument("--json", action="store_true")
     return p
 
 
@@ -74,7 +82,8 @@ def _diff_command(args: argparse.Namespace, cwd: Path,
                   stats: dict[str, object]) -> tuple[str, int, str]:
     ctx = build(cwd, args.base, args.deadline)
     view_id = ctx.head.view_id
-    stats.update(touched=len(ctx.diff.touched), files=ctx.head_cov.total)
+    stats.update(touched=len(ctx.diff.touched), files=ctx.head_cov.total,
+                 verdicts=len(verdicts(ctx)), repo_name=ctx.root.name)
     by_command: dict[str, Callable[[], list[Section]]] = {
         "removed": lambda: [contract_section(ctx)],
         "sig-drift": lambda: [verdict_section(ctx), drift_section(ctx)],
@@ -141,11 +150,86 @@ def _miss(name: str, found: Resolved) -> str:
     return f"{name} not found in this worktree's view"
 
 
+def _repo(cwd: Path) -> str:
+    try:
+        return paths.repo_key(gitio.common_dir(cwd))
+    except gitio.GitError:
+        return ""
+
+
+def _parse_steps(text: str) -> dict[str, int]:
+    steps: dict[str, int] = {}
+    for part in filter(None, text.split(",")):
+        step, sep, count = part.partition(":")
+        if not sep or not step.strip().isdigit() or not count.strip().isdigit():
+            raise ValueError(f"--steps expects step:count pairs like 1:2,3:1, got {part!r}")
+        steps[step.strip()] = int(count)
+    return steps
+
+
+def _say(text: str) -> None:
+    """Print to stdout; a closed pipe (`| head`) is a quiet end, not a traceback."""
+    try:
+        print(text)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())  # silence exit-time flush
+
+
+def _record_review(args: argparse.Namespace, cwd: Path) -> int:
+    if not 0 <= args.via_index <= args.findings:
+        print("concordance: --via-index must be between 0 and --findings", file=sys.stderr)
+        return 2
+    try:
+        steps = _parse_steps(args.steps)
+    except ValueError as exc:
+        print(f"concordance: {exc}", file=sys.stderr)
+        return 2
+    usage.record("record-review", _repo(cwd), None, 0, 0, 0,
+                 {"findings": args.findings, "via_index": args.via_index, "steps": steps},
+                 session=os.environ.get("CLAUDE_SESSION_ID", ""))
+    _say(f"recorded review: {args.findings} findings ({args.via_index} via concordance)")
+    return 0
+
+
+def _stats(args: argparse.Namespace, cwd: Path) -> int:
+    repo = _repo(cwd) if args.repo == "this" else None
+    if args.repo == "this" and not repo:
+        print("concordance: --repo this needs a git repository", file=sys.stderr)
+        return 2
+    rep = usage.report(days=args.days, repo=repo)
+    _say(json.dumps(rep, indent=2) if args.json else usage.format_report(rep))
+    return 0
+
+
+def _log(command: str, cwd: Path, view_id: str | None, started: float, text: str, code: int,
+         payload: dict[str, object]) -> None:
+    try:
+        usage.record(command, _repo(cwd), view_id, int((time.monotonic() - started) * 1000),
+                     est_tokens(text), code, payload,
+                     session=os.environ.get("CLAUDE_SESSION_ID", ""))
+    except Exception:  # noqa: BLE001, S110 - the usage log must never fail a query
+        pass
+
+
+def _utf8_streams() -> None:
+    """Never let an odd terminal encoding turn output into a traceback."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_streams()
     args = _parser().parse_args(argv)
     if args.command == "setup-ts":
         return extract_ts.setup()
     cwd = Path.cwd()
+    if args.command == "record-review":
+        return _record_review(args, cwd)
+    if args.command == "stats":
+        return _stats(args, cwd)
     started = time.monotonic()
     stats: dict[str, object] = {}
     try:
@@ -155,18 +239,14 @@ def main(argv: list[str] | None = None) -> int:
             text, code, view_id = _diff_command(args, cwd, stats)
     except (gitio.GitError, LockTimeout) as exc:
         print(f"concordance: {exc}", file=sys.stderr)
+        _log(args.command, cwd, None, started, "", 2, {"error": type(exc).__name__})
         return 2
     except Exception as exc:  # noqa: BLE001 - internal error: exit 2, never a bare traceback
         print(f"concordance: internal error: {exc!r}", file=sys.stderr)
+        _log(args.command, cwd, None, started, "", 2, {"error": type(exc).__name__})
         return 2
-    print(text)
-    try:
-        open_store(cwd).record_event(
-            args.command, view_id, int((time.monotonic() - started) * 1000), est_tokens(text),
-            payload=json.dumps(stats) if stats else "",
-            session=os.environ.get("CLAUDE_SESSION_ID", ""))
-    except Exception:  # noqa: BLE001, S110 - telemetry must never fail a query
-        pass
+    _say(text)
+    _log(args.command, cwd, view_id, started, text, code, stats)
     return code
 
 

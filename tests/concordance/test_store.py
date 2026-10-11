@@ -69,16 +69,12 @@ def test_orphan_facts_are_deleted_with_their_children(tmp_path: Path) -> None:
         assert st.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
 
 
-def test_meta_and_events(tmp_path: Path) -> None:
+def test_meta(tmp_path: Path) -> None:
     st = Store(tmp_path / "i.db")
     assert st.meta_get("schema_version") == "1"
     st.meta_set("last_gc", "5")
     assert st.meta_get("last_gc") == "5"
-    st.record_event("callers", "wt-1", 12, 300)
-    row = st.conn.execute(
-        "SELECT command, view_id, latency_ms, est_tokens FROM events"
-    ).fetchone()
-    assert row == ("callers", "wt-1", 12, 300)
+    assert not hasattr(st, "record_event")
 
 
 def test_file_facts_from_dict() -> None:
