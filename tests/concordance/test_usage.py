@@ -112,3 +112,53 @@ def test_printing_non_ascii_under_an_ascii_stdout_does_not_traceback(make_repo) 
     out = cli(repo.root, "callers", "café", env=env)  # the miss message echoes the name
     assert out.returncode == 0 and "Traceback" not in out.stderr
     assert "caf" in out.stdout
+
+
+def test_failed_runs_are_counted_apart_from_cost(tmp_path: Path) -> None:
+    db = tmp_path / "u.db"
+    usage.record("callers", "r", "wt", 10, 100, 0, {}, path=db)
+    usage.record("callers", "r", "wt", 20, 300, 0, {}, path=db)
+    usage.record("callers", "r", None, 9000, 0, 2, {"error": "GitError"}, path=db)
+    usage.record("check", "r", None, 5, 0, 2, {"error": "GitError"}, path=db)
+    rep = usage.report(path=db)
+    callers = rep["commands"]["callers"]
+    assert callers["runs"] == 2 and callers["failures"] == 1
+    assert callers["latency_p90"] == 20 and callers["tokens_p50"] == 100
+    assert rep["commands"]["check"]["runs"] == 0 and rep["commands"]["check"]["failures"] == 1
+    assert "failed" in usage.format_report(rep)
+
+
+def test_percentile_is_nearest_rank() -> None:
+    assert usage._pct([1, 2, 3, 4, 5, 6], 0.9) == 6
+    assert usage._pct([1, 2, 3, 4, 5, 6], 0.5) == 3
+    assert usage._pct([7], 0.9) == 7
+
+
+def test_unreadable_payload_rows_are_skipped_and_counted(tmp_path: Path) -> None:
+    db = tmp_path / "u.db"
+    usage.record("callers", "r", "wt", 10, 100, 0, {}, path=db)
+    con = sqlite3.connect(db)
+    con.execute("UPDATE events SET payload='{not json' WHERE 1")
+    con.commit()
+    con.close()
+    usage.record("callers", "r", "wt", 10, 100, 0, {}, path=db)
+    rep = usage.report(path=db)
+    assert rep["skipped_rows"] == 1 and rep["commands"]["callers"]["runs"] == 1
+
+
+def test_corrupt_usage_db_exits_2_without_traceback(tmp_path: Path, make_repo) -> None:
+    repo = make_repo({"a.py": "x = 1\n"})
+    bad = tmp_path / "bad.db"
+    bad.write_bytes(b"this is not a sqlite database" * 50)
+    env = {**os.environ, "CONCORDANCE_USAGE_DB": str(bad)}
+    for args in (("record-review", "--findings", "1", "--via-index", "1"), ("stats",)):
+        out = cli(repo.root, *args, env=env)
+        assert out.returncode == 2 and "Traceback" not in out.stderr
+        assert out.stderr.startswith("concordance:")
+
+
+def test_record_review_rejects_steps_exceeding_findings(make_repo) -> None:
+    repo = make_repo({"a.py": "x = 1\n"})
+    out = cli(repo.root, "record-review", "--findings", "1", "--via-index", "1",
+              "--steps", "1:1,3:1")
+    assert out.returncode == 2 and "--steps" in out.stderr and "Traceback" not in out.stderr

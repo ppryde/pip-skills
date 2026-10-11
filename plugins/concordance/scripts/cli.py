@@ -36,7 +36,7 @@ from scripts.review import (
 from scripts.views import worktree_view
 
 DEFAULT_BUDGET = 1500
-REVIEW_BUDGET = 4000  # provisional: tune from the events log (render stats + diff size)
+REVIEW_BUDGET = 4000  # provisional: tune from the usage log (render stats + diff size)
 DEFAULT_DEADLINE = 60.0
 
 
@@ -185,9 +185,16 @@ def _record_review(args: argparse.Namespace, cwd: Path) -> int:
     except ValueError as exc:
         print(f"concordance: {exc}", file=sys.stderr)
         return 2
-    usage.record("record-review", _repo(cwd), None, 0, 0, 0,
-                 {"findings": args.findings, "via_index": args.via_index, "steps": steps},
-                 session=os.environ.get("CLAUDE_SESSION_ID", ""))
+    if sum(steps.values()) > args.findings:
+        print("concordance: --steps counts exceed --findings", file=sys.stderr)
+        return 2
+    try:
+        usage.record("record-review", _repo(cwd), None, 0, 0, 0,
+                     {"findings": args.findings, "via_index": args.via_index, "steps": steps},
+                     session=os.environ.get("CLAUDE_SESSION_ID", ""))
+    except Exception as exc:  # noqa: BLE001 - unusable usage log: exit 2, never a traceback
+        print(f"concordance: usage log unavailable: {exc!r}", file=sys.stderr)
+        return 2
     _say(f"recorded review: {args.findings} findings ({args.via_index} via concordance)")
     return 0
 
@@ -197,7 +204,11 @@ def _stats(args: argparse.Namespace, cwd: Path) -> int:
     if args.repo == "this" and not repo:
         print("concordance: --repo this needs a git repository", file=sys.stderr)
         return 2
-    rep = usage.report(days=args.days, repo=repo)
+    try:
+        rep = usage.report(days=args.days, repo=repo)
+    except Exception as exc:  # noqa: BLE001 - unusable usage log: exit 2, never a traceback
+        print(f"concordance: usage log unavailable: {exc!r}", file=sys.stderr)
+        return 2
     _say(json.dumps(rep, indent=2) if args.json else usage.format_report(rep))
     return 0
 

@@ -5,6 +5,7 @@ caches, so deleting an index never loses history. The CLI appends one event per 
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import time
@@ -57,20 +58,22 @@ def size_bucket(touched: int) -> str:
 
 
 def _pct(values: list[int], q: float) -> int:
-    ordered = sorted(values)
-    return ordered[min(len(ordered) - 1, max(0, int(q * len(ordered) + 0.5) - 1))]
+    if not values:
+        return 0
+    ordered = sorted(values)  # nearest rank: the smallest value covering fraction q
+    return ordered[min(len(ordered) - 1, max(0, math.ceil(q * len(ordered)) - 1))]
 
 
 def report(days: int = 30, repo: str | None = None, now: float | None = None,
            path: Path | None = None) -> dict[str, object]:
     path = path or usage_path()
     since = (now if now is not None else time.time()) - days * DAY_S
-    rows: list[tuple[str, str, int, int, str]] = []
+    rows: list[tuple[str, str, int, int, int, str]] = []
     if path.exists():
         conn = _connect(path)
         try:
-            sql = ("SELECT command, session, latency_ms, est_tokens, payload FROM events "
-                   "WHERE ts >= ?" + (" AND repo = ?" if repo else "") + " ORDER BY ts")
+            sql = ("SELECT command, session, latency_ms, est_tokens, exit_code, payload "
+                   "FROM events WHERE ts >= ?" + (" AND repo = ?" if repo else "") + " ORDER BY ts")
             rows = conn.execute(sql, (since, repo) if repo else (since,)).fetchall()
         finally:
             conn.close()
@@ -82,8 +85,20 @@ def report(days: int = 30, repo: str | None = None, now: float | None = None,
     reviews = {"count": 0, "clean": 0, "findings": 0, "via_index": 0}
     by_step: Counter[str] = Counter()
     grouped: dict[str, list[tuple[str, int, int]]] = {}
-    for command, session, latency, tokens, raw in rows:
-        p = json.loads(raw or "{}")
+    failures: Counter[str] = Counter()
+    skipped = 0
+    for command, session, latency, tokens, exit_code, raw in rows:
+        try:
+            p = json.loads(raw or "{}")
+        except ValueError:
+            skipped += 1
+            continue
+        if not isinstance(p, dict):
+            skipped += 1
+            continue
+        if exit_code == 2:  # a failed run: counted apart, kept out of cost and effectiveness
+            failures[command] += 1
+            continue
         if command == "record-review":
             reviews["count"] += 1
             reviews["findings"] += int(p.get("findings", 0))
@@ -106,16 +121,19 @@ def report(days: int = 30, repo: str | None = None, now: float | None = None,
             if bucket in by_size:
                 by_size[bucket]["runs"] += 1
                 by_size[bucket]["cut"] += bool(cut or omitted)
-    for command, items in grouped.items():
+    for command in sorted(set(grouped) | set(failures)):
+        items = grouped.get(command, [])
         lat = [x[1] for x in items]
         tok = [x[2] for x in items]
         commands[command] = {
-            "runs": len(items), "sessions": len({x[0] for x in items if x[0]}),
+            "runs": len(items), "failures": failures[command],
+            "sessions": len({x[0] for x in items if x[0]}),
             "tokens_p50": _pct(tok, 0.5), "tokens_p90": _pct(tok, 0.9),
             "latency_p50": _pct(lat, 0.5), "latency_p90": _pct(lat, 0.9)}
     return {"days": days, "repo": repo or "all", "commands": commands,
             "budget": {**budget, "by_size": by_size, "sections_cut": dict(sections_cut)},
-            "verdicts": verdicts, "reviews": {**reviews, "by_step": dict(sorted(by_step.items()))}}
+            "verdicts": verdicts, "reviews": {**reviews, "by_step": dict(sorted(by_step.items()))},
+            "skipped_rows": skipped}
 
 
 def format_report(rep: dict[str, object]) -> str:
@@ -126,10 +144,11 @@ def format_report(rep: dict[str, object]) -> str:
     if not commands and not reviews["count"]:
         return f"{title}\n\nno concordance usage recorded in this window"
     out = [title, "", "## Usage", "",
-           "| command | runs | sessions | tokens p50/p90 | ms p50/p90 |", "|---|---|---|---|---|"]
+           "| command | runs | failed | sessions | tokens p50/p90 | ms p50/p90 |",
+           "|---|---|---|---|---|---|"]
     for name, c in sorted(commands.items()):
-        out.append(f"| {name} | {c['runs']} | {c['sessions']} | {c['tokens_p50']}/"
-                   f"{c['tokens_p90']} | {c['latency_p50']}/{c['latency_p90']} |")
+        out.append(f"| {name} | {c['runs']} | {c['failures']} | {c['sessions']} | "
+                   f"{c['tokens_p50']}/{c['tokens_p90']} | {c['latency_p50']}/{c['latency_p90']} |")
     budget = rep["budget"]
     verdicts = rep["verdicts"]
     assert isinstance(budget, dict) and isinstance(verdicts, dict)
@@ -150,4 +169,6 @@ def format_report(rep: dict[str, object]) -> str:
     if reviews["by_step"]:
         out.append("findings by step: " + ", ".join(
             f"step {k}: {v}" for k, v in reviews["by_step"].items()))
+    if rep.get("skipped_rows"):
+        out += ["", f"{rep['skipped_rows']} unreadable rows skipped"]
     return "\n".join(out)
