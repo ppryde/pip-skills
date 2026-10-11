@@ -235,6 +235,18 @@
         "remote-control",
         "mod"
       ]
+    },
+    {
+      "name": "pip-agents",
+      "source": "./plugins/pip-agents",
+      "description": "Shared subagent personas for pip-skills plugins (reviewer-correctness, -security, -scope, -rules, validator, explorer, gatekeeper), built from one base with one brief/result JSON contract and its validator. Consumers declare it as a dependency; no skills.",
+      "category": "engineering",
+      "tags": [
+        "agents",
+        "subagents",
+        "review",
+        "contract"
+      ]
     }
   ]
 }

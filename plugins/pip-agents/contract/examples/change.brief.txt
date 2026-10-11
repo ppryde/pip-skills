@@ -1,0 +1,4 @@
+brief: pip-agents/1
+kind: change
+ref: WF-140-chunk-2
+bundle: /Users/me/.claude/overseer/pip-skills/dispatch/WF-140/implementation/implementer-2.md

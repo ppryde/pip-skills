@@ -1,0 +1,4 @@
+brief: pip-agents/1
+kind: plan
+ref: WF-140
+bundle: /Users/me/.claude/overseer/pip-skills/dispatch/WF-140/planning/planner-bundle.md

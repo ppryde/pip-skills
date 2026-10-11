@@ -126,7 +126,7 @@ def test_known_esp_and_gen_annotations(by_id):
 
 def test_ghost_table_aware_html004_and_retitled_render018(by_id):
     assert "ghost" in by_id["HTML-004"].statement and "ghost" in by_id["HTML-004"].detect.check
-    assert (by_id["HTML-004"].transactional, by_id["HTML-004"].marketing) == ("mortal", "mortal")  # PR 3 demotes
+    assert (by_id["HTML-004"].transactional, by_id["HTML-004"].marketing) == ("venial", "venial")  # demoted in PR 3 (EL-10)
     s = by_id["RENDER-018"].statement
     assert "ignored by Outlook" in s and "width" in s
 
