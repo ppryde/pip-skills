@@ -40,11 +40,14 @@ Deleted files are excluded by the filter — deleted templates have no violation
 Filter to `email_paths` and known email extensions.
 
 **PR number mode:**
-The PR number must match `^[0-9]+$`; refuse anything else before building the command.
+The PR number must match `^[0-9]+$`; refuse anything else before building the command. Audit the PR's head commit, not the working tree (which is usually another branch):
 ```bash
-gh pr diff '<number>' --name-only
+gh pr view '<number>' --json headRefOid,baseRefName,files
 ```
-Filter same as above.
+- `headRefOid` is the head commit (40 hex digits; refuse anything else). If `git cat-file -e '<oid>^{commit}'` fails, run `git fetch origin 'pull/<number>/head'` once; if the commit is still missing, report the PR as not accessible.
+- `files` lists the changed paths; drop entries whose `changeType` is `DELETED`, keep the rest (the `path` is the destination for a rename), and filter to `email_paths` and the email extensions as above. A path that starts with `-` or `/`, or has a `..` part, is refused.
+- Read every file from that commit: `scan --rev '<oid>' --files ...` for Phase 1 (`§Audit pass`) and `git show '<oid>:<path>'` for Phase 2 and the line numbers. Never read the working-tree copy in PR mode.
+- `baseRefName` must match `^[A-Za-z0-9._][A-Za-z0-9._/-]*$`. The diff base is `git merge-base '<oid>' 'origin/<baseRefName>'`; if that does not resolve, treat every line as changed (`§Changed lines`).
 
 **Single file mode:** Named file only.
 
@@ -66,6 +69,15 @@ If scope holds no templates (Elder):
 > in `.email-absolution/config.yml` and ensure source templates are not
 > inside `exclude` patterns."
 
+## Changed lines
+
+A finding is **in the diff** when its line is one of the added or modified lines of its file, **outside the diff** otherwise. Get the added ranges for the files in scope:
+
+```bash
+python3 '<rules.py>' hunks --base '<merge-base>' [--rev '<oid>'] --files '<file>' ['<file>' ...]
+```
+`--base` is the same base as the scope diff (the merge-base sha, quoted as in `common.md §Rules`); `--rev` is the PR head in PR mode only. Each output line is `path: 12-15,40` (the added lines), `path: none` or `path: unknown`. `unknown` (git could not say: an added file not yet tracked, a missing base) and single-file mode mean every line counts as changed. Absence findings (a whole-file finding) count as in the diff. If `python3` is unavailable, use `git diff -U0` and read the `+start,count` of each `@@` header by hand.
+
 ## Audit pass
 
 Two sequential phases over every template in scope; finish both before the verdict. Run them per rule batch (`§Dispatch`). The checklist is the `select` output (`common.md §Rules`), generated fresh each run: never stored, never assumed.
@@ -78,7 +90,7 @@ Run `scan` for each batch (`§Dispatch`), with `--ids <that batch's ids>`, over 
 python3 '<rules.py>' scan --email-type '<t>' [--esp '<E>'] [--templating '<L>'] [--targets '<a,b>'] [--doctrine '<D>'] --ids '<id,id,...>' --files '<file>' ['<file>' ...]
 ```
 
-It applies every active regex pattern, and the regex part of every hybrid rule, line by line. No judgment is needed: a line `file:line | id | matched line` is a confirmed finding, with three exceptions.
+In PR mode add `--rev '<oid>'` (the PR head, `§Scope`) so the files are read from that commit. It applies every active regex pattern, and the regex part of every hybrid rule, line by line. No judgment is needed: a line `file:line | id | matched line` is a confirmed finding, with three exceptions.
 
 - `[verify]`: the pattern only nominates the line. Read it and confirm before recording a finding.
 - An absence line (`absence: trigger present, required pattern missing`) is a finding for the whole file; a file that does not match the trigger is skipped silently.
@@ -169,4 +181,5 @@ its canonical are keyed, the canonical's entry wins and the verdict notes the co
 - Every finding cites the file, line or block, and the rule id (with `also:` when it has aliases), what was found and what is required.
 - An overridden finding stays in its new bucket, annotated `(overridden: <reason>)`; a conflict note from `§Overrides` goes under the verdict.
 - Footer: `Rules checked: N (regex a, contextual b), violations: v`. N is the active count in the `select` header; hybrid rules are in both a and b. A mismatch with N means a rule was skipped: finish the pass.
+- **Visitation only (existing violations).** Classify each finding as in the diff or outside it (`§Changed lines`). A mortal sin anywhere in a touched file stays a mortal sin and blocks, but one outside the diff is labelled `(pre-existing)` and listed after the new ones under the same MORTAL SINS heading, so the author can tell what this change introduced. Venial and counsel findings outside the diff are existing debt: they are not listed in VENIAL SINS or COUNSEL, only counted per file in an EXISTING DEBT section (counts by severity, with the ids). Overrides apply first, so an overridden mortal is classified at its new severity.
 - Carry into the verdict any `warning:` line from `select`, an assumed `email_type`, and any skipped or timed-out file.
