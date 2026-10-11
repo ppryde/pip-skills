@@ -33,11 +33,13 @@ from scripts import (
     bundle,
     config,
     db,
+    gates,
     gitops,
     guard,
     hookfast,
     liveness,
     marker,
+    migrate,
     report_hook,
     store,
     views,
@@ -258,6 +260,89 @@ def _edit(
     if card is None:
         raise FileNotFoundError(f"no card with id {card_id}")
     return card
+
+
+# --- stage gates (WF-265 D2) ------------------------------------------------
+
+GATES_ENV = "OVERSEER_GATES"
+
+
+def _gate_mode(repo_root: Path) -> str:
+    """``hard`` (default) | ``warn`` | ``off``: ``OVERSEER_GATES`` wins over
+    the repo config's ``"gates"``; anything unrecognised is ``hard`` (a typo
+    must never switch the gates off)."""
+    env = os.environ.get(GATES_ENV, "").strip().lower()
+    if env in gates.MODES:
+        return env
+    value = config.load_config(repo_root).get("gates", "hard")
+    if value is False:
+        return "off"
+    return value if value in gates.MODES else "hard"
+
+
+def _force_reason(args: argparse.Namespace) -> "str | None":
+    """The ``--force-gate`` reason, or None. An empty reason is refused: a
+    forced gate is recorded with its reason, so it must have one."""
+    reason = getattr(args, "force_gate", None)
+    if reason is None:
+        return None
+    reason = " ".join(reason.split())
+    if not reason:
+        raise ValueError("--force-gate needs a non-empty reason, e.g. "
+                         "--force-gate \"user: plan approved verbally\"")
+    return reason
+
+
+def _card_gated(conn: sqlite3.Connection, card: Card) -> bool:
+    """Gates bind only cards created at or after the board's ``gates_from``
+    (their evidence is recorded from then on); older cards get warnings. A
+    board that has never been gated is stamped on its first check."""
+    since = db.get_meta(conn, "gates_from")
+    if since is None:  # a D1-era board: nothing before tomorrow has evidence
+        since = migrate.gates_floor(populated=True)
+        db.set_meta(conn, "gates_from", since)
+    return bool(card.created) and card.created[:10] >= since
+
+
+def _settle_gates(
+    repo_root: Path, card: Card, stage: str, label: str, problems: "list[str]",
+    force: "str | None", notes: "list[str]",
+) -> None:
+    """Inside the card's transaction. No problems: nothing. Problems and
+    ``force``: record the override (a ``## Decisions`` line plus a ``force``
+    evidence row, so the card history and the dashboard show it). Problems on
+    a card the gates bind in ``hard`` mode: refuse (the transaction rolls
+    back). Otherwise (warn mode, or a card from before the gates): print."""
+    if not problems:
+        return
+    conn = _conn(repo_root)
+    now = _now()
+    if force is not None:
+        unmet = "; ".join(p.removeprefix("GATE: ").split(" - ")[0] for p in problems)
+        card.append_section("Decisions", f"- {now} — GATE FORCED ({label}): {force} [unmet: {unmet}]", now)
+        db.record_evidence(conn, card.id, stage, "force", status="forced",
+                           detail=f"{label}: {force} [unmet: {unmet}]", ts=now)
+        notes.append(f"GATE FORCED ({label}): {force}")
+        return
+    if _gate_mode(repo_root) == "hard" and _card_gated(conn, card):
+        raise gates.GateRefused(problems)
+    notes.extend(f"WARNING {p}" for p in problems)
+
+
+def _gated_move(
+    repo_root: Path, card: Card, target: str, force: "str | None", notes: "list[str]",
+) -> None:
+    """``card.set_stage`` behind the transition gates. Inside the transaction."""
+    previous = card.stage or "new"
+    if _gate_mode(repo_root) != "off":
+        problems = gates.check_transition(card, target, db.evidence_for(_conn(repo_root), card.id))
+        _settle_gates(repo_root, card, target, f"{previous} -> {target}", problems, force, notes)
+    card.set_stage(target, _now())
+
+
+def _flush_notes(notes: "list[str]") -> None:
+    for line in notes:
+        print(line, file=sys.stderr)
 
 
 def _views(repo_root: Path) -> None:
@@ -547,6 +632,7 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     if args.brief_file and args.brief is not None:
         print("error: pass --brief or --brief-file, not both", file=sys.stderr)
         return 1
+    force = _force_reason(args)  # a bad --force-gate also fails before anything is created
     # Read the brief up front: a bad path or stdin must fail BEFORE the card
     # and worktree are created.
     if args.brief_file:
@@ -572,23 +658,35 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
         print(f"error: {card.id} left at bootstrap — {exc}", file=sys.stderr)
         return 1
 
+    notes: list[str] = []
+
     def record(c: Card) -> None:
         c.branch = branch
         c.worktree = str(path)
         if args.brief:
             c.set_section("## Plan", args.brief, _now())
-            c.set_stage("implementation", _now())
+            # The S shortcut's evidence goes in BEFORE the move, in the same
+            # transaction, so the plan-review gate knows the review was skipped
+            # by design (and a refused move rolls the evidence back too).
+            db.record_evidence_once(_conn(args.root), c.id, "planning", "brief",
+                                    status="brief", detail="bootstrap --brief", ts=_now())
+            _gated_move(args.root, c, "implementation", force, notes)
         else:
-            c.set_stage("planning", _now())
+            _gated_move(args.root, c, "planning", force, notes)
 
     card = _edit(args.root, card.id, record)
+    _flush_notes(notes)
     _stamp_orchestrator(args.root, card.id)
     print(f"{card.id} {card.stage} · {branch} · {path} (base {base})")
     return 0
 
 
 def cmd_set_stage(args: argparse.Namespace) -> int:
-    card = _edit(args.root, args.card_id, lambda c: c.set_stage(args.stage, _now()), ack=True)
+    force = _force_reason(args)
+    notes: list[str] = []
+    card = _edit(args.root, args.card_id,
+                 lambda c: _gated_move(args.root, c, args.stage, force, notes), ack=True)
+    _flush_notes(notes)
     _stamp_orchestrator(args.root, card.id)
     print(f"{card.id} → {args.stage}")
     return 0
@@ -1089,8 +1187,18 @@ def cmd_pull_children(args: argparse.Namespace) -> int:
             print(f"no live children of {parent.id}")
             return 0
         now = _now()
+        skipped: list[str] = []
         for child in children:
             if parent.stage:
+                # A board-level move, not a card's own progress: it is never
+                # refused, but a child carried past an unmet gate is recorded
+                # (a force row on the child, one Decisions line on the parent).
+                unmet = gates.check_transition(
+                    child, parent.stage, db.evidence_for(conn, child.id))
+                if unmet:
+                    skipped.append(child.id)
+                    db.record_evidence(conn, child.id, parent.stage, "force", status="forced",
+                                       detail=f"pull-children from {parent.id}", ts=now)
                 child.set_stage(parent.stage, now)
             else:
                 child.stage = None
@@ -1101,6 +1209,12 @@ def cmd_pull_children(args: argparse.Namespace) -> int:
                 child.blocked_on = parent.blocked_on if child.status == "blocked" else None
                 child.updated = now
             db.put_card(conn, child)
+        if skipped:
+            parent.append_section(
+                "Decisions",
+                f"- {now} — pull-children moved {', '.join(skipped)} into {parent.stage} "
+                "without meeting its stage gates", now)
+            db.put_card(conn, parent)
     print(f"pulled {len(children)} children into {parent.id}")
     return 0
 
@@ -1447,10 +1561,29 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
     ``choices=STAGES`` already rules that out here) so each stage playbook
     entry is one Bash call instead of set-stage-then-dispatch-prep. Prints
     only the bundle path either way."""
-    if args.advance:
-        card = _edit(args.root, args.card_id, lambda c: c.set_stage(args.stage, _now()), ack=True)
-    else:
-        card = _load(args.root, args.card_id)
+    force = _force_reason(args)
+    notes: list[str] = []
+    dispatched: list[int] = []
+
+    def prep(c: Card) -> None:
+        if args.advance:
+            _gated_move(args.root, c, args.stage, force, notes)
+        if _gate_mode(args.root) != "off":
+            problems = gates.check_dispatch(
+                c, args.stage, args.role, args.round,
+                db.evidence_for(_conn(args.root), c.id))
+            _settle_gates(args.root, c, args.stage, f"{args.role} round {args.round}", problems, force, notes)
+        if args.role in ("reviewer", "verifier"):
+            # Completeness (OR-2): a dispatched slot that never reports blocks
+            # its gate, so a crashed reviewer is not an approval.
+            rid = db.record_evidence_once(
+                _conn(args.root), c.id, args.stage, "dispatch", round_no=args.round,
+                slot=args.slot or "", status="dispatched", detail=args.role, ts=_now())
+            if rid is not None:
+                dispatched.append(rid)
+
+    card = _edit(args.root, args.card_id, prep, ack=args.advance)
+    _flush_notes(notes)
     chunk = args.chunk
     if chunk is None and args.role == "implementer":
         chunk = 1
@@ -1470,6 +1603,9 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
             today=_today(),
         )
     except bundle.BundleError as exc:
+        for rid in dispatched:  # nothing was dispatched: do not leave a phantom slot
+            with db.txn(_conn(args.root)):
+                db.delete_evidence(_conn(args.root), rid)
         print(f"error: {exc}", file=sys.stderr)
         return 1
     _stamp_orchestrator(args.root, card.id)
@@ -2145,11 +2281,16 @@ def build_parser() -> argparse.ArgumentParser:
                                     "'-' reads the brief from stdin")
     p.add_argument("--brief-file", dest="brief_file",
                    help="like --brief, reading the brief from this file")
+    p.add_argument("--force-gate", dest="force_gate", metavar="REASON",
+                   help="override a refused stage gate (see set-stage)")
     p.set_defaults(func=cmd_bootstrap)
 
     p = sub.add_parser("set-stage")
     p.add_argument("card_id")
     p.add_argument("stage")
+    p.add_argument("--force-gate", dest="force_gate", metavar="REASON",
+                   help="override a refused stage gate; the reason is recorded in "
+                        "## Decisions (convention: \"user: <why>\")")
     p.set_defaults(func=cmd_set_stage)
 
     p = sub.add_parser("block")
@@ -2281,6 +2422,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--var", action="append", help=f"key=value, value ≤ {bundle.VAR_CAP} chars")
     p.add_argument("--advance", action="store_true",
                     help="set-stage to --stage first, then prep the bundle, in one call")
+    p.add_argument("--force-gate", dest="force_gate", metavar="REASON",
+                   help="override a refused stage or round-cap gate (see set-stage)")
     p.set_defaults(func=cmd_dispatch_prep)
 
     p = sub.add_parser("new-sprint")
@@ -2507,6 +2650,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result: int = args.func(args)
         return result
+    except gates.GateRefused as exc:
+        for line in exc.problems:
+            print(line, file=sys.stderr)
+        print("(override, recorded in the card's Decisions: --force-gate \"user: <why>\"; "
+              "or gates: warn|off in .overseer/config.json, OVERSEER_GATES=warn|off)",
+              file=sys.stderr)
+        return 3
     except (CardParseError, FactParseError, FileNotFoundError, ValueError, db.MigrationError) as exc:
         # ValueError covers backup.restore_board's designed refusals (no
         # backup found, schema mismatch, corrupt manifest/cards/meta JSON,

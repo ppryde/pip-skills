@@ -774,6 +774,51 @@ def record_evidence(
     )
 
 
+def evidence_for(conn: sqlite3.Connection, card_id: str) -> "list[Evidence]":
+    """Every ``stage_evidence`` row of one card, oldest first (by id)."""
+    from scripts.gates import Evidence
+
+    rows = conn.execute(
+        "SELECT id, stage, kind, round, slot, status, critical, important, minor, detail "
+        "FROM stage_evidence WHERE card_id = ? ORDER BY id", (card_id,)).fetchall()
+    return [Evidence(*tuple(r)) for r in rows]
+
+
+def record_evidence_once(
+    conn: sqlite3.Connection, card_id: str, stage: str, kind: str, *,
+    round_no: "int | None" = None, slot: str = "", status: str = "",
+    critical: "int | None" = None, important: "int | None" = None,
+    minor: "int | None" = None, detail: str = "", ts: str = "",
+) -> "int | None":
+    """Idempotent ``record_evidence``: one row per (card, stage, kind, round,
+    slot). The same row again is a no-op (a hook that fires twice); a changed
+    row (a re-run slot, a second verifier) replaces the old one with a NEWER id,
+    so "latest" and "dispatched after reported" stay ordered by id. Returns the
+    new row id, or None when nothing was written."""
+    same = conn.execute(
+        "SELECT id, status, critical, important, minor, detail FROM stage_evidence "
+        "WHERE card_id = ? AND stage = ? AND kind = ? AND round IS ? AND slot = ?",
+        (card_id, stage, kind, round_no, slot)).fetchall()
+    if (kind != "dispatch" and len(same) == 1
+            and tuple(same[0])[1:] == (status, critical, important, minor, detail)):
+        redispatched = conn.execute(
+            "SELECT 1 FROM stage_evidence WHERE card_id = ? AND stage = ? AND kind = 'dispatch' "
+            "AND slot = ? AND id > ? LIMIT 1", (card_id, stage, slot, same[0][0])).fetchone()
+        if redispatched is None:
+            return None  # a hook that fired twice: nothing to add
+    for row in same:
+        conn.execute("DELETE FROM stage_evidence WHERE id = ?", (row[0],))
+    cur = conn.execute(
+        "INSERT INTO stage_evidence(card_id, stage, kind, round, slot, status, "
+        "critical, important, minor, detail, ts) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (card_id, stage, kind, round_no, slot, status, critical, important, minor, detail, ts))
+    return cur.lastrowid
+
+
+def delete_evidence(conn: sqlite3.Connection, row_id: int) -> None:
+    conn.execute("DELETE FROM stage_evidence WHERE id = ?", (row_id,))
+
+
 def _parse_iso(value: "str | None") -> "datetime | None":
     if not value:
         return None
