@@ -44,3 +44,33 @@ def test_duplicate_unit_names_refused(batching):
 
     with pytest.raises(ValueError):
         batching.plan_batches([mk(batching, "d", 3), mk(batching, "d", 4)])
+
+
+def _sizes(batching, n, **kw):
+    return [b.size for b in batching.plan_batches([mk(batching, "u", n, **kw)])]
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("n,want", [
+    (0, []), (1, [1]), (7, [7]), (8, [8]), (30, [30]), (31, [16, 15]), (37, [19, 18]), (38, [30, 8]),
+    (60, [30, 30]), (61, [30, 16, 15]), (62, [30, 16, 16]),
+])
+def test_sizes_and_floor_rebalance(batching, n, want):
+    assert _sizes(batching, n) == want  # no batch of a split unit under the floor
+
+
+def test_rebalanced_batches_still_tile(batching):
+    u = mk(batching, "u", 61)
+    spans = [s for b in batching.plan_batches([u]) for s in b.spans]
+    assert spans[0].start == 0 and spans[-1].end == 61
+    assert all(x.end == y.start for x, y in zip(spans, spans[1:]))
+
+
+def test_unscoped_units_are_never_packed(batching):
+    three = [mk(batching, f"n{i}", 3, scope=()) for i in range(3)]
+    assert [b.size for b in batching.plan_batches(three)] == [3, 3, 3]
+    mixed = [mk(batching, "n", 3, scope=()), mk(batching, "a", 3), mk(batching, "b", 3)]
+    sizes = sorted(b.size for b in batching.plan_batches(mixed))
+    assert sizes == [3, 6]  # only the two declared, identical scopes pack

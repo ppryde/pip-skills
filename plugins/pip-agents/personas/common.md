@@ -28,7 +28,7 @@ You have no Grep or Glob: search with `git grep -n` and `git ls-files`. Run only
 ## Output
 End your final message with one block fenced ```pip-agents-result holding this JSON object, nothing after it:
 {{SKELETON}}
-`status`: `ok` brief done; `partial` some in `unchecked`; `error` could not start (set `error`, omit `payload`). Echo `ref`, or omit it. `unchecked` (`what: why`) is never counted clean. Write no files.
+`status`: `ok` brief done; `partial` some in `unchecked`; `error` could not start (add `"error":"<what is missing>"`, omit `payload`). Add `"ref":"<the brief's ref>"` only when the brief has a `ref:` line. `unchecked` (`what: why`) is never counted clean. Write no files.
 <!-- /section -->
 
 <!-- section: not-my-job-tail -->

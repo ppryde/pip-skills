@@ -27,6 +27,8 @@ from pathlib import Path
 CONTRACT_DIR = Path(__file__).resolve().parent.parent / "contract"
 
 BLOCK_RE = re.compile(r"^(`{3,}|~{3,})pip-agents-result[ \t]*\n(?P<body>.*?)^\1[ \t]*$", re.M | re.S)
+OPENER_RE = re.compile(r"^(`{3,}|~{3,})pip-agents-result[ \t]*$", re.M)
+CLAIMS_MAX_BYTES = 1_000_000  # a claims file is a short JSON list; refuse anything bigger, or not a regular file
 OTHER_FENCE_RE = re.compile(r"^(?:`{3,}|~{3,})([A-Za-z0-9_-]+)", re.M)
 LINE_RE = re.compile(r"^([a-z_]+): (.*)$")
 INT_KEYS = ("limit", "timeout_ms")
@@ -81,12 +83,23 @@ def _is_type(v, t: str) -> bool:
     return isinstance(v, _TYPES[t])
 
 
+def _same(a, b) -> bool:
+    """JSON equality that keeps booleans apart from numbers (True != 1) at every depth."""
+    if isinstance(a, bool) != isinstance(b, bool):
+        return False
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    return a == b
+
+
 def _check(v, s: dict, root: dict, path: str, errs: list[str]) -> None:
     if "$ref" in s:
         s = root["$defs"][s["$ref"].split("/")[-1]]
-    if "const" in s and v != s["const"]:
+    if "const" in s and not _same(v, s["const"]):
         errs.append(f"{path}: expected {s['const']!r}")
-    if "enum" in s and v not in s["enum"]:
+    if "enum" in s and not any(_same(v, e) for e in s["enum"]):
         errs.append(f"{path}: {v!r} not in {s['enum']}")
     if "type" in s:
         ts = s["type"] if isinstance(s["type"], list) else [s["type"]]
@@ -201,7 +214,11 @@ def check_brief(brief: dict) -> list[str]:
 
 def extract_block(message: str) -> dict:
     """Decode the LAST ```pip-agents-result block of the message (the agent's final message only)."""
+    message = message.replace("\r\n", "\n").replace("\r", "\n")
     blocks = list(BLOCK_RE.finditer(message))
+    openers = list(OPENER_RE.finditer(message))
+    if openers and (not blocks or openers[-1].start() > blocks[-1].start()):
+        raise ResultError("E_NO_BLOCK", "the last ```pip-agents-result block is never closed (truncated message?)")
     if not blocks:
         found = sorted({m.group(1) for m in OTHER_FENCE_RE.finditer(message)})
         hint = f"found a ```{found[0]} block; " if found else "found no fenced block; "
@@ -218,12 +235,19 @@ def extract_block(message: str) -> dict:
 # ---- cross checks ---------------------------------------------------------------------------------------------
 
 def _id_list(rules: str) -> list[str] | None:
-    """Rule ids named by a brief's `rules:` value: the `(<ids>)` part, else a bare id list; None when absent."""
-    m = re.search(r"\(([^)]*)\)", rules)
+    """Rule ids named by a brief's `rules:` value: the trailing `(<ids>)` group, else a bare id list.
+
+    None when the value is a path with no id group. A path is anything with a `/` or `\\`, a drive letter, an
+    `L<a>-<b>` range or a file extension; a bare id list holds only id-like tokens.
+    """
+    rules = rules.strip()
+    m = re.search(r"\(([^)]*)\)\s*$", rules)
     if m:
         return [x for x in re.split(r"[,\s]+", m.group(1)) if x]
-    if not re.search(r"\bL\d+-\d+\b", rules) and not rules.startswith("/"):
-        return [x for x in re.split(r"[,\s]+", rules) if x]
+    tokens = [x for x in re.split(r"[,\s]+", rules) if x]
+    if tokens and all(re.fullmatch(r"[A-Za-z0-9_.:-]+", x) and not re.search(r"\.[A-Za-z]{1,5}$", x) for x in tokens) \
+            and not re.search(r"\bL\d+-\d+\b", rules):
+        return tokens
     return None
 
 
@@ -262,7 +286,12 @@ def _review(brief: dict, res: dict, persona: dict, errs: list[str], schema: dict
     seen: set[str] = set()
     target = str(brief.get("target", "")).split()
     checked = [c for c in res.get("checked", []) if isinstance(c, str)]
-    rule_ids = _id_list(str(brief["rules"])) if lens == "rules" and "rules" in brief else None
+    rule_ids = None
+    if lens == "rules":
+        if "rules" not in brief:
+            errs.append("brief has no `rules:` line (lens rules needs it for the id and denominator checks)")
+        else:
+            rule_ids = _id_list(str(brief["rules"]))
     for where, f in items:
         fid = f.get("id", "?")
         for k, want in find_lens.items():
@@ -296,7 +325,12 @@ def _claim_ids(brief: dict, claim_ids: list[str] | None, errs: list[str]) -> lis
     if claim_ids is not None:
         return claim_ids
     try:
-        data = json.loads(Path(str(brief.get("claims", ""))).read_text(encoding="utf-8"))
+        path = Path(str(brief.get("claims", "")))
+        if not path.is_file() or path.stat().st_size > CLAIMS_MAX_BYTES:  # regular files only: no FIFO, /dev/zero
+            raise OSError("not a regular file within the size cap")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            raise TypeError("not a list")
         return [str(c["id"]) for c in data]
     except (OSError, ValueError, KeyError, TypeError):
         errs.append("claims file unreadable or not a JSON list of {id, ...}; verdict ids cannot be checked")

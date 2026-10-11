@@ -225,3 +225,15 @@ def test_stale_revision_hash_fails(tmp_path):
     schema.write_text(schema.read_text().replace("pip-agents result envelope", "pip-agents result envelope!"))
     p = build_cli("--check", "--plugin", str(dst))
     assert p.returncode == 1 and "REVISION hash is stale" in p.stderr
+
+
+def test_check_compares_raw_bytes(tmp_path):
+    import shutil as sh
+    plug = tmp_path / "pip-agents"
+    sh.copytree(PLUGIN, plug, ignore=sh.ignore_patterns("__pycache__", ".pytest_cache"))
+    run = lambda: subprocess.run([sys.executable, str(ROOT / "tools" / "build_agents.py"), "--check", "--plugin", str(plug)],
+                                 capture_output=True, text=True)
+    assert run().returncode == 0
+    f = plug / "agents" / "validator.md"
+    f.write_bytes(f.read_bytes().replace(b"\n", b"\r\n"))
+    assert run().returncode == 1  # CRLF is drift

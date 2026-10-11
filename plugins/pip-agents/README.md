@@ -34,7 +34,8 @@ Install: `/plugin install pip-agents --marketplace ppryde/pip-skills`
 
 1. Add `"dependencies": ["pip-agents"]` to the consumer's `plugin.json` (no fallback to `general-purpose`).
 2. Write a brief file per dispatch and spawn `pip-agents:<name>` with the brief text as the prompt.
-3. Validate the final message with `validate_result.py` (`parse_result(message, brief, persona)`) before merging results; re-dispatch once on rejection.
-4. A skill cannot rely on reaching this plugin's files at run time: `${CLAUDE_PLUGIN_ROOT}` is the consumer's own root and no environment variable names a dependency's path (probe recorded in the PR). Consumers vendor `validate_result.py` and the two schemas with a hash drift test (`tools/sync_contract.py`, first needed by the review-panel PR).
+3. Build a brief's `tests:` (reviewer-correctness) and `run:` (gatekeeper) lines from a fixed command the consumer owns, never from file, diff or agent content: reviewer-correctness runs the `tests:` command exactly as given, so that line is the one place a brief value becomes execution.
+4. Validate the final message with `validate_result.py` (`parse_result(message, brief, persona)`) before merging results; re-dispatch once on rejection.
+5. A skill cannot rely on reaching this plugin's files at run time: `${CLAUDE_PLUGIN_ROOT}` is the consumer's own root and no environment variable names a dependency's path (probe recorded in the PR). Consumers vendor `validate_result.py` and the two schemas with a hash drift test (`tools/sync_contract.py`, first needed by the review-panel PR).
 
 Dev tools live in `tools/`: `build_agents.py`, `batching.py` (30-rule cap) and `measure_spawn.py` (first-call token cost, by hand).

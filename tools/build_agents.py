@@ -145,6 +145,8 @@ def skeleton(schema: dict, kind: str, name: str, lens: str | None) -> str:
     for k, sub in schema["properties"].items():
         if sub.get("x-persona") is False:
             continue
+        if k in ("ref", "error"):  # conditional: the Output prose says when to add them
+            continue
         if k == "kind":
             env[k] = kind
         elif k == "persona":
@@ -330,12 +332,12 @@ def main(argv: list[str] | None = None) -> int:
     stale = sorted(p for p in agents_dir.glob("*") if p not in outputs) if agents_dir.is_dir() else []
     drift = False
     for path in sorted(outputs):
-        have = read(path) if path.exists() else ""
-        if have != outputs[path]:
+        have = path.read_bytes() if path.exists() else b""
+        if have != outputs[path].encode("utf-8"):
             drift = True
             if ns.check:
                 sys.stdout.writelines(difflib.unified_diff(
-                    have.splitlines(keepends=True), outputs[path].splitlines(keepends=True),
+                    have.decode("utf-8", "replace").splitlines(keepends=True), outputs[path].splitlines(keepends=True),
                     f"a/{path.relative_to(plugin)}", f"b/{path.relative_to(plugin)}"))
     for path in stale:
         drift = True

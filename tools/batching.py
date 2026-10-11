@@ -9,8 +9,11 @@ Rules, in order:
 - a unit over BATCH_CAP is split along its categories (consecutive rules with the same category stay together);
   a single category over BATCH_CAP is cut at BATCH_CAP;
 - a unit of BATCH_FLOOR rules or more is never packed with another unit;
-- units under BATCH_FLOOR pack together only when their scope lists are identical (the same files are read for
-  each), up to BATCH_CAP rules per batch;
+- when a split leaves a batch under BATCH_FLOOR (31 rules would be [30, 1]) it is merged with its neighbour and
+  the pair rebalanced ([16, 15]); a unit under BATCH_FLOOR in total stays one batch;
+- units under BATCH_FLOOR pack together only when their scope lists are identical AND declared (the same files
+  are read for each); a unit with no scope is "unspecified", not "identical", and gets its own batch; at most
+  BATCH_CAP rules per batch;
 - the ranges of one unit tile its rules exactly, in order.
 Consumers import the two constants for their own drift tests (for example `rules.BATCH_CAP == batching.BATCH_CAP`).
 """
@@ -92,7 +95,27 @@ def _split(unit: Unit) -> list[Batch]:
         cur_end = b
     if cur_end > cur_start:
         batches.append(Batch((Span(unit.name, cur_start, cur_end),)))
-    return batches
+    return _rebalance(unit.name, batches)
+
+
+def _rebalance(name: str, batches: list[Batch]) -> list[Batch]:
+    """No batch of a split unit stays under BATCH_FLOOR: merge it into a neighbour, or cut the pair evenly."""
+    spans = [b.spans[0] for b in batches]
+    i = 0
+    while len(spans) > 1 and i < len(spans):
+        if spans[i].size >= BATCH_FLOOR:
+            i += 1
+            continue
+        j = i - 1 if i > 0 else i + 1
+        lo, hi = min(i, j), max(i, j)
+        start, end = spans[lo].start, spans[hi].end
+        if end - start <= BATCH_CAP:
+            spans[lo:hi + 1] = [Span(name, start, end)]
+        else:
+            mid = start + (end - start + 1) // 2
+            spans[lo:hi + 1] = [Span(name, start, mid), Span(name, mid, end)]
+        i = max(lo - 1, 0)
+    return [Batch((s,)) for s in spans]
 
 
 def plan_batches(units: list[Unit]) -> list[Batch]:
@@ -107,6 +130,8 @@ def plan_batches(units: list[Unit]) -> list[Batch]:
             continue
         if n >= BATCH_FLOOR:
             out += _split(u) if n > BATCH_CAP else [Batch((Span(u.name, 0, n),))]
+        elif not u.scope:
+            out.append(Batch((Span(u.name, 0, n),)))  # scope unspecified: never packed
         else:
             small.setdefault(u.scope, []).append(u)
     for group in small.values():

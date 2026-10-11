@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 
 import pytest
 
@@ -231,3 +232,115 @@ def test_persona_kind_must_match_tools_table(vr):
     res["persona"] = "explorer"
     _, errs = vr.parse_result(block(res), vr.parse_brief(brief), "explorer")
     assert any("kind" in e for e in errs)
+
+
+# ---- round-1 review fixes (A2, A4, A5, A6, B2) --------------------------------------------------------------
+
+def _fill(skel):
+    """Fill a generated skeleton literally: keep placeholders, take the first of `a|b` enums, empty object lists."""
+    def go(v, key=""):
+        if isinstance(v, dict):
+            return {k: go(x, k) for k, x in v.items()}
+        if isinstance(v, list):
+            if v and isinstance(v[0], dict) and key != "verdicts":
+                return []  # findings, hits: a clean run has none (verdicts need one per claim)
+            return [go(x, key) for x in v]
+        if key == "rules_checked":
+            return "1/1"
+        if isinstance(v, str) and "|" in v:
+            return v.split("|")[0]
+        return v
+    return go(skel)
+
+
+@pytest.mark.parametrize("name", ["explorer", "gatekeeper", "reviewer-correctness", "reviewer-rules", "reviewer-scope",
+                                  "reviewer-security", "validator"])
+def test_skeleton_filled_literally_validates(vr, ba, name):
+    pmap = json.loads((CONTRACT / "personas.json").read_text())
+    skel = json.loads(ba.skeleton(vr.result_schema(), pmap[name]["kind"], name, pmap[name].get("lens")))
+    assert "error" not in skel and "ref" not in skel  # conditional fields are prose, never a literal fill
+    res = _fill(skel)
+    assert res["status"] == "ok"
+    assert vr.validate_schema(res, vr.result_schema()) == []
+    brief = vr.parse_brief(f"brief: pip-agents/1\nkind: {pmap[name]['kind']}\n")
+    errs = vr.cross_check(brief, res, name, claim_ids=["<claim id>"])
+    assert not any("error only with status error" in e or "ref given" in e or "ref not echoed" in e for e in errs), errs
+
+
+def test_claims_file_read_from_disk(vr, tmp_path):
+    brief, res = example("validate")
+    res = copy.deepcopy(res)
+    ids = [v["id"] for v in res["payload"]["verdicts"]]
+    claims = tmp_path / "claims.json"
+    b = vr.parse_brief(brief.replace(brief.split("claims: ")[1].split("\n")[0], str(claims)))
+    claims.write_text(json.dumps([{"id": i, "claim": "x"} for i in ids]))
+    assert vr.parse_result(block(res), b, "validator")[1] == []  # match
+    claims.write_text(json.dumps([{"id": i} for i in ids[::-1]]))
+    assert any("input order" in e for e in vr.parse_result(block(res), b, "validator")[1])  # mismatch
+    claims.write_text(json.dumps({"id": "c1"}))
+    assert any("claims file unreadable" in e for e in vr.parse_result(block(res), b, "validator")[1])  # not a list
+    claims.write_text("[1, 2")
+    assert any("claims file unreadable" in e for e in vr.parse_result(block(res), b, "validator")[1])  # bad JSON
+
+
+def test_claims_file_size_cap_and_regular_only(vr, tmp_path):
+    brief, res = example("validate")
+    claims = tmp_path / "claims.json"
+    b = vr.parse_brief(brief.replace(brief.split("claims: ")[1].split("\n")[0], str(claims)))
+    claims.write_text(json.dumps([{"id": "c1", "pad": "x" * (vr.CLAIMS_MAX_BYTES + 10)}]))
+    assert any("claims file unreadable" in e for e in vr.parse_result(block(res), b, "validator")[1])
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)  # opening a FIFO with no writer would hang: it must be refused before any open
+    b["claims"] = str(fifo)
+    assert any("claims file unreadable" in e for e in vr.parse_result(block(res), b, "validator")[1])
+    b["claims"] = "/dev/zero"
+    assert any("claims file unreadable" in e for e in vr.parse_result(block(res), b, "validator")[1])
+
+
+@pytest.mark.parametrize("rules,want", [
+    ("/r/doc.md L1-40 (R1,R2,R3)", ["R1", "R2", "R3"]),
+    ("/r/doc (v2).md L1-10 (R1,R2)", ["R1", "R2"]),  # trailing group, not the first parenthesis
+    ("R1,R2 R3", ["R1", "R2", "R3"]),
+    ("rel/doc.md", None), ("doc.md", None), ("C:\\x\\doc.md", None), ("/r/doc.md L1-40", None),
+])
+def test_id_list(vr, rules, want):
+    assert vr._id_list(rules) == want
+
+
+def test_rules_lens_needs_rules_line(vr):
+    b = vr.parse_brief("brief: pip-agents/1\nkind: review\nref: b1\ntarget: /t/diff.patch\n")
+    _, errs = vr.parse_result(block(rules_res(rules_checked="1/1")), b, "reviewer-rules")
+    assert any("no `rules:` line" in e for e in errs)
+
+
+def test_rules_with_parenthesised_path_accepts_real_findings(vr):
+    b = vr.parse_brief("brief: pip-agents/1\nkind: review\nref: b1\ntarget: /t/diff.patch\nrules: /r/doc (v2).md L1-10 (R1,R2,R3)\n")
+    res = rules_res(findings=[rfinding(id="R1")], rules_checked="3/3")
+    assert vr.parse_result(block(res), b, "reviewer-rules")[1] == []
+
+
+def test_unterminated_final_block_is_an_error(vr):
+    brief, res = example("review")
+    b = vr.parse_brief(brief)
+    truncated = block(res) + "\n```pip-agents-result\n" + json.dumps(res)[:40]
+    _, errs = vr.parse_result(truncated, b, "reviewer-scope")
+    assert errs and "E_NO_BLOCK" in errs[0] and "never closed" in errs[0]
+    _, errs = vr.parse_result("```pip-agents-result\n" + json.dumps(res), b, "reviewer-scope")
+    assert errs and "never closed" in errs[0]
+
+
+def test_crlf_message(vr):
+    brief, res = example("review")
+    b = vr.parse_brief(brief)
+    crlf = block(res).replace("\n", "\r\n")
+    assert vr.parse_result(crlf, b, "reviewer-scope")[1] == []
+    _, errs = vr.parse_result(block(res, "```json").replace("\n", "\r\n"), b, "reviewer-scope")
+    assert errs and "E_NO_BLOCK" in errs[0] and "```json" in errs[0]
+
+
+def test_const_and_enum_are_type_strict(vr):
+    assert vr.validate_schema(1, {"const": True})
+    assert vr.validate_schema(True, {"const": 1})
+    assert vr.validate_schema(True, {"enum": [1, 2]})
+    assert vr.validate_schema(1, {"enum": [True]})
+    assert vr.validate_schema(1, {"const": 1}) == [] and vr.validate_schema("a", {"enum": ["a", "b"]}) == []
