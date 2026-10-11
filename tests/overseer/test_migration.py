@@ -377,3 +377,72 @@ def test_the_views_can_always_rebuild_what_the_tables_hold(board):
         f.unlink()
     assert views.export(conn, state)
     assert (state / "sprints" / "2026-07-S1.md").read_text() == SPRINT.to_text()
+
+
+# --- round 1 review fixes -------------------------------------------------
+
+
+def test_a_loser_that_backs_up_after_the_winner_finished_leaves_no_backup_of_a_v2_board(board, monkeypatch):
+    repo, path, state = board
+    loser = sqlite3.connect(str(path))
+    loser.row_factory = sqlite3.Row
+    winner = sqlite3.connect(str(path))
+    winner.row_factory = sqlite3.Row
+    real_backup = migrate.backup_before_v2
+
+    def winner_first(conn, p):
+        monkeypatch.setattr(migrate, "backup_before_v2", real_backup)
+        db.ensure_schema(winner, path=path, state=state)       # winner takes the true .bak
+        return real_backup(conn, p)                             # loser copies a v2 board
+
+    monkeypatch.setattr(migrate, "backup_before_v2", winner_first)
+    db.ensure_schema(loser, path=path, state=state)
+    [only] = baks(path)
+    check = sqlite3.connect(str(only))
+    assert check.execute("PRAGMA user_version").fetchone()[0] == 1   # the pre-upgrade copy
+    check.close()
+
+
+def test_a_failed_export_does_not_let_old_files_revert_later_v2_writes(board, monkeypatch):
+    from scripts.knowledge import Fact, save_fact
+
+    repo, path, state = board
+    conn = db.connect(repo)
+    save_fact(conn, Fact(id="KB-900", statement="old", created="2026-09-01", verified="2026-09-01"))
+    views.export(conn, state)
+    conn.close()
+    monkeypatch.setattr(views, "_export", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
+    conn = db.connect(repo)
+    db.set_meta(conn, "views_exported_at", "0")                   # as after a failed export
+    conn.commit()
+    conn.close()
+    db.connect(repo).close()                                      # first connect re-imports once
+    conn = db.connect(repo)
+    conn.execute("UPDATE facts SET statement='NEWEST' WHERE id='KB-900'")
+    conn.commit()
+    conn.close()
+    conn = db.connect(repo)
+    assert conn.execute("SELECT statement FROM facts WHERE id='KB-900'").fetchone()[0] == "NEWEST"
+
+
+def test_a_legacy_write_between_connect_and_export_is_imported_not_overwritten(board):
+    repo, path, state = board
+    conn = db.connect(repo)
+    f = state / "sprints" / "2026-07-S3.md"
+    f.write_text(Sprint(id="2026-07-S3", body="## Goal\nlate legacy write").to_text())
+    _touch_later(f)
+    assert views.export(conn, state)
+    assert "late legacy write" in conn.execute(
+        "SELECT body FROM sprints WHERE id='2026-07-S3'").fetchone()[0]
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("pytest: 12 passed\nPASS", "PASS"),
+    ("FAIL first run\nfixed it\nPASS", "UNKNOWN"),
+    ("FAIL: 2 failed", "FAIL"),
+])
+def test_verification_backfill_reads_a_verdict_only_when_unambiguous(text, expected):
+    from scripts.models import Card
+    card = make_card("WF-1", body=f"## Verification\n{text}\n")
+    [row] = [r for r in migrate._evidence_rows(card) if r["kind"] == "verify"]
+    assert row["status"] == expected

@@ -46,7 +46,16 @@ def _fingerprint(paths: list[Path]) -> dict[str, tuple[int, str]]:
 
 
 def _copy_board(src: Path, dest: Path) -> None:
-    source = sqlite3.connect(f"{src.resolve().as_uri()}?mode=ro", uri=True)
+    """Copy the board file (and any -wal/-shm beside it) with plain file I/O and
+    take the online backup from the COPY: the input is never opened through
+    sqlite, which would create -wal/-shm files next to it."""
+    raw = dest.with_name("source-copy.db")
+    shutil.copyfile(src, raw)
+    for suffix in ("-wal", "-shm"):
+        side = src.with_name(src.name + suffix)
+        if side.is_file():
+            shutil.copyfile(side, raw.with_name(raw.name + suffix))
+    source = sqlite3.connect(str(raw))
     try:
         out = sqlite3.connect(str(dest))
         try:
@@ -55,6 +64,8 @@ def _copy_board(src: Path, dest: Path) -> None:
             out.close()
     finally:
         source.close()
+    for stale in raw.parent.glob(raw.name + "*"):
+        stale.unlink(missing_ok=True)
 
 
 def _card_columns(path: Path) -> list[str]:
@@ -90,18 +101,24 @@ def _counts(conn: sqlite3.Connection) -> dict[str, int]:
 
 
 def check(board: Path, state: Path) -> dict:
-    watched = [board, *(p for p in (state / "sprints", state / "knowledge") if p.exists())]
+    sides = [board.with_name(board.name + s) for s in ("-wal", "-shm")]
+    watched = [board, *(p for p in sides if p.exists()),
+               *(p for p in (state / "sprints", state / "knowledge") if p.exists())]
     before = _fingerprint(watched)
-    src = sqlite3.connect(f"{board.resolve().as_uri()}?mode=ro", uri=True)
-    try:
-        user_version = src.execute("PRAGMA user_version").fetchone()[0]
-        src_total = src.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
-        src_live = src.execute("SELECT COUNT(*) FROM cards WHERE archived = 0").fetchone()[0]
-    finally:
-        src.close()
+    present = {p for p in sides if p.exists()}
 
     with tempfile.TemporaryDirectory(prefix="overseer-check-") as tmp_name:
         tmp = Path(tmp_name)
+        probe = tmp / "probe.db"
+        _copy_board(board, probe)
+        src = sqlite3.connect(str(probe))
+        try:
+            user_version = src.execute("PRAGMA user_version").fetchone()[0]
+            src_total = src.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
+            src_live = src.execute("SELECT COUNT(*) FROM cards WHERE archived = 0").fetchone()[0]
+        finally:
+            src.close()
+        probe.unlink()
         copy_state = tmp / "state"
         copy_state.mkdir()
         for sub in ("sprints", "knowledge"):
@@ -153,13 +170,20 @@ def check(board: Path, state: Path) -> dict:
             }
         finally:
             conn.close()
-    report["source_untouched"] = _fingerprint(watched) == before
+    report["already_v2"] = user_version >= db.SCHEMA_VERSION
+    if report["already_v2"]:
+        report["bak_verified"] = True  # nothing to upgrade, so no backup is expected
+    report["source_untouched"] = (
+        _fingerprint(watched) == before
+        and present == {p for p in sides if p.exists()}
+    )
     return report
 
 
 def render(r: dict) -> str:
     a = r["after"]
     lines = [
+        *(["board is already at schema v2: nothing to upgrade"] if r.get("already_v2") else []),
         f"board:   {r['board']}",
         f"state:   {r['state']}",
         f"schema before: user_version {r['schema_before']}",
@@ -172,7 +196,7 @@ def render(r: dict) -> str:
         f"evidence backfilled: {a['evidence_rows']} rows across {a['evidence_cards']} cards",
         f"unparsed files: {len(r['unparsed'])}",
         *[f"  - {u}" for u in r["unparsed"]],
-        f".bak taken and verified: {'yes' if r['bak_verified'] else 'NO'}",
+        f".bak taken and verified: {'n/a (already v2)' if r.get('already_v2') else 'yes' if r['bak_verified'] else 'NO'}",
         f"views written: {'yes' if r['views_written'] else 'NO'}",
         f"second pass imported new rows: {r['second_import_new_rows']} "
         f"(idempotent: {'yes' if r['idempotent'] else 'NO'})",

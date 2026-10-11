@@ -486,13 +486,20 @@ def cmd_clear(args: argparse.Namespace) -> int:
 
 def _create_card(args: argparse.Namespace) -> Card:
     """Mint and insert a card from new-card-style args. Raises
-    ``sqlite3.IntegrityError`` on an id collision (insert-only, see below)."""
+    ``sqlite3.IntegrityError`` on an id collision (insert-only: ``create_card`` raises on a PK collision, never upserts)."""
     conn = _conn(args.root)
     for what, ref in (("--jira", args.jira), ("--linear", args.linear)):
         if ref:
             check_id(ref, what)
-    card_id = args.jira or args.linear or db.mint_id(conn)
-    card = Card(
+    with db.txn(conn):  # mint and insert under one writer lock: no duplicate WF-nnn
+        card_id = args.jira or args.linear or db.mint_id(conn)
+        card = _build_card(args, card_id)
+        db.create_card(conn, card)
+    return card
+
+
+def _build_card(args: argparse.Namespace, card_id: str) -> Card:
+    return Card(
         id=card_id,
         title=args.title.strip(),
         status="planned",
@@ -507,12 +514,6 @@ def _create_card(args: argparse.Namespace) -> Card:
         labels=[lb.strip() for lb in args.labels.split(",") if lb.strip()] if args.labels else [],
         body=CARD_BODY_TEMPLATE.format(goal=args.goal or "_(to be written)_"),
     )
-    # Insert-only (not an upsert): a plain existence check here
-    # would leave a TOCTOU window where two concurrent `new-card` calls that
-    # mint/target the same id both pass the check and one silently
-    # overwrites the other. `create_card` raises on the PK collision instead.
-    db.create_card(conn, card)
-    return card
 
 
 def cmd_new_card(args: argparse.Namespace) -> int:

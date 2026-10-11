@@ -45,6 +45,14 @@ class TestInitAndNewCard:
         assert card.budget_estimate == 400_000
         assert "## Goal" in card.body
 
+    def test_new_card_mints_and_inserts_under_one_writer_lock(self, repo, monkeypatch):
+        from scripts import db
+        seen = []
+        real = db.mint_id
+        monkeypatch.setattr(db, "mint_id", lambda c: (seen.append(db.in_txn(c)), real(c))[1])
+        assert run(repo, "new-card", "--title", "Locked") == 0
+        assert seen == [True]
+
     def test_new_card_jira_id(self, repo, capsys):
         run(repo, "new-card", "--title", "Webhooks", "--jira", "PROJ-142")
         assert "PROJ-142" in capsys.readouterr().out

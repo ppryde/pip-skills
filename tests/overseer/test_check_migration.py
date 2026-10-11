@@ -42,3 +42,31 @@ def test_missing_board_is_an_error(tmp_path):
     proc = subprocess.run([sys.executable, str(SCRIPT), str(tmp_path / "nope.db")],
                           capture_output=True, text=True)
     assert proc.returncode == 1 and "no such board" in proc.stderr
+
+
+def test_wal_side_files_are_not_created_beside_the_input(tmp_path):
+    import sqlite3
+    board, state = tmp_path / "board.db", tmp_path / "state"
+    make_v1_board(board, state, n_cards=5)
+    for side in tmp_path.glob("board.db-*"):
+        side.unlink()
+    proc = subprocess.run([sys.executable, str(SCRIPT), str(board), "--state", str(state), "--json"],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert sorted(p.name for p in tmp_path.glob("board.db-*")) == []
+    assert json.loads(proc.stdout)["source_untouched"]
+
+
+def test_an_already_upgraded_board_is_reported_not_failed(tmp_path):
+    from scripts import db
+    import sqlite3
+    board, state = tmp_path / "board.db", tmp_path / "state"
+    make_v1_board(board, state, n_cards=3)
+    conn = sqlite3.connect(str(board))
+    conn.row_factory = sqlite3.Row
+    db.ensure_schema(conn, path=board, state=state)
+    conn.close()
+    proc = subprocess.run([sys.executable, str(SCRIPT), str(board), "--state", str(state)],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "already at schema v2" in proc.stdout

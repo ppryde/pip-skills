@@ -82,6 +82,10 @@ def export(conn: sqlite3.Connection, state: Path) -> bool:
     from scripts import db
 
     try:
+        # A legacy writer may have touched a file since this verb connected:
+        # import it before the export would overwrite it.
+        from scripts import migrate
+        migrate.reimport_newer_files(conn, state, export=False)
         _export(conn, state)
         db.set_meta(conn, "views_exported_at", repr(time.time()))
         conn.commit()

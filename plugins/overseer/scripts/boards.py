@@ -215,6 +215,32 @@ def _merge_sprints(target: sqlite3.Connection, folder: Path) -> int:
         source.close()
 
 
+def _merge_knowledge_rows(target: sqlite3.Connection, folder: Path) -> int:
+    """Add the facts and pending facts a schema-v2 source board holds that the
+    target lacks (by id; the target's own row wins)."""
+    source = _read_only(folder / "board.db")
+    if source is None:
+        return 0
+    try:
+        try:
+            facts = source.execute("SELECT * FROM facts").fetchall()
+            pending = source.execute("SELECT * FROM pending_facts").fetchall()
+        except sqlite3.OperationalError:
+            return 0  # a v1 source: its knowledge/ files are imported instead
+        added = 0
+        with db.txn(target):
+            for table, rows in (("facts", facts), ("pending_facts", pending)):
+                for r in rows:
+                    cols = r.keys()
+                    cur = target.execute(
+                        f"INSERT OR IGNORE INTO {table}({', '.join(chr(34) + c + chr(34) for c in cols)}) "
+                        f"VALUES ({', '.join('?' for _ in cols)})", tuple(r))
+                    added += max(0, cur.rowcount)
+        return added
+    finally:
+        source.close()
+
+
 def merge_boards(repo_root: Path, *, dry_run: bool = False,
                  now: float | None = None) -> dict[str, Any]:
     """Fold every other board for ``repo_root`` into the resolved one (see
@@ -253,6 +279,7 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
                 source.close()
             target_folder = Path(result["target"])
             sprints_added = 0 if dry_run else _merge_sprints(target_conn, folder)
+            facts_added = 0 if dry_run else _merge_knowledge_rows(target_conn, folder)
             moved: list[str] = []
             left_behind: list[str] = []
             for name in SIDECARS:
@@ -260,6 +287,13 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
                 if not src.exists():
                     continue
                 if dst.exists():
+                    if name == "knowledge" and not dry_run:
+                        # The target already has a knowledge/ (views): take the
+                        # source's legacy fact files into the tables by id.
+                        with db.txn(target_conn):
+                            report = migrate.import_state(target_conn, folder)
+                        facts_added += report.facts + report.retired + report.pending
+                        continue
                     left_behind.append(name)
                     continue
                 moved.append(name)
@@ -277,6 +311,7 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
                 **stats,
                 "label_colors": colours,
                 "sprints": sprints_added,
+                "facts": facts_added,
                 "moved": moved,
                 "left_behind": left_behind,
             })

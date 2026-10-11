@@ -38,6 +38,7 @@ from scripts.sprints import Sprint
 from scripts.store import check_id
 
 BACKUP_KEEP = 3
+SCHEMA_V2 = 2
 PENDING_FILENAME = "pending.jsonl"
 
 
@@ -105,6 +106,11 @@ def backup_before_v2(conn: sqlite3.Connection, path: Path) -> Path:
             f"could not back up {path} before the schema v2 upgrade ({exc}); "
             "board left untouched"
         ) from exc
+    if conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_V2:
+        # Lost the first-upgrade race: another process finished while we copied,
+        # so this is a copy of a v2 board, not the pre-upgrade state. Drop it.
+        dest.unlink(missing_ok=True)
+        return dest
     _prune_backups(path, keep_also=dest)
     return dest
 
@@ -271,10 +277,12 @@ def _evidence_rows(card: Card) -> list[dict]:
             ))
     verification = sections.get("## Verification", "").strip()
     if verification and verification != "_(pending)_":
-        found = _PASSFAIL.search(verification)
+        # A section that gives two different verdicts ("FAIL ... then PASS") or
+        # none is UNKNOWN: D2 reads these rows as gate evidence.
+        tokens = {m.group(1) for m in _PASSFAIL.finditer(verification)}
         rows.append(dict(
             stage="verification", kind="verify", round=None, slot="",
-            status=found.group(1) if found else "UNKNOWN",
+            status=tokens.pop() if len(tokens) == 1 else "UNKNOWN",
             critical=None, important=None, minor=None,
         ))
     return rows
@@ -328,6 +336,7 @@ def finish_v2(conn: sqlite3.Connection, state: "Path | None", *, imported: bool)
     if get_meta(conn, "gates_since") is None:
         set_meta(conn, "gates_since", now)
     set_meta(conn, "views_exported_at", "0")
+    set_meta(conn, "views_reimported_at", now_epoch())
     if imported:
         set_meta(conn, "v2_report", json.dumps({
             "summary": report.summary(), "unparsed": report.unparsed,
@@ -369,7 +378,7 @@ def _view_files(state: Path) -> list[Path]:
     return found
 
 
-def reimport_newer_files(conn: sqlite3.Connection, state: Path) -> None:
+def reimport_newer_files(conn: sqlite3.Connection, state: Path, *, export: bool = True) -> None:
     """Mixed-version safety: a plugin of an older version writes the legacy
     files directly. Any file modified after the last view export is a write the
     views would otherwise overwrite, so import it (file wins) and re-export.
@@ -378,10 +387,16 @@ def reimport_newer_files(conn: sqlite3.Connection, state: Path) -> None:
 
     if db.get_meta(conn, "state_imported_v2") is None:
         return
-    try:
-        exported = float(db.get_meta(conn, "views_exported_at") or 0)
-    except ValueError:
-        exported = 0.0
+    # A file is "a legacy write" only if it is newer than BOTH the last export
+    # and the last re-import: a failed export must not make already-imported
+    # (older) file content win over later v2 writes.
+    exported = 0.0
+    for key in ("views_exported_at", "views_reimported_at"):
+        try:
+            exported = max(exported, float(db.get_meta(conn, key) or 0))
+        except ValueError:
+            pass
+    scan_started = time.time()
     changed = []
     for path in _view_files(state):
         try:
@@ -393,9 +408,11 @@ def reimport_newer_files(conn: sqlite3.Connection, state: Path) -> None:
         return
     with db.txn(conn):
         report = import_state(conn, state, since=exported, overwrite=True)
+        db.set_meta(conn, "views_reimported_at", repr(scan_started))
     for line in report.unparsed:
         print(f"overseer: UNPARSED (left in place): {line}", file=sys.stderr)
-    export_views(conn, state)
+    if export:
+        export_views(conn, state)
 
 
 def now_epoch() -> str:

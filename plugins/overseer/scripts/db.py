@@ -207,7 +207,13 @@ def ensure_schema(
     if populated and path is not None:
         migrate.backup_before_v2(conn, path)  # raises MigrationError; board untouched
     conn.commit()
-    conn.execute("BEGIN IMMEDIATE")
+    # The one-time upgrade may hold the lock for a while on a big board: wait
+    # for it rather than fail "database is locked", then see user_version 2.
+    conn.execute("PRAGMA busy_timeout=60000")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    finally:
+        conn.execute("PRAGMA busy_timeout=5000")
     try:
         if conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION:
             conn.rollback()  # lost the race: another process finished the upgrade
@@ -585,7 +591,7 @@ def create_card(conn: sqlite3.Connection, card: Card) -> None:
     cols = ", ".join(f'"{c}"' for c in params)
     ph = ", ".join(f":{c}" for c in params)
     conn.execute(f"INSERT INTO cards ({cols}) VALUES ({ph})", params)
-    conn.commit()
+    commit_unless_txn(conn)
 
 
 def archive_card(conn: sqlite3.Connection, card: Card) -> None:

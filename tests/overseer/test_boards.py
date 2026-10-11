@@ -287,3 +287,28 @@ class TestMergeSchemaV2State:
             "from the other account"]
         assert (active / "sprints" / "S-other.md").is_file()      # views refreshed
         assert not elsewhere.exists()                              # renamed, not deleted
+
+    def test_facts_of_a_v2_source_are_carried_when_the_target_already_exported_views(self, tmp_path, monkeypatch):
+        from scripts import views
+        from scripts.knowledge import Fact, save_fact
+
+        primary, personal, repo = _setup(tmp_path, monkeypatch)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(personal))
+        src = db.connect(repo)
+        db.save_card(src, make_card("WF-1"))
+        save_fact(src, Fact(id="KB-001", statement="theirs", created="2026-09-01",
+                            verified="2026-09-01"))
+        views.export(src, config.central_root(repo))
+        src.close()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(primary))
+        tgt = db.connect(repo)
+        save_fact(tgt, Fact(id="KB-002", statement="mine", created="2026-09-01",
+                            verified="2026-09-01"))
+        views.export(tgt, config.central_root(repo))        # target already has knowledge/
+        tgt.close()
+        config.add_claude_dir(personal)
+
+        [absorbed] = boards.merge_boards(repo)["absorbed"]
+        assert absorbed["facts"] >= 1
+        conn = db.connect(repo)
+        assert {r[0] for r in conn.execute("SELECT statement FROM facts")} == {"theirs", "mine"}
