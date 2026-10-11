@@ -175,7 +175,7 @@ with `GATE: ...` lines. Escapes: `--force-gate "user: <why>"` on `set-stage`,
 `## Decisions` and kept as a `force` evidence row; the dashboard's move API
 takes `force_gate` and records it as `dashboard: <reason>`; an empty reason is
 refused), `"gates": "warn"|"off"` in `.overseer/config.json`, or
-`OVERSEER_GATES=hard|warn|off`. Cards created before the board's `gates_from`
+`OVERSEER_GATES=hard|warn|off` (a move that passes only because of `warn`/`off` leaves a `force` evidence row with status `bypassed`). Cards created before the board's `gates_from`
 date (set when the board is created or upgraded; a D1-era board is stamped on
 its first gate check, binding from the next day) only warn.
 

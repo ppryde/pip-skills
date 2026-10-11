@@ -77,7 +77,7 @@ def _review_problems(card: Card, stage: str, ev: "Sequence[Evidence]") -> "list[
     reviews = [e for e in ev if e.stage == stage and e.kind == "review" and e.round is not None]
     dispatches = [e for e in ev if e.stage == stage and e.kind == "dispatch"
                   and e.detail == "reviewer" and e.round is not None]
-    rounds = [e.round for e in reviews + dispatches]
+    rounds = [e.round for e in reviews + dispatches if e.round is not None]
     if not rounds:
         return [f"GATE: {stage} has no reviewer evidence - run the {stage} review loop "
                 f"(dispatch-prep {card.id} --stage {stage} --role reviewer --slot A --round 1)"]

@@ -324,8 +324,17 @@ def _settle_gates(
                            detail=f"{label}: {force} [unmet: {unmet}]", ts=now)
         notes.append(f"GATE FORCED ({label}): {force}")
         return
-    if _gate_mode(repo_root) == "hard" and _card_gated(conn, card):
+    mode = _gate_mode(repo_root)
+    if mode == "hard" and _card_gated(conn, card):
         raise gates.GateRefused(problems)
+    if mode != "hard":
+        # An environment/config escape leaves a trace too (a `force` evidence
+        # row), so a gate is never passed silently.
+        unmet = "; ".join(p.removeprefix("GATE: ").split(" - ")[0] for p in problems)
+        db.record_evidence(conn, card.id, stage, "force", status="bypassed",
+                           detail=f"{label}: gates={mode} [unmet: {unmet}]", ts=now)
+        if mode == "off":
+            return
     notes.extend(f"WARNING {p}" for p in problems)
 
 
@@ -334,9 +343,8 @@ def _gated_move(
 ) -> None:
     """``card.set_stage`` behind the transition gates. Inside the transaction."""
     previous = card.stage or "new"
-    if _gate_mode(repo_root) != "off":
-        problems = gates.check_transition(card, target, db.evidence_for(_conn(repo_root), card.id))
-        _settle_gates(repo_root, card, target, f"{previous} -> {target}", problems, force, notes)
+    problems = gates.check_transition(card, target, db.evidence_for(_conn(repo_root), card.id))
+    _settle_gates(repo_root, card, target, f"{previous} -> {target}", problems, force, notes)
     card.set_stage(target, _now())
 
 
@@ -1568,11 +1576,9 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
     def prep(c: Card) -> None:
         if args.advance:
             _gated_move(args.root, c, args.stage, force, notes)
-        if _gate_mode(args.root) != "off":
-            problems = gates.check_dispatch(
-                c, args.stage, args.role, args.round,
-                db.evidence_for(_conn(args.root), c.id))
-            _settle_gates(args.root, c, args.stage, f"{args.role} round {args.round}", problems, force, notes)
+        problems = gates.check_dispatch(
+            c, args.stage, args.role, args.round, db.evidence_for(_conn(args.root), c.id))
+        _settle_gates(args.root, c, args.stage, f"{args.role} round {args.round}", problems, force, notes)
         if args.role in ("reviewer", "verifier"):
             # Completeness (OR-2): a dispatched slot that never reports blocks
             # its gate, so a crashed reviewer is not an approval.

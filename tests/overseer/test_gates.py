@@ -245,6 +245,15 @@ class TestSetStage:
         assert "WARNING GATE: ## Plan is empty" in capsys.readouterr().err
         assert "FORCED" not in card(repo).body
 
+    def test_off_and_warn_leave_a_bypass_row(self, repo, monkeypatch):
+        monkeypatch.setenv("OVERSEER_GATES", "off")
+        assert run(repo, "set-stage", "WF-001", "implementation") == 0
+        [row] = [e for e in evidence(repo) if e.kind == "force"]
+        assert row.status == "bypassed" and "gates=off" in row.detail
+        monkeypatch.setenv("OVERSEER_GATES", "warn")
+        assert run(repo, "set-stage", "WF-001", "awaiting-merge") == 0
+        assert len([e for e in evidence(repo) if e.status == "bypassed"]) == 2
+
     def test_off_via_env_and_config(self, repo, monkeypatch):
         monkeypatch.setenv("OVERSEER_GATES", "off")
         assert run(repo, "set-stage", "WF-001", "implementation") == 0
