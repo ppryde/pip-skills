@@ -419,15 +419,21 @@ def _doc(name: str) -> str:
     return (SKILL / name).read_text()
 
 
+def _skill_text() -> str:
+    """SKILL.md plus the install reference it defers to (WF-268 lean bundle)."""
+    return _doc("SKILL.md") + (SKILL / "references" / "install.md").read_text()
+
+
 def test_docs_say_live_now_not_new_sessions() -> None:
-    for text in (_doc("SKILL.md"), _doc("README.md"), SPEC.read_text()):
+    for text in (_skill_text(), _doc("README.md"), SPEC.read_text()):
         assert "take effect in new sessions" not in text
         assert "in new sessions" not in text
-    assert "/hooks" in _doc("SKILL.md") and "/hooks" in _doc("README.md")
+    assert "/hooks" in _skill_text() and "/hooks" in _doc("README.md")
 
 
 def test_skill_md_carries_the_setup_protocol() -> None:
-    text = _doc("SKILL.md")
+    text = _skill_text()
+    assert "references/install.md" in _doc("SKILL.md")   # SKILL.md points at the protocol
     assert "## Moving this work into a tmux session" in text
     assert "resume the handover" in text and "claude-tmux" in text
     assert "never nudged" in text                     # inline status line: MANUAL STEP required
