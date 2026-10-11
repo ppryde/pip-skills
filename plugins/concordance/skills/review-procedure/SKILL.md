@@ -30,9 +30,13 @@ calling a step clean, fetch the rest: `removed` (step 1), `sig-drift` (step 2), 
 
 ## Step 1: removed contract
 
-For every row under **Removed contract**: the diff removed a symbol, a parameter, a guard or a
-decorator, and the row shows code that still references it (with ±2 lines). Decide whether
-that code *relies* on the removed behaviour. Open the file only when the snippet is not enough.
+Each row under **Removed contract** is one removed symbol, or one function that lost
+parameters, guards or decorators. It names what was removed, then lists the code that still
+depends on it once: the top sites with their line, plus an exact count of the rest. For guards
+the sites are the tests that reach the function (those that also reference a removed
+exception come first). A line marked "low confidence, not counted" is a same-name call that may
+belong to a sibling symbol: look at it only after the counted sites. Decide whether the
+listed code *relies* on the removed behaviour; open the file only when the line is not enough.
 A live reliance is finding BR-001.
 
 ## Step 2: signature drift

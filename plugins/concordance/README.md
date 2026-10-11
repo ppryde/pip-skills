@@ -6,7 +6,8 @@ every place a word appears in scripture; this is that, for symbols.
 It answers exact questions about a diff, in the CLI, at zero agent tokens:
 
 - **What still relies on what the diff removed?** Deleted symbols, removed parameters, guards
-  and decorators, against every remaining reference.
+  and decorators, against every remaining reference: one row per removed symbol or function,
+  its still-relying sites listed once with an exact count.
 - **Which call sites no longer match a changed signature?** A verdict, not a hint (BR-002),
   for calls it can prove; calls it cannot prove are listed as undecided for the reviewer.
 - **Who calls the changed code, and which tests reach it?** With a pure-refactor classifier,

@@ -82,13 +82,14 @@ def test_callers_and_guarding_tests(world) -> None:
 
 def test_removed_contract_hits(world) -> None:
     _, _, vi, d, snips = world
-    hits = removed_contract(vi, d.removed, snips)
-    found = {(h.item.kind, h.item.name, h.hit.symbol) for h in hits}
-    assert ("symbol", "old_helper", "app.api.handle") in found
-    assert ("param", "partial", "app.api.handle") in found
-    assert ("guard", "if", "tests.test_svc.test_rejects_zero") in found
-    param_hit = next(h for h in hits if h.item.kind == "param")
-    assert param_hit.hit.confidence == "exact" and "partial=True" in param_hit.hit.snippet
+    groups = removed_contract(vi, d.removed, snips)
+    by = {(g.kind, g.qualname): g for g in groups}
+    assert [h.symbol for h in by[("symbol", "app.svc.old_helper")].sites] == ["app.api.handle"]
+    param = by[("param", "app.svc.refund")]
+    assert [h.symbol for h in param.sites] == ["app.api.handle"]
+    assert param.sites[0].confidence == "exact" and "partial=True" in param.sites[0].snippet
+    guard = by[("guard", "app.svc.refund")]
+    assert "tests.test_svc.test_rejects_zero" in {h.symbol for h in guard.sites}
 
 
 def test_sig_drift_flags_the_stale_call_site(world) -> None:
@@ -182,3 +183,54 @@ def test_sig_drift_method_binding_unknown(tmp_path: Path, make_repo) -> None:
     assert "binding unknown" in by_line[5].reason
     assert by_line[6].hit.confidence == "exact"  # explicit Class.method: target is certain
     assert by_line[6].verdict == "error" and "unknown keyword" in by_line[6].reason
+
+
+def _world(tmp_path: Path, make_repo, base: dict[str, str], head: dict[str, str | None]):
+    repo = make_repo(base)
+    sha = repo.git("rev-parse", "HEAD").strip()
+    repo.write(head)
+    st = Store(tmp_path / "w.db")
+    hv, bv = worktree_view(repo.root), base_view(repo.root, sha)
+    ensure_view(st, hv)
+    ensure_view(st, bv)
+    vi = ViewIndex(st, hv)
+    return vi, analyse(st, bv, hv, vi), Snippets(hv)
+
+
+def test_removed_guards_group_into_one_row_per_function(tmp_path: Path, make_repo) -> None:
+    guarded = (
+        "def f(x):\n"
+        + "".join(f"    if x == {i}:\n        raise ValueError('bad {i}')\n" for i in range(3))
+        + "    return x\n"
+    )
+    tests = "from app import f\n\n\n" + "".join(
+        f"def test_{i}():\n    f({i})\n\n\n" for i in range(4)
+    ) + "def test_other():\n    assert ValueError\n"
+    vi, d, snips = _world(tmp_path, make_repo,
+                          {"app.py": guarded, "tests/test_f.py": tests},
+                          {"app.py": "def f(x):\n    return x\n"})
+    groups = removed_contract(vi, d.removed, snips)
+    guard_groups = [g for g in groups if g.kind == "guard"]
+    assert len(guard_groups) == 1  # six removed guards, one row
+    g = guard_groups[0]
+    assert g.qualname == "app.f" and len(g.removed) == 6
+    assert sorted(h.symbol for h in g.sites) == [f"tests.test_f.test_{i}" for i in range(4)]
+    # the unrelated test that merely names ValueError is not dragged in repo-wide
+    assert not any(h.symbol == "tests.test_f.test_other" for h in g.sites)
+
+
+def test_ambiguous_same_name_calls_are_not_counted_as_still_referencing(
+        tmp_path: Path, make_repo) -> None:
+    base = {
+        "m.py": ("class A:\n    def save(self):\n        return 1\n\n\n"
+                 "class B:\n    def save(self):\n        return 2\n\n\n"
+                 "class C:\n    def save(self):\n        return 3\n"),
+        "use.py": "def go(o):\n    o.save()\n    o.save()\n",
+    }
+    head = {"m.py": base["m.py"].replace(
+        "class A:\n    def save(self):\n        return 1\n\n\n", "class A:\n    pass\n\n\n")}
+    vi, d, snips = _world(tmp_path, make_repo, base, head)
+    sym = [g for g in removed_contract(vi, d.removed, snips) if g.kind == "symbol"]
+    assert [g.qualname for g in sym] == ["m.A.save"]
+    assert sym[0].sites == []  # not a hard claim
+    assert sym[0].ambiguous == 2  # named apart as low confidence

@@ -121,3 +121,19 @@ def test_review_context_logs_budget_cuts_and_diff_size(make_repo) -> None:
     assert logged["budget"] == 40 and logged["files"] == 3 and logged["touched"] >= 1
     assert "verdicts" in logged
     assert logged["cut"] or logged["omitted"]
+
+
+def test_removed_guards_render_as_one_row_not_one_per_test(make_repo) -> None:
+    guarded = ("def f(x):\n"
+               + "".join(f"    if x == {i}:\n        raise ValueError('b{i}')\n" for i in range(3))
+               + "    return x\n")
+    tests = "from app import f\n\n\n" + "".join(f"def test_{i}():\n    f({i})\n\n\n"
+                                                 for i in range(5))
+    repo = make_repo({"app.py": guarded, "tests/test_f.py": tests})
+    repo.git("checkout", "-q", "-b", "feat")
+    repo.write({"app.py": "def f(x):\n    return x\n"})
+    out = cli(repo.root, "removed")
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.count("[removed guards] app.f") == 1
+    assert "## Removed contract (1)" in out.stdout
+    assert "+2 more site(s) (exact)" in out.stdout  # 5 tests, top 3 shown, exact total

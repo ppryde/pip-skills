@@ -50,9 +50,15 @@ class TestHit:
 
 
 @dataclass(frozen=True)
-class ContractHit:
-    item: RemovedItem
-    hit: Hit
+class ContractGroup:
+    """Everything removed from one symbol (or the symbol itself) and who still relies on it.
+    `sites` are the sure-or-inferred references (the hard count); `ambiguous` call sites that
+    could belong to the removed symbol or to a sibling of the same name are counted apart."""
+    kind: str  # symbol | param | guard
+    qualname: str
+    removed: list[str]
+    sites: list[Hit]
+    ambiguous: int = 0
 
 
 @dataclass(frozen=True)
@@ -105,48 +111,97 @@ def guarding_tests(vi: ViewIndex, q: str, hops: int = 2) -> list[TestHit]:
     return sorted(found.values(), key=lambda t: (t.hops, t.path, t.line))
 
 
-def _contract(item: RemovedItem, snippets: Snippets, path: str, line: int, symbol: str,
-              conf: str, note: str) -> ContractHit:
-    return ContractHit(item, Hit(path, line, symbol, conf, note,
-                                 snippets.around(path, line, ctx=2)))
+TOP_SITES = 3  # referencing sites listed per removed-contract group; the total stays exact
+
+
+def _group_hit(snippets: Snippets, path: str, line: int, symbol: str, conf: str,
+               note: str) -> Hit:
+    return Hit(path, line, symbol, conf, note, snippets.around(path, line, ctx=0))
+
+
+def _by_conf(hits: list[Hit]) -> list[Hit]:
+    return sorted(hits, key=lambda h: (_CONF_RANK.get(h.confidence, 3), h.path, h.line))
 
 
 def removed_contract(vi: ViewIndex, items: list[RemovedItem],
-                     snippets: Snippets) -> list[ContractHit]:
-    out: list[ContractHit] = []
-    for item in items:
-        if item.kind == "symbol":
-            for path, ref in vi.refs_named(item.name):
-                if vi.canonical(ref.target) == item.qualname:
-                    conf = "exact"
-                elif ref.target.startswith("?.") and vi.resolve(ref.target).target is None:
-                    conf = "inferred"
-                else:
-                    continue
-                out.append(_contract(item, snippets, path, ref.line, ref.src, conf,
-                                     f"still references removed {item.qualname}"))
-        elif item.kind == "param":
-            for path, ref, conf in vi.callers_with_class(item.qualname):
-                if ref.args is not None and item.name in ref.args.keywords:
-                    out.append(_contract(item, snippets, path, ref.line, ref.src, conf,
-                                         f"still passes removed keyword `{item.name}`"))
-        else:  # guard or decorator: the tests that exercise the symbol may rely on it
-            if item.kind == "guard":
-                what = f"guard removed from {item.qualname}: {item.name} {item.text}"
+                     snippets: Snippets) -> list[ContractGroup]:
+    """One group per removed symbol, per function that lost parameters, and per function that
+    lost guards or decorators: what was removed, then the sites that still rely on it, once."""
+    groups: list[ContractGroup] = []
+    sym_items = [i for i in items if i.kind == "symbol"]
+    for item in sym_items:
+        sites: list[Hit] = []
+        ambiguous = 0
+        for path, ref in vi.refs_named(item.name):
+            if vi.canonical(ref.target) == item.qualname:
+                conf = "exact"
+            elif ref.target.startswith("?.") and vi.resolve(ref.target).confidence == "ambiguous":
+                ambiguous += 1  # may be a sibling method of the same name: not a hard claim
+                continue
+            elif ref.target.startswith("?.") and vi.resolve(ref.target).confidence == "unresolved":
+                conf = "inferred"
             else:
-                what = f"decorator {item.name} removed from {item.qualname}"
-            for t in guarding_tests(vi, item.qualname):
-                out.append(_contract(item, snippets, t.path, t.line, t.qualname, "inferred",
-                                     f"{what}; this test reaches it"))
-            if item.kind == "guard" and item.name == "raise":
-                exc = re.match(r"[A-Za-z_][\w.]*", item.text)
-                if exc:
-                    for path, ref in vi.refs_named(last(exc.group(0))):
-                        if vi.is_test(ref.src):
-                            out.append(_contract(
-                                item, snippets, path, ref.line, ref.src, "inferred",
-                                f"test expects {exc.group(0)}, raised by the removed guard"))
+                continue
+            sites.append(_group_hit(snippets, path, ref.line, ref.src, conf,
+                                    f"still references removed {item.qualname}"))
+        groups.append(_group("symbol", item.qualname, [item.qualname], sites, ambiguous))
+    owners: dict[tuple[str, str], list[RemovedItem]] = {}
+    for item in items:
+        if item.kind == "param":
+            owners.setdefault(("param", item.qualname), []).append(item)
+        elif item.kind in ("guard", "decorator"):
+            owners.setdefault(("guard", item.qualname), []).append(item)
+    for (kind, qualname), group_items in owners.items():
+        if kind == "param":
+            names = {i.name for i in group_items}
+            sites = []
+            for path, ref, conf in vi.callers_with_class(qualname):
+                passed = sorted(names & set(ref.args.keywords)) if ref.args is not None else []
+                if passed:
+                    sites.append(_group_hit(snippets, path, ref.line, ref.src, conf,
+                                            "still passes removed keyword "
+                                            + ", ".join(f"`{n}`" for n in passed)))
+            what = [f"param {i.name}" for i in group_items]
+            groups.append(_group("param", qualname, what, sites, 0))
+        else:
+            tests = guarding_tests(vi, qualname)
+            what = [f"guard {i.name} {i.text}".strip() if i.kind == "guard"
+                    else f"decorator {i.name}" for i in group_items]
+            expected = _expected_exceptions(group_items)
+            test_names = {t.qualname for t in tests}
+            expecting = {ref.src for name in expected for _p, ref in vi.refs_named(name)
+                         if ref.src in test_names}
+            sites = []
+            for t in tests:
+                note = "this test reaches it"
+                if t.qualname in expecting:
+                    note += " and references a removed exception"
+                sites.append(_group_hit(snippets, t.path, t.line, t.qualname, "inferred", note))
+            sites.sort(key=lambda h: (not h.note.endswith("exception"), h.path, h.line))
+            groups.append(_group("guard", qualname, what, sites, 0))
+    return groups
+
+
+def _expected_exceptions(items: list[RemovedItem]) -> set[str]:
+    out: set[str] = set()
+    for i in items:
+        if i.kind == "guard" and i.name == "raise":
+            exc = re.match(r"[A-Za-z_][\w.]*", i.text)
+            if exc:
+                out.add(last(exc.group(0)))
     return out
+
+
+def _group(kind: str, qualname: str, what: list[str], sites: list[Hit],
+           ambiguous: int) -> ContractGroup:
+    sites = sites if kind == "guard" else _by_conf(sites)
+    seen: set[tuple[str, int]] = set()
+    unique: list[Hit] = []
+    for h in sites:
+        if (h.path, h.line) not in seen:
+            seen.add((h.path, h.line))
+            unique.append(h)
+    return ContractGroup(kind, qualname, what, unique, ambiguous)
 
 
 def check_call(shape: CallShape, sig: Signature, bound: bool,

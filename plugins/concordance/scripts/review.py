@@ -12,7 +12,7 @@ from scripts.diff import DiffResult, Touched, analyse
 from scripts.index import BuildReport, ensure_view
 from scripts.paths import store_path
 from scripts.query import (
-    ContractHit,
+    ContractGroup,
     DriftHit,
     LiteralHit,
     Snippets,
@@ -29,6 +29,7 @@ from scripts.store import Coverage, Store
 from scripts.views import View, base_view, lang_of, worktree_view
 
 TOP_CALLERS = 3
+TOP_CONTRACT_SITES = 3
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ class Context:
     vi: ViewIndex
     diff: DiffResult
     snippets: Snippets
-    contract: list[ContractHit]
+    contract: list[ContractGroup]
     drift: list[DriftHit]
     gaps: list[Touched]
     literals: list[LiteralHit]
@@ -153,10 +154,27 @@ def verdict_section(ctx: Context) -> Section:
 
 def contract_section(ctx: Context) -> Section:
     rows = []
-    for c in ctx.contract:
-        what = c.item.qualname if c.item.kind == "symbol" else f"{c.item.qualname} ({c.item.name})"
-        rows.append(f"[removed {c.item.kind}] {what} ← {c.hit.path}:{c.hit.line} in "
-                    f"{c.hit.symbol} ({c.hit.confidence}): {c.hit.note}\n{c.hit.snippet}")
+    for g in ctx.contract:
+        shown = ", ".join(g.removed[:5]) + (f" +{len(g.removed) - 5} more"
+                                            if len(g.removed) > 5 else "")
+        if g.kind == "symbol":
+            head = f"[removed symbol] {g.qualname}"
+        elif g.kind == "param":
+            head = f"[removed params] {g.qualname}: {shown}"
+        else:
+            head = f"[removed guards] {g.qualname}: {shown}"
+        if not g.sites and not g.ambiguous:
+            continue
+        lines = [f"{head} — {len(g.sites)} site(s)" if g.sites else head]
+        for h in g.sites[:TOP_CONTRACT_SITES]:
+            lines.append(f"  {h.path}:{h.line} in {h.symbol} ({h.confidence}): {h.note}\n"
+                         f"{h.snippet}")
+        if len(g.sites) > TOP_CONTRACT_SITES:
+            lines.append(f"  +{len(g.sites) - TOP_CONTRACT_SITES} more site(s) (exact)")
+        if g.ambiguous:
+            lines.append(f"  low confidence, not counted: {g.ambiguous} call(s) by the same "
+                         "name that may belong to a sibling symbol")
+        rows.append("\n".join(lines))
     return Section("Removed contract", rows)
 
 
