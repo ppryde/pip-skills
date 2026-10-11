@@ -178,7 +178,7 @@ Base default: `--base`, else the merge-base of HEAD with the default branch
 ## Review flow
 
 ```
-concordance review-context [--base <ref>] [--budget 1500]
+concordance review-context [--base <ref>] [--budget 4000]
   1. view      cwd → worktree root → view (index lazily, hash-gated)
   2. base      merge-base with default branch → base view from git
   3. diff      touched symbols, removed items, signature changes, classification
@@ -186,8 +186,8 @@ concordance review-context [--base <ref>] [--budget 1500]
   5. render    budgeted, whole rows, "+N more (exact|≥)", coverage footer
 ```
 
-Each section is also its own command (`removed`, `sig-drift`, `callers`,
-`tests`, `literals`) for drilling down. Every command takes `--budget`
+Each section is also its own command (`removed`, `sig-drift`, `touched`,
+`callers`, `tests`, `literals`) for drilling down. Every command takes `--budget`
 (tokens, estimated at chars/3); seeds render first and are never cut; counts say
 whether they are exact or lower bounds.
 
@@ -336,3 +336,10 @@ Refinements found while planning; each keeps the design's intent.
   test.
 - The shadow use-rate proxy is approximate; it decides injection, not review
   quality, which the bench owns.
+- Budget (added after plan review): `review-context` defaults to 4000 tokens,
+  drill-downs to 1500. Rendering fills in three passes (every header, then a
+  first row each, then the rest in priority order) so a big early section
+  cannot starve the blind-spot sections. Every query logs its cuts plus the
+  diff and repo size in the events payload. The defaults are provisional: they
+  are reviewed after dogfooding on the refactor work and then a full-size work
+  repo, likely becoming size-aware. Bench step 4b compares 1500 against 4000.

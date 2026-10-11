@@ -17,7 +17,7 @@
 - The store lives at `$CLAUDE_CONFIG_DIR/concordance/<repo-key>/index.db` (`CLAUDE_CONFIG_DIR` defaulting to `~/.claude`), overridable by `CONCORDANCE_DB`. **Nothing is ever written into the repo** being indexed.
 - Repo identity is `git rev-parse --git-common-dir`; all worktrees of a repo share one store.
 - Output paths are **relative to the asking worktree's root**; no answer ever names a path in another worktree.
-- Default `--budget` is **1500** tokens (estimated as chars/3); default index deadline is **60 s**.
+- Default `--budget` is **4000** tokens for `review-context` and **1500** for the drill-down commands (estimated as chars/3); default index deadline is **60 s**. Budgets are provisional and are tuned from the events log after real use.
 - Diff base default: merge-base of HEAD with the default branch (`origin/HEAD`, else `main`, else `master`). **Never `HEAD~1`.**
 - Exit codes: `check` exits 1 on verdicts, 0 when clean; any internal error exits 2 with a message on stderr.
 - Tests pin `CLAUDE_CONFIG_DIR` into `tmp_path` (repo rule: CLAUDE.md "Test isolation") and create nothing outside `tmp_path`.
@@ -3176,9 +3176,11 @@ git commit -m "feat(concordance): removed-contract, signature-drift, callers, te
 - Test: `tests/concordance/test_render.py`
 
 **Interfaces:**
-- Produces: `CHARS_PER_TOKEN = 3`; `est_tokens(text: str) -> int`; `Section(title: str, rows: list[str], total: int | None = None, exact: bool = True, seed: bool = False)`; `render(header: list[str], sections: list[Section], footer: list[str], budget_tokens: int) -> str`.
+- Produces: `CHARS_PER_TOKEN = 3`; `est_tokens(text: str) -> int`; `Section(title: str, rows: list[str], total: int | None = None, exact: bool = True, seed: bool = False)`; `render(header: list[str], sections: list[Section], footer: list[str], budget_tokens: int, stats: dict[str, object] | None = None) -> str`.
 
-Rules: seed sections render first and whole, regardless of budget; other sections render in the given order with whole rows only until the budget is spent; a cut section ends with `  +N more (exact)` (or `(≥)` when `exact=False`); a section whose header no longer fits is listed in one closing `omitted for budget:` line; empty sections are dropped; the footer always renders.
+Rules: seed sections render first and whole, regardless of budget. The rest are filled in **three passes** so a late section is never starved by an early one: (1) every non-empty section gets its header (name and true count), in order; (2) every section gets its first row, in order; (3) the remaining budget goes to further rows in priority order. Whole rows only. A cut section ends with `  +N more (exact)` (or `(≥)` when `exact=False`); room for that tail line is reserved with the header, so the output stays within budget. Only a section whose *header* cannot fit is listed in the closing `omitted for budget:` line. Empty sections are dropped; the footer always renders. When `stats` is given, it is filled with `budget`, `cut` (title → rows hidden) and `omitted` (titles), for the events log.
+
+Budgets are provisional: the defaults (4000 for `review-context`, 1500 elsewhere) will be reviewed against the events log once concordance has been used on real work, since the right size likely depends on the size of the diff and the repo.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3198,7 +3200,7 @@ def test_rows_are_cut_whole_with_an_exact_tail() -> None:
     shown = [r for r in rows if r in out]
     assert 0 < len(shown) < 20
     assert f"+{20 - len(shown)} more (exact)" in out
-    assert est_tokens(out) <= 60 + 10
+    assert est_tokens(out) <= 60
 
 
 def test_lower_bound_tail_and_true_totals() -> None:
@@ -3206,11 +3208,28 @@ def test_lower_bound_tail_and_true_totals() -> None:
     assert "## Hits (7+)" in out and "+6 more (≥)" in out
 
 
-def test_sections_that_do_not_fit_are_named() -> None:
-    big = Section("First", ["y" * 300])
-    later = Section("Second", ["z"])
-    out = render([], [big, later], [], budget_tokens=50)
-    assert "omitted for budget: Second (1)" in out
+def test_a_big_early_section_does_not_starve_later_ones() -> None:
+    big = Section("Callers", [f"caller {i} " + "y" * 60 for i in range(30)])
+    later = [Section("Changed literals", ["lit row"]), Section("Removed comments", ["# why"])]
+    out = render([], [big, *later], [], budget_tokens=200)
+    assert "## Changed literals (1)" in out and "lit row" in out
+    assert "## Removed comments (1)" in out and "# why" in out
+    assert "caller 0 " in out and "more (exact)" in out
+    assert est_tokens(out) <= 200
+
+
+def test_only_sections_whose_header_cannot_fit_are_omitted() -> None:
+    out = render(["h" * 140], [Section("Second", ["z"])], [], budget_tokens=50)
+    assert "omitted for budget: Second (1)" in out and "## Second" not in out
+
+
+def test_stats_record_what_was_cut() -> None:
+    stats: dict[str, object] = {}
+    rows = [f"row {i} " + "x" * 30 for i in range(10)]
+    render([], [Section("Callers", rows)], [], budget_tokens=40, stats=stats)
+    assert stats["budget"] == 40 and stats["omitted"] == []
+    cut = stats["cut"]
+    assert isinstance(cut, dict) and 0 < cut["Callers"] < 10
 
 
 def test_empty_sections_are_dropped() -> None:
@@ -3226,13 +3245,15 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.render'`
 
 ```python
 """Budgeted text output. Whole rows only; counts say whether they are exact or lower bounds;
-seeds (verdicts) are never cut; whatever does not fit is named, never silently dropped.
+seeds (verdicts) are never cut; every section is named and gets a first row before any section
+gets a second; whatever does not fit is named, never silently dropped.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 CHARS_PER_TOKEN = 3
+TAIL_RESERVE = 24  # room for "  +NNNN more (exact)\n", reserved with each non-seed header
 
 
 def est_tokens(text: str) -> int:
@@ -3247,49 +3268,66 @@ class Section:
     exact: bool = True
     seed: bool = False
 
+    @property
+    def count(self) -> int:
+        return self.total if self.total is not None else len(self.rows)
+
+    @property
+    def head(self) -> str:
+        return f"## {self.title} ({self.count}{'' if self.exact else '+'})"
+
 
 def render(header: list[str], sections: list[Section], footer: list[str],
-           budget_tokens: int) -> str:
+           budget_tokens: int, stats: dict[str, object] | None = None) -> str:
     budget = budget_tokens * CHARS_PER_TOKEN
-    out = list(header)
     used = sum(len(line) + 1 for line in [*header, *footer])
+    live = [s for s in sections if s.count > 0]
+    ordered = [s for s in live if s.seed] + [s for s in live if not s.seed]
+    shown: dict[int, int] = {}
     omitted: list[str] = []
-    ordered = [s for s in sections if s.seed] + [s for s in sections if not s.seed]
-    for sec in ordered:
-        total = sec.total if sec.total is not None else len(sec.rows)
-        if total == 0:
-            continue
-        head = f"## {sec.title} ({total}{'' if sec.exact else '+'})"
+    for i, sec in enumerate(ordered):  # pass 1: seeds whole, then every header
         if sec.seed:
-            out.append(head)
-            out.extend(sec.rows)
-            used += sum(len(line) + 1 for line in [head, *sec.rows])
+            shown[i] = len(sec.rows)
+            used += sum(len(line) + 1 for line in [sec.head, *sec.rows])
+        elif used + len(sec.head) + 1 + TAIL_RESERVE <= budget:
+            shown[i] = 0
+            used += len(sec.head) + 1 + TAIL_RESERVE
+        else:
+            omitted.append(f"{sec.title} ({sec.count})")
+    for limit in (1, None):  # pass 2: a first row each; pass 3: the rest, in priority order
+        for i, sec in enumerate(ordered):
+            if i not in shown or sec.seed:
+                continue
+            while shown[i] < len(sec.rows) and (limit is None or shown[i] < limit):
+                cost = len(sec.rows[shown[i]]) + 1
+                if used + cost > budget:
+                    break
+                used += cost
+                shown[i] += 1
+    out = list(header)
+    cut: dict[str, int] = {}
+    for i, sec in enumerate(ordered):
+        if i not in shown:
             continue
-        if used + len(head) + 1 > budget:
-            omitted.append(f"{sec.title} ({total})")
-            continue
-        out.append(head)
-        used += len(head) + 1
-        shown = 0
-        for row in sec.rows:
-            if used + len(row) + 1 > budget:
-                break
-            out.append(row)
-            used += len(row) + 1
-            shown += 1
-        if shown < total:
-            out.append(f"  +{total - shown} more ({'exact' if sec.exact else '≥'})")
+        out.append(sec.head)
+        out.extend(sec.rows[:shown[i]])
+        hidden = sec.count - shown[i]
+        if hidden > 0:
+            out.append(f"  +{hidden} more ({'exact' if sec.exact else '≥'})")
+            cut[sec.title] = hidden
     if omitted:
         out.append("omitted for budget: " + ", ".join(omitted)
                    + " (rerun with a larger --budget or the section's own command)")
     out.extend(footer)
+    if stats is not None:
+        stats.update(budget=budget_tokens, cut=cut, omitted=[o.rsplit(" (", 1)[0] for o in omitted])
     return "\n".join(out)
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd plugins/concordance && ../../.venv/bin/python -m pytest ../../tests/concordance/test_render.py -q`
-Expected: 5 passed
+Expected: 7 passed
 
 - [ ] **Step 5: Commit**
 
@@ -3308,13 +3346,14 @@ git commit -m "feat(concordance): budgeted section renderer"
 
 **Interfaces:**
 - Consumes: everything from Tasks 1-9.
-- Produces (`review.py`): `Verdict(rule: str, path: str, line: int, message: str)`; `Context` (fields: `root`, `store`, `head`, `base`, `base_label`, `reports`, `vi`, `diff`, `snippets`, `contract`, `drift`, `gaps`, `literals`, `head_cov`, `base_cov`); `open_store(cwd: Path) -> Store`; `build(cwd: Path, base_ref: str | None, deadline_s: float) -> Context`; `verdicts(ctx) -> list[Verdict]`; `header(ctx) -> list[str]`; `footer(ctx) -> list[str]`; section builders `verdict_section`, `contract_section`, `drift_section`, `touched_section`, `callers_section`, `tests_section`, `blindspot_sections` (each `(ctx) -> Section` or `list[Section]`); `render_context(ctx, budget: int) -> str`.
-- Produces (`cli.py`): `main(argv: list[str] | None = None) -> int`, subcommands `index`, `review-context`, `removed`, `sig-drift`, `literals`, `callers NAME`, `tests NAME`, `check`, `coverage`, `setup-ts`; common options `--base REF`, `--budget N` (default 1500), `--deadline S` (default 60).
+- Produces (`review.py`): `Verdict(rule: str, path: str, line: int, message: str)`; `Context` (fields: `root`, `store`, `head`, `base`, `base_label`, `reports`, `vi`, `diff`, `snippets`, `contract`, `drift`, `gaps`, `literals`, `head_cov`, `base_cov`); `open_store(cwd: Path) -> Store`; `build(cwd: Path, base_ref: str | None, deadline_s: float) -> Context`; `verdicts(ctx) -> list[Verdict]`; `header(ctx) -> list[str]`; `footer(ctx) -> list[str]`; section builders `verdict_section`, `contract_section`, `drift_section`, `touched_section`, `callers_section`, `tests_section`, `blindspot_sections` (each `(ctx) -> Section` or `list[Section]`); `render_context(ctx, budget: int, stats: dict[str, object] | None = None) -> str`.
+- Produces (`cli.py`): `main(argv: list[str] | None = None) -> int`, subcommands `index`, `review-context`, `removed`, `sig-drift`, `literals`, `touched`, `callers NAME`, `tests NAME`, `check`, `coverage`, `setup-ts`; common options `--base REF`, `--budget N` (default 4000 for `review-context`, 1500 elsewhere), `--deadline S` (default 60). Every query records an event whose `payload` is JSON: the render stats (`budget`, `cut`, `omitted`) plus `touched` (symbols in the diff) and `files` (files in the head view), so the budgets can be tuned from real use.
 
 - [ ] **Step 1: Write the failing tests**
 
 `tests/concordance/test_cli.py`:
 ```python
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -3410,6 +3449,21 @@ def test_queries_are_recorded_as_events(make_repo) -> None:
     cli(repo.root, "callers", "refund")
     st = open_store(repo.root)
     assert st.conn.execute("SELECT command FROM events").fetchall() == [("callers",)]
+
+
+def test_review_context_logs_budget_cuts_and_diff_size(make_repo) -> None:
+    repo = make_repo(BASE)
+    repo.git("checkout", "-q", "-b", "feat")
+    repo.write({"app/svc.py": "def refund(loan, amount):\n    return amount + 1\n"})
+    assert cli(repo.root, "touched").returncode == 0
+    out = cli(repo.root, "review-context", "--budget", "40")
+    assert out.returncode == 0, out.stderr
+    rows = open_store(repo.root).conn.execute(
+        "SELECT command, payload FROM events ORDER BY ts").fetchall()
+    assert [c for c, _ in rows] == ["touched", "review-context"]
+    logged = json.loads(rows[-1][1])
+    assert logged["budget"] == 40 and logged["files"] == 3 and logged["touched"] >= 1
+    assert logged["cut"] or logged["omitted"]
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
@@ -3636,11 +3690,11 @@ def blindspot_sections(ctx: Context) -> list[Section]:
             Section("Removed comments", comment_rows)]
 
 
-def render_context(ctx: Context, budget: int) -> str:
+def render_context(ctx: Context, budget: int, stats: dict[str, object] | None = None) -> str:
     sections = [verdict_section(ctx), contract_section(ctx), drift_section(ctx),
                 touched_section(ctx), callers_section(ctx), tests_section(ctx),
                 *blindspot_sections(ctx)]
-    return render(header(ctx), sections, footer(ctx), budget)
+    return render(header(ctx), sections, footer(ctx), budget, stats)
 ```
 
 - [ ] **Step 4: Implement `cli.py`**
@@ -3650,6 +3704,7 @@ def render_context(ctx: Context, budget: int) -> str:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -3664,12 +3719,14 @@ from scripts.query import Snippets, callers, guarding_tests  # noqa: E402
 from scripts.render import Section, est_tokens, render  # noqa: E402
 from scripts.resolve import Resolved, ViewIndex  # noqa: E402
 from scripts.review import (  # noqa: E402
-    Context, blindspot_sections, build, contract_section, drift_section, footer, header,
-    open_store, render_context, verdict_section, verdicts,
+    Context, blindspot_sections, build, callers_section, contract_section, drift_section,
+    footer, header, open_store, render_context, tests_section, touched_section, verdict_section,
+    verdicts,
 )
 from scripts.views import worktree_view  # noqa: E402
 
 DEFAULT_BUDGET = 1500
+REVIEW_BUDGET = 4000  # provisional: tune from the events log (render stats + diff size)
 DEFAULT_DEADLINE = 60.0
 
 
@@ -3684,7 +3741,8 @@ def _parser() -> argparse.ArgumentParser:
         if diff:
             sp.add_argument("--base", default=None,
                             help="base ref (default: merge-base with the default branch)")
-        sp.add_argument("--budget", type=int, default=DEFAULT_BUDGET)
+        sp.add_argument("--budget", type=int,
+                        default=REVIEW_BUDGET if name == "review-context" else DEFAULT_BUDGET)
         sp.add_argument("--deadline", type=float, default=DEFAULT_DEADLINE)
 
     add("index", "build or refresh this worktree's view (and the base view)")
@@ -3692,6 +3750,7 @@ def _parser() -> argparse.ArgumentParser:
     add("removed", "references to what the diff removed")
     add("sig-drift", "call sites that no longer match a changed signature")
     add("literals", "changed literals, reordered statements, removed comments")
+    add("touched", "touched symbols, callers of changed behaviour, guarding tests")
     add("check", "verdicts only (BR-002, BR-005); exit 1 when any")
     add("callers", "who calls NAME", diff=False, name_arg=True)
     add("tests", "tests that reach NAME within --hops", diff=False, name_arg=True)
@@ -3701,18 +3760,22 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
-def _diff_command(args: argparse.Namespace, cwd: Path) -> tuple[str, int, str]:
+def _diff_command(args: argparse.Namespace, cwd: Path,
+                  stats: dict[str, object]) -> tuple[str, int, str]:
     ctx = build(cwd, args.base, args.deadline)
     view_id = ctx.head.view_id
+    stats.update(touched=len(ctx.diff.touched), files=ctx.head_cov.total)
+    by_command = {
+        "removed": [contract_section(ctx)],
+        "sig-drift": [verdict_section(ctx), drift_section(ctx)],
+        "literals": blindspot_sections(ctx),
+        "touched": [touched_section(ctx), callers_section(ctx), tests_section(ctx)],
+    }
     if args.command == "review-context":
-        return render_context(ctx, args.budget), 0, view_id
-    if args.command == "removed":
-        return render(header(ctx), [contract_section(ctx)], footer(ctx), args.budget), 0, view_id
-    if args.command == "sig-drift":
-        sections = [verdict_section(ctx), drift_section(ctx)]
-        return render(header(ctx), sections, footer(ctx), args.budget), 0, view_id
-    if args.command == "literals":
-        return render(header(ctx), blindspot_sections(ctx), footer(ctx), args.budget), 0, view_id
+        return render_context(ctx, args.budget, stats), 0, view_id
+    if args.command in by_command:
+        sections = by_command[args.command]
+        return render(header(ctx), sections, footer(ctx), args.budget, stats), 0, view_id
     if args.command == "check":
         return _check(ctx), (1 if verdicts(ctx) else 0), view_id
     report = ctx.reports[0]
@@ -3729,7 +3792,8 @@ def _check(ctx: Context) -> str:
     return "\n".join(f"[{v.rule}] {v.path}:{v.line}  {v.message}" for v in found)
 
 
-def _name_command(args: argparse.Namespace, cwd: Path) -> tuple[str, int, str]:
+def _name_command(args: argparse.Namespace, cwd: Path,
+                  stats: dict[str, object]) -> tuple[str, int, str]:
     store = open_store(cwd)
     view = worktree_view(cwd)
     ensure_view(store, view, args.deadline)
@@ -3756,7 +3820,7 @@ def _name_command(args: argparse.Namespace, cwd: Path) -> tuple[str, int, str]:
         section = Section(f"Tests reaching {q}{note}", rows)
     if not section.rows:
         return f"{section.title}: none found", 0, view.view_id
-    return render([], [section], [], args.budget), 0, view.view_id
+    return render([], [section], [], args.budget, stats), 0, view.view_id
 
 
 def _miss(name: str, found: Resolved) -> str:
@@ -3773,11 +3837,12 @@ def main(argv: list[str] | None = None) -> int:
         return extract_ts.setup()
     cwd = Path.cwd()
     started = time.monotonic()
+    stats: dict[str, object] = {}
     try:
         if args.command in ("callers", "tests", "coverage"):
-            text, code, view_id = _name_command(args, cwd)
+            text, code, view_id = _name_command(args, cwd, stats)
         else:
-            text, code, view_id = _diff_command(args, cwd)
+            text, code, view_id = _diff_command(args, cwd, stats)
     except (gitio.GitError, LockTimeout) as exc:
         print(f"concordance: {exc}", file=sys.stderr)
         return 2
@@ -3788,6 +3853,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         open_store(cwd).record_event(
             args.command, view_id, int((time.monotonic() - started) * 1000), est_tokens(text),
+            payload=json.dumps(stats) if stats else "",
             session=os.environ.get("CLAUDE_SESSION_ID", ""))
     except Exception:  # telemetry must never fail a query
         pass
@@ -3801,7 +3867,7 @@ if __name__ == "__main__":
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cd plugins/concordance && ../../.venv/bin/python -m pytest ../../tests/concordance/test_cli.py -q`
-Expected: 8 passed
+Expected: 10 passed
 
 - [ ] **Step 6: Run the whole suite, ruff and mypy**
 
@@ -4375,8 +4441,9 @@ Read the header (base, counts) and the **coverage footer**. A file listed as fai
 indexed was not checked by the index: silence about it is not evidence it is safe. For those
 files, do steps 1-4 by Grep.
 
-If output says `omitted for budget`, re-run the named section's own command
-(`removed`, `sig-drift`, `literals`) or raise `--budget`.
+Any `+N more` or `omitted for budget` line means you have **not** seen everything. Before
+calling a step clean, fetch the rest: `removed` (step 1), `sig-drift` (step 2), `touched`
+(steps 3-4), `literals` (step 5), each with a larger `--budget` if it is cut again.
 
 ## Step 1: removed contract
 
@@ -4507,11 +4574,11 @@ The `review-procedure` skill tells a reviewer exactly when to use each answer; r
 ## Use
 
 ```bash
-python plugins/concordance/scripts/cli.py review-context [--base REF] [--budget 1500]
+python plugins/concordance/scripts/cli.py review-context [--base REF] [--budget 4000]
 python plugins/concordance/scripts/cli.py check            # verdicts only; exit 1 on any
 python plugins/concordance/scripts/cli.py callers NAME     # did-you-mean on a miss
 python plugins/concordance/scripts/cli.py tests NAME [--hops 2]
-python plugins/concordance/scripts/cli.py removed | sig-drift | literals | coverage | index
+python plugins/concordance/scripts/cli.py removed | sig-drift | literals | touched | coverage | index
 python plugins/concordance/scripts/cli.py setup-ts         # once, for TypeScript
 ```
 
@@ -4846,6 +4913,14 @@ Rebuild A-D with `make_case.py` from the commits recorded in `$CONCORDANCE_BENCH
 - [ ] **Step 4: Run both arms and judge**
 
 For each of the 7 cases, dispatch the baseline and concordance arms (Sonnet, identical brief, per `tests/concordance/bench/README.md`), then one Sonnet judge per result. Record tokens and verdicts in `runs.tsv`.
+
+- [ ] **Step 4b: Budget sensitivity**
+
+Re-run the concordance arm on every case with `review-context --budget 1500` (the reviewer brief
+unchanged otherwise) and judge it the same way. Report, per case, whether 1500 caught fewer
+defects than 4000, and the `cut`/`omitted` payloads from the events table. If 1500 loses a catch,
+4000 stays; if 4000 also cut a section on any case, say which, with the diff size: that is the
+first data point for a size-aware budget.
 
 - [ ] **Step 5: Verdict**
 
