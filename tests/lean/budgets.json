@@ -35,20 +35,18 @@
     "plugins/puritan/skills/inquisition/SKILL.md": 8200,
     "plugins/puritan/skills/scriptorium/SKILL.md": 8700,
     "plugins/review-clone/commands/clone-reviewer.md": 273,
-    "plugins/review-clone/skills/clone-reviewer/SKILL.md": 11164,
-    "plugins/review-clone/skills/review-as/SKILL.md": 11851,
+    "plugins/review-clone/skills/clone-reviewer/SKILL.md": 7890,
+    "plugins/review-clone/skills/review-as/SKILL.md": 2224,
     "plugins/review-panel/commands/review-panel.md": 831,
     "plugins/review-panel/skills/convene/SKILL.md": 4440,
     "plugins/test-crucible/skills/test-suite-health/SKILL.md": 12288,
     "plugins/tribunal/skills/reckoning/SKILL.md": 6062,
     "plugins/vigil/commands/handover.md": 1513,
     "plugins/vigil/skills/vigil/SKILL.md": 4765,
-    "skills/context-vigil/SKILL.md": 9179
+    "skills/context-vigil/SKILL.md": 5836
   },
   "exemptions": {
     "plugins/overseer/skills/orchestrate/SKILL.md": "own stream (overseer redesign); seeded at current size, only ratchets down",
-    "plugins/review-clone/skills/clone-reviewer/SKILL.md": "WF-268 sweep (deferral-only PR); seeded at current size, ratchets down when its sweep PR lands",
-    "plugins/review-clone/skills/review-as/SKILL.md": "WF-268 sweep (deferral-only PR); seeded at current size, ratchets down when its sweep PR lands",
     "plugins/test-crucible/skills/test-suite-health/SKILL.md": "Q3 (ratified): 12 KB, not 10 KB. The only measured skill (28 runs, iteration-3 pass rates); every deferred phase keeps its one-line rule in SKILL.md and a hard read instruction."
   }
 }
