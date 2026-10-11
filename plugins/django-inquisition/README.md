@@ -56,7 +56,7 @@ The default run is trigger-gated. `scripts/triggers.py` runs every check's trigg
 - Findings with unknown savings (`?`) sort last within their tier.
 - The PAT-070 (audit framework) and WRITE-005 (signal listener) banners only appear when the settings file and every file containing a `@receiver` or a `save()`/`delete()` override are passed to the scanner; the banner line starts with its code, e.g. `[INFO] PAT-070 Audit/history framework detected: pghistory`.
 - The scanner truncates lines over 2000 characters (minified assets, data blobs) and says so; it lists every skipped file (over 2 MB, binary) and does not count it as scanned. For a skipped target, use `--thorough`.
-- Directory scans prune `.venv`, `venv`, `node_modules`, `migrations`, `.git` and `__pycache__`; a file passed explicitly is always scanned.
+- Directory scans prune `.venv`, `venv`, `node_modules`, `migrations`, `.git` and `__pycache__`; a file passed explicitly is never pruned (it is still skipped if over 2 MB or binary).
 
 ---
 
