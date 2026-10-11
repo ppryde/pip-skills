@@ -63,8 +63,8 @@ anything else with `error: ...`, exit 1 (exit 2 = the guard). `<id>` is a card i
 |---|---|---|
 | `resume` | `resume [--json]` | In-flight cards for this repo. Run first, every session. |
 | `bootstrap` | `bootstrap (--title "<t>" \| --card <id>) [--complexity S\|M\|L\|XL] [--labels a,b] [--goal "<g>"] [--jira K\|--linear K] [--type feat\|fix\|...] [--slug s] [--brief "<text>" \| --brief - \| --brief-file <path>]` | New card + worktree + branch, in one call. Plain: lands at `planning`. With `--brief`: writes `## Plan` from the text and lands at `implementation` directly — the whole S-card shortcut. |
-| `dispatch-prep` | `dispatch-prep <id> --stage <s> --role planner\|implementer\|reviewer\|fixer\|verifier [--round n] [--slot A] [--chunk n] [--lens l] [--var k=v ...] [--advance]` | Prints ONLY the bundle path — that path is the agent's whole prompt. `--chunk` defaults to `1` for `--role implementer`. `--advance` runs `set-stage <id> <s>` first, in the same call — a stage transition and its first dispatch in one Bash call. |
-| `set-stage` | `set-stage <id> <stage>` | A bare stage transition with no dispatch (PLAN GATE approval, PR raised). Prefer `dispatch-prep --advance` when a dispatch follows immediately. |
+| `dispatch-prep` | `dispatch-prep <id> --stage <s> --role planner\|implementer\|reviewer\|fixer\|verifier [--round n] [--slot A] [--chunk n] [--lens l] [--var k=v ...] [--advance] [--force-gate "user: <why>"]` | Prints ONLY the bundle path — that path is the agent's whole prompt. `--chunk` defaults to `1` for `--role implementer`. `--advance` runs `set-stage <id> <s>` first, in the same call — a stage transition and its first dispatch in one Bash call. |
+| `set-stage` | `set-stage <id> <stage> [--force-gate "user: <why>"]` | A bare stage transition with no dispatch (PLAN GATE approval, PR raised). Prefer `dispatch-prep --advance` when a dispatch follows immediately. Stage gates (below) can refuse it with exit 3. |
 | `set-section` | `set-section <id> --section Plan\|Verification\|Decisions (--text-file <path> \| --text "<t>" \| --text -)` | `--text` for short plain text; `--text-file` (alias `--file`) or `--text -` otherwise. |
 | `set-field` | `set-field <id> [--branch b] [--worktree w] [--pr url] [--touches t] [--labels a,b] [--parent id] [--priority P0..P4] [--title t] [--body md] [--complexity S\|M\|L\|XL] [--estimate 400k]` | Any card metadata field; an empty string clears a clearable one. |
 | `block` / `unblock` | `block <id> --reason "..."` / `unblock <id>` | A real blocker, with a reason. |
@@ -175,6 +175,25 @@ edge cases (a maintained dispute, a deadlock, an L panel's round-1 lens set).
    --reason "user: review deadlock — <summary>"`.
 6. The report hook logs every verdict under the round's header in
    `## Review log` — never call `log-review` yourself in this loop.
+
+## Stage gates (hard)
+The CLI refuses a forward move when its evidence is missing — exit 3, one
+`GATE: <rule> - <what to run>` line per problem. Run what the line says; do not
+route around it.
+- `-> implementation`: a real `## Plan` and a clean plan-review round (skipped
+  only for an S `--brief` card).
+- `-> verification`: a clean impl-review round, every size.
+- `-> awaiting-merge`: a verifier `PASS` the report hook recorded (prose in
+  `## Verification` is not evidence).
+- `dispatch-prep`: reviewer round n needs a fixer report for round n-1 and
+  n <= the cap; a fixer at the cap is refused (block the card instead).
+- A reviewer or verifier that was dispatched but never reported blocks its
+  gate: an absent verdict is not an approval.
+Evidence is written by the report hook; you never record it. Escape, only when
+the user says to proceed anyway: `--force-gate "user: <why>"` on `set-stage` or
+`dispatch-prep` (recorded in `## Decisions`, shown on the card); an empty reason
+is refused. Cards created before the gates shipped only warn. Repo config
+`"gates": "warn"|"off"` or `OVERSEER_GATES=warn|off` softens them.
 
 ## Dispatch
 - **Prompt = bundle path.** Always `dispatch-prep` first; the agent's whole
