@@ -1,0 +1,53 @@
+# concordance
+
+An owned symbol index for review, in Python and TypeScript. A concordance is the index of
+every place a word appears in scripture; this is that, for symbols.
+
+It answers exact questions about a diff, in the CLI, at zero agent tokens:
+
+- **What still relies on what the diff removed?** Deleted symbols, removed parameters, guards
+  and decorators, against every remaining reference.
+- **Which call sites no longer match a changed signature?** A verdict, not a hint (BR-002),
+  for calls it can prove; calls it cannot prove are listed as undecided for the reviewer.
+- **Who calls the changed code, and which tests reach it?** With a pure-refactor classifier,
+  so refactors are not reviewed as behaviour changes. Behaviour changes no test reaches are a
+  verdict (BR-005).
+- **What can't an index see?** Changed literals (SQL, keys, event names) with their other
+  occurrences, reordered statements, removed comments.
+
+The `review-procedure` skill tells a reviewer exactly when to use each answer; review-panel's
+`blast-radius` lens runs it.
+
+## Use
+
+```bash
+python plugins/concordance/scripts/cli.py review-context [--base REF] [--budget 4000]
+python plugins/concordance/scripts/cli.py check            # verdicts only; exit 1 on any
+python plugins/concordance/scripts/cli.py callers NAME     # did-you-mean on a miss
+python plugins/concordance/scripts/cli.py tests NAME [--hops 2]
+python plugins/concordance/scripts/cli.py removed | sig-drift | literals | touched | coverage | index
+python plugins/concordance/scripts/cli.py setup-ts         # once, for TypeScript
+```
+
+The base defaults to the merge-base with the default branch. The index builds lazily on first
+use and only re-parses files whose content changed. `--budget` caps output size (default 4000
+for `review-context`, 1500 for the other commands).
+
+## Worktrees
+
+One store per repo (keyed by the git common dir) under
+`$CLAUDE_CONFIG_DIR/concordance/`, shared by every worktree. Facts are keyed by file content,
+so a new worktree parses only what differs. Each worktree gets its own view, including
+uncommitted edits; answers never mention another worktree's paths. Removed worktrees are
+garbage-collected lazily. Nothing is written into the repo.
+
+## Requirements
+
+Python 3.11+ (stdlib only). TypeScript needs Node 18+ and `setup-ts`, which installs the
+pinned `typescript` 5.6.3 from the committed lockfile with install scripts disabled. Without
+it, TypeScript files are reported as not indexed; nothing fails.
+
+## Credits
+
+Ideas borrowed, no code copied: code-review-graph (MIT), graphify (Apache-2.0),
+codebase-memory-mcp (MIT), GitNexus (ideas only).
