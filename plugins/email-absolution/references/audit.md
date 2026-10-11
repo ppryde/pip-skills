@@ -1,6 +1,6 @@
 # The audit procedure (Elder and Visitation)
 
-Elder and Visitation read this file after `common.md`. Skills cite a section by its heading, as `audit.md §Scope`. Both skills run the same two-phase audit; they differ only in scope and in the verdict layout.
+Elder and Visitation read this file after `common.md`. Skills cite a section by its heading, as `audit.md §Scope`. Both skills run the same two-phase audit; they differ only in scope and in the verdict layout. Visitation's own scope, changed-line and existing-violation rules are in its `references/pr-scope.md`.
 
 ## Scope
 
@@ -24,34 +24,6 @@ Filter to files matching `email_paths` patterns and known email extensions
 **Single file:** The named file only.
 
 A named doctrine (`doctrine <name>`) keeps the scope of the other arguments and narrows only the rules (`select --doctrine`).
-
-### Visitation scope
-
-**Branch/PR mode (default):**
-```bash
-git diff --name-status -M --diff-filter=ACMRT '<base>'
-```
-
-`<base>` is resolved as in Elder scope. Omitting a trailing `HEAD` includes uncommitted edits, so a run before opening a PR works.
-
-Include files with status `A` (added), `M` (modified), `T` (type change) and
-`R`/`C` (renamed/copied — the destination path is in scope).
-Deleted files are excluded by the filter — deleted templates have no violations.
-Filter to `email_paths` and known email extensions.
-
-**PR number mode:**
-The PR number must match `^[0-9]+$`; refuse anything else before building the command.
-```bash
-gh pr diff '<number>' --name-only
-```
-Filter same as above.
-
-**Single file mode:** Named file only.
-
-If no email template files are found in scope:
-> "The Visitation finds no email templates in this branch's changes.
-> If templates were moved, renames are followed automatically; if the base
-> branch was wrong, name it explicitly or check `git diff --name-status` manually."
 
 ### Scope errors
 
@@ -78,7 +50,7 @@ Run `scan` for each batch (`§Dispatch`), with `--ids <that batch's ids>`, over 
 python3 '<rules.py>' scan --email-type '<t>' [--esp '<E>'] [--templating '<L>'] [--targets '<a,b>'] [--doctrine '<D>'] --ids '<id,id,...>' --files '<file>' ['<file>' ...]
 ```
 
-It applies every active regex pattern, and the regex part of every hybrid rule, line by line. No judgment is needed: a line `file:line | id | matched line` is a confirmed finding, with three exceptions.
+In Visitation PR mode add `--rev '<oid>'` so the files are read from the PR head commit. It applies every active regex pattern, and the regex part of every hybrid rule, line by line. No judgment is needed: a line `file:line | id | matched line` is a confirmed finding, with three exceptions.
 
 - `[verify]`: the pattern only nominates the line. Read it and confirm before recording a finding.
 - An absence line (`absence: trigger present, required pattern missing`) is a finding for the whole file; a file that does not match the trigger is skipped silently.
@@ -169,4 +141,5 @@ its canonical are keyed, the canonical's entry wins and the verdict notes the co
 - Every finding cites the file, line or block, and the rule id (with `also:` when it has aliases), what was found and what is required.
 - An overridden finding stays in its new bucket, annotated `(overridden: <reason>)`; a conflict note from `§Overrides` goes under the verdict.
 - Footer: `Rules checked: N (regex a, contextual b), violations: v`. N is the active count in the `select` header; hybrid rules are in both a and b. A mismatch with N means a rule was skipped: finish the pass.
+- Visitation adds an existing-violations classification (its `references/pr-scope.md`).
 - Carry into the verdict any `warning:` line from `select`, an assumed `email_type`, and any skipped or timed-out file.

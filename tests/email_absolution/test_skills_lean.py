@@ -155,8 +155,9 @@ def test_every_documented_command_single_quotes_values_and_paths():
             assert m.group(1).startswith("'"), (p.name, line)
         assert "--files" not in line or "--files '" in line, (p.name, line)
     audit = text(SHARED / "audit.md")
-    for cmd in ("git diff --name-only --diff-filter=ACMR '<base>'", "gh pr diff '<number>'"):
-        assert cmd in audit
+    assert "git diff --name-only --diff-filter=ACMR '<base>'" in audit
+    prscope = text(PLUGIN / "skills" / "visitation" / "references" / "pr-scope.md")
+    assert "gh pr view '<number>' --json headRefOid,baseRefName,files" in prscope
     assert "single quote or a newline" in text(SHARED / "common.md")
 
 
