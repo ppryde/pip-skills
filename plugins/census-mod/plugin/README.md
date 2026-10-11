@@ -91,10 +91,9 @@ session. Run it beside your status line first (shadow mode, below). Do not insta
 Works on Windows. The config dir is `CLAUDE_CONFIG_DIR`, else `<home>\.claude` (home: `HOME`, else `USERPROFILE`, else
 `HOMEDRIVE`+`HOMEPATH`); `~`, `~/` and `~\` in `CENSUS_STORE` and `CENSUS_MOD_STORE` expand with the same home, and every path keeps the
 separator of its base (no `C:\Users\you/.claude`). Recording runs the bundled recorder with the first of `python3`, `python`, `py -3`
-that answers `--version` (chosen once per process); with none the band still draws, nothing is recorded and one log line says so.
-`/census-setup` writes `settings.json` in place on Windows (a temp file and `mv` on macOS/Linux): nothing is ever spelled into a `cmd` line, and an
-undo empties the backup file instead of deleting it. `/census-mod:vitals` runs through `bin/pyrun.sh`, which tries the same three launchers
-and says nothing about the ones that fail (a Git Bash `sh` is needed for it). The cache lifetime and session title are read with `tail`/`grep` where `sh` runs (Git Bash) and from the transcript file
+that passes a Python 3.9+ probe (`-c 'import sys; sys.exit(sys.version_info < (3, 9))'`, which also rules out a Python 2 `python` and the Windows Store stub; chosen once per process); with none the band still draws, nothing is recorded and one log line says so.
+`/census-setup` writes `settings.json` in place on Windows and on macOS/Linux through a unique temp file (the session id and the moment are in its name) renamed over it: nothing is ever spelled into a `cmd` line, and an
+undo empties the backup file instead of deleting it. Either way the write is abandoned if `settings.json` no longer holds the text the change was derived from (Claude Code or another session edited it meanwhile; their edit is never lost), and on Windows the in-place write is read back and the file put back as it was if it is not what was written. The cache lifetime and session title are read with `tail`/`grep` where `sh` runs (Git Bash) and from the transcript file
 itself where it does not (a transcript over the engine's 4 MiB read cap is then skipped: the cache keeps its last known lifetime and the title its
 last value). Liveness on Windows asks the OS (`OpenProcess`) and never `os.kill`, which there ends the process.
 
@@ -192,7 +191,7 @@ with `census read` against each dir, then cut over: unset `CENSUS_MOD_STORE` and
 census-mod always runs its own bundled recorder: `CENSUS_CLI`, a `cli.path` pointer, a sibling
 census plugin and `census` on PATH are never consulted. The bundled files are copied by
 `plugins/census-mod/sync-bundle.sh` from `plugins/census/scripts/` (the one source), and a test in
-the census suite fails if they ever differ.
+the census suite fails if they ever differ. The copy also records the census release it came from (`scripts/BUNDLED_FROM`), so a census version bump fails that test until the bundle is synced again, and census-mod's own version is then bumped with it.
 
 ## Tests
 

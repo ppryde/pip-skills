@@ -7,10 +7,16 @@ export const onWindows = (path: string): boolean => isAbsolute(path) && !path.st
 /** Python launchers to try, in order: `python3` (macOS, Linux), `python`, then the Windows launcher `py -3`. */
 export const PYTHON_CANDIDATES: readonly (readonly string[])[] = [['python3'], ['python'], ['py', '-3']]
 
-/** The first launcher whose `--version` ran, given a probe that says whether one did; null when none. */
+/**
+ * What the probe runs: exits 0 only on Python 3.9 or newer. `--version` would also pass a `python` that is Python 2
+ * (and the Windows Store stub fails it, as it opens the Store instead of running), and the recorder's code needs 3.9+.
+ */
+export const PYTHON_PROBE = 'import sys; sys.exit(sys.version_info < (3, 9))'
+
+/** The first launcher whose probe ran, given a probe that says whether one did; null when none. */
 export async function pickPython(works: (argv: string[]) => Promise<boolean>): Promise<string[] | null> {
   for (const candidate of PYTHON_CANDIDATES) {
-    const argv = [...candidate, '--version']
+    const argv = [...candidate, '-c', PYTHON_PROBE]
     if (await works(argv).catch(() => false)) return [...candidate]
   }
   return null

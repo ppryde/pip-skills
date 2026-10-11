@@ -27,7 +27,14 @@ def test_the_bundle_is_byte_identical_to_the_source():
 
 
 def test_the_bundle_holds_exactly_those_files():
-    assert sorted(p.name for p in BUNDLE.iterdir() if p.name != "__pycache__") == sorted(FILES)
+    assert sorted(p.name for p in BUNDLE.iterdir() if p.name not in ("__pycache__", "BUNDLED_FROM")) == sorted(FILES)
+
+
+def test_the_bundle_says_which_census_release_it_was_taken_from():
+    """A census release changes its version with its scripts: this fails until sync-bundle.sh runs again, and census-mod's
+    own version is then bumped with the new copy (CLAUDE.md "Mod layout")."""
+    census = json.loads((REPO / "plugins" / "census" / ".claude-plugin" / "plugin.json").read_text())["version"]
+    assert (BUNDLE / "BUNDLED_FROM").read_text().strip() == census, "run plugins/census-mod/sync-bundle.sh and bump census-mod"
 
 
 def test_the_sync_script_copies_the_same_list():
@@ -39,13 +46,15 @@ def test_the_sync_script_copies_the_same_list():
 def test_the_sync_script_makes_the_bundle_identical(tmp_path):
     work = tmp_path / "repo" / "plugins"
     shutil.copytree(REPO / "plugins" / "census" / "scripts", work / "census" / "scripts")
+    (work / "census" / ".claude-plugin").mkdir(parents=True)
+    shutil.copy(REPO / "plugins" / "census" / ".claude-plugin" / "plugin.json", work / "census" / ".claude-plugin" / "plugin.json")
     (work / "census-mod").mkdir(parents=True)
     shutil.copy(MOD / "sync-bundle.sh", work / "census-mod" / "sync-bundle.sh")
     (work / "census-mod" / "plugin" / "scripts").mkdir(parents=True)
     (work / "census-mod" / "plugin" / "scripts" / "stale.py").write_text("old")
     subprocess.run(["bash", str(work / "census-mod" / "sync-bundle.sh")], check=True, capture_output=True)
     got = sorted(p.name for p in (work / "census-mod" / "plugin" / "scripts").iterdir())
-    assert got == sorted(FILES)  # and the stale file was removed
+    assert got == sorted([*FILES, "BUNDLED_FROM"])  # and the stale file was removed
     for f in FILES:
         assert (work / "census-mod" / "plugin" / "scripts" / f).read_bytes() == (SOURCE / f).read_bytes()
 

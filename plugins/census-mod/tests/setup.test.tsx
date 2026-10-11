@@ -209,7 +209,7 @@ test('Remove: statusLine backed up exactly, settings.json rewritten atomically w
 
   expect(JSON.parse(w.files.get(SETTINGS) ?? '{}')).toEqual({ model: 'opus', env: { A: '1' } })
   expect(JSON.parse(w.files.get(BACKUP) ?? '{}')).toMatchObject({ statusLine: STATUS_LINE, from: SETTINGS })
-  expect(w.files.has('/cfg/settings.json.census-mod.tmp')).toBe(false) // renamed over, not left behind
+  expect([...w.files.keys()].filter(k => k.includes('.census-mod.') && k.endsWith('.tmp'))).toEqual([]) // renamed over, not left behind
   expect(w.runs.some(r => r.argv[0] === 'mv' && r.argv.at(-1) === SETTINGS)).toBe(true)
   expect(w.files.get(SCRIPT)).toBe(MARKED)
   expect(saved(w)).toMatchObject({ record: 'yes' })
@@ -477,7 +477,7 @@ test('a settings.json that is a symlink is written through: the temp file sits b
 
   expect(w.links.get(SETTINGS)).toBe('/dotfiles/settings.json') // never replaced by a regular file
   expect(JSON.parse(w.files.get('/dotfiles/settings.json') ?? '{}')).toEqual({ model: 'opus', env: { A: '1' } })
-  expect(w.runs.some(r => r.argv[0] === 'mv' && r.argv.at(-1) === '/dotfiles/settings.json' && r.argv.at(-2) === '/dotfiles/settings.json.census-mod.tmp')).toBe(true)
+  expect(w.runs.some(r => r.argv[0] === 'mv' && r.argv.at(-1) === '/dotfiles/settings.json' && /^\/dotfiles\/settings\.json\.census-mod\..+\.tmp$/.test(r.argv.at(-2) ?? ''))).toBe(true)
 })
 
 test('the original file mode is kept: the temp file starts as a copy that preserves it', async ($, on) => {
@@ -485,7 +485,9 @@ test('the original file mode is kept: the temp file starts as a copy that preser
   doubleWriter(w)
   await setupRun($, w)
 
-  expect(w.cps).toContainEqual(['cp', '-p', SETTINGS, `${SETTINGS}.census-mod.tmp`])
+  expect(w.cps).toHaveLength(1)
+  expect(w.cps[0]?.slice(0, 3)).toEqual(['cp', '-p', SETTINGS])
+  expect(w.cps[0]?.[3]).toMatch(/^\/cfg\/settings\.json\.census-mod\..+\.tmp$/)
 })
 
 test('a failed rename leaves no temp file behind, and the status line stays', async ($, on) => {
@@ -494,7 +496,7 @@ test('a failed rename leaves no temp file behind, and the status line stays', as
   w.mvFails.value = true
   await setupRun($, w)
 
-  expect(w.files.has(`${SETTINGS}.census-mod.tmp`)).toBe(false)
+  expect([...w.files.keys()].filter(k => k.endsWith('.tmp'))).toEqual([])
   expect(w.files.get(SETTINGS)).toBe(settings())
   expect(saved(w)).toMatchObject({ record: 'no' })
   expect(w.logs.join('\n')).toContain('could not write /cfg/settings.json, so I left your status line alone')
@@ -670,3 +672,27 @@ test('a dismissed exclusivity question stops setup quietly with what was answere
   expect(w.toasts.at(-1)).toContain('census-setup stopped')
 })
 
+
+// ---- VL-2: a unique temp, and nothing is lost to a change made while setup ran ---------------------------------------------
+
+test('the temp file name is unique to the session and the moment: two setups never share one', async ($, on) => {
+  const w = world(on)
+  doubleWriter(w)
+  await setupRun($, w)
+
+  expect(w.cps[0]?.[3]).toContain('s1-') // the session id leads the tag
+  expect(w.cps[0]?.[3]).not.toBe(`${SETTINGS}.census-mod.tmp`)
+})
+
+test('settings.json changed while setup was running: the rename is abandoned, nothing is lost, no temp is left', async ($, on) => {
+  const w = world(on)
+  doubleWriter(w)
+  const theirs = JSON.stringify({ model: 'sonnet', statusLine: STATUS_LINE, permissions: { allow: ['Bash(ls:*)'] } }, null, 2) + '\n'
+  w.onWrite.fn = path => { if (path.endsWith('.tmp')) w.files.set(SETTINGS, theirs) } // Claude Code (or another session) writes meanwhile
+  await setupRun($, w)
+
+  expect(w.files.get(SETTINGS)).toBe(theirs) // their edit survives
+  expect([...w.files.keys()].filter(k => k.endsWith('.tmp'))).toEqual([])
+  expect(w.runs.some(r => r.argv[0] === 'mv' && r.argv.at(-1) === SETTINGS)).toBe(false)
+  expect(w.logs.join('\n')).toContain('could not write /cfg/settings.json, so I left your status line alone')
+})

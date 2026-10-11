@@ -315,7 +315,8 @@ export function restoreStatusLine(text: string, backupText: string | null): Rest
   return { done: 'restored', text: serialise({ ...p.data, statusLine: backup.statusLine }, text) }
 }
 
-export const settingsTmp = (path: string): string => `${path}.census-mod.tmp`
+/** A temp name no other setup shares: the session and the moment are in it (two sessions can run /census-setup at once). */
+export const settingsTmp = (path: string, tag: string): string => `${path}.census-mod.${tag}.tmp`
 
 /** An existing backup holding a DIFFERENT status line than the one about to be removed: keep it, refuse the removal. */
 export function backupBlocks(existing: string | null, newBackup: string): boolean {

@@ -30,6 +30,8 @@ export type World = {
   registryLists: { count: number }        // reads of the session registry directory
   links: Map<string, string>            // symlink path -> target
   mvFails: { value: boolean }           // makes `mv` exit 1
+  /** Runs on every fs.write before it lands; a returned string is what the file ends up holding (a torn write). */
+  onWrite: { fn: ((path: string, text: string) => string | void) | null }
   cps: string[][]                       // argv of every `cp`
   asks: { header: string; question: string; options: string[] }[]
   askGate: { value: Promise<void> | null } // while set, every ask waits on it before answering
@@ -65,7 +67,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     git: { status: '# branch.oid abc1234def\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +1 -0\n1 .M N... 100644 100644 100644 a b f.ts\n', dir: '/repo/.git\n/repo\n', exitCode: 0 },
     gh: { stdout: '[]', exitCode: 0, throws: false }, remote: { value: '' }, toolResult: { value: 'ok' },
     titles: new Map(), tail: { value: '"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":100}\n' },
-    logs: [], invalidations: { count: 0 }, lookups: [], surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, bundle: { present: true }, pythons: { value: ['python3'] }, shell: { value: true },
+    logs: [], invalidations: { count: 0 }, lookups: [], surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, onWrite: { fn: null }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, bundle: { present: true }, pythons: { value: ['python3'] }, shell: { value: true },
   }
   w.files.set(`${REGISTRY}/22695.json`, JSON.stringify({ pid: 22695, sessionId: 's1', procStart: 'Sun Oct  4 22:57:51 2026', version: '2.1.289' }))
   const real = (p: string): string => w.links.get(p) ?? p
@@ -95,10 +97,10 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     // Windows spells move/del through cmd; the fake files treat them as mv/rm
     const argv = e.argv[0] === 'cmd' && e.argv[2] === 'move' ? ['mv', '-f', e.argv[4] ?? '', e.argv[5] ?? ''] : e.argv[0] === 'cmd' && e.argv[2] === 'del' ? ['rm', '-f', e.argv[e.argv.length - 1] ?? ''] : e.argv
     const [cmd, ...args] = argv
-    if (args[args.length - 1] === '--version') {
-      const launcher = [cmd, ...args.slice(0, -1)].join(' ')
+    if (args.at(-2) === '-c' && args.at(-1)?.includes('version_info')) {
+      const launcher = [cmd, ...args.slice(0, -2)].join(' ')
       if (!w.pythons.value.includes(launcher)) throw new Error(`spawn ${cmd} ENOENT`)
-      return { value: done(0, 'Python 3.12.0') }
+      return { value: done(0) }
     }
     if (cmd === 'sh' && !w.shell.value) throw new Error('spawn sh ENOENT')
     if (cmd === 'sh' && e.argv[2] === 'exit 0') return { value: done(0) }
@@ -141,7 +143,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
   on('classic.CwdChanged', () => ({}))
   on('classic.PostCompact', () => ({}))
   on('ui.toast', (_$, e) => { w.toasts.push(e.text); return { value: undefined } })
-  on('fs.write', (_$, e) => { w.files.set(real(winPath(e.path)), e.text); return { value: undefined } })
+  on('fs.write', (_$, e) => { const got = w.onWrite.fn?.(winPath(e.path), e.text); w.files.set(real(winPath(e.path)), typeof got === 'string' ? got : e.text); return { value: undefined } })
   on('fs.stat', (_$, e) => { w.lookups.push(e.path); return { value: { kind: 'file' as const, size: 1, mtimeMs: 0, isLink: w.links.has(winPath(e.path)), realPath: real(winPath(e.path)) } as never } })
   // $.ui.ask runs as an AskUserQuestion tool call; its answers sit on the result, keyed by question text.
   on('tool.call', async (_$, e) => {

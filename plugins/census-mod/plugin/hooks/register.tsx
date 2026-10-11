@@ -52,7 +52,7 @@ let gitTimer: Timer | null = null
 let lastGitAt: number | null = null
 let cli: string | null | undefined // census-mod's own bundled recorder, once found there
 let saidNoCli = false
-let python: string[] | null | undefined // the launcher that ran --version, once; null = none found
+let python: string[] | null | undefined // the launcher that passed the Python 3.9+ probe, once; null = none found
 let shell: boolean | undefined // whether `sh` runs here (it does not on Windows)
 let saidNoGh = false
 const repoByDir = new Map<string, string | null>() // working dir -> owner/name of origin (null = none), asked once per dir
@@ -211,7 +211,7 @@ async function discover($: EngineInterface): Promise<string | null> {
   return null
 }
 
-/** `python3`, `python` or `py -3`, the first that runs `--version`; asked once per process. null: none, said once in the log. */
+/** `python3`, `python` or `py -3`, the first that passes the Python 3.9+ probe; asked once per process. null: none, said once in the log. */
 async function pythonLauncher($: EngineInterface, budgetMs = INGEST_TIMEOUT_MS): Promise<string[] | null> {
   if (python !== undefined) return python
   // Three probes share the hook's budget (a session.end has little): too little left, and the probe waits for a later ingest.
@@ -665,21 +665,37 @@ const readBackup = async ($: EngineInterface, path: string): Promise<string | nu
   return typeof text === 'string' && text.trim() ? text : null
 }
 
-const writeSettings = async ($: EngineInterface, path: string, text: string): Promise<boolean> => {
-  // Through a symlink to its target (a dotfiles repo), never replacing the link; a temp file beside the
-  // target, started as a copy so the mode survives, then renamed over it: a reader never sees half a file.
+/**
+ * Write `text` over `path`, which `expected` is the text it was derived from. Nothing is written when the file no
+ * longer holds `expected` (Claude Code or another session changed it since we read it): their edit is never lost.
+ * POSIX: a unique temp file beside the target (started as a copy so the mode survives), re-checked, then renamed
+ * over it, so a reader never sees half a file. Windows has no rename to call (cmd would parse the path), so the
+ * file is written in place, read back, and put back as it was if what is there is not what we wrote.
+ */
+const writeSettings = async ($: EngineInterface, path: string, text: string, expected: string): Promise<boolean> => {
+  // Through a symlink to its target (a dotfiles repo), never replacing the link.
   const target = (await $.fs.stat(path, { resolve: true }).catch(() => undefined))?.realPath ?? path
-  const tmp = settingsTmp(target)
-  if (!moveArgv(tmp, target)) {
-    // Windows: no shell to rename with (cmd would parse the path), so the file is written in place.
-    return $.fs.write(target, text).then(() => true, () => false)
+  const unchanged = async (): Promise<boolean> => (await $.fs.read(target).catch(() => undefined)) === expected
+  if (!moveArgv(path, target)) {
+    if (!(await unchanged())) return false
+    try {
+      await $.fs.write(target, text)
+      if ((await $.fs.read(target).catch(() => undefined)) === text) return true
+    } catch {
+      // fall through to the put-back
+    }
+    await $.fs.write(target, expected).catch(() => undefined) // a torn write: the file as it was
+    return false
   }
+  const tmp = settingsTmp(target, `${(await $.session.id().catch(() => 'x')).slice(0, 8)}-${await nowMs($)}`)
   try {
     const copy = copyModeArgv(target, tmp) // keeps the mode on POSIX; a Windows file has none
     if (copy) await $.process.run(copy).catch(() => undefined)
     await $.fs.write(tmp, text)
-    const mv = await $.process.run(moveArgv(tmp, target)!)
-    if (mv.exitCode === 0) return true
+    if (await unchanged()) {
+      const mv = await $.process.run(moveArgv(tmp, target)!)
+      if (mv.exitCode === 0) return true
+    }
   } catch {
     // fall through to the cleanup
   }
@@ -711,7 +727,7 @@ async function removeOwnStatusLine($: EngineInterface): Promise<{ done: boolean;
     say($, `🧭 census-setup: could not write the backup ${backup}, so I left your status line alone`)
     return { done: false }
   }
-  if (!(await writeSettings($, path, r.text))) {
+  if (!(await writeSettings($, path, r.text, text))) {
     say($, `🧭 census-setup: could not write ${path}, so I left your status line alone`)
     return { done: false }
   }
@@ -730,7 +746,7 @@ async function turnOff($: EngineInterface) {
     const text = await $.fs.read(path).catch(() => undefined)
     const r = restoreStatusLine(typeof text === 'string' ? text : '', backup)
     if (r.done === 'restored') {
-      if (await writeSettings($, path, r.text)) {
+      if (await writeSettings($, path, r.text, typeof text === 'string' ? text : '')) {
         await removeFile($, backupPath)
         lines.push(`your status line is back in ${path}`)
       } else lines.push(`could not write ${path}: your status line is still backed up in ${backupPath}`)

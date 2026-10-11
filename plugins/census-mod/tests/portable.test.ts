@@ -1,18 +1,26 @@
 import { expect, test } from 'claude-code/testing'
-import { PYTHON_CANDIDATES, cacheLinesFromText, copyModeArgv, moveArgv, onWindows, pickPython, removeArgv, tailBytes, titleLinesFromText } from '../plugin/core/portable'
+import { PYTHON_CANDIDATES, PYTHON_PROBE, cacheLinesFromText, copyModeArgv, moveArgv, onWindows, pickPython, removeArgv, tailBytes, titleLinesFromText } from '../plugin/core/portable'
 import { ingestArgv } from '../plugin/core/census'
 
-test('python launchers are tried python3, python, py -3, and the first that runs --version wins', async () => {
+test('python launchers are tried python3, python, py -3, and the first that passes the 3.9+ probe wins', async () => {
   expect(PYTHON_CANDIDATES).toEqual([['python3'], ['python'], ['py', '-3']])
   const seen: string[][] = []
-  const pick = (ok: string) => pickPython(async argv => (seen.push(argv), argv.join(' ') === ok))
-  expect(await pick('python3 --version')).toEqual(['python3'])
+  const launcher = (argv: string[]) => argv.slice(0, -2).join(' ')
+  const pick = (ok: string) => pickPython(async argv => (seen.push(argv), launcher(argv) === ok))
+  expect(await pick('python3')).toEqual(['python3'])
   seen.length = 0
-  expect(await pick('python --version')).toEqual(['python'])
-  expect(seen).toEqual([['python3', '--version'], ['python', '--version']])
+  expect(await pick('python')).toEqual(['python'])
+  expect(seen.map(launcher)).toEqual(['python3', 'python'])
   seen.length = 0
-  expect(await pick('py -3 --version')).toEqual(['py', '-3'])
+  expect(await pick('py -3')).toEqual(['py', '-3'])
   expect(seen.length).toBe(3)
+})
+
+test('the probe asks for Python 3.9 or newer, not just any python that answers --version', async () => {
+  const seen: string[][] = []
+  await pickPython(async argv => (seen.push(argv), true))
+  expect(seen[0]).toEqual(['python3', '-c', PYTHON_PROBE])
+  expect(PYTHON_PROBE).toBe('import sys; sys.exit(sys.version_info < (3, 9))')
 })
 
 test('none found is null; a probe that throws counts as not found', async () => {

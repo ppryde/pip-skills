@@ -18,4 +18,8 @@ for f in "$dest"/*.py; do
   for g in "${FILES[@]}"; do [ "$(basename "$f")" = "$g" ] && keep=1; done
   [ "$keep" = 1 ] || rm -f "$f"
 done
+# which census release this copy was taken from: a census release (its version is bumped on every change to its
+# scripts) fails tests/census/test_census_mod_bundle.py until this runs again, and census-mod's own version is then
+# bumped with it (CLAUDE.md "Mod layout")
+sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$here/../census/.claude-plugin/plugin.json" | head -1 > "$dest/BUNDLED_FROM"
 echo "census-mod bundle synced: ${FILES[*]}"

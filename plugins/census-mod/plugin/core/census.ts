@@ -33,7 +33,7 @@ export function censusDir(env: CensusEnv): string | null {
  */
 export const bundledCli = (pluginRoot: string): string => joinPath(pluginRoot, 'scripts', 'cli.py')
 
-/** The ingest argv for a launcher that passed `--version`. */
+/** The ingest argv for a launcher that passed the Python 3.9+ probe. */
 export const ingestArgv = (cli: string, python: readonly string[] = ['python3']): string[] => [...python, cli, 'ingest']
 
 /** Shadow mode points the child's census at the shadow dir; ingest honours `CENSUS_STORE`. */

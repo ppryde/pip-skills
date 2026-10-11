@@ -29,7 +29,7 @@ test('the launcher is chosen once per process, not once per ingest', async ($, o
   await $.turn.complete(turn(USAGE))
   await w.clock.advance(2_000)
   expect(w.ingests.length).toBeGreaterThan(1)
-  expect(w.runs.filter(r => r.argv.includes('--version')).map(r => r.argv.join(' '))).toEqual(['python3 --version', 'python --version'])
+  expect(w.runs.filter(r => r.argv.at(-1)?.includes('version_info')).map(r => r.argv.slice(0, -2).join(' '))).toEqual(['python3', 'python'])
 })
 
 test('no Python at all: nothing recorded, one log line, and the band still draws', async ($, on) => {
@@ -88,7 +88,7 @@ test('a Windows home (USERPROFILE only): the config dir, settings and backup kee
   expect(JSON.parse(w.files.get(WIN_SETTINGS) ?? '{}').statusLine).toBeUndefined()
   expect([...w.files.keys()].some(k => k.startsWith(`${WIN}\\census\\`) && k.includes('/'))).toBe(false) // no mixed separators
   expect(w.files.has(`${WIN}\\census\\census-mod.statusline.json`)).toBe(true)
-  expect(w.files.has(`${WIN_SETTINGS}.census-mod.tmp`)).toBe(false) // written in place: no temp to leave behind
+  expect([...w.files.keys()].filter(k => k.endsWith('.tmp'))).toEqual([]) // written in place: no temp to leave behind
 })
 
 test('a Windows home from HOMEDRIVE+HOMEPATH alone is found too', async ($, on) => {
@@ -138,7 +138,7 @@ test('an unprimed session that ends first still writes its last word: the launch
   expect(last?.argv[0]).toBe('python')
   expect(last?.payload.census_mod).toMatchObject({ event: 'session.end', ended: 'prompt_input_exit' })
   expect(last?.timeoutMs).toBeLessThanOrEqual(1000)
-  expect(w.runs.filter(r => r.argv.includes('--version'))).toEqual([]) // no probe spent the budget
+  expect(w.runs.filter(r => r.argv.at(-1)?.includes('version_info'))).toEqual([]) // no probe spent the budget
 })
 
 test('at session end with no Python at all: nothing recorded, one log line, and the launcher is not cached as none', async ($, on) => {
@@ -148,4 +148,19 @@ test('at session end with no Python at all: nothing recorded, one log line, and 
   await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: {} as never })
   expect(w.ingests).toEqual([])
   expect(w.logs.filter(l => l.includes('found no Python')).length).toBeLessThanOrEqual(1)
+})
+
+test('Windows settings.json is read back after the in-place write; a torn write is put back as it was', async ($, on) => {
+  const original = JSON.stringify({ statusLine: WIN_LINE, model: 'opus' }, null, 2) + '\n'
+  const w = world(on, { env: { USERPROFILE: 'C:\\Users\\x' }, files: { [WIN_SETTINGS]: original, [WIN_SCRIPT]: MARKED } })
+  w.answer.value = q => q.options.find(o => o.startsWith('Replace')) ?? q.options[0] ?? null
+  let torn = false
+  w.onWrite.fn = (path, text) => {
+    if (path === WIN_SETTINGS && !torn && text !== original) { torn = true; return text.slice(0, 10) } // the process is killed mid-write
+  }
+  await winSetup($, w)
+
+  expect(torn).toBe(true)
+  expect(w.files.get(WIN_SETTINGS)).toBe(original) // restored, not left half-written
+  expect(w.logs.join('\n')).toContain('so I left your status line alone')
 })
