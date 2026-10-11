@@ -119,3 +119,66 @@ def test_literal_hits_find_other_occurrences(world) -> None:
             for h in literal_hits(st, head.view_id, d.literals)}
     assert hits[("removed", "DELETE FROM scenario_events")] == [("app/other.py", 1)]
     assert hits[("added", "DELETE FROM events")] == []
+
+
+def test_check_call_edge_cases() -> None:
+    kwonly = (Param("a", "pos", False), Param("k", "kwonly", False))
+    assert "keyword-only" in check_call(CallShape(1, (), False, False), kwonly, False)[1]
+    assert check_call(CallShape(1, ("k",), False, False), kwonly, False) is None
+    posonly = (Param("a", "posonly", False),)
+    assert "unknown keyword" in check_call(CallShape(0, ("a",), False, False), posonly, False)[1]
+    star = (Param("a", "pos", False), Param("rest", "vararg", True))
+    assert check_call(CallShape(5, (), False, False), star, False) is None
+    dflt = (Param("a", "pos", False), Param("b", "pos", True))
+    assert check_call(CallShape(1, (), False, False), dflt, False) is None
+    assert check_call(CallShape(1, (), False, True), dflt, False)[0] == "undecided"
+    dup = check_call(CallShape(1, ("a",), False, False), dflt, False)
+    assert dup == ("error", "argument `a` given twice")
+    unbound = check_call(CallShape(3, (), False, False), dflt, False, binding_known=False)
+    assert unbound is not None and unbound[0] == "undecided"
+    assert check_call(CallShape(1, ("a",), False, False), dflt, False, False) is None
+
+
+def _drift(tmp_path: Path, make_repo, base: dict[str, str], head: dict[str, str]):
+    repo = make_repo(base)
+    sha = repo.git("rev-parse", "HEAD").strip()
+    repo.write(head)
+    st = Store(tmp_path / "i.db")
+    hv, bv = worktree_view(repo.root), base_view(repo.root, sha)
+    ensure_view(st, hv)
+    ensure_view(st, bv)
+    vi = ViewIndex(st, hv)
+    return sig_drift(vi, analyse(st, bv, hv, vi).signatures, Snippets(hv))
+
+
+def test_sig_drift_valid_call_is_silent(tmp_path: Path, make_repo) -> None:
+    base = {"m.py": "def f(a, b=1):\n    return a\n",
+            "u.py": "from m import f\n\n\ndef go():\n    return f(1)\n"}
+    head = {"m.py": "def f(a):\n    return a\n"}
+    assert _drift(tmp_path, make_repo, base, head) == []
+
+
+def test_sig_drift_inferred_target_is_undecided(tmp_path: Path, make_repo) -> None:
+    base = {"m.py": "def refund(a, b):\n    return a\n",
+            "u.py": "def go(client):\n    return client.refund(1, 2)\n"}
+    head = {"m.py": "def refund(a):\n    return a\n"}
+    drift = _drift(tmp_path, make_repo, base, head)
+    assert drift and {d.verdict for d in drift} == {"undecided"}
+    assert any("inferred by name" in d.reason for d in drift)
+
+
+METHOD_BASE = {
+    "m.py": "class C:\n    def go(self, a, b):\n        return a\n",
+    "u.py": ("from m import C\n\n\ndef run(c: C):\n    c.go(1, 2)\n"
+             "    C.go(c, 1, z=3)\n"),
+}
+METHOD_HEAD = {"m.py": "class C:\n    def go(self, a):\n        return a\n"}
+
+
+def test_sig_drift_method_binding_unknown(tmp_path: Path, make_repo) -> None:
+    drift = _drift(tmp_path, make_repo, METHOD_BASE, METHOD_HEAD)
+    by_line = {d.hit.line: d for d in drift}
+    assert 5 in by_line and by_line[5].verdict == "undecided"
+    assert "binding unknown" in by_line[5].reason
+    assert by_line[6].hit.confidence == "exact"  # explicit Class.method: target is certain
+    assert by_line[6].verdict == "error" and "unknown keyword" in by_line[6].reason

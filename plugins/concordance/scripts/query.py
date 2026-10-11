@@ -149,7 +149,10 @@ def removed_contract(vi: ViewIndex, items: list[RemovedItem],
     return out
 
 
-def check_call(shape: CallShape, sig: Signature, bound: bool) -> tuple[str, str] | None:
+def check_call(shape: CallShape, sig: Signature, bound: bool,
+               binding_known: bool = True) -> tuple[str, str] | None:
+    """Judge one call shape against a signature. `error` is a hard verdict: positional-count
+    problems are only `error` when `binding_known` (a method may be called unbound)."""
     params = list(sig)
     if bound and params and params[0].name in ("self", "cls"):
         params = params[1:]
@@ -158,17 +161,28 @@ def check_call(shape: CallShape, sig: Signature, bound: bool) -> tuple[str, str]
     positional = [p for p in params if p.kind in ("posonly", "pos")]
     has_var = any(p.kind == "vararg" for p in params)
     has_varkw = any(p.kind == "varkw" for p in params)
-    if shape.positional > len(positional) and not has_var:
-        return ("error", f"{shape.positional} positional args; signature takes {len(positional)}")
     named = {p.name for p in params if p.kind in ("pos", "kwonly")}
     unknown = [k for k in shape.keywords if k not in named]
     if unknown and not has_varkw:
         return ("error", f"unknown keyword(s): {', '.join(unknown)}")
-    covered = {p.name for p in positional[: shape.positional]} | set(shape.keywords)
-    missing = [p.name for p in params if p.kind in ("posonly", "pos", "kwonly")
-               and not p.has_default and p.name not in covered]
+    covered = {p.name for p in positional[: shape.positional]}
+    kwonly_missing = [p.name for p in params if p.kind == "kwonly" and not p.has_default
+                      and p.name not in shape.keywords]
+    if kwonly_missing:
+        return ("error", f"missing required keyword-only: {', '.join(kwonly_missing)}")
+    verdict = "error" if binding_known else "undecided"
+    suffix = "" if binding_known else " (method binding unknown)"
+    if shape.positional > len(positional) and not has_var:
+        takes = len(positional)
+        return (verdict, f"{shape.positional} positional args; signature takes {takes}{suffix}")
+    if binding_known:
+        twice = [k for k in shape.keywords if k in covered]
+        if twice:
+            return ("error", f"argument `{twice[0]}` given twice")
+    missing = [p.name for p in positional
+               if not p.has_default and p.name not in covered and p.name not in shape.keywords]
     if missing:
-        return ("error", f"missing required: {', '.join(missing)}")
+        return (verdict, f"missing required: {', '.join(missing)}{suffix}")
     return None
 
 
@@ -177,14 +191,19 @@ def sig_drift(vi: ViewIndex, changes: list[SignatureChange],
     out: list[DriftHit] = []
     for ch in changes:
         sym = vi.symbol(ch.qualname)
-        bound = sym is not None and sym.kind == "method"
+        is_method = sym is not None and sym.kind == "method"
         for path, ref, conf in vi.callers_with_class(ch.qualname):
             if ref.kind != "call":
                 continue
-            if conf == "ambiguous" or ref.args is None:
+            if conf == "ambiguous":
                 verdict: tuple[str, str] | None = ("undecided", "call target is ambiguous")
+            elif ref.args is None:
+                verdict = ("undecided", "call shape is unknown")
             else:
-                verdict = check_call(ref.args, ch.new, bound)
+                verdict = check_call(ref.args, ch.new, bound=is_method,
+                                     binding_known=not is_method)
+                if verdict is not None and verdict[0] == "error" and conf != "exact":
+                    verdict = ("undecided", f"{verdict[1]} (target inferred by name)")
             if verdict is not None:
                 out.append(DriftHit(ch, Hit(path, ref.line, ref.src, conf, verdict[1],
                                             snippets.around(path, ref.line)), *verdict))
