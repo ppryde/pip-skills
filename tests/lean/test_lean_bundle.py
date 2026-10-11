@@ -141,7 +141,7 @@ def test_shared_collect_and_render_is_wired_from_both_skills():
     for skill in (RA / "references/mode-refresh.md", CR / "SKILL.md"):
         text = read_lf(skill)
         assert "references/collect-and-render.md" in text, skill
-        assert reads(text, "collect-and-render.md") or "following" in text, skill
+        assert reads(text, "collect-and-render.md"), skill
 
 
 def test_shared_reference_carries_every_collector_and_render_rule():
@@ -171,3 +171,14 @@ def test_refresh_does_not_restate_the_collect_command():
     refresh = read_lf(RA / "references/mode-refresh.md")
     assert "python3 <plugin>/scripts/collect.py" not in refresh
     assert "`{{RULE_COUNT}}`" not in refresh
+
+
+def test_refresh_says_alias_and_repo_come_from_frontmatter():
+    text = read_lf(RA / "references/mode-refresh.md")
+    assert "alias and repo from the persona frontmatter" in text
+
+
+def test_context_vigil_skill_heading_follows_a_blank_line():
+    lines = read_lf(CV / "SKILL.md").splitlines()
+    i = lines.index("## Install, tmux, uninstall")
+    assert lines[i - 1] == ""

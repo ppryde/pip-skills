@@ -161,6 +161,16 @@ class TestBranchCacheAndWriteSkip:
         st.ingest(_payload(sid="abc", cwd=str(b)), now=2.0)
         assert _read(store_file)["sessions"]["abc"]["branch"] == "feat/b"
 
+    def test_failed_branch_lookup_is_retried_next_render(self, store_file, tmp_path, monkeypatch):
+        repo = self._repo(tmp_path)
+        real = st._git_branch
+        monkeypatch.setattr(st, "_git_branch", lambda cwd: None)   # git timed out once
+        st.ingest(_payload(sid="abc", cwd=str(repo)), now=1.0)
+        assert _read(store_file)["sessions"]["abc"]["branch"] is None
+        monkeypatch.setattr(st, "_git_branch", real)
+        st.ingest(_payload(sid="abc", cwd=str(repo)), now=2.0)
+        assert _read(store_file)["sessions"]["abc"]["branch"] == "feat/x"
+
     def test_non_repo_cwd_still_none(self, store_file, tmp_path):
         plain = tmp_path / "plain"
         plain.mkdir()
@@ -194,9 +204,11 @@ class TestBranchCacheAndWriteSkip:
         assert set(_read(store_file)["sessions"]) == {"abc", "def"}
 
     def test_a_prune_forces_the_write(self, store_file):
+        ttl = st.SESSION_TTL_SECONDS
         st.ingest(_payload(sid="old", cwd="/wt/o"), now=100.0)
-        st.ingest(_payload(sid="abc", cwd="/wt/a"), now=200.0)
-        far = 200.0 + st.SESSION_TTL_SECONDS - 100.0
-        st.ingest(_payload(sid="abc", cwd="/wt/a"), now=far)       # heartbeat due: writes
-        st.ingest(_payload(sid="abc", cwd="/wt/a"), now=far + 1)   # inside heartbeat: skipped
+        st.ingest(_payload(sid="abc", cwd="/wt/a"), now=ttl + 90.0)   # old still inside the TTL
+        assert "old" in _read(store_file)["sessions"]
+        # 15s later: inside the heartbeat, only updated_at moved for abc, but old is now
+        # past the TTL, so the prune changes the session count and the store is rewritten.
+        st.ingest(_payload(sid="abc", cwd="/wt/a"), now=ttl + 105.0)
         assert "old" not in _read(store_file)["sessions"]

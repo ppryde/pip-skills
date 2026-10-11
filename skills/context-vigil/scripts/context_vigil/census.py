@@ -299,7 +299,7 @@ def _head_stamp(worktree_cwd: str | None) -> list[Any] | None:
 
 def _cached_branch(previous: Any, worktree: str | None, stamp: list[Any] | None) -> tuple[bool, Any]:
     """(hit, branch): the previous entry's branch when HEAD's stamp and the cwd match."""
-    if (stamp is not None and isinstance(previous, dict) and "branch" in previous
+    if (stamp is not None and isinstance(previous, dict) and previous.get("branch") is not None
             and previous.get("worktree_cwd") == worktree
             and previous.get("branch_stamp") == stamp):
         return True, previous["branch"]

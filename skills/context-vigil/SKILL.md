@@ -16,6 +16,7 @@ description: >
 Run everything through the launcher in this skill's directory:
 
     "<this skill dir>/scripts/context-vigil" <command>
+
 ## Install, tmux, uninstall
 
 If `status` says `installed: no` or `partial` (hooks MISSING), or the user asks to
@@ -28,7 +29,7 @@ user has seen its dry-run summary and agreed.
 ## Measure
 
 `context` prints `ctx NN%` (and the threshold when over it; `ctx ~NN% (window unconfirmed)` while the window is only the configured fallback, which never nudges an interactive session). Check it at
-natural stopping points in long work. Headless runs (`claude -p`, the SDK) have
+stopping points in long work. Headless runs (`claude -p`, the SDK) have
 no status line: the percentage comes from the transcript against a window the
 script works out itself. Set `CONTEXT_VIGIL_WINDOW` there only if the model has
 never been seen in an interactive session (otherwise the learned table and

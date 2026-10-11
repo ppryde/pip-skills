@@ -795,7 +795,7 @@ def apply(plan: Plan) -> None:
             config.set_value(Path.cwd(), "last_light.enabled", "on" if plan.last_light else "off")
         if plan.last_light_threshold is not None:
             config.set_value(Path.cwd(), "last_light.threshold", str(plan.last_light_threshold))
-    except Exception as exc:
+    except BaseException as exc:
         restored, failed = _roll_back(done)
         exc.rolled_back = restored            # type: ignore[attr-defined]
         exc.rollback_failed = failed          # type: ignore[attr-defined]

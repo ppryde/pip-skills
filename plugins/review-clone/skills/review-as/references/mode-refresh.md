@@ -4,7 +4,7 @@
 
 ### 1 — Pull since last scan (Haiku subagent)
 
-Refresh is pure data gathering — no reasoning happens here. Drift detection and rule updates (Steps 3–4) stay on the main Opus session. Dispatch the collector as the **refresh** variant in `<plugin>/references/collect-and-render.md` (read it now): handles from frontmatter joined with commas, `--months`, `--paths`/`--extensions` from the persona's filters, plus `--since '<last_scanned_at>'`. Its reply is the snapshot JSON: parse it (or re-read `~/.claude/review-clone/<alias>/snapshot.json`) and continue from Step 2.
+Refresh is pure data gathering — no reasoning happens here. Drift detection and rule updates (Steps 3–4) stay on the main Opus session. Dispatch the collector as the **refresh** variant in `<plugin>/references/collect-and-render.md` (read it now): alias and repo from the persona frontmatter (`<repo>` is validated as the reference requires), handles from frontmatter joined with commas, `--months`, `--paths`/`--extensions` from the persona's filters, plus `--since '<last_scanned_at>'`. Its reply is the snapshot JSON: parse it (or re-read `~/.claude/review-clone/<alias>/snapshot.json`) and continue from Step 2.
 
 ### 2 — Pre-extract gate
 

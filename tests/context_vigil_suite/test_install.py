@@ -524,13 +524,36 @@ def test_rollback_removes_files_the_install_created(cfg: Path, monkeypatch) -> N
 
 def test_rollback_keeps_mode_of_restored_file(cfg: Path, monkeypatch) -> None:
     plan, script = _two_file_plan(cfg)
-    (cfg / "settings.json").chmod(0o640)
+    settings = cfg / "settings.json"
+    settings.chmod(0o640)
     real = install.write_atomic
-    monkeypatch.setattr(install, "write_atomic", lambda p, t: (_ for _ in ()).throw(
-        OSError("x")) if p == script else real(p, t))
+
+    def fake(p, t):
+        if p == script:
+            raise OSError("x")
+        real(p, t)
+        os.chmod(str(p), 0o600)          # the write itself changes the mode
+
+    monkeypatch.setattr(install, "write_atomic", fake)
     with pytest.raises(OSError):
         install.apply(plan)
-    assert (cfg / "settings.json").stat().st_mode & 0o777 == 0o640
+    assert settings.stat().st_mode & 0o777 == 0o640   # only the restore can put it back
+
+
+def test_keyboard_interrupt_also_rolls_back(cfg: Path, monkeypatch) -> None:
+    plan, script = _two_file_plan(cfg)
+    before = (cfg / "settings.json").read_bytes()
+    real = install.write_atomic
+
+    def fake(p, t):
+        if p == script:
+            raise KeyboardInterrupt
+        real(p, t)
+
+    monkeypatch.setattr(install, "write_atomic", fake)
+    with pytest.raises(KeyboardInterrupt):
+        install.apply(plan)
+    assert (cfg / "settings.json").read_bytes() == before
 
 
 def test_config_write_failure_rolls_back_files_and_config(cfg: Path, monkeypatch) -> None:
@@ -553,9 +576,12 @@ def test_config_write_failure_rolls_back_files_and_config(cfg: Path, monkeypatch
     assert not cfg_path.exists()
 
 
-def test_successful_apply_reports_no_rollback(cfg: Path) -> None:
+def test_successful_apply_does_not_roll_back(cfg: Path, monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(install, "_roll_back", lambda done: calls.append(done) or ([], []))
     install.apply(install.plan_install(threshold=None))
     assert (cfg / "settings.json").exists()
+    assert calls == []
 
 
 def test_cli_midway_failure_says_rolled_back(cfg: Path, monkeypatch, capsys) -> None:

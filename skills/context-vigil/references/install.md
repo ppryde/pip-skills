@@ -48,6 +48,10 @@ to set it up:
    work into a tmux session" — suggest it whenever auto mode needs a new
    session.
 
+`install --yes` is all-or-nothing for files: if a write fails (or Ctrl-C lands) part-way, every
+file already written is restored to its original bytes and mode, and files the install created
+are removed. Only directories it created may remain. Fix the cause and re-run.
+
 Never run any `--yes` command (`install`, `launcher`, `uninstall`) until the
 user has seen its dry-run summary and agreed.
 
