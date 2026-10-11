@@ -14,6 +14,7 @@ from scripts.resolve import ViewIndex, last
 from scripts.store import Store
 from scripts.views import View, lang_of
 
+MAX_DIFF_CELLS = 1_000_000  # lines(base) x lines(head) of the changed middle
 _NOT_CODE = ("module", "alias", "type")
 
 
@@ -97,9 +98,22 @@ def _changed_lines(base_text: str, head_text: str,
     a, b = base_text.splitlines(), head_text.splitlines()
     base_lines: set[int] = set()
     head_lines: set[int] = set()
-    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+    pre = 0  # an unchanged head and tail never need diffing
+    while pre < len(a) and pre < len(b) and a[pre] == b[pre]:
+        pre += 1
+    post = 0
+    while post < len(a) - pre and post < len(b) - pre and a[-1 - post] == b[-1 - post]:
+        post += 1
+    ma, mb = a[pre:len(a) - post], b[pre:len(b) - post]
+    if len(ma) * len(mb) > MAX_DIFF_CELLS:
+        # difflib is super-linear on large repetitive input: call the whole middle changed
+        opcodes: list[tuple[str, int, int, int, int]] = [("replace", 0, len(ma), 0, len(mb))]
+    else:
+        opcodes = list(difflib.SequenceMatcher(None, ma, mb, autojunk=False).get_opcodes())
+    for tag, i1, i2, j1, j2 in opcodes:
         if tag == "equal":
             continue
+        i1, i2, j1, j2 = i1 + pre, i2 + pre, j1 + pre, j2 + pre
         base_lines.update(range(i1 + 1, i2 + 1))
         if j2 > j1:
             head_lines.update(range(j1 + 1, j2 + 1))
@@ -154,6 +168,8 @@ def analyse(store: Store, base: View, head: View, head_vi: ViewIndex) -> DiffRes
         _, h_lines = _changed_lines(b_text, h_text, defs)
         starts = _decorator_starts(h_text) if lang_of(p) == "python" else {}
         _touched(result, p, b_text, h_text, b_syms, h_syms, h_lines, starts)
+        if p in head.files and (hff is None or not hff.parsed_ok):
+            continue  # head did not parse (the footer says so): removals there are unknown
         for q, s in b_syms.items():
             if q not in head_vi.symbols:
                 result.removed.append(RemovedItem("symbol", q, last(q), p, s.line_start, ""))

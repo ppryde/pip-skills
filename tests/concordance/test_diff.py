@@ -105,3 +105,23 @@ def test_removed_decorator_touches_the_function(tmp_path: Path, make_repo) -> No
     d = run(tmp_path, make_repo, {"m.py": src}, {"m.py": src.replace("@functools.cache\n", "")},
             name="decorm")
     assert {t.qualname for t in d.touched if t.behaviour_changed} == {"m.f"}
+
+
+def test_head_file_that_fails_to_parse_removes_nothing(tmp_path: Path, make_repo) -> None:
+    d = run(tmp_path, make_repo,
+            {"core.py": "def helper():\n    return 1\n\n\ndef other(a):\n    return a\n",
+             "use.py": "from core import helper\n\n\ndef go():\n    return helper()\n"},
+            {"core.py": "def helper(:\n    return 1\n"})
+    assert d.removed == [] and d.signatures == []
+
+
+def test_line_diff_of_a_large_repetitive_file_is_bounded(tmp_path: Path) -> None:
+    import time
+
+    from scripts.diff import _changed_lines
+    a = "x = 1\n" * 12000
+    b = a.replace("x = 1\n", "x = 2\n", 1).replace("x = 1\n", "x = 3\n", 6000)
+    start = time.monotonic()
+    base_lines, head_lines = _changed_lines(a, b)
+    assert time.monotonic() - start < 1  # difflib alone needs seconds here
+    assert 1 in base_lines and 1 in head_lines  # still reports the changed region
