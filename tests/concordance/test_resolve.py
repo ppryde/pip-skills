@@ -116,7 +116,7 @@ def test_duplicate_qualnames_tolerated(tmp_path: Path, make_repo) -> None:
     # the extractor emits `C.v` as a name ref to the class only, so no ref targets m.C.v
     assert vi.callers("m.C.v") == []
     assert {ref.src for _, ref, _ in vi.callers("m.C")} == {"m.go"}
-    assert vi.resolve("m.os") == Resolved("m.os", "exact")
+    assert vi.resolve("m.os") == Resolved(None, "external")  # alias of stdlib os
 
 
 def _tsconfig_view(make_repo, text: str):
