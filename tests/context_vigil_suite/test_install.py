@@ -469,3 +469,115 @@ def test_bar_refuses_a_non_object_env(cfg: Path, mod: Path) -> None:
     with pytest.raises(install.InstallError, match="not an object"):
         install.plan_install(None, bar=True)
     assert (cfg / "settings.json").read_text() == before
+
+
+# --- CV-9 (WF-268 lean bundle): a --yes install that fails midway rolls back ---------
+
+def _two_file_plan(cfg: Path):
+    script = cfg / "sl.sh"
+    script.write_text("input=$(cat)\n")
+    script.chmod(0o755)
+    _write(cfg, {"model": "opus", "statusLine": {"type": "command", "command": str(script)}})
+    plan = install.plan_install(threshold=None)
+    assert len([c for c in plan.changes if c.before != c.after]) == 2
+    return plan, script
+
+
+def test_midway_failure_restores_files_already_written(cfg: Path, monkeypatch) -> None:
+    plan, script = _two_file_plan(cfg)
+    settings_before = (cfg / "settings.json").read_bytes()
+    script_before = script.read_bytes()
+    real = install.write_atomic
+
+    def boom(path, text):
+        if path == script:
+            raise OSError("disk full")
+        return real(path, text)
+
+    monkeypatch.setattr(install, "write_atomic", boom)
+    with pytest.raises(OSError) as info:
+        install.apply(plan)
+    assert (cfg / "settings.json").read_bytes() == settings_before
+    assert script.read_bytes() == script_before
+    assert str((cfg / "settings.json").resolve()) in info.value.rolled_back
+    assert info.value.rollback_failed == []
+    assert not list(cfg.glob("*.context-vigil.tmp"))
+
+
+def test_rollback_removes_files_the_install_created(cfg: Path, monkeypatch) -> None:
+    rc = cfg / "rc"
+    plan = install.plan_install(threshold=None)
+    plan.changes.append(install.Change(rc, "", "alias x=y\n", ["rc"]))
+    real = install.write_atomic
+
+    def boom(path, text):
+        if path == rc:
+            raise OSError("read-only fs")
+        return real(path, text)
+
+    monkeypatch.setattr(install, "write_atomic", boom)
+    assert not (cfg / "settings.json").exists()
+    with pytest.raises(OSError):
+        install.apply(plan)
+    assert not (cfg / "settings.json").exists()      # created by the install: gone again
+
+
+def test_rollback_keeps_mode_of_restored_file(cfg: Path, monkeypatch) -> None:
+    plan, script = _two_file_plan(cfg)
+    (cfg / "settings.json").chmod(0o640)
+    real = install.write_atomic
+    monkeypatch.setattr(install, "write_atomic", lambda p, t: (_ for _ in ()).throw(
+        OSError("x")) if p == script else real(p, t))
+    with pytest.raises(OSError):
+        install.apply(plan)
+    assert (cfg / "settings.json").stat().st_mode & 0o777 == 0o640
+
+
+def test_config_write_failure_rolls_back_files_and_config(cfg: Path, monkeypatch) -> None:
+    plan = install.plan_install(threshold=60)
+    cfg_path = paths.global_config_path()
+    calls = []
+    real = config.set_value
+
+    def flaky(cwd, key, raw, worktree=False):
+        calls.append(key)
+        if len(calls) == 1:
+            return real(cwd, key, raw, worktree)
+        raise OSError("config disk full")
+
+    plan.last_light = True
+    monkeypatch.setattr(config, "set_value", flaky)
+    with pytest.raises(OSError):
+        install.apply(plan)
+    assert not (cfg / "settings.json").exists()
+    assert not cfg_path.exists()
+
+
+def test_successful_apply_reports_no_rollback(cfg: Path) -> None:
+    install.apply(install.plan_install(threshold=None))
+    assert (cfg / "settings.json").exists()
+
+
+def test_cli_midway_failure_says_rolled_back(cfg: Path, monkeypatch, capsys) -> None:
+    from context_vigil import cli
+    plan, script = _two_file_plan(cfg)
+    settings_before = (cfg / "settings.json").read_bytes()
+    real = install.write_atomic
+    monkeypatch.setattr(install, "write_atomic", lambda p, t: (_ for _ in ()).throw(
+        OSError("disk full")) if p == script else real(p, t))
+    assert cli.main(["install", "--yes"]) == 1
+    err = capsys.readouterr().err
+    assert "rolled back" in err and "disk full" in err
+    assert (cfg / "settings.json").read_bytes() == settings_before
+
+
+def test_cli_reports_files_it_could_not_restore(cfg: Path, monkeypatch, capsys) -> None:
+    from context_vigil import cli
+    plan, script = _two_file_plan(cfg)
+    real = install.write_atomic
+    monkeypatch.setattr(install, "write_atomic", lambda p, t: (_ for _ in ()).throw(
+        OSError("disk full")) if p == script else real(p, t))
+    monkeypatch.setattr(install, "_restore", lambda *a: (_ for _ in ()).throw(OSError("ro")))
+    assert cli.main(["install", "--yes"]) == 1
+    err = capsys.readouterr().err
+    assert "could not restore" in err and str(cfg / "settings.json") in err
