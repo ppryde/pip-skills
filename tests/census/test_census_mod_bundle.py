@@ -32,7 +32,7 @@ def test_the_bundle_holds_exactly_those_files():
 
 def test_the_sync_script_copies_the_same_list():
     script = (MOD / "sync-bundle.sh").read_text()
-    listed = re.search(r"^FILES=\((.*?)\)$", script, re.M).group(1).split()
+    listed = re.search(r"^FILES=\((.*?)\)$", script, re.MULTILINE).group(1).split()
     assert sorted(listed) == sorted(FILES)
 
 
@@ -99,7 +99,7 @@ def test_ingest_publishes_the_bundled_cli_as_cli_path_so_other_tools_find_a_cens
 
 
 def test_where_works_from_the_bundle(lone):
-    root, env, tmp = lone
+    root, env, _ = lone
     where = run_cli(root, env, "where")
     assert where.returncode == 0 and "vitals" not in json.loads(where.stdout)
 

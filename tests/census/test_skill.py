@@ -13,7 +13,7 @@ def test_frontmatter_names_the_skill_after_its_folder():
 
 def test_every_segment_it_teaches_exists():
     text = SKILL.read_text(encoding="utf-8")
-    listed = re.search(r"The\s+names are (.+?)\. A `/`", text, re.S).group(1)
+    listed = re.search(r"The\s+names are (.+?)\. A `/`", text, re.DOTALL).group(1)
     assert set(re.findall(r"`(\w+)`", listed)) == set(render.SEGMENTS)
 
 

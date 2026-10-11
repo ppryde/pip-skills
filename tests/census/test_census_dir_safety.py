@@ -5,7 +5,6 @@ import json
 import time
 
 import pytest
-
 from scripts import cli
 from scripts import install as ins
 from scripts import store as st

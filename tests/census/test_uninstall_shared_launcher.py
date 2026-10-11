@@ -1,10 +1,8 @@
 """SS-1: the launcher (~/.local/bin/census) is one file for every account. Uninstalling one account while another
 account's settings.json still runs it asks (a flag per answer) instead of silently breaking the other account."""
 import json
-from pathlib import Path
 
 import pytest
-
 from scripts import cli
 from scripts import install as ins
 

@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from scripts import cli
 from scripts import where as wh
 
