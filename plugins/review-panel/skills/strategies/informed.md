@@ -19,7 +19,7 @@ context files before dispatch to stay within budget.
    prompted with diff + HEAD files + context files. Output: finding contract.
 
 ## Reconciliation
-Same as committee: collate, then apply strictness/decisions.
+Run `reconcile` (SKILL Step 5). No verdict stage, so every finding is kept.
 
 ## Cost
 Higher than committee: more context tokens per reviewer.

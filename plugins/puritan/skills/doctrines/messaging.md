@@ -178,7 +178,7 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest async Messaging is in use):
+Directory signals (counted by Covenant):
 - `infrastructure/messaging/` — message broker integration and configuration
 - `workers/` or `consumers/` — background message consumer processes
 - `publishers/` or `producers/` — message publishing logic
@@ -186,7 +186,7 @@ Strong indicators (any 2+ suggest async Messaging is in use):
 - `api/webhooks/` — async inbound webhook handlers
 
 ### File signals
-Strong indicators (any 1 is significant):
+File signals (counted by Covenant):
 - Files named `*Consumer.*` or `*Subscriber.*`
 - Files named `*Publisher.*` or `*Producer.*`
 - Files named `*MessageHandler.*` or `*EventHandler.*`

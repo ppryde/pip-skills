@@ -577,6 +577,28 @@ made on a feature branch. Record the patch under the current version, with a
 
 ---
 
+## Smoke: compare before and after a skill change
+
+Use this after any change to the Elder, Visitation or Scribe skill text, the shared
+references or `scripts/rules.py` (the lean-skill refactor is the model case). It checks
+that levels 1-7 still score the same against the BENCHMARK answer key.
+
+1. Baseline: check out the commit before the change (a worktree is enough) and run the
+   Elder on each of `templates/level-1` to `level-7` in report mode, with a config that
+   matches the level's stack. Save each verdict.
+2. Run the same seven audits on the changed commit, same config, same model.
+3. Score both runs per `BENCHMARK.md` (Scoring): catch rate, false positives, rule ID
+   and severity accuracy. Both must meet the minimum thresholds there.
+4. Compare the two runs level by level. Catch rate must not fall by more than one planted
+   violation per level, false positives must not rise past the level's maximum, and the
+   `Rules checked` footer must equal the `rules.py select` count for that config.
+5. Spot-check one Visitation run (`visitation <file>` on level-1) and one Scribe
+   generation, and confirm the verdict layout and exit codes are unchanged.
+
+Model output varies run to run: repeat a level that regresses before blaming the change.
+
+---
+
 ## Adding a New Version Entry
 
 When doctrines or skills are updated and merged to main, add a new version block
