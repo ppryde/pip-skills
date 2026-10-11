@@ -30,7 +30,7 @@ def test_overseer_rollup_feeds_vigil_handover(tmp_path, monkeypatch):
     )
     assert result.returncode == 0, result.stderr
 
-    (handoff_file,) = (tmp_path / "cfg" / "vigil").glob("*/handoff.md")
+    (handoff_file,) = (tmp_path / "cfg" / "vigil").glob("*/sessions/*/handoff.md")
     handoff = handoff_file.read_text()
     assert "WF-001" in handoff                    # the overseer rollup flowed through
     assert "preserve the auth spike" in handoff   # notes preserved
