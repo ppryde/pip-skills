@@ -17,6 +17,46 @@ NUDGE = PLUGIN_ROOT / "hooks" / "nudge-hook.sh"
 BASH = shutil.which("bash") or "/bin/bash"
 
 
+RULE = "─" * 40
+# A idle Claude Code prompt: the placeholder is drawn dim (SGR 2) so it is not "typed".
+SAFE_SCREEN = f"output\n{RULE}\n❯ \x1b[2mTry something\x1b[0m\n{RULE}\n"
+TYPED_SCREEN = f"output\n{RULE}\n❯ half a sentence\n{RULE}\n"
+DIALOG_SCREEN = (
+    f"Allow this tool?\n❯ 1. Yes\n  2. No\nEnter to select · Esc to cancel\n"
+)
+
+
+def _fake_tmux(tmp_path, screen, capture_fails=False):
+    """A fake tmux on a private bin dir: has-session ok, capture-pane prints `screen`
+    (or fails), display-message says not-in-mode; every other call (rename-window,
+    send-keys) appends its argv to `marker`. Never a real tmux server."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    shot = tmp_path / "screen.txt"
+    shot.write_text(screen)
+    marker = tmp_path / "tmux-called"
+    capture = "exit 1" if capture_fails else f'cat "{shot}"; exit 0'
+    fake = bindir / "tmux"
+    fake.write_text(
+        '#!/usr/bin/env bash\n'
+        'if [ "$1" = "has-session" ]; then exit 0; fi\n'
+        'if [ "$1" = "display-message" ]; then exit 0; fi\n'
+        f'if [ "$1" = "capture-pane" ]; then {capture}; fi\n'
+        f'echo "$@" >> "{marker}"\n'
+    )
+    fake.chmod(0o755)
+    return bindir, marker
+
+
+def _auto_env(bindir):
+    return _base_env({
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "TMUX": "/tmp/fake,1,0",
+        "TMUX_PANE": "%9",
+        "VIGIL_CLEAR_DELAY": "0",
+    })
+
+
 def _run(script, payload, env, cwd):
     return subprocess.run(
         ["bash", str(script)],
@@ -52,6 +92,16 @@ def _promote_and_arm(repo, pane=None):
         else:
             os.environ["TMUX_PANE"] = saved
     return st
+
+
+def _wait_calls(marker, count, timeout=5):
+    deadline = time.time() + timeout
+    calls: list[str] = []
+    while time.time() < deadline and len(calls) < count:
+        if marker.exists():
+            calls = marker.read_text().strip().splitlines()
+        time.sleep(0.05)
+    return calls
 
 
 class TestStopHook:
@@ -146,16 +196,7 @@ class TestStopHook:
         # fake tmux on PATH: the has-session liveness probe succeeds silently;
         # only send-keys records its argv to the marker (so the wait loop below
         # cannot race on the probe having merely created the file).
-        bindir = tmp_path / "bin"
-        bindir.mkdir()
-        marker = tmp_path / "tmux-called"
-        fake = bindir / "tmux"
-        fake.write_text(
-            '#!/usr/bin/env bash\n'
-            'if [ "$1" = "has-session" ]; then exit 0; fi\n'
-            'echo "$@" >> "%s"\n' % marker
-        )
-        fake.chmod(0o755)
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN)
         env = _base_env({
             "PATH": f"{bindir}:{os.environ['PATH']}",
             "TMUX": "/tmp/fake,1,0",
@@ -178,16 +219,7 @@ class TestStopHook:
         st.request_clear(tmp_path, "HANDOFF FROM HOOK TEST", title="fix the auth bug")
         # fake tmux on PATH: has-session succeeds silently; rename-window and
         # send-keys both append their argv to the marker, in call order.
-        bindir = tmp_path / "bin"
-        bindir.mkdir()
-        marker = tmp_path / "tmux-called"
-        fake = bindir / "tmux"
-        fake.write_text(
-            '#!/usr/bin/env bash\n'
-            'if [ "$1" = "has-session" ]; then exit 0; fi\n'
-            'echo "$@" >> "%s"\n' % marker
-        )
-        fake.chmod(0o755)
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN)
         env = _base_env({
             "PATH": f"{bindir}:{os.environ['PATH']}",
             "TMUX": "/tmp/fake,1,0",
@@ -211,16 +243,7 @@ class TestStopHook:
 
     def test_auto_mode_skips_rename_when_no_title_armed(self, tmp_path):
         st = _promote_and_arm(tmp_path, "%9")  # no title
-        bindir = tmp_path / "bin"
-        bindir.mkdir()
-        marker = tmp_path / "tmux-called"
-        fake = bindir / "tmux"
-        fake.write_text(
-            '#!/usr/bin/env bash\n'
-            'if [ "$1" = "has-session" ]; then exit 0; fi\n'
-            'echo "$@" >> "%s"\n' % marker
-        )
-        fake.chmod(0o755)
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN)
         env = _base_env({
             "PATH": f"{bindir}:{os.environ['PATH']}",
             "TMUX": "/tmp/fake,1,0",
@@ -236,6 +259,63 @@ class TestStopHook:
         assert marker.exists()
         calls = marker.read_text().strip().splitlines()
         assert calls == ["send-keys -t %9 /clear Enter"]  # no rename-window call
+
+    def test_safe_pane_sends_clear(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")  # read the flag from the hook's pane lineage
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN)
+        result = _run(STOP, {"cwd": str(tmp_path)}, _auto_env(bindir), tmp_path)
+        assert result.returncode == 0 and result.stdout.strip() == ""
+        assert not st.clear_flag(tmp_path).exists()
+        assert _wait_calls(marker, 1) == ["send-keys -t %9 /clear Enter"]
+
+    def _assert_held(self, tmp_path, result, marker, st, why):
+        assert result.returncode == 0
+        message = json.loads(result.stdout.strip())["systemMessage"]
+        assert "handover pending" in message and "not sent" in message and why in message
+        assert st.clear_flag(tmp_path).exists()  # still armed
+        time.sleep(0.3)
+        assert not marker.exists()  # no send-keys, no rename-window
+
+    def test_non_empty_prompt_holds(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")  # read the flag from the hook's pane lineage
+        bindir, marker = _fake_tmux(tmp_path, TYPED_SCREEN)
+        result = _run(STOP, {"cwd": str(tmp_path)}, _auto_env(bindir), tmp_path)
+        self._assert_held(tmp_path, result, marker, st, "prompt box is not empty")
+
+    def test_open_dialog_holds(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")  # read the flag from the hook's pane lineage
+        bindir, marker = _fake_tmux(tmp_path, DIALOG_SCREEN)
+        result = _run(STOP, {"cwd": str(tmp_path)}, _auto_env(bindir), tmp_path)
+        self._assert_held(tmp_path, result, marker, st, "no empty prompt box")
+
+    def test_dialog_footer_under_a_prompt_box_holds(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")  # read the flag from the hook's pane lineage
+        screen = SAFE_SCREEN + "Enter to confirm · Esc to cancel\n"
+        bindir, marker = _fake_tmux(tmp_path, screen)
+        result = _run(STOP, {"cwd": str(tmp_path)}, _auto_env(bindir), tmp_path)
+        self._assert_held(tmp_path, result, marker, st, "dialog or permission prompt")
+
+    def test_capture_failure_holds_with_system_message(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")  # read the flag from the hook's pane lineage
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN, capture_fails=True)
+        result = _run(STOP, {"cwd": str(tmp_path)}, _auto_env(bindir), tmp_path)
+        self._assert_held(tmp_path, result, marker, st, "could not be read")
+
+    def test_stop_hook_active_short_circuits(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")  # read the flag from the hook's pane lineage
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN)
+        payload = {"cwd": str(tmp_path), "stop_hook_active": True}
+        result = _run(STOP, payload, _auto_env(bindir), tmp_path)
+        assert result.returncode == 0 and result.stdout.strip() == ""
+        assert st.clear_flag(tmp_path).exists()  # not consumed
+        time.sleep(0.3)
+        assert not marker.exists()
 
     def test_induced_failure_still_exits_0(self, tmp_path):
         _promote_and_arm(tmp_path)
@@ -404,7 +484,9 @@ class TestInterpreterChoice:
         env = _base_env({"VIGIL_PYTHON": str(shim), "TMUX": "/x,1,0",
                          "PATH": f"{fake_bin}:{os.environ['PATH']}", "VIGIL_CLEAR_DELAY": "0"})
         _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
-        assert len(marker.read_text().split()) == 3
+        # nudge + session-start + the stop guard + the pane check (which holds: the
+        # shim prints nothing, so the pane cannot be read and stop-hook is never reached)
+        assert len(marker.read_text().split()) == 4
 
     def test_bin_vigil_honours_override(self, tmp_path):
         marker = tmp_path / "bin-ran"

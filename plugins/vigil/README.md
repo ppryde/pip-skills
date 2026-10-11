@@ -14,6 +14,10 @@ other plugin.
   keystroke via `tmux send-keys`. Without tmux, handover is **manual** (vigil
   checkpoints and you type `/clear`). Apple's bundled `screen` (v4.00.03) cannot
   drive the modern TUI and is not supported.
+  Before typing, the Stop hook reads the pane (`tmux capture-pane`): it only
+  sends `/clear` into an empty prompt with no dialog open. Otherwise (or if the
+  pane cannot be read, or the Stop was itself caused by a Stop hook) it sends
+  nothing, leaves the handover armed and tells you via a systemMessage.
 
 ## What it does
 

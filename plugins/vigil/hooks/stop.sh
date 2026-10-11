@@ -24,6 +24,13 @@ loud_manual() {
   fi
 }
 
+# A Stop caused by a Stop hook must never re-trigger the dispatcher.
+guard="$(printf '%s' "$input" \
+  | "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" stop-guard-hook 2>/dev/null || true)"
+if [ "$guard" = "ACTIVE" ]; then
+  exit 0
+fi
+
 if [ -z "${TMUX:-}" ]; then
   loud_manual
   exit 0
@@ -35,6 +42,18 @@ fi
 # manual path so the flag is preserved for the human's own /clear.
 if ! tmux has-session 2>/dev/null; then
   loud_manual
+  exit 0
+fi
+
+# Never type /clear into a pane that is not an empty prompt: a dialog or
+# permission prompt would take it as an answer, and typed text would be
+# clobbered. Unsafe or unreadable -> keep the flag armed and say why.
+pane_check="$(printf '%s' "$input" \
+  | "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" pane-check-hook 2>/dev/null || true)"
+if [ "$pane_check" != "OK" ]; then
+  why="${pane_check#HOLD:}"
+  [ "$why" = "$pane_check" ] && why="the pane could not be checked"
+  printf '{"systemMessage":"vigil: handover pending, /clear not sent because %s. It stays armed: type /clear to complete it."}\n' "$why"
   exit 0
 fi
 

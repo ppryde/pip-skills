@@ -13,6 +13,7 @@ if __package__ in (None, ""):  # direct invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts import census  # noqa: E402
+from scripts import pane as pane_mod  # noqa: E402
 from scripts import context as ctx  # noqa: E402
 from scripts import snapshot as snap  # noqa: E402
 from scripts import state as st  # noqa: E402
@@ -211,6 +212,35 @@ def cmd_clear_armed_hook(args: argparse.Namespace) -> int:
     payload = _read_hook_payload()
     if st.clear_requested(_hook_root(payload, args)):
         print("ARMED")
+    return 0
+
+
+def cmd_stop_guard_hook(args: argparse.Namespace) -> int:
+    """Stop-hook re-entry guard: prints ACTIVE when this Stop was itself caused
+    by a Stop hook (``stop_hook_active``), so the dispatcher never re-triggers."""
+    if _read_hook_payload().get("stop_hook_active") is True:
+        print("ACTIVE")
+    return 0
+
+
+def cmd_pane_check_hook(args: argparse.Namespace) -> int:
+    """Read-only Stop-hook helper: may the armed ``/clear`` be typed now?
+
+    Prints ``OK`` when nothing is armed (nothing will be typed) or the pane's
+    prompt is empty with no dialog open; otherwise ``HOLD:<reason>``. Never
+    consumes the flag, so a held handover stays armed for a later turn or the
+    human's own /clear.
+    """
+    payload = _read_hook_payload()
+    if not st.clear_requested(_hook_root(payload, args)):
+        print("OK")
+        return 0
+    pane = os.environ.get("TMUX_PANE", "")
+    if not pane:
+        print("HOLD:no tmux pane is known")
+        return 0
+    reason = pane_mod.pane_hold_reason(pane)
+    print("OK" if reason is None else f"HOLD:{reason}")
     return 0
 
 
@@ -451,6 +481,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_handover)
 
     sub.add_parser("stop-hook").set_defaults(func=cmd_stop_hook)
+    sub.add_parser("stop-guard-hook").set_defaults(func=cmd_stop_guard_hook)
+    sub.add_parser("pane-check-hook").set_defaults(func=cmd_pane_check_hook)
     sub.add_parser("clear-armed-hook").set_defaults(func=cmd_clear_armed_hook)
     sub.add_parser("session-start-hook").set_defaults(func=cmd_session_start_hook)
     sub.add_parser("nudge-hook").set_defaults(func=cmd_nudge_hook)
