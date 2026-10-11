@@ -21,12 +21,15 @@ def _seed(repo, monkeypatch, *, with_knowledge=False):
                      checklist=[{"task": "review", "subject": "impl", "status": "pending"}],
                      updated="2026-08-01T00:00:00")
     db.create_card(conn, conn_card)
-    (central / "sprints").mkdir(exist_ok=True)
-    (central / "sprints" / "sprint-1.md").write_text("---\nid: sprint-1\nstatus: active\n---\n")
-    (central / "usage.jsonl").write_text('{"card":"WF-001","tokens":5}\n')
+    from scripts import views
+    from scripts.knowledge import Fact, save_fact
+    from scripts.sprints import Sprint, save_sprint
+    save_sprint(conn, Sprint(id="sprint-1", status="active"))
     if with_knowledge:
-        (central / "knowledge").mkdir(exist_ok=True)
-        (central / "knowledge" / "KB-001-x.md").write_text("# fact\n")
+        save_fact(conn, Fact(id="KB-001", statement="x", created="2026-08-01", verified="2026-08-01"))
+    views.export(conn, central)
+    (central / "usage.jsonl").write_text('{"card":"WF-001","tokens":5}\n')
+    conn.close()
     return central
 
 
@@ -39,7 +42,7 @@ def test_backup_writes_json_and_copies_state(tmp_path, monkeypatch):
     assert [c["id"] for c in cards] == ["WF-001"]
     # lossless JSON column: touches copied verbatim as its stored TEXT
     assert json.loads(cards[0]["touches"]) == ["a.py", "b.py"]
-    assert (dest / "sprints" / "sprint-1.md").exists()
+    assert [r["id"] for r in json.loads((dest / "sprints.json").read_text())] == ["sprint-1"]
     assert (dest / "usage.jsonl").exists()
     manifest = json.loads((dest / "manifest.json").read_text())
     assert manifest["schema_version"] == db.SCHEMA_VERSION
@@ -121,12 +124,12 @@ def test_backup_depends_on_and_checklist_round_trip_verbatim(tmp_path, monkeypat
     ]
 
 
-def test_backup_copies_knowledge_dir_and_counts_fact_files(tmp_path, monkeypatch):
+def test_backup_dumps_facts_table_and_counts_fact_rows(tmp_path, monkeypatch):
     repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
     _seed(repo, monkeypatch, with_knowledge=True)
     summary = backup.backup_board(repo)
     dest = config.backup_dir(repo)
-    assert (dest / "knowledge" / "KB-001-x.md").exists()
+    assert [r["id"] for r in json.loads((dest / "facts.json").read_text())] == ["KB-001"]
     manifest = json.loads((dest / "manifest.json").read_text())
     assert manifest["fact_files"] == 1
     assert summary["fact_files"] == 1
@@ -299,27 +302,29 @@ def test_backup_restore_round_trips_quarantined_corrupt_files(tmp_path, monkeypa
     assert (central / "archive" / "corrupt" / "WF-666-bad.md").read_text() == "not a valid card\n"
 
 
-def test_restore_fill_gaps_leaves_existing_files_untouched(tmp_path, monkeypatch):
-    """Partial loss: sprints/ survives locally (with local edits since the
-    backup), usage.jsonl and knowledge/ are gone. Restore must leave the
-    surviving file byte-for-byte untouched (files_skipped) and only fill in
-    what's actually missing (files_restored)."""
+def test_restore_fill_gaps_leaves_existing_rows_and_files_untouched(tmp_path, monkeypatch):
+    """Partial loss: the sprint row survives locally (with local edits since the
+    backup), the fact and usage.jsonl are gone. Restore must leave the surviving
+    sprint untouched and only fill in what is actually missing."""
     repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
     central = _seed(repo, monkeypatch, with_knowledge=True)
     backup.backup_board(repo)
 
-    local_content = "---\nid: sprint-1\nstatus: LOCAL-EDIT\n---\n"
-    (central / "sprints" / "sprint-1.md").write_text(local_content)
+    conn = db.connect(repo)
+    conn.execute("UPDATE sprints SET status = 'closed' WHERE id = 'sprint-1'")
+    conn.execute("DELETE FROM facts")
+    conn.commit()
+    conn.close()
     (central / "usage.jsonl").unlink()
-    shutil.rmtree(central / "knowledge")
 
     res = backup.restore_board(repo)
 
-    assert (central / "sprints" / "sprint-1.md").read_text() == local_content
+    conn = db.connect(repo)
+    assert conn.execute("SELECT status FROM sprints WHERE id='sprint-1'").fetchone()[0] == "closed"
+    assert [r[0] for r in conn.execute("SELECT id FROM facts")] == ["KB-001"]
     assert (central / "usage.jsonl").exists()
-    assert (central / "knowledge" / "KB-001-x.md").exists()
-    assert res["files_skipped"] == 1
-    assert res["files_restored"] == 2
+    assert res["rows_restored"] == 1       # the fact; the sprint was already there
+    assert res["files_restored"] == 1      # usage.jsonl
 
 
 def test_restore_merges_meta_excluding_identity_keys(tmp_path, monkeypatch):
@@ -403,3 +408,113 @@ def test_restore_refuses_unknown_card_column_with_clear_error(tmp_path, monkeypa
     (dest / "cards.json").write_text(json.dumps(cards))
     with pytest.raises(ValueError, match="cards.json"):
         backup.restore_board(repo)
+
+
+# ---- schema v2 snapshots, v1 snapshots, destination safety, --from-bak -------------
+
+def test_a_v2_snapshot_round_trips_every_table(tmp_path, monkeypatch):
+    from scripts.knowledge import Fact, save_fact
+    from scripts.pending import add_pending
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    central = _seed(repo, monkeypatch, with_knowledge=True)
+    conn = db.connect(repo)
+    add_pending(conn, "WF-001", "a pending fact", ["t"], "/d")
+    db.record_evidence(conn, "WF-001", "impl-review", "review", round_no=1, slot="A",
+                       status="approved", critical=0, important=0, minor=0, ts="t")
+    conn.commit()
+    conn.close()
+    stats = backup.backup_board(repo)
+    dest = config.backup_dir(repo)
+    manifest = json.loads((dest / "manifest.json").read_text())
+    assert manifest["schema_version"] == 2
+    assert (manifest["pending_facts"], manifest["stage_evidence"]) == (1, 1)
+    shutil.rmtree(central)
+    res = backup.restore_board(repo)
+    conn = db.connect(repo)
+    assert [r[0] for r in conn.execute("SELECT id FROM sprints")] == ["sprint-1"]
+    assert [r[0] for r in conn.execute("SELECT id FROM facts")] == ["KB-001"]
+    assert conn.execute("SELECT statement FROM pending_facts").fetchone()[0] == "a pending fact"
+    assert conn.execute("SELECT slot, status FROM stage_evidence").fetchone()[:] == ("A", "approved")
+    assert res["rows_restored"] == 4
+    # restoring again adds nothing (fill-gaps, evidence matched on content)
+    assert backup.restore_board(repo)["rows_restored"] == 0
+
+
+def test_a_v1_snapshot_with_file_trees_restores_through_the_importer(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    central = _seed(repo, monkeypatch)
+    dest = tmp_path / "snap"
+    dest.mkdir()
+    (dest / "cards.json").write_text("[]")
+    (dest / "meta.json").write_text("[]")
+    (dest / "manifest.json").write_text(json.dumps({"schema_version": 1}))
+    (dest / "sprints").mkdir()
+    (dest / "sprints" / "old.md").write_text("---\nid: old\nstatus: closed\n---\n\n## Goal\nlegacy\n")
+    (dest / "knowledge" / "facts").mkdir(parents=True)
+    (dest / "knowledge" / "facts" / "KB-005-x.md").write_text(
+        "---\nid: KB-005\nstatement: legacy fact\nstatus: active\n---\n\nbody\n")
+    (dest / "sprints" / "link.md").symlink_to(tmp_path / "secret")
+    res = backup.restore_board(repo, dest)
+    conn = db.connect(repo)
+    assert conn.execute("SELECT status FROM sprints WHERE id='old'").fetchone()[0] == "closed"
+    assert conn.execute("SELECT statement FROM facts WHERE id='KB-005'").fetchone()[0] == "legacy fact"
+    assert not (central / "sprints" / "link.md").exists()
+    assert res["rows_restored"] >= 2
+
+
+def test_an_unknown_snapshot_schema_is_refused(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    _seed(repo, monkeypatch)
+    backup.backup_board(repo)
+    dest = config.backup_dir(repo)
+    (dest / "manifest.json").write_text(json.dumps({"schema_version": 99}))
+    with pytest.raises(ValueError, match="not one of"):
+        backup.restore_board(repo)
+
+
+def test_backup_refuses_a_non_empty_folder_that_is_not_a_snapshot(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    _seed(repo, monkeypatch)
+    dest = tmp_path / "precious"
+    dest.mkdir()
+    (dest / "thesis.docx").write_text("do not delete me")
+    with pytest.raises(ValueError, match="no manifest.json"):
+        backup.backup_board(repo, dest)
+    assert (dest / "thesis.docx").read_text() == "do not delete me"
+    backup.backup_board(repo, tmp_path / "fresh")          # a missing folder is fine
+    backup.backup_board(repo, tmp_path / "fresh")          # and so is refreshing a snapshot
+
+
+def test_backup_refuses_ancestors_of_the_repo_the_central_folder_and_home(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    central = _seed(repo, monkeypatch)
+    for bad in (repo, tmp_path, central, central.parent, Path.home(), Path("/")):
+        with pytest.raises(ValueError, match="contains"):
+            backup.backup_board(repo, bad)
+
+
+def test_restore_from_bak_cli_puts_the_pre_upgrade_board_back(tmp_path, capsys):
+    from scripts.cli import main
+    from test_migration import baks, card_rows, make_v1_board
+    _init_git(tmp_path)
+    path, state = tmp_path / "board.db", tmp_path / "state"
+    make_v1_board(path, state, n_cards=5)
+    before = card_rows(path)
+    db.connect(tmp_path).close()
+    [bak] = baks(path)
+    capsys.readouterr()
+    assert main(["--root", str(tmp_path), "restore", "--from-bak", str(bak)]) == 0
+    out = capsys.readouterr().out
+    assert "restored the pre-v2 board" in out and "schema v1 again" in out
+    assert card_rows(path) == before
+    assert main(["--root", str(tmp_path), "restore", "--from-bak", str(bak),
+                 "--dir", str(tmp_path)]) == 1
+    assert main(["--root", str(tmp_path), "restore", "--from-bak", str(tmp_path / "nope.bak")]) == 1
+
+
+def test_restore_from_bak_refuses_something_that_is_not_a_board(tmp_path):
+    _init_git(tmp_path)
+    junk = tmp_path / "junk.bak"
+    junk.write_text("not sqlite")
+    with pytest.raises(ValueError, match="not an overseer board backup"):
+        backup.restore_from_bak(tmp_path, junk)

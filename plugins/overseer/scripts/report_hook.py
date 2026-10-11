@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts import db
+from scripts import db, views
 from scripts.dispatch import dispatch_dir, role_of
 from scripts.models import Card
 from scripts.pending import add_pending
@@ -158,14 +158,17 @@ def handle(payload: dict[str, object], repo_root: Path, now: str) -> dict[str, o
     conn = db.connect(repo_root)
     try:
         card = db.mutate_card(conn, report.card, lambda c: _record(c, role, report, detail, spend, now))
+        if card is None:
+            entry["error"] = f"no card {report.card}"
+        else:
+            if report.learned:
+                with db.txn(conn):
+                    for fact in report.learned:
+                        add_pending(conn, report.card, fact.statement, list(fact.tags), str(report.detail))
+                views.export(conn, root)
+            if card.tripwire_breached:
+                entry["tripwire"] = True
     finally:
         conn.close()
-    if card is None:
-        entry["error"] = f"no card {report.card}"
-    else:
-        for fact in report.learned:
-            add_pending(repo_root, report.card, fact.statement, list(fact.tags), str(report.detail))
-        if card.tripwire_breached:
-            entry["tripwire"] = True
     append_usage(root, entry)
     return None

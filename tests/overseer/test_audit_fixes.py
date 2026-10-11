@@ -15,10 +15,10 @@ from factories import db_repo, make_card
 from scripts import backup, config, db, gitops
 from scripts.cli import main
 from scripts.dispatch import dispatch_dir
-from scripts.knowledge import find_fact_path
+from scripts.knowledge import load_fact
 from scripts.report_hook import MAX_DETAIL_BYTES
 from scripts.schemas import ReportError, parse_report
-from scripts.sprints import Sprint, save_sprint, sprint_path
+from scripts.sprints import Sprint, save_sprint
 from scripts.store import check_id, state_root
 from scripts.usage import load_usage
 
@@ -75,7 +75,7 @@ def test_moving_a_done_card_back_to_a_live_status_revives_it(tmp_path, monkeypat
 # OL-4
 def test_new_sprint_on_fresh_central_dir_and_duplicate_refused(tmp_path, capsys):
     assert run(tmp_path, "new-sprint", "S1", "--goal", "first") == 0
-    path = sprint_path(state_root(tmp_path), "S1")
+    path = state_root(tmp_path) / "sprints" / "S1.md"  # the regenerated view
     body = path.read_text()
     capsys.readouterr()
     assert run(tmp_path, "new-sprint", "S1", "--goal", "second") == 1
@@ -83,10 +83,14 @@ def test_new_sprint_on_fresh_central_dir_and_duplicate_refused(tmp_path, capsys)
     assert path.read_text() == body
 
 
-def test_save_sprint_creates_missing_folder(tmp_path):
-    root = tmp_path / "nowhere"
-    root.mkdir()
-    assert save_sprint(root, Sprint(id="S9")).exists()
+def test_sprint_views_create_a_missing_folder(tmp_path):
+    from scripts import views
+    state = tmp_path / "nowhere"
+    state.mkdir()
+    conn = db.connect(tmp_path, migrate=False)
+    save_sprint(conn, Sprint(id="S9"))
+    assert views.export(conn, state)
+    assert (state / "sprints" / "S9.md").exists()
 
 
 # OL-5
@@ -105,10 +109,11 @@ def test_hostile_ids_write_nothing(repo, capsys):
     assert run(repo, "new-sprint", "../../evil") == 1
     assert not (state_root(repo).parent.parent / "evil.md").exists()
     assert run(repo, "new-card", "--title", "T", "--jira", "a/b") == 1
+    conn = db.connect(repo, migrate=False)
     with pytest.raises(ValueError):
-        find_fact_path(state_root(repo), "../x")
+        load_fact(conn, "../x")
     with pytest.raises(FileNotFoundError):  # glob metacharacters are literal
-        find_fact_path(state_root(repo), "*")
+        load_fact(conn, "*")
 
 
 # OL-6
@@ -157,22 +162,22 @@ def test_backup_round_trips_label_colors_and_skips_symlinks(tmp_path, monkeypatc
     repo.mkdir()
     _git_init(repo)
     central, _ = _seed(repo, monkeypatch)
-    (central / "sprints").mkdir()
-    (central / "sprints" / "s.md").write_text("---\nid: s\nstatus: active\n---\n")
+    (central / "archive" / "corrupt").mkdir(parents=True)
+    (central / "archive" / "corrupt" / "s.md").write_text("kept")
     secret = tmp_path / "secret.txt"
     secret.write_text("secret")
-    (central / "sprints" / "link.md").symlink_to(secret)
+    (central / "archive" / "corrupt" / "link.md").symlink_to(secret)
     backup.backup_board(repo)
     dest = config.backup_dir(repo)
     assert json.loads((dest / "label_colors.json").read_text()) == [
         {"color_key": "red", "name": "bug"}]
-    assert not (dest / "sprints" / "link.md").exists()
+    assert not (dest / "archive" / "corrupt" / "link.md").exists()
     # a symlink planted in the committed tree is not restored
-    (dest / "sprints" / "planted.md").symlink_to(secret)
+    (dest / "archive" / "corrupt" / "planted.md").symlink_to(secret)
     shutil.rmtree(central)
     backup.restore_board(repo)
-    assert (config.central_root(repo) / "sprints" / "s.md").exists()
-    assert not (config.central_root(repo) / "sprints" / "planted.md").exists()
+    assert (config.central_root(repo) / "archive" / "corrupt" / "s.md").exists()
+    assert not (config.central_root(repo) / "archive" / "corrupt" / "planted.md").exists()
     assert db.load_label_colors(db.connect(repo)) == {"bug": "red"}
 
 

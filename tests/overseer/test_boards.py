@@ -257,3 +257,33 @@ class TestMergeBoards:
 
         assert main(["--root", str(repo), "boards"]) == 0
         assert "1 boards" not in capsys.readouterr().out  # the "N boards for one repo" line is gone
+
+
+class TestMergeSchemaV2State:
+    def test_sprints_and_facts_of_a_v2_source_land_in_the_target_tables(self, tmp_path, monkeypatch):
+        from scripts import views
+        from scripts.knowledge import Fact, save_fact
+        from scripts.sprints import Sprint, save_sprint
+
+        primary, personal, repo = _setup(tmp_path, monkeypatch)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(personal))
+        src = db.connect(repo)
+        db.save_card(src, make_card("WF-1"))
+        save_sprint(src, Sprint(id="S-other", body="## Goal\nx"))
+        save_fact(src, Fact(id="KB-001", statement="from the other account",
+                            created="2026-09-01", verified="2026-09-01"))
+        views.export(src, config.central_root(repo))
+        src.close()
+        elsewhere = config.central_root(repo)
+        active = _board_under(primary, repo, monkeypatch, [make_card("WF-9")])
+        config.add_claude_dir(personal)
+
+        result = boards.merge_boards(repo)
+        [absorbed] = result["absorbed"]
+        assert absorbed["sprints"] == 1 and "knowledge" in absorbed["moved"]
+        target = db.connect(repo)
+        assert [r[0] for r in target.execute("SELECT id FROM sprints")] == ["S-other"]
+        assert [r[0] for r in target.execute("SELECT statement FROM facts")] == [
+            "from the other account"]
+        assert (active / "sprints" / "S-other.md").is_file()      # views refreshed
+        assert not elsewhere.exists()                              # renamed, not deleted

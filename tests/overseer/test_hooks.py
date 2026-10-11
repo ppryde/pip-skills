@@ -949,3 +949,13 @@ class TestPrepushSnapshotHook:
         )
         assert result.returncode == 0
         assert "chore(overseer): board snapshot" in self._log_messages(worktree)
+
+
+def test_append_usage_is_one_write_and_lines_stay_small(tmp_path):
+    from scripts.usage import append_usage, load_usage
+    entry = {"ts": "2026-10-11T10:00", "card": "WF-001", "role": "reviewer", "stage": "impl-review",
+             "tier": "sonnet", "tokens": 12345, "round": 1, "agent_id": "a" * 17}
+    append_usage(tmp_path, entry)
+    append_usage(tmp_path, entry)
+    assert len(json.dumps(entry)) + 1 < 4096          # PIPE_BUF: one atomic append
+    assert load_usage(tmp_path) == ([entry, entry], 0)

@@ -12,7 +12,10 @@ stranded. ``merge_boards`` folds them into the resolved board:
 - label colours unioned (the target's win on a clash);
 - ``knowledge/`` and ``usage.jsonl`` MOVE to the target when the target has
   none of its own (the common case: an empty board that won the lookup);
-  when both sides have one, the source's stays where it is;
+  when both sides have one, the source's stays where it is. Schema v2 keeps
+  facts in board.db, so a moved ``knowledge/`` is imported into the target's
+  tables (never overwriting) and the views refreshed; sprints a v2 source holds
+  are added by id (the target's win);
 - each absorbed folder is RENAMED ``<name>.absorbed-<stamp>``, never deleted,
   so anything left behind is a folder rename away.
 
@@ -26,7 +29,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from scripts import config, db
+from scripts import config, db, migrate, views
 from scripts.store import derive_repo_label, derive_repo_root, slugify
 
 # Per-board files beside board.db worth carrying across when the target has
@@ -188,6 +191,30 @@ def _merge_label_colors(target: sqlite3.Connection, source: sqlite3.Connection) 
     return n
 
 
+def _merge_sprints(target: sqlite3.Connection, folder: Path) -> int:
+    """Add the sprints a schema-v2 source board holds that the target lacks."""
+    source = _read_only(folder / "board.db")
+    if source is None:
+        return 0
+    try:
+        try:
+            rows = source.execute("SELECT * FROM sprints").fetchall()
+        except sqlite3.OperationalError:
+            return 0  # a v1 source: its sprint files stay in the absorbed folder
+        added = 0
+        with db.txn(target):
+            for r in rows:
+                cur = target.execute(
+                    "INSERT OR IGNORE INTO sprints(id, status, budget_estimate, budget_actual, "
+                    "started, body, updated) VALUES (?,?,?,?,?,?,?)",
+                    (r["id"], r["status"], r["budget_estimate"], r["budget_actual"],
+                     r["started"], r["body"], r["updated"]))
+                added += max(0, cur.rowcount)
+        return added
+    finally:
+        source.close()
+
+
 def merge_boards(repo_root: Path, *, dry_run: bool = False,
                  now: float | None = None) -> dict[str, Any]:
     """Fold every other board for ``repo_root`` into the resolved one (see
@@ -225,6 +252,7 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
             finally:
                 source.close()
             target_folder = Path(result["target"])
+            sprints_added = 0 if dry_run else _merge_sprints(target_conn, folder)
             moved: list[str] = []
             left_behind: list[str] = []
             for name in SIDECARS:
@@ -237,6 +265,9 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
                 moved.append(name)
                 if not dry_run:
                     shutil.move(str(src), str(dst))
+            if moved and not dry_run:
+                with db.txn(target_conn):
+                    migrate.import_state(target_conn, target_folder)
             renamed = folder.with_name(f"{folder.name}.absorbed-{stamp}")
             if not dry_run:
                 folder.rename(renamed)
@@ -245,9 +276,12 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
                 "renamed_to": str(renamed),
                 **stats,
                 "label_colors": colours,
+                "sprints": sprints_added,
                 "moved": moved,
                 "left_behind": left_behind,
             })
+        if not dry_run and result["absorbed"]:
+            views.export(target_conn, Path(result["target"]))
     finally:
         target_conn.close()
     return result
