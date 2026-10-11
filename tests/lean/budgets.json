@@ -15,13 +15,7 @@
     }
   },
   "budgets": {
-    "plugins/census-mod/plugin/commands/vitals.md": 3633,
-    "plugins/census-mod/plugin/skills/vitals-detailed/SKILL.md": 1983,
-    "plugins/census-mod/plugin/skills/vitals-lean/SKILL.md": 1854,
-    "plugins/census/commands/vitals.md": 3659,
     "plugins/census/skills/setup-statusline/SKILL.md": 6233,
-    "plugins/census/skills/vitals-detailed/SKILL.md": 2066,
-    "plugins/census/skills/vitals-lean/SKILL.md": 1938,
     "plugins/chronicle/skills/chronicle/SKILL.md": 5629,
     "plugins/chronicle/skills/reconcile/SKILL.md": 9963,
     "plugins/django-inquisition/skills/optimise-orm/SKILL.md": 10115,

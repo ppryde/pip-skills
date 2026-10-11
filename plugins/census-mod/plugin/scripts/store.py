@@ -1202,7 +1202,7 @@ def read_view(
     *, session: str | None = None, worktree: str | None = None, limits_only: bool = False, every_account: bool = False
 ) -> Any:
     """What ``census read`` prints (before it is JSON): the one place that picks the view, shared by the CLI and by
-    vitals, which reads census in-process instead of running it. ``limits_only`` wins, then ``session``, then
+    in-process readers. ``limits_only`` wins, then ``session``, then
     ``worktree``, else the whole store."""
     if limits_only:
         return all_limits() if every_account else limits()

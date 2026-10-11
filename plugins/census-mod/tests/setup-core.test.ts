@@ -72,8 +72,8 @@ test('another writer is one that wrote recently and is not the mod', async () =>
 
 // ---- the questions -----------------------------------------------------------------------------------
 
-const YES = 'Yes — record into census (dashboards, vitals and liveness use it)'
-const NO = "No — don't record (dashboards and vitals won't see this account)"
+const YES = 'Yes — record into census (dashboards and liveness use it)'
+const NO = "No — don't record (dashboards won't see this account)"
 const NO_FED = 'No — leave recording to my status line (it keeps feeding census)'
 const NO_OTHER = "No — don't record (whatever else writes keeps feeding census)"
 const SHADOW = "Shadow — record into a separate store to compare; dashboards won't see it"
@@ -83,7 +83,7 @@ const OTHER = { ...NO_DETECTION, otherWriter: true }
 test('with no existing writer the record question is just Yes (recommended) or No', async () => {
   expect(Q.record(NO_DETECTION)).toEqual({
     header: '📝 Record',
-    question: "Record this account's sessions into census? That's what the overseer dashboard, /census-mod:vitals and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.",
+    question: "Record this account's sessions into census? That's what the overseer dashboard and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.",
     options: [`${YES} (Recommended)`, NO],
   })
 })
@@ -244,8 +244,4 @@ test('the exclusivity question names every enabled census and how to disable it;
   expect(q.question).toContain('claude plugin disable census@a; claude plugin disable census@b')
   expect(q.options).toEqual(["Stop — I'll disable census first (Recommended)", 'Continue anyway (two writers)'])
   expect(q.options.map(continueAnyway)).toEqual([false, true])
-})
-
-test('/census-mod:vitals is always named in the record question: it is bundled', async () => {
-  for (const det of [NO_DETECTION, WITH_BLOCK, OTHER]) expect(Q.record(det).question).toContain('/census-mod:vitals')
 })

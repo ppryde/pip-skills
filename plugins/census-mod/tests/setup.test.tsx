@@ -37,7 +37,6 @@ test('/census-setup is a registered command that asks, in order: record, draw (a
   expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below', preset: 'two', pr: true, offered: true })
   expect(w.toasts.at(-1)).toBe('🧭 census-mod is set up')
   expect(w.logs.join('\n')).toContain('undo any time: /census-setup off')
-  expect(w.logs.at(-1)).toBe('📊 /census-mod:vitals shows this session on your phone')
 })
 
 test('the exact questions', async ($, on) => {
@@ -45,7 +44,7 @@ test('the exact questions', async ($, on) => {
   await setupRun($, w)
 
   expect(w.asks).toEqual([
-    { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard, /census-mod:vitals and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards, vitals and liveness use it) (Recommended)', "No — don't record (dashboards and vitals won't see this account)"] },
+    { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards and liveness use it) (Recommended)', "No — don't record (dashboards won't see this account)"] },
     { header: '🎛️ Draw', question: 'Should census-mod draw your status line, and where?', options: ["Yes — below the input, under Claude Code's hint line (Recommended)", 'Yes — above the input, in the band', 'No — record only, draw nothing'] },
     { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Your two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git'] },
     { header: '🔀 PR', question: "Show the branch's open PR (number, review state) using gh? No means gh is never called.", options: ['Yes (Recommended)', "No — never call gh"] },
@@ -84,7 +83,7 @@ test('Shadow records into <config dir>/census-shadow through the child CENSUS_ST
 
   expect(saved(w)).toMatchObject({ record: 'shadow' })
   expect(w.ingests.at(-1)?.env).toEqual({ CENSUS_STORE: '/cfg/census-shadow' })
-  expect(w.logs.join('\n')).toContain("recording: shadow store /cfg/census-shadow — the dashboards and vitals do not read it; run /census-setup and answer Yes to record into census itself")
+  expect(w.logs.join('\n')).toContain("recording: shadow store /cfg/census-shadow — the dashboards do not read it; run /census-setup and answer Yes to record into census itself")
 })
 
 test('record No with the band on keeps drawing and stops recording', async ($, on) => {
@@ -566,7 +565,7 @@ test('with nothing recording into census yet there is no Shadow and no Replace: 
   await setupRun($, w)
   const options = w.asks.find(a => a.header === '📝 Record')?.options ?? []
 
-  expect(options).toEqual(['Yes — record into census (dashboards, vitals and liveness use it) (Recommended)', "No — don't record (dashboards and vitals won't see this account)"])
+  expect(options).toEqual(['Yes — record into census (dashboards and liveness use it) (Recommended)', "No — don't record (dashboards won't see this account)"])
 })
 
 test('where the status line already feeds census: Replace first, then Shadow, Yes, No, with the long question', async ($, on) => {
@@ -576,11 +575,11 @@ test('where the status line already feeds census: Replace first, then Shadow, Ye
 
   expect(w.asks.find(a => a.header === '📝 Record')).toEqual({
     header: '📝 Record',
-    question: "Your status line already records this account's sessions into census — the store the overseer dashboard, /census-mod:vitals and liveness read. Replace it with census-mod (records and draws the line; yours is backed up), compare first, or leave recording to your status line (it keeps feeding census)?",
+    question: "Your status line already records this account's sessions into census — the store the overseer dashboard and liveness read. Replace it with census-mod (records and draws the line; yours is backed up), compare first, or leave recording to your status line (it keeps feeding census)?",
     options: [
       'Replace my status line — census-mod records and draws it (Recommended)',
       "Shadow — record into a separate store to compare; dashboards won't see it",
-      'Yes — record into census (dashboards, vitals and liveness use it)',
+      'Yes — record into census (dashboards and liveness use it)',
       'No — leave recording to my status line (it keeps feeding census)',
     ],
   })
@@ -671,12 +670,3 @@ test('a dismissed exclusivity question stops setup quietly with what was answere
   expect(w.toasts.at(-1)).toContain('census-setup stopped')
 })
 
-// ---- vitals is always bundled -------------------------------------------------------------------------------------------
-
-test('the record question and the summary always name /census-mod:vitals: it ships inside census-mod', async ($, on) => {
-  const w = world(on)
-  await setupRun($, w)
-
-  expect(w.asks.find(a => a.header === '📝 Record')?.question).toContain('/census-mod:vitals')
-  expect(w.logs.at(-1)).toBe('📊 /census-mod:vitals shows this session on your phone')
-})

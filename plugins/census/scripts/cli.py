@@ -12,7 +12,7 @@ if __package__ in (None, ""):  # direct invocation: put plugin root on sys.path
 
 from scripts import store as st
 
-# census-mod bundles this file with only ingest, read, where and vitals: no installer, no status-line drawer.
+# census-mod bundles this file with only ingest, read and where: no installer, no status-line drawer.
 # Those commands are refused there (see main); everywhere else the modules are simply imported.
 try:
     from scripts import install as ins

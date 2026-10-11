@@ -146,9 +146,9 @@ export const L = {
   exStop: "Stop — I'll disable census first",
   exGo: 'Continue anyway (two writers)',
   recReplace: 'Replace my status line — census-mod records and draws it',
-  recYes: 'Yes — record into census (dashboards, vitals and liveness use it)',
+  recYes: 'Yes — record into census (dashboards and liveness use it)',
   recShadow: "Shadow — record into a separate store to compare; dashboards won't see it",
-  recNo: "No — don't record (dashboards and vitals won't see this account)",
+  recNo: "No — don't record (dashboards won't see this account)",
   recNoFed: 'No — leave recording to my status line (it keeps feeding census)',
   recNoOther: "No — don't record (whatever else writes keeps feeding census)",
   drawBelow: "Yes — below the input, under Claude Code's hint line",
@@ -184,8 +184,8 @@ export const Q = {
    * records into the real store.
    */
   record: (det: Detection, shadowByEnv = false): Question => {
-    const readers = 'the overseer dashboard, /census-mod:vitals and session liveness'
-    const OVERSEER = 'the overseer dashboard, /census-mod:vitals and liveness'
+    const readers = 'the overseer dashboard and session liveness'
+    const OVERSEER = 'the overseer dashboard and liveness'
     if (det.ingestBlock && shadowByEnv) {
       return {
         header: '📝 Record',

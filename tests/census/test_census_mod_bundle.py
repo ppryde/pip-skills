@@ -15,9 +15,9 @@ SOURCE = REPO / "plugins" / "census" / "scripts"
 MOD = REPO / "plugins" / "census-mod"
 PLUGIN = MOD / "plugin"
 BUNDLE = PLUGIN / "scripts"
-# ingest, read, where (cli), what the store needs, vitals. Not install/render/statusline: the command status line is
+# ingest, read, where (cli), what the store needs. Not install/render/statusline: the command status line is
 # the census plugin's job.
-FILES = ["__init__.py", "cli.py", "gitcache.py", "resolve.py", "store.py", "vitals.py", "where.py"]
+FILES = ["__init__.py", "cli.py", "gitcache.py", "resolve.py", "store.py", "where.py"]
 
 
 def test_the_bundle_is_byte_identical_to_the_source():
@@ -98,16 +98,10 @@ def test_ingest_publishes_the_bundled_cli_as_cli_path_so_other_tools_find_a_cens
     assert Path(pointer) == (root / "scripts" / "cli.py").resolve()
 
 
-def test_where_and_vitals_work_from_the_bundle(lone):
+def test_where_works_from_the_bundle(lone):
     root, env, tmp = lone
-    run_cli(root, env, "ingest", stdin=json.dumps(PAYLOAD))
     where = run_cli(root, env, "where")
-    assert where.returncode == 0 and json.loads(where.stdout)["vitals"] is True
-    vitals = subprocess.run(
-        [sys.executable, str(root / "scripts" / "vitals.py"), "lean", "--session", "s1", "--cwd", str(tmp)],
-        capture_output=True, text=True, env=env, timeout=60,
-    )
-    assert vitals.returncode == 0 and "Opus 5.5" in vitals.stdout and "⚡ 9%" in vitals.stdout
+    assert where.returncode == 0 and "vitals" not in json.loads(where.stdout)
 
 
 @pytest.mark.parametrize("command", [["statusline", "--preview"], ["install"], ["uninstall"], ["install-statusline"]])
@@ -118,21 +112,11 @@ def test_the_bundle_declines_the_commands_that_belong_to_the_census_plugin(lone,
     assert "Traceback" not in done.stderr
 
 
-def test_census_mod_ships_the_vitals_command_and_skills():
-    command = (PLUGIN / "commands" / "vitals.md").read_text()
-    assert "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" in command and "/census-mod:vitals" in command
-    for skill in ("vitals-lean", "vitals-detailed"):
-        text = (PLUGIN / "skills" / skill / "SKILL.md").read_text()
-        assert f"name: {skill}" in text and "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" in text
-        assert f"/census-mod:{skill}" in text
-    assert not (PLUGIN / "skills" / "vitals-playful").exists()
-
-
-def test_no_vitals_shell_line_in_census_mod_splices_arguments():
-    for f in [PLUGIN / "commands" / "vitals.md", *sorted((PLUGIN / "skills").glob("vitals-*/SKILL.md"))]:
-        for line in f.read_text().splitlines():
-            if line.startswith("!") or line.lstrip().startswith(("python3 ", "python ")):
-                assert "ARGUMENTS" not in line, f"{f.name}: {line}"
+def test_census_mod_ships_no_vitals_command_skill_or_script():
+    """Vitals was retired (WF-269): nothing of it may linger in the shipped plugin."""
+    for gone in ("commands", "skills", "bin"):
+        assert not (PLUGIN / gone).exists(), gone
+    assert not (BUNDLE / "vitals.py").exists()
 
 
 def test_census_mod_never_mentions_the_census_plugin_as_a_dependency():

@@ -21,8 +21,8 @@ worktrees).
 ## census or census-mod: install one
 
 census and census-mod are **alternatives**. census is the classic, mod-free plugin: a command status line that
-records and draws. census-mod is a standalone Claude Code mod that includes census's store, ingest and
-`/census-mod:vitals` and does not need this plugin. Install one or the other, not both: with both enabled there
+records and draws. census-mod is a standalone Claude Code mod that includes census's store and ingest
+and does not need this plugin. Install one or the other, not both: with both enabled there
 are two writers on one store. `census where` (and the setup-statusline skill) say so when census-mod is installed.
 
 ## Writers
@@ -139,68 +139,12 @@ reads git itself, so ingest runs none), else the git cache described under Statu
 stays as it was (null on a detached HEAD); when the mod supplies the block it is taken from it. Records written
 before this block have none, and readers fall back to their own `git`.
 
-## Vitals
+## Vitals (retired)
 
-An on-demand readout of the current session's vital signs, sized for a phone (no line wider than 44 display columns;
-branch, session and tool names are clipped to fit). It writes nothing but one preference (below). It was the separate
-`vitals` plugin and is now part of census: it reads census's store directly, in-process (the same view `census read`
-prints), so it runs no census subprocess and needs no sibling plugin. `CENSUS_STORE` and the config dir are honoured as
-everywhere else; the only subprocess left is the fixed-argv `git` fallback below.
-census-mod bundles this same `vitals.py` (and the store it reads) as `/census-mod:vitals`, so it works without this plugin.
-
-**Default style.** The first time `/census:vitals` runs it shows the lean readout, ends it with the line
-`(vitals: no default style chosen yet)`, and the command asks once which style to show by default (lean or detailed).
-The answer is saved per account in its own file, `<census dir>/vitals/<account key>.json` (the same key as
-`limits/<account>.json`): `{"default_style": "compact|detailed"}`. Accounts that share a `CENSUS_STORE` share the
-folder but never a file, so there is no shared read-modify-write for two of them to lose a choice in. It is written
-atomically; a missing, corrupt or unknown value (an old `playful`) just means "not chosen yet". The earlier shared
-`vitals.json` (`{"<account key>": {"default_style": …}}`) is checked as a fallback on each read, for the calling account only and only while that account's own
-file has no style yet; it is never written. Once the account's own file holds a style, a
-bare `/census:vitals` shows that style; naming a style (`/census:vitals detailed`) overrides it for that run, and
-`/census:vitals default detailed` changes it. From a shell: `vitals.py --set-default <lean|detailed>` (a name or alias
-such as `brief`, `full`, `trend`; anything else is an error and nothing is written).
-
-| Source | Gives |
-|---|---|
-| **census** (its store, in-process) | context %, tokens and window size, model, effort, cost, duration, prompt-cache warmth, the account's rate-limit windows; the session's `git` block (branch, uncommitted files, ahead of upstream); the payload's `pr` (number, state) |
-| **git**, only when the entry has no usable `git` block (missing, from before it, or malformed) | one `git --no-optional-locks status --porcelain=2 --branch -uno` in the worktree |
-| **the transcript** (`transcript_path` from census) | tool calls by name, subagent spawns, typed prompts |
-
-It never calls `gh`: the PR is whatever the payload carries. Untracked files are not counted (`-uno`), and with no upstream
-there is no "ahead". Every source is optional: a missing one leaves its lines out and never raises.
-
-| Invoke | Style |
-|---|---|
-| `/census:vitals` | your default style (lean until you choose); `lean` or `detailed` by argument (aliases `brief`, `full`, `trend`) |
-| `/census:vitals-lean` | three lines with emoji gauges: context, model and cost; branch, PR and uncommitted work; rate-limit windows. A fourth line only when the reading may not be live |
-| `/census:vitals-detailed` | sectioned: context headroom and cache, cost and tokens, git sync and lines changed, tool breakdown, duration, each rate-limit window with reset time and **pace** |
-
-```text
-⚡ 9% ▰▱▱▱▱▱ 88k/1M · Opus 5.5 · $0.90
-🌿 feat/vitals · 🔀 #102 ✓ approved · ✏️ 2 ⬆️ 1
-⏳ 5h 3% ⟳4h · 7d 22% ⟳5d
-```
-
-Lean drops parts that are absent (no PR, no limits, no cost), shows `⬆️` only above zero, and when a line would pass 44
-columns drops its lowest-priority part rather than wrap: the cost first, then the token counts, then the model name is
-clipped; a long branch is clipped, and a PR's state word goes before the branch is cut.
-
-**Pace** projects a window's usage at reset from the rate so far, `used × window length ÷ elapsed`, once 5% of the window
-has gone, for the known `five_hour` and `seven_day` windows only. It is a straight line, so it overstates early-week
-bursts.
-
-Each skill and the command run `scripts/vitals.py` through `!` command injection, so the reading is in the prompt before
-the model sees it and the model only echoes it in a `text` fence. By hand:
-
-```bash
-python3 scripts/vitals.py [lean|detailed|alias] [--session ID] [--cwd DIR]
-```
-
-The session comes from `--session`, then `CLAUDE_SESSION_ID`; with no entry for it (a brand-new session, right after
-`/clear`) it uses the freshest entry for the worktree and says *another session's reading* if that is a sibling's.
-The vitals pieces are separable:
-`scripts/vitals.py`, `skills/vitals-*`, `commands/vitals.md` and the census test suite's `test_vitals.py` depend on
-nothing else in census but `scripts/gitcache.py` and `scripts/store.py`.
+`/census:vitals`, `/census:vitals-lean` and `/census:vitals-detailed` were retired (WF-269): the skills, the command
+and `scripts/vitals.py` are gone. The store, ingest and status line are unchanged, and `census read` still prints the
+same view for any reader. A leftover `<census dir>/vitals/` folder from the old default-style preference is harmless and
+can be deleted by hand.
 
 ## Liveness
 

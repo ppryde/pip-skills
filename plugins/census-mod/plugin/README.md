@@ -1,7 +1,7 @@
 # census-mod
 
 Census v2 recorded and drawn by a Claude Code mod. **census-mod is standalone**: it bundles
-census's store, ingest and vitals (`scripts/`, byte-identical copies of the census plugin's own
+census's store and ingest (`scripts/`, byte-identical copies of the census plugin's own
 Python) and never needs, calls or looks for the census plugin. census and census-mod are
 **alternatives: install one or the other**. census is the classic, mod-free plugin (a command
 status line); census-mod is this. A status line is a command Claude Code re-runs every 60 s in
@@ -14,9 +14,6 @@ every session, idle or not; a mod acts on events, so the steady-state cost is ab
   dashboard, vigil and other readers find a census CLI without census being installed.
 - **Draws** the status line, your choice of above the input (the band) or below it (under Claude
   Code's hint line), with census's segments, glyphs, colours and thresholds.
-- **Ships vitals**: `/census-mod:vitals` (and `/census-mod:vitals-lean`, `/census-mod:vitals-detailed`)
-  show this session's vital signs on a phone, read straight from the store (the command is
-  `/census-mod:vitals`, not `/census:vitals`, because the plugin is `census-mod`).
 - **No heartbeat.** The payload carries `census_mod.{version,pid,proc_start,event,ended}`
   so a reader can tell "open but idle" from "gone" by the session's process: `stale` when
   `census_mod.ended` is set, the pid is gone, or Claude Code's registry file
@@ -40,14 +37,14 @@ and census-mod are alternatives, so if it is, setup stops first: "census-mod rep
 census plugin — disable it with `claude plugin disable census@<marketplace>`", and offers to
 continue anyway (two writers on one store: a warning, not a ban). Then:
 
-1. **Record** into census, or not. Recording is what the overseer dashboard, `/census-mod:vitals` (bundled) and session liveness read (context, cost,
+1. **Record** into census, or not. Recording is what the overseer dashboard and session liveness read (context, cost,
    limits, git, PR); when nothing else records into census they see nothing from this account.
    Where this account's status line (or another writer) already records, **No** leaves that
    writer active, so they keep getting this account's data from it; the option says so. Almost nobody else records into census, so the common question is just **Yes**
    (recommended) or **No**. Two more answers appear only where something already records into the
    real store, i.e. this account's status line feeds census (or another writer wrote in the last
    few minutes): **Shadow** (a separate store, `<config dir>/census-shadow`, to compare first;
-   the dashboards and vitals do not read it, and `/census-setup` with **Yes** switches to the
+   the dashboards do not read it, and `/census-setup` with **Yes** switches to the
    real store later) and, when the status line itself feeds census, **Replace my status line**
    (the recommended answer there): census-mod records and draws it, setup asks only where to
    draw, then removes the status line as in step 3 without asking again. A status line that
@@ -181,5 +178,5 @@ the census suite fails if they ever differ.
 typecheck with `plugins/census-mod/typecheck.sh`.
 The bundle is checked by `tests/census/test_census_mod_bundle.py` in the census suite: it fails when
 `plugin/scripts/` differs from `plugins/census/scripts/`, runs the bundled recorder and reader with no
-census plugin anywhere, and checks the vitals command and skills ship. After changing census's Python,
+census plugin anywhere, and checks no vitals command, skills or script ship (retired). After changing census's Python,
 run `plugins/census-mod/sync-bundle.sh`.
