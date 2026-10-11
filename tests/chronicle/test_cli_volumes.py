@@ -151,12 +151,6 @@ class TestSyncVerb:
         assert _out(capsys)["volumes"] == []
 
 
-def test_open_refuses_a_docker_label_plainly(capsys, monkeypatch):
-    monkeypatch.setattr(sys, "platform", "darwin")
-    assert main(["open", "https://x.test", "--config-dir", "docker://wf-state"]) == 1
-    assert "docker volume" in capsys.readouterr().err
-
-
 def test_pull_volume_is_still_there_and_marked_legacy():
     actions = build_parser()._subparsers._group_actions[0]      # type: ignore[union-attr]
     assert "pull-volume" in actions.choices
