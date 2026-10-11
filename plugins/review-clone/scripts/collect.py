@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -14,16 +13,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-PERSONA_ROOT = Path(
-    os.environ.get("REVIEW_CLONE_ROOT", "") or Path.home() / ".claude" / "review-clone"
-)
-
 WINDOW_CAP_MONTHS = 6
 
 try:  # imported as a package (tests)
-    from .persona_io import check_alias
+    from .persona_io import PERSONA_ROOT, check_alias
 except ImportError:  # run as a script: scripts/ is on sys.path
-    from persona_io import check_alias
+    from persona_io import PERSONA_ROOT, check_alias
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
