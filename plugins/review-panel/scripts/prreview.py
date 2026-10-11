@@ -68,7 +68,7 @@ def default_runner(argv: list[str], timeout: int = TIMEOUT) -> tuple[int, str, s
         return 127, "", f"{argv[0]}: command not found"
     try:
         p = subprocess.run([exe, *argv[1:]], capture_output=True, text=True,
-                           timeout=timeout, shell=False)
+                           timeout=timeout, shell=False, check=False)
     except subprocess.TimeoutExpired:
         return 124, "", "timeout"
     return p.returncode, p.stdout, p.stderr
@@ -173,7 +173,7 @@ def parse_diff(text: str) -> dict[str, FileAnchors]:
     while i < len(lines):
         raw = lines[i]
         i += 1
-        line = raw[:-1] if raw.endswith("\r") else raw
+        line = raw.removesuffix("\r")
         if old_left > 0 or new_left > 0:  # inside a hunk body
             tag = line[:1]
             if tag == "\\":
@@ -329,7 +329,7 @@ def review_body(prefix: str, lead: str, bullets: list[str], run_id: str) -> str:
 
 def _resolve_pr(env: Env, pr: str | None) -> dict | None:
     argv = ["pr", "view"] + ([pr] if pr else []) + ["--json", "number,url,headRefOid"]
-    rc, out, err = env.run(["gh", *argv])
+    rc, out, _ = env.run(["gh", *argv])
     if rc != 0:
         return None
     try:
@@ -536,7 +536,7 @@ def classify(rc: int, out: str, err: str) -> str:
     m = re.search(r"HTTP (\d{3})", text) or re.search(r'"status"\s*:\s*"?(\d{3})', text)
     code = int(m.group(1)) if m else 0
     if code == 422:
-        return "pending" if re.search(r"\bpending review\b", text, re.I) else "unprocessable"
+        return "pending" if re.search(r"\bpending review\b", text, re.IGNORECASE) else "unprocessable"
     if code in (401, 403, 404, 429) or 400 <= code < 500:
         return "fatal"
     return "ambiguous"  # timeout, 5xx, empty or unparsable

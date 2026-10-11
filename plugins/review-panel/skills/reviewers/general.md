@@ -10,7 +10,7 @@ default reviewer and the catch-all lens when no specialist is seated.
 ## When to seat
 Always safe to seat. Ideal for small-to-medium changes, or as the single
 reviewer in a quick pass. For high-risk or specialised changes, add
-specialist reviewers alongside it (Epic 2).
+specialist reviewers alongside it.
 
 ## Techniques
 Checklist (the rubric below), control-flow (trace the changed paths),
