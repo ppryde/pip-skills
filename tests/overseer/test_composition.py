@@ -9,7 +9,9 @@ from factories import make_card as _card
 VIGIL_CLI = Path(__file__).resolve().parents[2] / "plugins" / "vigil" / "scripts" / "cli.py"
 
 
-def test_overseer_rollup_feeds_vigil_handover(tmp_path):
+def test_overseer_rollup_feeds_vigil_handover(tmp_path, monkeypatch):
+    # vigil keeps its state under the config dir (outside the repo): pin it here.
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
     # Build an overseer ledger with an in-flight card and get the enriched rollup.
     conn = db.connect(tmp_path)
     db.save_card(conn, _card("WF-001"))
@@ -28,7 +30,8 @@ def test_overseer_rollup_feeds_vigil_handover(tmp_path):
     )
     assert result.returncode == 0, result.stderr
 
-    handoff = (tmp_path / ".claude" / "vigil" / "handoff.md").read_text()
+    (handoff_file,) = (tmp_path / "cfg" / "vigil").glob("*/handoff.md")
+    handoff = handoff_file.read_text()
     assert "WF-001" in handoff                    # the overseer rollup flowed through
     assert "preserve the auth spike" in handoff   # notes preserved
     assert "Session snapshot" not in handoff      # --no-snapshot honored
