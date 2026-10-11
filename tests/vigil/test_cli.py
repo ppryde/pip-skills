@@ -1,3 +1,4 @@
+import pytest
 import io
 import json
 import sys
@@ -441,6 +442,24 @@ class TestHookBackends:
         self._stdin(monkeypatch, {"cwd": str(repo), "source": "startup"})
         assert run(repo, "session-start-hook") == 0
         assert capsys.readouterr().out.strip() == ""
+
+    @pytest.mark.parametrize("source", ["startup", "resume", "compact", None])
+    def test_session_start_injects_only_after_clear(self, repo, capsys, monkeypatch, source):
+        from scripts import state as st
+        st.begin(repo)
+        st.request_clear(repo, "HANDOFF PAYLOAD")
+        st.consume_clear_flag(repo)
+        payload = {"cwd": str(repo)}
+        if source:
+            payload["source"] = source
+        self._stdin(monkeypatch, payload)
+        assert run(repo, "session-start-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+        assert st.read_handoff(repo) == "HANDOFF PAYLOAD"   # still pending, untouched
+        # the /clear that follows delivers it
+        self._stdin(monkeypatch, {"cwd": str(repo), "source": "clear"})
+        assert run(repo, "session-start-hook") == 0
+        assert "HANDOFF PAYLOAD" in capsys.readouterr().out
 
     def test_session_start_clears_gate_and_touches_cooldown_after_injection(
         self, repo, capsys, monkeypatch,

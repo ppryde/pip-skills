@@ -132,8 +132,10 @@ class TestResumeKickUnit:
 
         assert run(repo, "session-start-hook") == 0
         out = capsys.readouterr().out
-        assert "KICK TEST HANDOFF" in out
-        assert "additionalContext" in out
+        # a non-clear source neither injects nor consumes the handoff (VG-5)
+        assert out.strip() == ""
+        from scripts import state as st
+        assert st.read_handoff(repo) is not None
 
         time.sleep(0.3)  # give a wrongly-dispatched kick a chance to land
         assert not marker.exists()  # source check gates BEFORE any tmux probe
