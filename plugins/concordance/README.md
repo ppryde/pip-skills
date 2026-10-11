@@ -1,5 +1,10 @@
 # concordance
 
+**Status: experimental.** The phase-1 bench (7 seeded review cases) showed no catch-rate lift
+over a plain Read/Grep reviewer, and about 9% more tokens per review (the review-context
+output is additive). The bench cases were too easy to show lift; real-world trials on large
+repos are pending.
+
 An owned symbol index for review, in Python and TypeScript. A concordance is the index of
 every place a word appears in scripture; this is that, for symbols.
 

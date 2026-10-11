@@ -239,7 +239,7 @@
     {
       "name": "concordance",
       "source": "./plugins/concordance",
-      "description": "An owned, worktree-native symbol index for Python and TypeScript, built for review: removed contracts, signature drift, callers and guarding tests, detected in the CLI; a review procedure and review-panel lens say when to use them.",
+      "description": "(experimental) An owned, worktree-native symbol index for Python and TypeScript, built for review: removed contracts, signature drift, callers and guarding tests, detected in the CLI; a review procedure and review-panel lens say when to use them.",
       "category": "engineering",
       "tags": ["code-review", "impact-analysis", "symbols", "callers", "tests", "worktrees", "python", "typescript"]
     }

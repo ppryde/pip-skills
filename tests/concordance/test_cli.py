@@ -171,3 +171,102 @@ def test_footer_lists_an_unreadable_dirty_file(make_repo) -> None:
         (repo.root / "a.py").chmod(0o644)
     assert out.returncode == 0, out.stderr
     assert "not indexed (unreadable), head view: a.py" in out.stdout
+
+
+def _drifted(make_repo):
+    repo = make_repo(BASE)
+    repo.git("checkout", "-q", "-b", "feat")
+    repo.write({"app/svc.py": "def refund(loan, amount):\n    return amount\n\n\n"
+                              "def unused():\n    return 1\n"})
+    return repo
+
+
+def test_sig_drift_reports_the_verdict_and_exits_zero(make_repo) -> None:
+    out = cli(_drifted(make_repo).root, "sig-drift")
+    assert out.returncode == 0, out.stderr  # only `check` turns verdicts into exit 1
+    assert "[BR-002] app/api.py:5" in out.stdout
+    assert "app.svc.refund: unknown keyword(s): partial" in out.stdout
+    assert "coverage: 3/3 files indexed" in out.stdout
+
+
+def test_sig_drift_is_quiet_on_a_pure_refactor(make_repo) -> None:
+    repo = make_repo(BASE)
+    repo.git("checkout", "-q", "-b", "feat")
+    repo.write({"app/svc.py": "def refund(loan, amount, *, partial=False):\n"
+                              "    \"\"\"Refund.\"\"\"\n    return amount\n\n\n"
+                              "def unused():\n    return 1\n"})
+    out = cli(repo.root, "sig-drift")
+    assert out.returncode == 0 and "BR-002" not in out.stdout
+
+
+def test_sig_drift_outside_a_repo_exits_2(tmp_path: Path) -> None:
+    out = cli(tmp_path, "sig-drift")
+    assert out.returncode == 2 and "concordance:" in out.stderr and "Traceback" not in out.stderr
+
+
+def test_literals_lists_changed_literals_and_removed_comments(make_repo) -> None:
+    repo = make_repo({"app/c.py": "RATE = 'old-rate'\n\n\ndef f():\n    # keep me\n    return RATE\n"})
+    repo.git("checkout", "-q", "-b", "feat")
+    repo.write({"app/c.py": "RATE = 'new-rate'\n\n\ndef f():\n    return RATE\n"})
+    out = cli(repo.root, "literals")
+    assert out.returncode == 0, out.stderr
+    assert "## Changed literals" in out.stdout and "'new-rate'" in out.stdout
+    assert "## Removed comments" in out.stdout and "keep me" in out.stdout
+
+
+def test_literals_on_an_untouched_tree_is_clean(make_repo) -> None:
+    repo = make_repo(BASE)
+    out = cli(repo.root, "literals", "--base", "HEAD")
+    assert out.returncode == 0 and "Changed literals" not in out.stdout
+
+
+def test_literals_with_a_bad_base_exits_2(make_repo) -> None:
+    out = cli(make_repo(BASE).root, "literals", "--base", "no-such-ref")
+    assert out.returncode == 2 and "Traceback" not in out.stderr
+
+
+def test_index_prints_a_summary_and_is_incremental(make_repo) -> None:
+    repo = make_repo(BASE)
+    first = cli(repo.root, "index", "--base", "HEAD")
+    assert first.returncode == 0, first.stderr
+    assert "3 files, 3 parsed, 0 reused, 0 failed, 0 skipped" in first.stdout
+    second = cli(repo.root, "index", "--base", "HEAD")
+    assert second.returncode == 0 and "0 parsed, 3 reused" in second.stdout
+
+
+def test_index_names_a_failed_file_and_still_exits_zero(make_repo) -> None:
+    repo = make_repo(BASE)
+    repo.write({"app/broken.py": "def (:\n"})
+    out = cli(repo.root, "index", "--base", "HEAD")
+    assert out.returncode == 0 and "1 failed" in out.stdout
+    assert "failed to parse: app/broken.py" in out.stdout
+
+
+def test_index_outside_a_repo_exits_2(tmp_path: Path) -> None:
+    out = cli(tmp_path, "index")
+    assert out.returncode == 2 and "Traceback" not in out.stderr
+
+
+def test_setup_ts_without_npm_exits_2(monkeypatch, capsys) -> None:
+    from scripts import cli as cli_mod
+    from scripts import extract_ts
+    monkeypatch.setattr(extract_ts.shutil, "which", lambda _name: None)
+    assert cli_mod.main(["setup-ts"]) == 2
+    assert "npm not found" in capsys.readouterr().err
+
+
+def test_setup_ts_runs_a_pinned_npm_ci_and_returns_its_code(monkeypatch) -> None:
+    from scripts import cli as cli_mod
+    from scripts import extract_ts
+    calls: list[tuple[list[str], object]] = []
+
+    def fake_run(cmd, cwd=None, check=None):
+        calls.append((cmd, cwd))
+        return subprocess.CompletedProcess(cmd, 7)
+
+    monkeypatch.setattr(extract_ts.shutil, "which", lambda _name: "/usr/bin/npm")
+    monkeypatch.setattr(extract_ts.subprocess, "run", fake_run)
+    assert cli_mod.main(["setup-ts"]) == 7  # npm's own exit code passes through
+    cmd, cwd = calls[0]
+    assert cmd[:2] == ["npm", "ci"] and "--ignore-scripts" in cmd
+    assert cwd == extract_ts.NODE_DIR
