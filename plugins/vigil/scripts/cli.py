@@ -244,6 +244,11 @@ def cmd_pane_check_hook(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pane_safe(args: argparse.Namespace) -> int:
+    """Flag-independent: exit 0 when ``pane`` is an empty prompt with no dialog open."""
+    return 0 if args.pane and pane_mod.pane_hold_reason(args.pane) is None else 1
+
+
 def cmd_session_start_hook(args: argparse.Namespace) -> int:
     payload = _read_hook_payload()
     root = _hook_root(payload, args)
@@ -482,6 +487,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("stop-hook").set_defaults(func=cmd_stop_hook)
     sub.add_parser("stop-guard-hook").set_defaults(func=cmd_stop_guard_hook)
+    psafe = sub.add_parser("pane-safe")
+    psafe.add_argument("pane")
+    psafe.set_defaults(func=cmd_pane_safe)
     sub.add_parser("pane-check-hook").set_defaults(func=cmd_pane_check_hook)
     sub.add_parser("clear-armed-hook").set_defaults(func=cmd_clear_armed_hook)
     sub.add_parser("session-start-hook").set_defaults(func=cmd_session_start_hook)

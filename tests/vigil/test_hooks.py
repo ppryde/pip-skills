@@ -26,21 +26,29 @@ DIALOG_SCREEN = (
 )
 
 
-def _fake_tmux(tmp_path, screen, capture_fails=False):
+def _fake_tmux(tmp_path, screen, capture_fails=False, in_mode="0", later_screen=None, name="tmux"):
     """A fake tmux on a private bin dir: has-session ok, capture-pane prints `screen`
-    (or fails), display-message says not-in-mode; every other call (rename-window,
-    send-keys) appends its argv to `marker`. Never a real tmux server."""
+    (or fails; from the 2nd capture on, `later_screen` when given), display-message
+    prints `in_mode`; every other call (rename-window, send-keys) appends its argv to
+    `marker`. Every call is logged to `all-calls`. Never a real tmux server."""
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     shot = tmp_path / "screen.txt"
     shot.write_text(screen)
+    later = tmp_path / "screen-later.txt"
+    later.write_text(screen if later_screen is None else later_screen)
+    counter = tmp_path / "captures"
     marker = tmp_path / "tmux-called"
-    capture = "exit 1" if capture_fails else f'cat "{shot}"; exit 0'
-    fake = bindir / "tmux"
+    capture = "exit 1" if capture_fails else (
+        f'n=$(cat "{counter}" 2>/dev/null || echo 0); echo $((n+1)) > "{counter}"; '
+        f'if [ "$n" = 0 ]; then cat "{shot}"; else cat "{later}"; fi; exit 0'
+    )
+    fake = bindir / name
     fake.write_text(
         '#!/usr/bin/env bash\n'
+        f'echo "$@" >> "{tmp_path / "all-calls"}"\n'
         'if [ "$1" = "has-session" ]; then exit 0; fi\n'
-        'if [ "$1" = "display-message" ]; then exit 0; fi\n'
+        f'if [ "$1" = "display-message" ]; then echo {in_mode}; exit 0; fi\n'
         f'if [ "$1" = "capture-pane" ]; then {capture}; fi\n'
         f'echo "$@" >> "{marker}"\n'
     )
@@ -205,7 +213,6 @@ class TestStopHook:
         })
         result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
         assert result.returncode == 0
-        assert not st.clear_flag(tmp_path).exists()  # consumed
         deadline = time.time() + 3
         while time.time() < deadline and not marker.exists():
             time.sleep(0.05)
@@ -228,7 +235,6 @@ class TestStopHook:
         })
         result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
         assert result.returncode == 0
-        assert not st.clear_flag(tmp_path).exists()  # consumed
         # The clear runs in a detached process: wait for BOTH calls, not just the
         # first line landing, or a loaded machine reads the file between them.
         deadline = time.time() + 5
@@ -252,7 +258,6 @@ class TestStopHook:
         })
         result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
         assert result.returncode == 0
-        assert not st.clear_flag(tmp_path).exists()  # consumed
         deadline = time.time() + 3
         while time.time() < deadline and not marker.exists():
             time.sleep(0.05)
@@ -266,8 +271,8 @@ class TestStopHook:
         bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN)
         result = _run(STOP, {"cwd": str(tmp_path)}, _auto_env(bindir), tmp_path)
         assert result.returncode == 0 and result.stdout.strip() == ""
-        assert not st.clear_flag(tmp_path).exists()
         assert _wait_calls(marker, 1) == ["send-keys -t %9 /clear Enter"]
+        assert not st.clear_flag(tmp_path).exists()
 
     def _assert_held(self, tmp_path, result, marker, st, why):
         assert result.returncode == 0
@@ -316,6 +321,61 @@ class TestStopHook:
         assert st.clear_flag(tmp_path).exists()  # not consumed
         time.sleep(0.3)
         assert not marker.exists()
+
+    def test_pane_turning_unsafe_during_the_delay_holds_and_stays_armed(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")
+        # safe at the first check, then the person has typed something by the re-check
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN, later_screen=TYPED_SCREEN)
+        env = _auto_env(bindir)
+        env["VIGIL_CLEAR_DELAY"] = "0.5"
+        result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0 and result.stdout.strip() == ""
+        assert st.clear_flag(tmp_path).exists()  # still armed through the delay
+        time.sleep(1.5)  # the detached subshell has run its re-check
+        assert not marker.exists()  # no rename-window, no send-keys
+        assert st.clear_flag(tmp_path).exists()  # never consumed
+
+    def test_flag_is_consumed_only_after_a_passing_recheck(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN)
+        env = _auto_env(bindir)
+        env["VIGIL_CLEAR_DELAY"] = "0.5"
+        _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert st.clear_flag(tmp_path).exists()  # during the delay
+        assert _wait_calls(marker, 1) == ["send-keys -t %9 /clear Enter"]
+        assert not st.clear_flag(tmp_path).exists()
+
+    def test_copy_mode_holds(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN, in_mode="1")
+        result = _run(STOP, {"cwd": str(tmp_path)}, _auto_env(bindir), tmp_path)
+        self._assert_held(tmp_path, result, marker, st, "copy mode")
+
+    def test_missing_tmux_pane_holds_when_armed_in_default_lineage(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("TMUX_PANE", raising=False)
+        st = _promote_and_arm(tmp_path, None)  # armed under the default lineage
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN)
+        env = _auto_env(bindir)
+        env.pop("TMUX_PANE")
+        result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        self._assert_held(tmp_path, result, marker, st, "no tmux pane is known")
+
+    def test_vigil_tmux_bin_is_used_for_every_tmux_call(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")
+        # only `mytmux` exists: a bare `tmux` on PATH would be a failing/absent binary
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN, name="mytmux")
+        env = _auto_env(bindir)
+        env["PATH"] = f"{bindir}:/usr/bin:/bin"
+        env["VIGIL_TMUX_BIN"] = str(bindir / "mytmux")
+        result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0 and result.stdout.strip() == ""
+        assert _wait_calls(marker, 1) == ["send-keys -t %9 /clear Enter"]
+        seen = (tmp_path / "all-calls").read_text()
+        assert "has-session" in seen and "capture-pane" in seen
 
     def test_induced_failure_still_exits_0(self, tmp_path):
         _promote_and_arm(tmp_path)
