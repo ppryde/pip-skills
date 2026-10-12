@@ -37,9 +37,9 @@ if str(_PLUGIN_ROOT) not in sys.path:
 import sqlite3
 
 from scripts import (
-    chrome_profile,
     dedupe,
     ingest,
+    permits_report,
     pricehistory,
     pricerefresh,
     redact,
@@ -384,6 +384,15 @@ def _parse_since(value: str) -> float:
         raise argparse.ArgumentTypeError(f"invalid --since value: {value!r}") from None
 
 
+def _parse_window(value: str) -> float:
+    """``--since`` for `permits`: ``30d`` (the last 30 days) or anything
+    `_parse_since` accepts."""
+    match = re.fullmatch(r"(\d+)d", value)
+    if match:
+        return time.time() - int(match.group(1)) * 86400
+    return _parse_since(value)
+
+
 def _resolve_since(args: argparse.Namespace) -> float | None:
     return args.since if args.since is not None else _since(args.days)
 
@@ -444,20 +453,9 @@ def cmd_session(args: argparse.Namespace) -> int:
     return 0
 
 
-# A docker volume name, and the path within it. Validated rather than trusted:
-# both are interpolated into a `docker run` argv, and a value starting with "-"
-# would be read by docker as an option rather than as a name.
-_VOLUME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-# Leading dot allowed — the default source is `.config/claude/projects`. A `..`
-# segment is not: the helper mounts the volume read-only, but a traversal would
-# still let the copy read the helper image's own filesystem.
-_SOURCE_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9_./-]*$")
-# The helper image, validated for the same reason and more urgently: it sits at
-# the one argv position where docker is still parsing its OWN options, so an
-# unvalidated value is the easiest of the three to turn into a flag. Registry
-# host, port, path segments, a `:tag` and an `@sha256:` digest all pass; a
-# space or a leading dash does not.
-_IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-/:@]*$")
+# The pull-volume inputs are validated with the same patterns the config loader
+# and `volumes` use (one definition each): the volume name and path land in a
+# `docker run` argv, where a leading "-" would be read as an option.
 _PULL_TIMEOUT_SECONDS = 900
 
 
@@ -479,7 +477,7 @@ def _pull_account_profile(args: argparse.Namespace, dest: Path) -> str | None:
     from scripts import store
     # ".../projects" -> "...", and a single-segment source -> "" (the volume
     # root). `rsplit` alone returns the input unchanged when there is no "/",
-    # so `--source projects` — which `_SOURCE_RE` accepts — read
+    # so `--source projects` — which `store._CLAUDE_DIR_RE` accepts — read
     # `/v/projects/.claude.json` instead of `/v/.claude.json`, soft-failed to
     # None, and reported no plan: the exact unattributable-sessions failure
     # this function exists to fix.
@@ -487,7 +485,7 @@ def _pull_account_profile(args: argparse.Namespace, dest: Path) -> str | None:
     config_root = source.rsplit("/", 1)[0] if "/" in source else ""
     try:
         read = subprocess.run(
-            ["docker", "run", "--rm", "-v", f"{args.volume}:/v:ro", args.image,
+            ["docker", "run", "--rm", "--network", "none", "-v", f"{args.volume}:/v:ro", args.image,
              "cat", f"/v/{config_root}/.claude.json" if config_root else "/v/.claude.json"],
             capture_output=True, text=True, timeout=60, check=False,
         )
@@ -530,16 +528,20 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
 
     Pull only, like every other verb here: nothing watches, nothing daemonises.
     """
-    if not _VOLUME_RE.match(args.volume):
+    if not store._VOLUME_NAME_RE.match(args.volume):
         return _fail(f"invalid volume name: {args.volume!r}", code=INVALID_INPUT)
     source = args.source.strip("/")
-    if not _SOURCE_RE.match(source) or ".." in Path(source).parts:
+    if not store._CLAUDE_DIR_RE.match(source) or ".." in Path(source).parts:
         return _fail(f"invalid source path: {args.source!r}", code=INVALID_INPUT)
-    if not _IMAGE_RE.match(args.image):
+    if not volumes._IMAGE_RE.match(args.image):
         return _fail(f"invalid image: {args.image!r}", code=INVALID_INPUT)
     dest = Path(args.dest).expanduser()
     if not dest.is_absolute():
         return _fail("dest must be an absolute path (docker requires one)", code=INVALID_INPUT)
+    if ":" in str(dest):
+        # docker reads ":" in a bind mount as the option separator.
+        return _fail(f"invalid dest: {args.dest!r} (a ':' is a docker mount-option separator)",
+                     code=INVALID_INPUT)
     # Created HERE, not by the container: the container needs no shell to
     # mkdir, so nothing is interpolated into one.
     #
@@ -558,7 +560,7 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
     except OSError as exc:
         return _fail(f"cannot create {projects}: {exc}")
     cmd = [
-        "docker", "run", "--rm",
+        "docker", "run", "--rm", "--network", "none",
         "-v", f"{args.volume}:/v:ro",
         "-v", f"{dest}:/out",
         args.image,
@@ -635,45 +637,25 @@ def cmd_repos(_: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_open(args: argparse.Namespace) -> int:
-    """Open `url` in the Chrome profile signed in as the account at
-    `--config-dir` (default: the active one — same account the terminal
-    running this command is already in, which is the account that would have
-    printed the link). Multi-account contracting setups: one config dir per
-    client, so this is how a client's artifact link lands in THAT client's
-    browser identity instead of whichever Chrome window has focus."""
-    try:
-        chrome_profile.check_url(args.url)
-    except ValueError as exc:
-        return _fail(str(exc), code=INVALID_INPUT)
-    if sys.platform != "darwin":
-        print("chronicle open: macOS only (uses `open --args --profile-directory`)",
-              file=sys.stderr)
-        return 1
-    if store.is_volume_label(args.config_dir):
-        print(f"chronicle open: {args.config_dir} is a docker volume, not a config dir with a "
-              "signed-in browser identity; pass the host config dir of that account",
-              file=sys.stderr)
-        return 1
-    if store.is_remote_label(args.config_dir):
-        print(f"chronicle open: {args.config_dir} is a remote box, not a config dir with a "
-              "signed-in browser identity on THIS machine; there is no local Chrome profile for it",
-              file=sys.stderr)
-        return 1
-    config_dir = Path(args.config_dir) if args.config_dir else store.config_dir()
-    email = chrome_profile.account_email(config_dir)
-    if not email:
-        print(f"chronicle open: no signed-in account at {config_dir}/.claude.json", file=sys.stderr)
-        return 1
-    profiles = chrome_profile.read_profiles(chrome_profile.DEFAULT_LOCAL_STATE)
-    profile_dir = chrome_profile.profile_for_email(email, profiles)
-    if not profile_dir:
-        known = ", ".join(sorted(profiles)) or "(none)"
-        print(f"chronicle open: no Chrome profile signed in as {email}; known: {known}",
-              file=sys.stderr)
-        return 1
-    subprocess.run(chrome_profile.open_command(args.url, profile_dir), check=False)
-    print(json.dumps({"url": args.url, "email": email, "profile_dir": profile_dir}))
+def cmd_permits(args: argparse.Namespace) -> int:
+    """`chronicle permits` — what subagents were allowed, denied and asked, per
+    (skill, agent type), from the outcome columns `sync` fills (see
+    ``scripts.permits_report``). Text tables by default; ``--json`` is the
+    structure the proposal generator reads."""
+    conn = _open_readonly()
+    if conn is None:
+        out: dict[str, Any] = {"supported": False,
+                               "note": f"no store at {store.db_path()}; run `chronicle sync`"}
+    else:
+        try:
+            out = permits_report.report(conn, since=_resolve_since(args), skill=args.skill,
+                                        agent_type=args.agent_type)
+        finally:
+            conn.close()
+    if args.json:
+        print(json.dumps(out))
+    else:
+        sys.stdout.write(permits_report.render_text(out))
     return 0
 
 
@@ -782,12 +764,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("repos", help="repo roots seen, with session counts (JSON)").set_defaults(fn=cmd_repos)
 
-    p = sub.add_parser("open",
-                       help="open a URL in the Chrome profile signed in as the active account (macOS)")
-    p.add_argument("url")
-    p.add_argument("--config-dir", default=None,
-                   help="account whose signed-in email to match (default: the active account)")
-    p.set_defaults(fn=cmd_open)
+    p = sub.add_parser("permits",
+                       help="what subagents were allowed, denied and asked, per skill and agent "
+                            "type (text; --json for the structure)")
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None, help="only tool calls in the last N days")
+    window.add_argument("--since", type=_parse_window, default=None,
+                        help="only tool calls since this ISO date/datetime, or `30d` for the last 30 days")
+    p.add_argument("--skill", default=None, help="only this skill (as stamped; default: all)")
+    p.add_argument("--agent-type", default=None,
+                   help="only this agent type (an ad-hoc name is `(ad-hoc)`)")
+    p.add_argument("--json", action="store_true", help="print the report as JSON")
+    p.set_defaults(fn=cmd_permits)
 
     sub.add_parser("accounts", help="account uuids seen, with session counts (JSON)").set_defaults(
         fn=cmd_accounts)

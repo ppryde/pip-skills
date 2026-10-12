@@ -378,3 +378,53 @@ class TestBundle:
         assert "-a" in argv and "-x" in argv
         assert "--" in argv
         assert argv[argv.index("--") + 1] == remote.host
+
+
+class TestRequestTravelsOnStdin:
+    """CH-4: the request lists every known file and offset, so on argv it hit
+    the 128 KiB per-argument limit after ~1,000 transcripts."""
+
+    def test_argv_carries_no_request(self, remote):
+        argv = remote_mod.ssh_argv(remote)
+        assert argv[-2:] == ["python3", "-"]
+
+    def test_a_huge_state_still_round_trips(self, remote_box, remote):
+        write_session(remote_box, "s1", [prompt("u1", T0, "hi")])
+        state = {"files": {f"-workspaces-app/{i:08d}-aaaa-bbbb-cccc-dddddddddddd.jsonl": {"offset": i}
+                           for i in range(3000)}, "meta": {}}
+        request = remote_mod._request_for(remote, state, max_bytes=1000, deadline_s=5)
+        encoded = remote_mod._b64(request)
+        assert len(encoded) > 131072            # would not fit one argv token on Linux
+        seen = []
+
+        def transport(argv, stdin, timeout):
+            seen.append(argv)
+            return local_transport(argv, stdin, timeout)
+
+        result = transport(remote_mod.ssh_argv(remote), remote_mod.bundle_source(encoded).encode(), 30)
+        assert max(len(a) for a in seen[0]) < 1000
+        assert result.returncode == 0
+        frames = [json.loads(line) for line in result.stdout.decode().splitlines()]
+        assert frames[-1]["t"] == "done"
+
+    def test_bundle_with_a_request_still_has_one_future_import_and_parses_as_3_8(self):
+        import ast
+        src = remote_mod.bundle_source("QUJD")
+        ast.parse(src, feature_version=(3, 8))
+        assert "REQUEST_B64 = 'QUJD'" in src
+        assert sum(1 for line in src.splitlines()
+                   if line.strip() == "from __future__ import annotations") == 1
+
+    def test_pull_passes_the_request_inside_the_script(self, remote_box, remote):
+        write_session(remote_box, "s1", [prompt("u1", T0, "hi")])
+        seen = []
+
+        def transport(argv, stdin, timeout):
+            seen.append((argv, stdin))
+            return local_transport(argv, stdin, timeout)
+
+        conn = store.connect()
+        remote_mod.sync_remotes(conn, [remote], transport=transport, force=True)
+        argv, stdin = seen[0]
+        assert argv[-1] == "-"
+        assert b"REQUEST_B64 = " in stdin
