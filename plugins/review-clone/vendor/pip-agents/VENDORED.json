@@ -1,0 +1,19 @@
+{
+  "files": {
+    "contract/REVISION": "bcdbef58e7667d6f467b88a19738eb917dc3a35b1c275c6be12114e2e2a8c77c",
+    "contract/brief.schema.json": "f3c1bd9dc66600ff79c4b976b5d078e62e946c389da01a1de75c448d1964a1fc",
+    "contract/personas.json": "6818b34d35dcad384726751bd55e5daaaa77beafd63e968e22316dedbf654563",
+    "contract/result.schema.json": "5989ca671e7549080738735f9894bf3d3fd38dd75fd0f828179c95ee6513ce4e",
+    "scripts/batching.py": "0c27cc5b0e70111f3f3f1ca34ee9ddd0f64bcc5b7032492295761ea0a7e116d6",
+    "scripts/validate_result.py": "8db33cd9a594ae8566209ad31e8315e3b17a23abc087129ddd04ddfcda0f703c"
+  },
+  "revision": "1.0 ad43d9304a698666604368f397c12bd31a214c919532985c189c65e81b8a2d09",
+  "sources": {
+    "contract/REVISION": "plugins/pip-agents/contract/REVISION",
+    "contract/brief.schema.json": "plugins/pip-agents/contract/brief.schema.json",
+    "contract/personas.json": "plugins/pip-agents/contract/personas.json",
+    "contract/result.schema.json": "plugins/pip-agents/contract/result.schema.json",
+    "scripts/batching.py": "tools/batching.py",
+    "scripts/validate_result.py": "plugins/pip-agents/scripts/validate_result.py"
+  }
+}

@@ -36,6 +36,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from scripts import permits
+
 MAIN_AGENT = ""
 SYNTHETIC_MODEL = "<synthetic>"
 ARTIFACT_TOOL = "Artifact"
@@ -74,6 +76,9 @@ class Turn:
     account_uuid: str | None = None
     # (tool_use_id, name, qualifier) — see `_qualifier`.
     tool_uses: list[tuple[str, str, str | None]] = field(default_factory=list)
+    # tool_use_id -> the call's closed-vocabulary shape (see `permits.tool_shape`):
+    # a program and subcommand, never an argument. Absent when there is none.
+    tool_shapes: dict[str, str] = field(default_factory=dict)
     # Artifact publishes issued in this turn, keyed by tool_use_id.
     artifacts: dict[str, ArtifactUse] = field(default_factory=dict)
 
@@ -128,6 +133,13 @@ class ToolResult:
     # so an ingest that sees the result but not the call can still fill it.
     artifact_url: str | None = None
     is_error: bool = False
+    # What became of the call, as a fixed category (see `permits.classify`),
+    # the closed-vocabulary permissionDecision, and whether a person was
+    # prompted. The result TEXT is classified and dropped, never kept.
+    outcome: str | None = None
+    reason: str | None = None
+    decision: str | None = None
+    prompted: int = 0
 
 
 @dataclass
@@ -372,6 +384,9 @@ def _fold_assistant(facts: Facts, record: dict[str, Any], agent_id: str) -> None
             if (isinstance(tool_id, str) and isinstance(name, str)
                     and all(existing != tool_id for existing, _, _ in turn.tool_uses)):
                 turn.tool_uses.append((tool_id, name, _qualifier(name, block.get("input"))))
+                shape = permits.tool_shape(name, block.get("input"))
+                if shape is not None:
+                    turn.tool_shapes[tool_id] = shape
                 if name == ARTIFACT_TOOL:
                     artifact = _artifact_use(tool_id, block.get("input"))
                     if artifact is not None:
@@ -611,8 +626,19 @@ def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, 
         chars = block.get("_len")
         if not isinstance(chars, int) or isinstance(chars, bool):
             chars = len(text)
+        pd = record.get("permissionDecision")
+        decision, prompted = permits.decision_fields(pd)
+        # `_outcome`/`_reason` are a redacted transcript's stand-ins for what
+        # the dropped text said (see scripts.redact): classified on the box,
+        # re-validated here against the closed vocabulary. A real transcript
+        # never carries them, so its text is classified now, and then dropped.
+        outcome, reason = block.get("_outcome"), block.get("_reason")
+        if not (isinstance(outcome, str) and permits.valid_outcome(outcome, reason)):
+            outcome, reason = permits.classify(payload, is_error, pd)
         facts.results[tool_id] = ToolResult(tool_use_id=tool_id, chars=chars, ts=ts,
-                                            artifact_url=url, is_error=is_error)
+                                            artifact_url=url, is_error=is_error,
+                                            outcome=outcome, reason=reason,
+                                            decision=decision, prompted=prompted)
         edit = _file_edit(tool_id, record.get("toolUseResult"), ts, agent_id)
         if edit is not None:
             facts.file_edits[tool_id] = edit

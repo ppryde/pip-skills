@@ -122,7 +122,22 @@ def _reviewers(raw: dict) -> tuple[ReviewerRef, ...]:
     return tuple(parse_reviewer_key(k, _strictness_value(k, v)) for k, v in raw.items())
 
 
-def resolve_profile(config: dict, profile: str | None) -> ResolvedReview:
+def _pick(override, configured):
+    return override if override is not None else configured
+
+
+def _override(value, valid: set[str], what: str):
+    if value is not None and value not in valid:
+        raise ConfigError(f"invalid {what} {value!r}; expected {sorted(valid)}")
+    return value
+
+
+def resolve_profile(config: dict, profile: str | None, *, scope: str | None = None,
+                    output: str | None = None) -> ResolvedReview:
+    """Resolve a profile. `scope`/`output` are call-time overrides (the `full` /
+    `interactive` / `inline` argument words), validated like config values."""
+    scope_arg = _override(scope, VALID_SCOPE, "scope")
+    output_arg = _override(output, VALID_OUTPUT, "output")
     defaults = config.get("defaults", {}) or {}
     profiles = config.get("profiles", {}) or {}
     name = profile if profile is not None else defaults.get("profile")
@@ -137,30 +152,33 @@ def resolve_profile(config: dict, profile: str | None) -> ResolvedReview:
     scope = spec.get("scope", defaults.get("scope", DEFAULT_SCOPE))
     if scope not in VALID_SCOPE:
         raise ConfigError(f"invalid scope {scope!r}; expected {sorted(VALID_SCOPE)}")
-    output, output_file = _output_settings(config)
+    out_cfg, output_file = _output_settings(config)
     return ResolvedReview(
         strategy=strategy,
-        scope=scope,
+        scope=_pick(scope_arg, scope),
         targets=_as_tuple(spec.get("targets"), "targets"),
         reviewers=_reviewers(spec.get("reviewers", {})),
         context=tuple(_check_relative(c, "context entry")
                       for c in _as_tuple(spec.get("context"), "context")),
-        output=output,
+        output=_pick(output_arg, out_cfg),
         output_file=output_file,
     )
 
 
-def resolve_adhoc(config: dict, reviewer_keys: list[str]) -> ResolvedReview:
+def resolve_adhoc(config: dict, reviewer_keys: list[str], *, scope: str | None = None,
+                  output: str | None = None) -> ResolvedReview:
     defaults = config.get("defaults", {}) or {}
     if not reviewer_keys:
         raise ConfigError("ad-hoc review needs at least one reviewer")
-    output, output_file = _output_settings(config)
+    scope_arg = _override(scope, VALID_SCOPE, "scope")
+    output_arg = _override(output, VALID_OUTPUT, "output")
+    out_cfg, output_file = _output_settings(config)
     return ResolvedReview(
         strategy=defaults.get("strategy", DEFAULT_STRATEGY),
-        scope=defaults.get("scope", DEFAULT_SCOPE),
+        scope=_pick(scope_arg, defaults.get("scope", DEFAULT_SCOPE)),
         targets=(),
         reviewers=tuple(parse_reviewer_key(k, DEFAULT_STRICTNESS) for k in reviewer_keys),
         context=(),
-        output=output,
+        output=_pick(output_arg, out_cfg),
         output_file=output_file,
     )

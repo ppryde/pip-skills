@@ -76,3 +76,53 @@ python3 tools/measure_spawn.py report <session-dir> [--persona NAME]
   for both (tool list read back: Read, Bash, Monitor).
 - Tests: `tests/agents/` (run by `tests/run.sh`). Sync to wf-claude-market: copy `plugins/pip-agents/`, the three
   tools and `tests/agents/` as one unit; the build is deterministic, so wf runs the same `--check`.
+
+## derive_agent_tools.py (permissions, WF-271 PR 3)
+
+Stdlib only; **read-only**: it prints to stdout and opens no file for writing (a test runs it under a read-only
+tree). Reads `chronicle permits --json` and proposes `tools:` changes as a unified diff for review.
+
+```
+chronicle permits --json > permits.json
+python3 tools/derive_agent_tools.py --evidence permits.json              # diffs + a settings snippet, stdout only
+python3 tools/derive_agent_tools.py --evidence permits.json --snapshot   # the tests/agents/evidence.json text
+python3 tools/derive_agent_tools.py --evidence permits.json --check      # diff the committed snapshot; exit 1 on drift
+```
+
+- Tightening (remove a tool exposed and unused across `--min-runs`, default 10) is proposed normally; with Bash granted,
+  Grep and Glob are never proposed for removal (not exposed, so zero calls prove nothing). A persona below
+  `--min-runs` gets nothing. Loosening (add a tool, or an allow line) is labelled LOOSENS and needs evidence of need
+  ("no such tool", or a read-only shape a person approved temporarily at least 3 times and never otherwise).
+  A shape the classifier, safety check, worktree guard or sleep guard refused is never an allow rule: it is listed under
+  "investigate the command shape" with its sub-cause, and the remedy is charter text a human writes.
+- The diff targets `personas/tools.md` when the plugin keeps its grants there (then run `tools/build_agents.py`), else
+  the agent file's frontmatter. A person applies it with `git apply` in a reviewed PR.
+- `tests/agents/evidence.json` is the checked-in snapshot (aggregates only: per persona runs, tool-call counts, denial
+  causes, prompts) plus the human-written `unobserved` reasons, which the generator carries over and never invents.
+  The persona lint (`tests/agents/test_derive_agent_tools.py`) requires every granted tool to be observed in the snapshot
+  or listed `unobserved` with a one-line reason. **Day one every grant is `unobserved`**: no `pip-agents:*` run can exist
+  before the consumer PRs move dispatches onto the personas, so that is the starting state, not a defect. The scan of the
+  work account (aggregates only) is the owner's own act and is not part of any PR.
+
+## sync_contract.py (pip-agents vendoring, WF-270 PR E)
+
+Stdlib only. A consumer skill cannot reach a dependency plugin's files (`${CLAUDE_PLUGIN_ROOT}` is the consumer's own
+root; probe recorded in PR A), so each consumer carries a byte-identical copy of what it needs, the census-mod bundle
+precedent.
+
+```
+python3 tools/sync_contract.py              # write plugins/<consumer>/vendor/pip-agents/ for every consumer
+python3 tools/sync_contract.py --check      # write nothing; list drift, exit 1
+python3 tools/sync_contract.py review-clone # one consumer
+```
+
+- Bundle: `scripts/validate_result.py` and `contract/{result,brief}.schema.json`, `personas.json`, `REVISION` from
+  `plugins/pip-agents/`, `scripts/batching.py` from `tools/batching.py` (so `BATCH_CAP` has one definition), and
+  `VENDORED.json` (the contract revision and a sha256 per file, regenerated each sync). Consumers: `CONSUMERS` in the
+  tool (review-panel, review-clone); a consumer also declares `"dependencies": ["pip-agents"]`.
+- `tests/agents/test_sync_contract.py` fails on any drift, a missing or extra file, a consumer without the dependency,
+  and checks the vendored validator runs standalone under `python3 -I`.
+- When `contract/` changes (a revision bump) or `validate_result.py` changes, re-run the tool in the same PR and bump
+  every consumer's version. Sync to wf-claude-market: copy `tools/sync_contract.py`, `tests/agents/` and each
+  consumer's `vendor/`; wf runs the same `--check`, and a consumer is synced only after `pip-agents` is in wf's
+  marketplace at the same or higher version.

@@ -1,50 +1,40 @@
 # review-clone: collect and render (shared by `clone-reviewer` and `review-as`)
 
-One copy of the collector dispatch and the slash-command render, read by `clone-reviewer` (Steps 3 and 7) and by `review-as` refresh (Steps 1 and 4b). `<plugin>` is the absolute path of the `review-clone` plugin directory in this Claude Code install.
+One copy of the collector dispatch and the slash-command render, read by `clone-reviewer` (Steps 3 and 7) and by `review-as` refresh (Steps 1 and 4b). `<plugin>` is the absolute path of the `review-clone` plugin directory in this Claude Code install. `<persona dir>`, `<raw dir>`, `<commands dir>` and the persona's other paths come from `python3 <plugin>/scripts/persona_io.py paths --alias '<alias>'` (JSON): they root at `${CLAUDE_CONFIG_DIR:-~/.claude}`, so each account keeps its own personas. Never hardcode `~/.claude`.
 
-## Collect (Haiku subagent)
+## Collect (`pip-agents:gatekeeper`)
 
-Data collection is pure I/O — `gh` API calls, file writes, no reasoning. **Dispatch it to a Haiku subagent** so the main (Opus) session keeps its context budget for reasoning (theme extraction in `clone-reviewer` Step 5; drift detection and rule updates in `review-as` refresh Steps 3–4). Do not run `collect.py` directly from this session.
+Data collection is pure I/O: `gh` API calls and file writes, no reasoning. It runs through the `pip-agents` plugin's **gatekeeper** (a declared dependency; haiku; Bash and Read only), which runs the one command it is briefed with and returns a result envelope holding the snapshot **path and counts**, never the corpus. Do not run `collect.py` directly from this session, and do not pipe its stdout back into it: read `snapshot.json` from disk when you need it.
 
-**Quoting untrusted values.** `<handles>`, `<repo>`, `<paths>` and `<extensions>` are user-supplied (or derived from the checkout's `origin`), so treat them as hostile. Put each in **single quotes**, escaping any embedded `'` as `'\''`; never double quotes (those still run `$(...)` and backticks). Before building the command, validate `<repo>` as `owner/name` (`[A-Za-z0-9._-]+/[A-Za-z0-9._-]+`) and each handle as `[A-Za-z0-9-]+`; if a value fails or contains a newline or NUL, stop and say so.
+**Quoting untrusted values.** `<handles>`, `<repo>`, `<paths>` and `<extensions>` are user-supplied (or derived from the checkout's `origin`), so treat them as hostile. Put each in **single quotes**, escaping any embedded `'` as `'\''`; never double quotes (those still run `$(...)` and backticks). `gate.py` re-checks them and refuses: `<repo>` must be `owner/name` (`[A-Za-z0-9._-]+/[A-Za-z0-9._-]+`), each handle `[A-Za-z0-9-]+`, each path or extension `[A-Za-z0-9._/@+-]+`, `--since` an ISO date. If a value fails or contains a newline or NUL, stop and say so.
 
-Tell the user before dispatching:
+1. **Brief.** Make a scratch dir (`mktemp -d -t review-clone.XXXXXX`, on its own), then run
 
-- clone: > Pulling `<handle>`'s comments via a Haiku subagent. No live progress — I'll surface the summary when it finishes.
-- refresh: > Refreshing `<alias>` via a Haiku subagent. No live progress — summary on completion.
+   ```bash
+   python3 <plugin>/scripts/gate.py brief-collect --alias '<alias>' --handles '<handles>' --repo '<repo>' --months <months> --paths='<paths>' --extensions='<extensions>' --work-dir '<scratch>'
+   ```
 
-Then call the `Agent` tool:
+   Pass `--paths=''` / `--extensions=''` (empty strings) when there is no filter, never omit the value. Add `--incremental` (refresh) or `--since '<iso>'`. It prints `brief` (a path), `prompt` (the brief text) and `out` (the snapshot path), or `{"status":"error"}`: stop and show it. The collector needs `gh` >= 2.48; it writes the raw scrape, `digest.jsonl` and `snapshot.json` to the persona dir (private: 0700/0600), fetches 3 PRs at a time, backs off on rate limits and checkpoints each PR.
 
-- `subagent_type: "general-purpose"`
-- `model: "haiku"`
-- `description: "Scrape <handle> review history"`
-- `prompt`: instruct the subagent to run the exact `collect.py` command below and return its stdout verbatim. **The subagent must not interpret, summarise, diff or post-process the output** — its only job is to run the script and report what came back.
+2. **Tell the user** before dispatching: clone: > Pulling `<handle>`'s comments via the gatekeeper. No live progress; I'll surface the summary when it finishes. Refresh: > Refreshing `<alias>` via the gatekeeper. No live progress; summary on completion.
 
-Prompt body to send to the subagent:
+3. **Dispatch.** Call `Agent` with `subagent_type: "pip-agents:gatekeeper"`, `description: "Scrape <handle> review history"` and `prompt` = the `prompt` from step 1, unchanged. The gatekeeper runs the command once with a 600000 ms timeout and never retries or alters it.
 
-> Run this command exactly and return its stdout verbatim — it is a single line of JSON (the snapshot).
->
-> ```bash
-> python3 <plugin>/scripts/collect.py \
->   --alias '<alias>' \
->   --handles '<handles>' \
->   --repo '<repo>' \
->   --months <months> \
->   --paths='<paths>' \
->   --extensions='<extensions>'
-> ```
->
-> Pass `--paths=''` / `--extensions=''` (empty strings) when there is no filter — never omit the value after the flag. Requires `gh` >= 2.48.
->
-> The script writes raw scrape files and `snapshot.json` to `~/.claude/review-clone/<alias>/` and prints per-PR progress to stderr — you do not need to relay the stderr lines. When the command exits, reply with ONLY the JSON snapshot from stdout. If the command fails, reply with the stderr output prefixed `ERROR:`.
+4. **Check.** Write its final message to a file with the Write tool and run `python3 <plugin>/scripts/gate.py check-collect --brief '<brief path>' --message '<message file>'`:
+   - `ok` → `snapshot` (the path) and `counts` (`pr_count`, `comment_count`, `error_count`). Read that file and continue.
+   - `failed` → the collector exited non-zero or timed out; show `stderr_tail`. If it was cut off, run step 3 again with the same brief: it resumes from the checkpoint.
+   - `refused` → the gatekeeper declined the command (`error` says why): stop and show it.
+   - `rejected` → the reply was not a valid envelope (`errors`); dispatch once more with the same brief, then stop and show the errors.
 
-**Refresh variant.** Take `<handles>` from the persona frontmatter, joined with commas, and add one more argument to the command: `--since '<last_scanned_at>'` (only comments created since the last scan are collected). Single-quote every value as above.
+**Refresh variant.** Take `<handles>` from the persona frontmatter, joined with commas, and add `--incremental` to `brief-collect` (starts from the `watermark` in the persona's `snapshot.json`; use `--since '<last_scanned_at>'` instead when there is no snapshot yet). Only comments created since then are collected and merged into `raw/`; nothing old is lost. `digest.jsonl` is rebuilt as the full corpus and `digest-new.jsonl` holds just the new comments. If any PR failed, the watermark is held back so the next run retries them.
 
-**Reading the result.** The subagent's final message is the snapshot JSON. Parse it (or re-read `~/.claude/review-clone/<alias>/snapshot.json` from disk). Haiku fetches, Opus reasons: theme extraction and drift detection stay on the main session.
+**Reading the result.** The snapshot carries `counts`, `errors` (PRs that failed after retries; the rest are kept, re-run the command to retry them), `search_truncated` (a handle hit gh's 1000-result limit: narrow the window), `private_source`/`visibility`, `watermark` (newest comment collected), `digest` (`file`, `items`, `bytes`) and, on a refresh, `digest_new`. Collecting is the gatekeeper's, reasoning is yours: theme extraction and drift detection stay on the main session, reading the digest.
+
+**Other collector commands** (run by absolute path, no subagent needed): `collect.py check --repo '<repo>'` (visibility and your permission, writes nothing), `collect.py digest --alias '<alias>' [--since '<iso>']` (rebuild the digest; with `--since` it writes `digest-new.jsonl` and leaves the full digest alone), `collect.py cleanup --alias '<alias>'` (delete `raw/`, both digests and the checkpoint; only the account's own persona dir, never legacy `~/.claude/review-clone/` data; the persona, snapshot and command stay).
 
 ## Render the per-persona slash command
 
-Render `<plugin>/templates/review-as-command.md.tmpl` and write the result to `~/.claude/commands/review-as-<alias>.md`. Create the `~/.claude/commands/` dir if missing.
+Render `<plugin>/templates/review-as-command.md.tmpl` and write the result to `<commands dir>/review-as-<alias>.md` (`command_file` from `persona_io.py paths`). Create the commands dir if missing.
 
 The template's `description` field encodes the persona summary so it shows up in the slash-command palette. Substitute every placeholder:
 

@@ -65,6 +65,47 @@ class TestConsume:
         assert st.clear_flag(tmp_path).exists()
 
 
+    def test_two_racing_consumers_exactly_one_wins(self, tmp_path):
+        import threading
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        for _ in range(50):
+            st.cooldown_marker(tmp_path).unlink(missing_ok=True)  # let the next arm through
+            assert st.request_clear(tmp_path, "H") == "armed"
+            barrier = threading.Barrier(2)
+            wins: list[bool] = []
+
+            def consume() -> None:
+                barrier.wait()
+                wins.append(st.consume_clear_flag(tmp_path))
+
+            threads = [threading.Thread(target=consume) for _ in range(2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            assert sorted(wins) == [False, True]
+
+    def test_loser_of_the_unlink_race_reports_false(self, tmp_path, monkeypatch):
+        # Deterministic: the flag passes the regular-file check, then another
+        # consumer removes it before our unlink. The old exists-then-unlink
+        # code returned True here, so both consumers dispatched /clear.
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "H")
+        real = st.marker_exists
+
+        def raced(path):
+            seen = real(path)
+            if path == st.clear_flag(tmp_path):
+                path.unlink()  # the other consumer wins here
+            return seen
+
+        monkeypatch.setattr(st, "marker_exists", raced)
+        assert st.consume_clear_flag(tmp_path) is False
+        assert not st.cooldown_marker(tmp_path).exists()
+
+
 class TestConsumeHandoff:
     def test_returns_text_and_archives(self, tmp_path):
         ensure_root(tmp_path)
@@ -361,3 +402,80 @@ class TestClearRequested:
         assert st.clear_requested(tmp_path) is True
         assert st.clear_requested(tmp_path) is True  # non-consuming: repeatable
         assert st.clear_flag(tmp_path).exists()  # still there for the real consumer
+
+
+class TestArchiveRetention:
+    """VG-13: timestamped archive names, newest 20 kept, no sequential probing."""
+
+    def test_archive_names_are_timestamped_not_numbered(self, tmp_path):
+        st.begin(tmp_path)
+        for i in range(3):
+            st.request_clear(tmp_path, f"H{i}")
+            st.consume_handoff(tmp_path)
+            st.cooldown_marker(tmp_path).unlink(missing_ok=True)
+        names = sorted(p.name for p in st.handoff_archive_dir(tmp_path).iterdir())
+        assert len(names) == 3
+        assert all(n.startswith("handoff-") and n.endswith(".md") for n in names)
+        assert not any(n.startswith("handoff.") for n in names)
+
+    def test_keeps_only_newest_twenty(self, tmp_path):
+        st.begin(tmp_path)
+        for i in range(25):
+            st.request_clear(tmp_path, f"H{i}")
+            st.consume_handoff(tmp_path)
+            st.cooldown_marker(tmp_path).unlink(missing_ok=True)
+        kept = sorted(st.handoff_archive_dir(tmp_path).iterdir(), key=lambda p: p.name)
+        assert len(kept) == st.ARCHIVE_KEEP == 20
+        assert {p.read_text() for p in kept} == {f"H{i}" for i in range(5, 25)}
+
+    def test_does_not_probe_for_free_names(self, tmp_path, monkeypatch):
+        st.begin(tmp_path)
+        for i in range(5):
+            st.request_clear(tmp_path, f"H{i}")
+            st.consume_handoff(tmp_path)
+        calls = []
+        real = Path.exists
+        monkeypatch.setattr(Path, "exists", lambda self: calls.append(self) or real(self))
+        st.request_clear(tmp_path, "LAST")
+        calls.clear()
+        st.consume_handoff(tmp_path)
+        assert [c for c in calls if c.parent.name == "archive"] == []
+
+
+class TestSessionLineage:
+    """VG-5: handover state is per session lineage (tmux pane), not shared by a repo."""
+
+    def test_two_panes_do_not_share_handoff_or_cooldown(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TMUX_PANE", "%1")
+        st.begin(tmp_path)
+        assert st.request_clear(tmp_path, "PANE ONE") == "armed"
+        monkeypatch.setenv("TMUX_PANE", "%2")
+        assert st.read_handoff(tmp_path) is None            # other pane sees nothing
+        assert st.consume_clear_flag(tmp_path) is False     # and cannot consume the request
+        assert st.request_clear(tmp_path, "PANE TWO") == "armed"  # no cooldown bleed
+        monkeypatch.setenv("TMUX_PANE", "%1")
+        assert st.consume_handoff(tmp_path) == "PANE ONE"
+
+    def test_lineage_is_sanitised(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TMUX_PANE", "../../%evil/..")
+        root = st.session_root(tmp_path)
+        assert root.parent.name == "sessions"
+        assert ".." not in root.name and "/" not in root.name
+
+    def test_no_pane_uses_default(self, tmp_path):
+        assert st.session_root(tmp_path).name == "default"
+
+    def test_active_and_pause_stay_repo_wide(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TMUX_PANE", "%1")
+        st.begin(tmp_path)
+        monkeypatch.setenv("TMUX_PANE", "%2")
+        assert st.is_active(tmp_path)
+        st.pause(tmp_path)
+        monkeypatch.setenv("TMUX_PANE", "%1")
+        assert st.is_paused(tmp_path)
+
+    def test_session_dirs_are_private(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TMUX_PANE", "%1")
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "H")
+        assert st.session_root(tmp_path).stat().st_mode & 0o777 == 0o700

@@ -4,6 +4,8 @@
 
 ### 1 — Compute the diff
 
+If the persona's `private_source` is true, say once that it comes from a private repo and its review text should stay private (do not paste it into public places).
+
 Resolve the base branch: `gh pr view --json baseRefName -q .baseRefName` if a PR exists, else `git symbolic-ref --short refs/remotes/origin/HEAD` (strip the `origin/` prefix). Call it `<base>`. If the persona's `repo` differs from this checkout's `origin`, warn the user before reviewing.
 
 ```bash
@@ -27,7 +29,10 @@ Read the file at HEAD too (not just the hunk) — context matters for rules that
 
 ### 3 — Walk the rule list
 
-For each rule in the PERSONA body, decide if it applies to any changed file. If yes, draft a finding.
+Write the diff (`git diff 'origin/<base>...HEAD'` limited to the in-scope files, written to a file) into a scratch dir (`mktemp -d -t review-clone.XXXXXX`, on its own) and run `python3 <plugin>/scripts/gate.py batches --alias '<alias>' --target '<diff file>' --work-dir '<scratch>'`.
+
+- `"inline": true` (30 rules or fewer): walk the rules yourself. For each rule in the PERSONA body, decide if it applies to any changed file. If yes, draft a finding.
+- `"inline": false` (more than 30 rules): dispatch each `seats[]` entry as a `pip-agents:reviewer-rules` agent, in parallel (`Agent` with `subagent_type` and `prompt` from the entry; one batch is at most 30 rules). Write each final message to a file with the Write tool and run `python3 <plugin>/scripts/gate.py review-ingest --brief '<seat brief>' --message '<message file>' --out '<scratch>/candidates.json'`; `rejected`: dispatch that batch once more, then report it as unchecked. Read `candidates.json`: each entry is a candidate finding (`id` = the rule id, `file`, `line`, `evidence`, `fix`, `citation`; `tier: "medium"` means one link unproven). Draft each as below, with the PERSONA rule's own **Severity** and your voice, not the batch agent's severity word. Mention any `injection_attempts` the command printed, and any batch with `seat_error` or `unchecked`.
 
 When a finding fires, record its **line anchor** from the hunk it sits in — you need this for inline PR posting (Step 5, option 4 `post-inline-pr`, posted in Step 6b):
 - `path` — repo-relative file path
@@ -56,9 +61,9 @@ Read `output_default` from frontmatter:
   3. **All in file** (`all-file`)
   4. **Post inline to PR** (`post-inline-pr`) — see Step 6b
 
-  Plus a toggle: "Make this the default for /review-as-<alias>?" If yes, write `output_default` back to PERSONA frontmatter using `persona_io.write_persona`.
+  Plus a toggle: "Make this the default for /review-as-<alias>?" If yes, write `output_default` back with `python3 <plugin>/scripts/persona_io.py update --alias '<alias>' --set <part.json>` (`{"output_default": "<value>"}` in a temp file written with the Write tool).
 
-  File path when used: `.review-clone/last-review-<alias>.md` in repo root. Create `.review-clone/` via `mkdir -p .review-clone/` if it doesn't exist before writing.
+  File path when used: `.review-clone/last-review-<alias>.md` in repo root. Create `.review-clone/` via `mkdir -p .review-clone/` if it doesn't exist before writing. That file holds derived opinions on unpublished code: the first time you create the directory, print the hint "Add `.review-clone/` to `.gitignore` (or `.git/info/exclude`) so it is not committed." Do not edit any ignore file yourself.
 
 ### 6a — Emit to chat / file
 

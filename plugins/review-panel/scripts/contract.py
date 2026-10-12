@@ -57,6 +57,9 @@ class Finding:
     # True when the reviewer omitted `category` and "general" was filled in;
     # a made-up category must never be a reason to pair two findings.
     category_defaulted: bool = False
+    # "medium" when a pip-agents seat listed the finding as plausible with one link unproven (the envelope's
+    # `medium` list). Inert: only the report shows it; it never changes severity or a verdict.
+    tier: str | None = None
 
 
 def finding_to_dict(f: Finding) -> dict:
@@ -230,6 +233,7 @@ def _parse_one(reviewer: str, raw: dict, strict: bool, notes: list[str], label: 
         line=line, citation=raw.get("citation"),
         rule_id=rule_id,
         category_defaulted=category_defaulted,
+        tier="medium" if raw.get("tier") == "medium" else None,
     )
 
 
@@ -327,6 +331,8 @@ def render_report(
             for f in by_sev[sev]:
                 loc = f"{f.file}:{f.line}" if f.line is not None else f.file
                 verdict = f" _({f.verdict})_" if f.verdict else ""
+                if f.tier:
+                    verdict += f" _({f.tier})_"
                 lines.append(f"- **[{f.id}] {sev}**{verdict} — {_one_line(f.rule)} — {_code_span(loc)}")
                 lines.append(f"  - found: {_code_span(f.actual)}")
                 lines.append(f"  - fix: {_one_line(f.suggestion)}")

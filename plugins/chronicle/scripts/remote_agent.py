@@ -16,9 +16,11 @@ is no file to import it from.
 
 Protocol (see the README's "Remote boxes" section for the worked example):
 
-Request — one JSON object, base64-encoded, passed as ``sys.argv[1]`` (never
-on stdin: stdin IS the script text, and ``python3 -`` reads it to EOF before
-the interpreter starts, so nothing can follow it on the same stream)::
+Request — one JSON object, base64-encoded, embedded in the script text as a
+``REQUEST_B64 = '...'`` literal (stdin IS the script, and ``python3 -`` reads
+it to EOF before the interpreter starts, so nothing can follow it on the same
+stream; a single argv token is capped at 128 KiB on Linux, which a large
+mirror's state outgrew). ``sys.argv[1]`` is still honoured as a fallback::
 
     {"claude_dir": "/opt/wf-state/.config/claude", "fidelity": "minimal",
      "state": {"<relpath>": {"offset": N, "size": M}, ...},
@@ -274,11 +276,14 @@ def run(request):
 
 
 def main(argv):
-    if len(argv) < 2:
-        _emit({"t": "error", "error": "no request argument"})
+    # The client embeds the request as a `REQUEST_B64` literal in the script
+    # text (see `scripts.remote.bundle_source`); argv[1] is still honoured.
+    encoded = globals().get("REQUEST_B64") or (argv[1] if len(argv) >= 2 else None)
+    if not encoded:
+        _emit({"t": "error", "error": "no request"})
         return 0
     try:
-        request = json.loads(base64.b64decode(argv[1]).decode("utf-8"))
+        request = json.loads(base64.b64decode(encoded).decode("utf-8"))
     except (binascii.Error, ValueError, UnicodeDecodeError) as exc:
         _emit({"t": "error", "error": f"bad request: {exc}"})
         return 0

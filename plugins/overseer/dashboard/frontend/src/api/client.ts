@@ -287,8 +287,31 @@ export function pullChildren(id: string): Promise<BoardResponse> {
   );
 }
 
-export function move(id: string, body: MoveBody): Promise<BoardResponse> {
-  return request<BoardResponse>("POST", withRoot(`/api/card/${id}/move`), body);
+/** A stage move. A refused stage gate (409 carrying the CLI's `GATE:` lines)
+ * asks the person for a reason and retries with `force_gate`; the backend
+ * records it in the card's Decisions as "dashboard: <reason>". Cancel or an
+ * empty reason leaves the card where it was and rethrows the refusal. */
+export async function move(id: string, body: MoveBody): Promise<BoardResponse> {
+  const post = (b: MoveBody) =>
+    request<BoardResponse>("POST", withRoot(`/api/card/${id}/move`), b);
+  try {
+    return await post(body);
+  } catch (e) {
+    if (
+      "stage" in body &&
+      e instanceof ApiError &&
+      e.status === 409 &&
+      e.message.includes("GATE:")
+    ) {
+      const reason = window.prompt(
+        `${e.message}\n\nMove it anyway? Give a reason (recorded on the card):`
+      );
+      if (reason && reason.trim()) {
+        return post({ ...body, force_gate: reason.trim() });
+      }
+    }
+    throw e;
+  }
 }
 
 export function setThreshold(value: number): Promise<BoardResponse> {

@@ -1,6 +1,6 @@
 {
   "name": "pip-agents",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared subagent personas for pip-skills plugins: reviewer-correctness, -security, -scope, -rules, validator, explorer and gatekeeper, built from one base with one brief/result JSON contract and its validator. Consumers declare it as a dependency; no skills.",
   "author": {
     "name": "Pip",

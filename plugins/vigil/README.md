@@ -7,28 +7,66 @@ other plugin.
 
 ## Requirements
 
-- **Python 3.11+** (pure stdlib — no third-party packages).
+- **Python 3.11+** (pure stdlib — no third-party packages). The hooks and
+  `bin/vigil` run `python3` from PATH; set `VIGIL_PYTHON` to use another
+  interpreter. A repo-adjacent `.venv` is never preferred.
 - **tmux** for *automatic* handover: vigil's Stop hook injects the `/clear`
   keystroke via `tmux send-keys`. Without tmux, handover is **manual** (vigil
   checkpoints and you type `/clear`). Apple's bundled `screen` (v4.00.03) cannot
   drive the modern TUI and is not supported.
+  Before typing, the Stop hook reads the pane (`tmux capture-pane`): it only
+  sends `/clear` into an empty prompt (named sessions included) with no dialog
+  open. Otherwise (or if the pane cannot be read) it sends nothing, leaves the
+  handover armed and tells you via a systemMessage; a Stop that was itself
+  caused by a Stop hook sends nothing and says nothing.
+  The pane is checked again after the `VIGIL_CLEAR_DELAY` wait (default 2s),
+  and this re-check also refuses a running turn (`esc to interrupt` in the
+  footer under the prompt box; the hook's own check cannot use it, since the
+  footer still shows it while the Stop hook runs). The footer keeps showing it
+  until EVERY Stop hook has finished, so a busy-only hold is retried every 0.5s
+  for up to `VIGIL_BUSY_WAIT` seconds (default 10; whole seconds only, anything else means 10); raise it if your other Stop
+  hooks run longer. If the pane is still busy after that, or has stopped being
+  safe (you started typing, a dialog opened), the
+  dispatch is dropped **silently**: the hook has already
+  returned, so no message can reach you. The handover stays armed and completes
+  at the next Stop, or when you type `/clear` yourself.
 
 ## What it does
 
-- `.claude/vigil/` (per-repo, self-ignored via its own `.gitignore` — never
-  touches the repo's own) holds the watch state: an `active` marker, the armed
-  flag, a paused flag, a TTL cooldown, a TTL `handover-gate` (arms the
-  once-per-cycle trigger nudge), and the pending `handoff.md` (archived to
-  `.claude/vigil/archive/` after it injects once).
+- `$CLAUDE_CONFIG_DIR/vigil/<repo-key>/` (default `~/.claude/vigil/`; outside
+  the repo, directories 0700, files 0600, symlinks never followed) holds the
+  watch state: an `active` marker, the armed flag, a paused flag, a TTL
+  cooldown, a TTL `handover-gate` (arms the once-per-cycle trigger nudge), and
+  the pending `handoff.md` (archived to `archive/` after it injects once, as
+  `handoff-<timestamp>.md`, newest 20 kept). `<repo-key>` is the repo name plus
+  a hash of its root, resolved once for CLI and hooks (`$CLAUDE_PROJECT_DIR`,
+  else the enclosing git work tree). An explicit `vigil --root <dir>` is
+  authoritative and overrides `$CLAUDE_PROJECT_DIR`. The `active` and
+  `paused` markers and the config are per repo root; the handover state (handoff,
+  armed flag, gate, cooldown, title, archive) is per session lineage under
+  `sessions/<lineage>/`, keyed by the tmux pane (stable across `/clear`, unlike the
+  session id), or `default` outside tmux. Two sessions in different panes of one repo
+  never inject or consume each other's handover; two sessions outside tmux share
+  the `default` lineage. Handoffs written by older versions (repo-level
+  `handoff.md`) are ignored.
 - `vigil begin` activates the watch (auto under tmux, else manual).
 - `vigil context` reports `ctx NN%` against a configured threshold.
 - A `UserPromptSubmit` hook (`vigil nudge-hook`) watches ctx% every turn
-  (census-backed) and nudges the agent once, at the threshold, to write a
+  (census-backed; without census it detects a 1M window from a `[1m]` model id or
+  usage over 200k, or the configured model (`ANTHROPIC_MODEL`, `model` in
+  settings.json), assuming 200k only when unknown, unless `context.window` is
+  set). Limit: hook payloads and transcripts carry no `[1m]` suffix, so a 1M
+  session below 200k tokens, with no `[1m]` in your configured model and no
+  census, reads against 200k; set `vigil config set context.window 1000000`
+  or use census there. A `PostToolUse` registration matched to `TaskCreate|TaskUpdate` runs the
+  same hook at task boundaries, so unattended runs are nudged only if they use
+  the Task tools. The hook nudges the agent once, at the threshold, to write a
   handover — not a blind auto-handover; the agent still judges the stopping
   point. The `handover-gate` prevents re-nagging until the cycle completes.
 - `vigil handover` assembles a handover (session snapshot + optional caller
   content, `--inline <path>` files, and your notes) and arms an in-process
-  `/clear`; `SessionStart` re-injects it and clears the gate. `vigil
+  `/clear`; `SessionStart` re-injects it after `/clear` (only; a plain startup, resume or
+  compact never injects it) and clears the gate. `vigil
   pause`/`resume` suspend/re-arm auto-handover (and release the gate).
   `--title "<task name>"` also renames the tmux window when the Stop hook
   dispatches `/clear` — auto mode only, so a bank of parallel sessions stays
@@ -44,6 +82,18 @@ other plugin.
   always exit 0). Without tmux, the Stop hook is loud: it tells the user to
   type `/clear` rather than silently doing nothing.
 - `/handover` command for a manual reset.
+
+## Migrating from 0.3.x
+
+State used to live in `<repo>/.claude/vigil/`. It now lives under the config dir
+(see above), and any old in-repo `.claude/vigil/` files are ignored — never read,
+never injected. Run `vigil begin` once per repo to start watching again, re-set
+any `vigil config` values, and delete the old `.claude/vigil/` directory (it can
+hold a stale `handoff.md` full of `git status` output).
+
+A pending handoff survives a crash or plain restart until the next `/clear` in
+that repo root, which then injects it (there is no expiry). To discard a stale
+one, delete `handoff.md` in the state dir (`<config dir>/vigil/<repo-key>/`).
 
 ## Composability
 

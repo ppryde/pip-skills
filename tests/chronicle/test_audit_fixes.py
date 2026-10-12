@@ -10,7 +10,7 @@ from typing import ClassVar
 
 import pytest
 
-from scripts import chrome_profile, cli, ingest, redact, store, volumes
+from scripts import cli, ingest, redact, store, volumes
 from scripts import remote as remote_mod
 from scripts.remote import SSHResult
 from scripts.transcript import fold
@@ -192,27 +192,6 @@ def test_the_documented_utc_daily_query_runs(builder):
                            extra="t.ts IS NOT NULL")
     assert list(utc) == ["2026-09-01"]
     assert utc["2026-09-01"]["cost_usd"] > 0
-
-
-# --- CH-8: open refuses non-https / dash URLs --------------------------------
-
-class TestOpenUrl:
-    @pytest.mark.parametrize("url", [
-        "--renderer-cmd-prefix=x", "javascript:alert(1)", "file:///etc/passwd",
-        "http://claude.ai/x", "https://", "https://a b", "-https://x", "",
-    ])
-    def test_hostile_urls_are_refused_before_anything_runs(self, url, monkeypatch, capsys):
-        def boom(*a, **k):
-            raise AssertionError("open must not run")
-        monkeypatch.setattr("scripts.cli.subprocess.run", boom)
-        assert cli.main(["open", "--", url]) == 2
-        assert "error" in json.loads(capsys.readouterr().err)
-
-    def test_a_normal_https_url_is_accepted_and_the_argv_is_unchanged(self):
-        url = "https://claude.ai/code/artifact/abc"
-        chrome_profile.check_url(url)
-        assert chrome_profile.open_command(url, "Profile 1") == [
-            "open", "-na", "Google Chrome", "--args", "--profile-directory=Profile 1", url]
 
 
 # --- CH-12: cost-state redaction ---------------------------------------------

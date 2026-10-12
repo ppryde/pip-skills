@@ -121,7 +121,8 @@ def test_ra_post_inline_pr_is_read_only_when_selected():
     assert "Only when the selected output is `post-inline-pr`" in review
     assert reads(review, "references/post-inline-pr.md")
     post = read_lf(RA / "references/post-inline-pr.md")
-    for needle in ("[From <alias>]:", "Confirmation gate (never auto-post)", "--input", "422"):
+    for needle in ("[From <alias>]:", "Confirmation gate (never auto-post)", "prreview.py plan",
+                   "prreview.py post", "--confirmed", "fallback_summary"):
         assert needle in post, needle
     assert "Confirmation gate" not in review
 
@@ -146,10 +147,10 @@ def test_shared_collect_and_render_is_wired_from_both_skills():
 
 def test_shared_reference_carries_every_collector_and_render_rule():
     text = read_lf(SHARED)
-    for needle in ('model: "haiku"', "Do not run `collect.py` directly", "single quotes",
+    for needle in ('"pip-agents:gatekeeper"', "Do not run `collect.py` directly", "single quotes",
                    "[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", "[A-Za-z0-9-]+", "newline or NUL",
                    "--paths=''", "gh` >= 2.48", "--since '<last_scanned_at>'",
-                   "must not interpret", "ERROR:", "stop and ask rather than escaping it",
+                   "never retries or alters it", "stderr_tail", "stop and ask rather than escaping it",
                    "do not invent extra fields", "`{{RULE_COUNT}}` is 0"):
         assert needle in text, needle
     for placeholder in ("ALIAS", "REPO", "RULE_COUNT", "COMMENT_COUNT", "PR_COUNT",
@@ -161,7 +162,9 @@ def test_shared_reference_carries_every_collector_and_render_rule():
 
 def test_clone_reviewer_no_longer_restates_the_collector_or_render_text():
     text = read_lf(CR / "SKILL.md")
-    assert "python3 <plugin>/scripts/collect.py" not in text
+    # the collect dispatch lives in the shared reference; the SKILL may name the small
+    # `check` and `cleanup` subcommands but never the full collect invocation
+    assert "--handles" not in text and "--months" not in text
     assert "| `{{RULE_COUNT}}` |" not in text
     assert reads(text, "references/persona-format.md")
     assert "disclaimer:" in read_lf(CR / "references/persona-format.md")
