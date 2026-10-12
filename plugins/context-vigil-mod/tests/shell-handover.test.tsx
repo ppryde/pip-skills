@@ -455,6 +455,61 @@ test('the archive record cannot be saved: no archive rename, the handover goes o
   expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
 })
 
+// The engine still answering the old id after the clear (a slow start): the stranded mark goes
+// to the id the clear's SessionStart carried (its transcript's name), never to the old session.
+async function strandedClear($: any, w: World, transcript: string | undefined) {
+  w.titles.set('/t/s1.jsonl', 'My work')
+  w.renameRefusedAt.add(2)
+  await $.session.start(START)
+  await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/s1.jsonl' } as never)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  await $.classic.SessionStart({ source: 'clear', transcript_path: transcript, session_title: 'Archive: My work' } as never)   // w.sessionId still 's1'
+  await w.clock.advance(500)
+}
+
+test('the stranded mark is keyed by the id the clear carried, not the not-yet-rebound engine id', async ($, on) => {
+  const w = world(on)
+  await strandedClear($, w, '/t/s2.jsonl')
+  expect(w.store.get('stranded:s2')).toMatchObject({ name: 'My work' })
+  expect(w.store.has('stranded:s1')).toBe(false)
+})
+
+test('a Windows transcript path still names the new id', async ($, on) => {
+  const w = world(on)
+  await strandedClear($, w, 'C:\\t\\s2.jsonl')
+  expect(w.store.get('stranded:s2')).toMatchObject({ name: 'My work' })
+})
+
+test('no new id known at all: no stranded mark, and it says why', async ($, on) => {
+  const w = world(on)
+  await strandedClear($, w, undefined)
+  expect([...w.store.keys()].filter(k => k.startsWith('stranded:'))).toEqual([])
+  const events = [...w.files].filter(([k]) => k.includes('/events/')).map(([, t]) => t).join('')
+  expect(events).toContain('stranded-unkeyed')
+  expect(w.notices).toContain(V.renameFailed)
+})
+
+test('stranded marks are pruned 14 days on, a malformed one at once; a moved mark counts from the move', async ($, on) => {
+  const DAY = 86_400_000
+  const now = 30 * DAY
+  const w = world(on, { now, store: {
+    'stranded:old': { name: 'A', at: now - 15 * DAY },
+    'stranded:fresh': { name: 'B', at: now - 1 * DAY },
+    'stranded:bad': { name: 'C' },
+    'stranded:s1': { name: 'D', at: now - 13 * DAY },
+  } })
+  await $.session.start(START)
+  expect(w.store.has('stranded:old')).toBe(false)
+  expect(w.store.has('stranded:bad')).toBe(false)
+  expect(w.store.has('stranded:fresh')).toBe(true)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(w.store.get('stranded:s2')).toEqual({ name: 'D', at: now })
+})
+
 test('a refused archive rename still clears and resumes, and says so', async ($, on) => {
   const w = world(on)
   w.titles.set('/t/s1.jsonl', 'My work')
