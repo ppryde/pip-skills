@@ -45,7 +45,11 @@ class SeatError(Exception):
 
 def _private_write(path: Path, text: str) -> None:
     """Owner-only file (a rulebook may hold a private persona's rules)."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    except OSError as exc:
+        raise SeatError(f"cannot write {path}: {exc.strerror or exc}") from exc
+    os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as fh:
         fh.write(text)
 
@@ -115,7 +119,7 @@ def seat_briefs(
         raise SeatError("--tests must not contain a newline")
     lens, name, header, rules, exceptions = _rules_for(ref, reviewers_dir)
     work = Path(work_dir)
-    work.mkdir(parents=True, exist_ok=True)
+    work.mkdir(parents=True, exist_ok=True, mode=0o700)
     given = {"intent": intent, "claims": claims, "context": list(context or [])}
     base = {"brief": "pip-agents/1", "kind": "review", "ref": ref.name, "target": _abs(target, "target")}
     batches: list[list[Rule]] = plan(name, rules) if lens == "rules" else [[]]
@@ -171,7 +175,7 @@ def claim_calls(
     chunks = [sent[i:i + per_call] for i in range(0, len(sent), per_call)]
     kept = chunks if max_calls is None else chunks[:max_calls]
     work = Path(work_dir)
-    work.mkdir(parents=True, exist_ok=True)
+    work.mkdir(parents=True, exist_ok=True, mode=0o700)
     calls = []
     for n, chunk in enumerate(kept, 1):
         claims = [{"id": f.fingerprint or f.id, "claim": _claim_text(f),

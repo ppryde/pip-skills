@@ -59,6 +59,7 @@ def _emit(obj: dict) -> None:
 def _private_write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as fh:
         fh.write(text)
 
@@ -152,6 +153,9 @@ def cmd_check_collect(args) -> tuple[dict, int]:
     if p["exit_code"] != 0 or p["timed_out"]:
         return {"status": "failed", "exit_code": p["exit_code"], "timed_out": p["timed_out"],
                 "stderr_tail": p.get("stderr_tail", "")}, 1
+    if not p.get("out"):
+        return {"status": "failed", "exit_code": 0, "timed_out": False,
+                "stderr_tail": "the gatekeeper reported no snapshot file (out is null)"}, 1
     return {"status": "ok", "snapshot": p["out"], "counts": p["counts"],
             "injection_attempts": env["injection_attempts"]}, 0
 

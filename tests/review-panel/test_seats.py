@@ -299,3 +299,32 @@ def test_adversarial_flow_from_brief_to_report(tmp_path, wd):
     assert rec["counts"]["refuted"] == 1 and rec["counts"]["unverified"] == 0
     assert [f["severity"] for f in rec["findings"]] == ["info"]  # important -> warning -> weakened to info
     assert rec["dropped"][0]["reason"].startswith("unverified:")
+
+
+def test_symlink_at_a_brief_path_is_a_json_error_not_a_traceback(tmp_path, wd):
+    args = ("brief", "--reviewer", "general", "--target", wd / "diff.patch", "--work-dir", wd)
+    run(tmp_path, *args)
+    victim = tmp_path / "victim"
+    victim.write_text("keep")
+    brief = next(f for f in wd.iterdir() if f.name.startswith("brief"))
+    brief.unlink()
+    os.symlink(victim, brief)
+    out = run(tmp_path, *args, expect=1)
+    assert out["status"] == "error"
+    assert victim.read_text() == "keep"
+
+
+def test_preexisting_loose_files_are_tightened_and_workdir_is_private(tmp_path, wd):
+    run(tmp_path, "brief", "--reviewer", "general", "--target", wd / "diff.patch", "--work-dir", wd)
+    files = [f for f in wd.iterdir() if f.name.startswith("brief")]
+    assert files
+    for f in files:
+        f.chmod(0o644)
+    run(tmp_path, "brief", "--reviewer", "general", "--target", wd / "diff.patch", "--work-dir", wd)
+    assert all(f.stat().st_mode & 0o777 == 0o600 for f in files)
+    fresh = tmp_path / "fresh"
+    (tmp_path / "d2").mkdir()
+    (tmp_path / "d2" / "diff.patch").write_text("x")
+    run(tmp_path, "brief", "--reviewer", "general", "--target", tmp_path / "d2" / "diff.patch",
+        "--work-dir", fresh)
+    assert fresh.stat().st_mode & 0o777 == 0o700

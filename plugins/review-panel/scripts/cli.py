@@ -357,7 +357,7 @@ def cmd_brief(args) -> int:
             target_kind=args.target_kind, intent=args.intent, claims=args.claims, context=args.context,
             tests=args.tests,
         )
-    except (ConfigError, SeatError, LensError) as exc:
+    except (ConfigError, SeatError, LensError, OSError) as exc:
         _emit({"status": "error", "error": str(exc)})
         return 1
     _emit({"status": "ok", "seats": seats})
@@ -407,10 +407,14 @@ def cmd_claims(args) -> int:
     if not isinstance(raw, list):
         raise CliError(f"{args.findings}: findings must be a list")
     findings = [finding_from_dict(d) for d in raw if isinstance(d, dict)]
-    result = claim_calls(
-        findings, target=args.target, work_dir=Path(args.out_dir), role="arbiter" if args.disputed else "critic",
-        per_call=args.per_call, max_calls=args.max_calls, drop_twins=not args.disputed,
-    )
+    try:
+        result = claim_calls(
+            findings, target=args.target, work_dir=Path(args.out_dir), role="arbiter" if args.disputed else "critic",
+            per_call=args.per_call, max_calls=args.max_calls, drop_twins=not args.disputed,
+        )
+    except (SeatError, OSError) as exc:
+        _emit({"status": "error", "error": str(exc)})
+        return 1
     _emit({"status": "ok", **result})
     return 0
 

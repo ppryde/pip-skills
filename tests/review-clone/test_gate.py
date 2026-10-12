@@ -301,3 +301,21 @@ def test_rulebook_matches_review_panels(tmp_path):
 
 def test_vendored_planner_is_the_repo_planner():
     assert (PLUGIN / "vendor/pip-agents/scripts/batching.py").read_bytes() == (ROOT / "tools" / "batching.py").read_bytes()
+
+
+def test_check_collect_refuses_a_null_snapshot_path(tmp_path, home):
+    out = collect_brief(tmp_path, home)
+    env = envelope(out["prompt"])
+    env["payload"]["out"] = None
+    got = check(tmp_path, home, out["brief"], write(tmp_path / "m.md", env), expect=1)
+    assert got["status"] == "failed" and "no snapshot" in got["stderr_tail"]
+
+
+def test_private_files_are_tightened_even_when_they_pre_exist(tmp_path, home):
+    wd = tmp_path / "wd"
+    wd.mkdir()
+    (wd / "brief-collect.txt").write_text("old")
+    (wd / "brief-collect.txt").chmod(0o644)
+    run(tmp_path, home, "brief-collect", "--alias", "jen", "--handles", "bob", "--repo", "o/r", "--months", "3",
+        "--work-dir", wd)
+    assert (wd / "brief-collect.txt").stat().st_mode & 0o777 == 0o600
