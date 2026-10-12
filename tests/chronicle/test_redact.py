@@ -242,8 +242,24 @@ class TestPython38Grammar:
     @pytest.mark.parametrize("name", ["redact.py"])
     def test_the_remote_side_imports_nothing_from_chronicle(self, name):
         tree = ast.parse((SCRIPTS / name).read_text())
-        roots = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
-        roots |= {n.module.split(".")[0] for n in ast.walk(tree)
-                  if isinstance(n, ast.ImportFrom) and n.module}
+        modules = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+        modules |= {n.module for n in ast.walk(tree)
+                    if isinstance(n, ast.ImportFrom) and n.module}
+        # The ONE chronicle import is permits.py (stdlib-only, bundled right
+        # after this file on a remote box), and it is guarded: see below.
+        chronicle = {m for m in modules if m.split(".")[0] == "scripts"}
+        assert chronicle <= {"scripts.permits"}, chronicle
+        roots = {m.split(".")[0] for m in modules} - {"scripts"}
         assert roots <= {"json", "os", "re", "sys", "time", "stat", "typing", "types", "hashlib",
                          "redact", "errno", "__future__", "collections"}, roots
+
+    def test_the_permits_import_is_skipped_when_bundled(self):
+        """Bundled, redact IS `__main__` and permits.py's source follows it: the
+        import must not run there (a `scripts/` dir in the remote cwd would
+        shadow the bundle)."""
+        tree = ast.parse((SCRIPTS / "redact.py").read_text())
+        guarded = [n for n in tree.body if isinstance(n, ast.If)
+                   and any(isinstance(b, ast.ImportFrom) and b.module == "scripts.permits"
+                           for b in n.body)]
+        assert len(guarded) == 1
+        assert ast.unparse(guarded[0].test) == "__name__ != '__main__'"

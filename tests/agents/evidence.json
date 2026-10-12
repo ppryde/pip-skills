@@ -1,0 +1,41 @@
+{
+  "format": 1,
+  "personas": {},
+  "unobserved": {
+    "pip-agents:explorer": {
+      "Glob": "no pip-agents:* runs yet (consumer PRs B-G pending); expands the target",
+      "Grep": "no pip-agents:* runs yet (consumer PRs B-G pending); the two-grep pass over a target list",
+      "Read": "no pip-agents:* runs yet (consumer PRs B-G pending); confirms a hit is an import or attribute use"
+    },
+    "pip-agents:gatekeeper": {
+      "Bash": "no pip-agents:* runs yet (consumer PRs B-G pending); runs the one named script (collect.py)",
+      "Monitor": "no pip-agents:* runs yet (consumer PRs B-G pending); backs the charter text 'use Monitor, not sleep'; explicit grant unverified",
+      "Read": "no pip-agents:* runs yet (consumer PRs B-G pending); confirms out: and reads counts"
+    },
+    "pip-agents:reviewer-correctness": {
+      "Bash": "no pip-agents:* runs yet (consumer PRs B-G pending); git diff/show/grep and the brief's tests: command; overseer-reviewer and GR reviewers were Bash-heavy",
+      "Monitor": "no pip-agents:* runs yet (consumer PRs B-G pending); backs the charter text 'use Monitor, not sleep'; explicit grant resolving in a plugin agent is unverified",
+      "Read": "no pip-agents:* runs yet (consumer PRs B-G pending); reads the diff and the files under test"
+    },
+    "pip-agents:reviewer-rules": {
+      "Glob": "no pip-agents:* runs yet (consumer PRs B-G pending); expands the target file list",
+      "Grep": "no pip-agents:* runs yet (consumer PRs B-G pending); doctrine tables carry grep hints",
+      "Read": "puritan doctrine agents used Read only (22 of 22 calls, 9 runs, below min-runs)"
+    },
+    "pip-agents:reviewer-scope": {
+      "Glob": "no pip-agents:* runs yet (consumer PRs B-G pending); expands the target",
+      "Grep": "no pip-agents:* runs yet (consumer PRs B-G pending); callers and consumers of changed public names",
+      "Read": "no pip-agents:* runs yet (consumer PRs B-G pending); reads the function-context diff"
+    },
+    "pip-agents:reviewer-security": {
+      "Glob": "no pip-agents:* runs yet (consumer PRs B-G pending); expands the target",
+      "Grep": "no pip-agents:* runs yet (consumer PRs B-G pending); source-to-sink tracing",
+      "Read": "no pip-agents:* runs yet (consumer PRs B-G pending); reads the diff file the lead wrote"
+    },
+    "pip-agents:validator": {
+      "Glob": "no pip-agents:* runs yet (consumer PRs B-G pending); expands the target",
+      "Grep": "no pip-agents:* runs yet (consumer PRs B-G pending); locates the cited lines",
+      "Read": "no pip-agents:* runs yet (consumer PRs B-G pending); reads the cited claims' files"
+    }
+  }
+}
