@@ -146,3 +146,74 @@ def test_reply_names():
     assert bundle.reply_name("verifier", round_no=1, slot=None, chunk=None) == "verification.md"
     assert bundle.reply_name("implementer", round_no=1, slot=None, chunk=3) == "c3.md"
     assert bundle.reply_name("fixer", round_no=2, slot=None, chunk=None) == "r2-fix.md"
+
+
+# --- PR B (lean): fewer facts, role-gated knowledge, planner-only calibration -----------
+
+def _many_facts(repo, n):
+    conn = db.connect(repo, migrate=False)
+    for i in range(n):
+        save_fact(conn, Fact(id=f"KB-{100 + i}", statement=f"dbt fact number {i}", tags=["dbt"],
+                             created="2026-09-01", verified="2026-09-01"))
+
+
+def test_knowledge_defaults_to_eight_facts(repo, capsys):
+    _many_facts(repo, 20)
+    _prep(repo, capsys, "--stage", "implementation", "--role", "implementer")
+    text = (dispatch_dir(repo, "WF-001", "implementation") / "bundle-implementer-c1-r1.md").read_text()
+    assert text.count("dbt fact number") + text.count("dbt needs --target ci") == bundle.MAX_FACTS == 8
+
+
+def test_knowledge_max_is_configurable(repo, capsys):
+    _many_facts(repo, 20)
+    (repo / ".overseer" / "config.local.json").write_text('{"knowledge_max": 3}')
+    _prep(repo, capsys, "--stage", "implementation", "--role", "implementer")
+    text = (dispatch_dir(repo, "WF-001", "implementation") / "bundle-implementer-c1-r1.md").read_text()
+    assert text.count("dbt fact number") + text.count("dbt needs --target ci") == 3
+
+
+@pytest.mark.parametrize("bad", ['"x"', "0", "-2", "true"])
+def test_bad_knowledge_max_falls_back_to_the_default(repo, capsys, bad):
+    _many_facts(repo, 20)
+    (repo / ".overseer" / "config.local.json").write_text('{"knowledge_max": %s}' % bad)
+    _prep(repo, capsys, "--stage", "implementation", "--role", "implementer")
+    text = (dispatch_dir(repo, "WF-001", "implementation") / "bundle-implementer-c1-r1.md").read_text()
+    assert text.count("dbt fact number") + text.count("dbt needs --target ci") == 8
+
+
+@pytest.mark.parametrize("role,stage", [("fixer", "impl-review")])
+def test_fixer_gets_no_knowledge_unless_asked(repo, capsys, role, stage):
+    code, _, _ = _prep(repo, capsys, "--stage", stage, "--role", role, "--round", "1")
+    assert code == 0
+    d = dispatch_dir(repo, "WF-001", stage)
+    text = (d / "bundle-fixer-r1.md").read_text()
+    assert "dbt needs --target ci" not in text
+    code, _, _ = _prep(repo, capsys, "--stage", stage, "--role", role, "--round", "1", "--var", "knowledge=1")
+    assert code == 0
+    assert "dbt needs --target ci" in (d / "bundle-fixer-r1.md").read_text()
+
+
+def test_verifier_bundle_never_carries_facts_and_the_knowledge_var_is_refused(repo, capsys):
+    code, _, _ = _prep(repo, capsys, "--stage", "verification", "--role", "verifier")
+    assert code == 0
+    d = dispatch_dir(repo, "WF-001", "verification")
+    assert "dbt needs --target ci" not in next(d.glob("bundle-verifier*.md")).read_text()
+    code, _, err = _prep(repo, capsys, "--stage", "verification", "--role", "verifier",
+                         "--var", "knowledge=1")
+    assert code == 1 and "built-in" in err
+
+
+def test_knowledge_var_is_still_refused_for_other_roles(repo, capsys):
+    code, _, err = _prep(repo, capsys, "--stage", "impl-review", "--role", "reviewer", "--slot", "A",
+                         "--var", "knowledge=1")
+    assert code == 1 and "built-in" in err
+
+
+def test_calibration_only_computed_for_the_planner(repo, capsys, monkeypatch):
+    calls = []
+    real = bundle._calibration
+    monkeypatch.setattr(bundle, "_calibration", lambda a: calls.append(1) or real(a))
+    _prep(repo, capsys, "--stage", "implementation", "--role", "implementer")
+    assert calls == []
+    _prep(repo, capsys, "--stage", "planning", "--role", "planner")
+    assert calls == [1]

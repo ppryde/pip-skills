@@ -34,6 +34,8 @@ EXEMPT_DANGLING: dict[str, dict[str, str]] = {
     "plugins/overseer/skills/ledger": {
         "references/telemetry.md": "names the orchestrate skill's reference (cross-skill pointer)",
         "references/review-loop.md": "names the orchestrate skill's reference (cross-skill pointer)",
+        "references/gates.md": "names the orchestrate skill's reference (cross-skill pointer)",
+        "references/cli.md": "names the orchestrate skill's generated CLI reference (cross-skill pointer)",
     },
 }
 

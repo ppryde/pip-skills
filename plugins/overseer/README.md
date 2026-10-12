@@ -33,7 +33,8 @@ adversarial review loops, integrated with sprint planning and superpowers.
 - Living knowledge base: durable facts (rows in `board.db`) with per-fact verification dates;
   facts marked `[STALE]` after 90 days untouched; retirement (never deleted, supports
   `superseded_by` chains); `knowledge/` is a regenerated read-only view with a `knowledge.md`
-  index of active/stale/retired sections; `{{knowledge}}` injection into orchestration templates.
+  index of active/stale/retired sections; `{{knowledge}}` injection into orchestration templates (fixer bundles carry
+  none unless dispatched with `--var knowledge=1`).
 - Context stewardship via the **`vigil`** plugin (a soft dependency): a promoted
   orchestrator caps its own context creep by handing its ledger rollup to vigil,
   which resets context in-process via `/clear` and re-injects the handover.
@@ -260,11 +261,28 @@ interpreter missing), the hook fails open for every tool.
 - **orchestrate** — drive a card end-to-end: delegated planning and
   implementation, adversarial review loops scaled by complexity (1/2/3
   reviewers, capped rounds), plan + merge gates with S-card PR stacking,
-  drift/budget/unresponsiveness watchdogs, and context-stewardship handoff via
+  drift/budget watchdogs, and context-stewardship handoff via
   the vigil plugin; injects knowledge base facts into templates via
   `{{knowledge}}`. A lean
   driver (`SKILL.md`) with detailed sub-playbooks in `references/` loaded only
-  when a stage needs them, to keep the orchestrator's context small.
+  when a stage needs them, to keep the orchestrator's context small. Its CLI
+  signature block and `references/cli.md` are generated from the argparse parser
+  (`scripts/gen_cli_ref.py`, drift fails a test); `cli.py help <verb>` prints one
+  verb's line, `show <id> --section Plan` one section.
+
+A `SessionStart` hook (`hooks/session-start.sh`, matcher `startup|resume|clear`)
+prints one line naming the cards in flight (`overseer: 2 in-flight (WF-261
+impl-review, WF-263 planning). /overseer:ledger to resume.`) in a repo that ran
+`overseer init`; it replaces the ledger skill's old "at the start of any session"
+auto-trigger. It reads the board read-only and never imports the CLI or PyYAML.
+
+Knobs for dispatch bundles (repo `.overseer/config.json`): `knowledge_max` (default
+8) caps the facts injected per bundle; fixer bundles carry none unless
+`dispatch-prep ... --var knowledge=1`. The impl-review `diff.patch` leaves out
+lockfiles and binaries (listed in a footer), is capped at 200 KB (stat plus whole
+per-file hunks, omitted files named with the `git diff` to read each), and starts
+with a `# WARNING` line when the worktree has uncommitted changes the diff cannot
+show.
 
 ## Commands
 

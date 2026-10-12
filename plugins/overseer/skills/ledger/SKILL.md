@@ -4,175 +4,101 @@ description: >
   Persistent per-repo work ledger: cards, stages, sprints, token budgets, a
   durable knowledge base of facts, and session resume/handoff. Use when starting
   a piece of tracked work, when the user asks "what's in flight", "resume where
-  we left off", "start a new card/task", "log progress", to record or recall a
-  durable fact, or at the start of any session in a repo already tracked by
-  overseer (a `board.db` entry for cards, with sprints, usage and knowledge
-  as files, all under the central per-repo folder). The state layer beneath the orchestrate
-  skill; drive it through the overseer CLI, never by editing files.
+  we left off", "start a new card/task", "log progress", or to record or recall
+  a durable fact. The state layer beneath the orchestrate skill; drive it
+  through the overseer CLI, never by editing files. (A SessionStart notice lists
+  in-flight cards in a tracked repo; this skill is not loaded for it.)
 effort: medium
 ---
 
 # Overseer Ledger
 
-Manage the overseer ledger. Cards — planned, in-flight and completed work —
-live in a single per-repo SQLite `board.db`, alongside sprints, usage and the
-knowledge base, in one central per-repo folder
-(`$CLAUDE_CONFIG_DIR/overseer/<repo-label>/` by default, overridable via
-`overseer init`/`OVERSEER_CENTRAL`), shared across every worktree of this
-repo so claims are atomic; `board.db` is the source of truth, read directly
-by the CLI, dashboard and `resume` (the generated `ledger.md` view is
-retired, WF-072). Sprints and knowledge facts live in `board.db` too; the
-`sprints/` and `knowledge/` files under the **state root** are generated views.
-A legacy `.workflow/` tree is
-imported into the central folder once, on first connect after upgrade, then
-left in place unused. **Never edit `board.db` or state-root files
-directly**; drive everything through the CLI:
+Cards (planned, in-flight, completed work), sprints, usage and the knowledge
+base live in one per-repo SQLite `board.db` in a central folder
+(`$CLAUDE_CONFIG_DIR/overseer/<repo-label>/`, overridable with
+`overseer init` / `OVERSEER_CENTRAL`), shared across every worktree so claims
+are atomic. The `sprints/` and `knowledge/` files under the state root are
+generated views. **Never edit `board.db` or state-root files directly**; drive
+everything through the CLI, always in this one form:
 
 ```bash
-python plugins/overseer/scripts/cli.py --root <repo-root> <command> ...
+python3 "<base directory>/../../scripts/cli.py" --root . <verb> ...
 ```
 
-(When overseer is installed as a plugin, the scripts live under the plugin
-root instead — locate `cli.py` relative to this SKILL.md.) The CLI needs
-Python 3.11+ with the packages in `requirements.txt` (PyYAML, httpx); hooks use
-`OVERSEER_PYTHON` or a repo `.venv` when set.
+`<base directory>` is the folder this file loaded from (Claude Code names it
+when it loads a skill); the CLI is two levels up. Never search the filesystem
+for it. `help <verb>` prints one verb's line; the orchestrate skill's
+`references/cli.md` lists every verb. Needs Python 3.11+ and the packages in
+`requirements.txt`.
 
 ## On invocation — always check for in-flight work first
-
-```bash
-python .../cli.py --root . resume
-```
-
-- If cards are in flight, report them to the user and offer per card:
-  **resume / park / block / abandon**. Never silently start fresh.
-- `resume` lists only in-flight and blocked cards.
-- Resuming a card: read it back via the CLI (`show <id> --json` for the plan
-  and decisions; plain `show <id>` prints only the title and section
-  headings), re-enter at the recorded stage — never earlier, never assume later. If the report shows
-  `(MISSING)` next to the worktree, recreate it from the recorded branch
-  before continuing.
-- If no state root exists yet and the user wants tracked work: run `init`.
+Run `resume`.
+- Cards in flight → report them and offer per card: **resume / park / block /
+  abandon**. Never silently start fresh. `resume` lists only in-flight and
+  blocked cards.
+- Resuming a card: `show <id> --section Plan` (or `Decisions`); plain `show <id>`
+  prints the title and section headings, `--json` everything. Re-enter at the
+  recorded stage — never earlier, never assume later. A `(MISSING)` worktree is
+  recreated from the recorded branch before continuing.
+- No state root yet and the user wants tracked work: `init`.
 
 ## Starting a new piece of work
-
 1. `new-card --title "..." [--jira PROJ-142] [--complexity S|M|L] [--estimate 300k] [--goal "..."]`
-   - Use the Jira key as the id when one exists; otherwise an id is minted.
-   - Complexity bands for estimates: S ≈ 100–200k, M ≈ 300–500k, L ≈ 700k+.
-   - **Write a cold-pickup goal.** The goal must let a fresh session start cold —
-     name *what* changes, *why*, and *where* (when not obvious from the title).
-     If the user gave a goal, use it. If you have the context, draft a 1–3
-     sentence goal and **show it before saving** — never save `_(to be written)_`
-     or a vague goal silently. If you lack context, ask ≤3 questions (user-visible
-     outcome / area touched / constraints), then draft.
-2. `set-stage <id> bootstrap`, then: pull the repo's base branch (detect it, do not assume `main`), create a worktree and
-   branch (branch name: `<type>/<id>-<slug>`), record them with
-   `set-field <id> --branch ... --worktree ...`.
-3. Advance stages as work proceeds:
-   `bootstrap → planning → plan-review → implementation → impl-review →
-   verification → awaiting-merge`.
+   (the Jira key is the id when one exists; otherwise one is minted. Bands: S ≈
+   100–200k, M ≈ 300–500k, L ≈ 700k+.)
+   - **Write a cold-pickup goal**: what changes, why, and where. Use the user's
+     goal; else draft 1–3 sentences and **show it before saving** — never save
+     `_(to be written)_` or a vague goal silently. Lacking context, ask ≤3
+     questions (outcome / area touched / constraints), then draft.
+2. `set-stage <id> bootstrap`; pull the repo's base branch (detect it, do not
+   assume `main`), create a worktree and branch (`<type>/<id>-<slug>`), record
+   them with `set-field <id> --branch ... --worktree ...`.
+3. Advance: `bootstrap → planning → plan-review → implementation → impl-review →
+   verification → awaiting-merge`. Forward moves are gated by evidence (a
+   `GATE:` refusal is explained in the orchestrate skill's `references/gates.md`).
 
 ## During work
-
-- **Progress:** `log-progress <id> --note "what happened" --tokens 120k` for
-  manual, off-dispatch progress only. Exit code 2 means the 2× budget
-  tripwire fired: **stop the card, tell the user why it overran.** Under
-  orchestration, the `SubagentStop` report hook logs each dispatched agent's
-  progress, commits and real usage automatically — you don't call this after
-  a dispatch (orchestrate `references/telemetry.md`).
-- **Orchestration verbs (orchestrate skill):** `bootstrap`, `dispatch-prep`,
+- **Progress:** `log-progress <id> --note "…" --tokens 120k` for manual,
+  off-dispatch progress only. Exit 2 = the 2× budget tripwire: **stop the card
+  and tell the user why it overran.** Under orchestration the `SubagentStop`
+  report hook logs each agent's progress, commits and usage automatically
+  (orchestrate `references/telemetry.md`); you do not call this after a dispatch.
+- **Orchestration verbs** (orchestrate skill): `bootstrap`, `dispatch-prep`,
   `set-section`, `release`, `facts --pending`, `accept-fact`, `reject-fact`.
-  Hook backends (not for hand use): `report-hook`, `pretool-hook`.
+  Hook backends, not for hand use: `report-hook`, `pretool-hook`.
 - **Reviews:** `log-review <id> --stage plan-review --reviewers 2 --verdict
-  "approved"` for a manually-run review round only. Under orchestration, the
-  report hook writes each dispatched reviewer's verdict to the card's
-  `## Review log` automatically — you never call this in the dispatch review
-  loop (orchestrate `references/review-loop.md`). Verdicts are short and
-  factual ("found wanting — 2 findings, 1 mortal").
+  "approved"` for a manually-run round only; the report hook writes dispatched
+  verdicts to `## Review log` automatically (orchestrate
+  `references/review-loop.md`). Verdicts are short and factual.
 - **Blocked:** `block <id> --reason "user: <question>"` for a human/agent
-  blocker; `unblock <id>` when cleared. For card→card ordering use `depends`
-  (see Relationships), not a `block` reason.
-- **Decisions:** significant decisions and trade-offs belong in the card's
-  `## Decisions` section, part of its `board.db` body — append with
-  `append-body <id> Decisions --text "- chose X over Y"` (heading given
-  bare or as `## Decisions`, both work). Appends server-side, so you never
-  read-modify-write the whole body: pass `--text -` to
-  pipe stdin (or `--text-file`) instead. A missing section is created
-  at the end of the body.
-- **Amending a goal:** never silently rewrite a card's goal — confirm the new
-  wording with the user first. The goal is one of the by-hand fields under the
-  prose exception, so it gets extra care.
-- **Corrupt cards suspected:** `rebuild-index` only removes the retired
-  `ledger.md` and repairs nothing. A malformed card row raises a parse error
-  naming the card; fix that card with `set-field`/`set-section` or inspect it
-  with `show <id> --json`.
-
-## Relationships (epics, dependencies, parking)
-- **Epics are emergent.** Set a card's `parent` with `set-field <id> --parent
-  <epic-id>` (`--parent ""` clears). A card with children *is* an epic — the
-  index shows it with a rollup (`2/4 done · 260k/900k`) and its children nested.
-  Keep trees shallow; deep nesting is discouraged.
-- **Dependencies gate readiness.** Record card→card ordering with
-  `depends <id> --on <dep>` (`--off` to remove). A card is **ready** only when
-  every `depends_on` card is `done`; the index/resume show `ready` or
-  `waiting on <id>`. Use `depends`, not `blocked_on`, for card ordering —
-  `blocked_on` is for human/agent blocks only (`user:`/`agent:`). Cycles are
-  refused. `depends --on` targets must be live cards — you can't add a
-  dependency on an already-done (archived) card.
-- **Park to shelve.** `park <id>` sets a card aside without a blocker (distinct
-  from `block`, which needs a reason, and `abandon`, which is terminal). It
-  preserves stage/branch/worktree; `unpark <id>` resumes it (→ in-flight if it
-  had a stage, else planned).
+  blocker; `unblock <id>` when cleared. Card→card ordering is `depends`, not a
+  `block` reason (`references/relationships.md`).
+- **Decisions:** significant decisions and trade-offs go in the card's
+  `## Decisions`: `append-body <id> Decisions --text "- chose X over Y"` (server-side
+  append; `--text -` pipes stdin, `--text-file` reads a file; a missing section
+  is created).
+- **Amending a goal:** never silently rewrite it — confirm the new wording with
+  the user first.
+- **Corrupt card suspected:** `rebuild-index` repairs nothing. A malformed row
+  raises a parse error naming the card; fix it with `set-field`/`set-section`
+  or inspect it with `show <id> --json`.
 
 ## Finishing
-
 - `done <id>` when merged (archives the card); `abandon <id>` otherwise.
-- The verification stage expects evidence in the card's `## Verification`
-  section: test output, mypy/ruff results, end-to-end observation. This is a
-  convention the orchestrator checks before moving a card to `awaiting-merge`;
-  the CLI does not enforce it.
-- Token accounting: `log-usage <id> --role <role>` records usage, `usage
-  [--card <id>] [--json]` summarises it and `calibration [--json]` compares
-  estimates with actuals.
+- The verification stage records evidence in `## Verification` (tests, mypy/ruff,
+  an end-to-end observation); the gate checks it before `awaiting-merge`.
+- Tokens: `log-usage <id> --role <role>` records usage, `usage [--card <id>]
+  [--json]` summarises, `calibration [--json]` compares estimates with actuals.
 
-## Sprints
-
-- `new-sprint 2026-07-S1 --estimate 2.1M --goal "..."`, assign cards with
-  `--sprint` at creation, and `rollup-sprint <id>` after any card change to
-  refresh the sprint's card table and budget actuals.
-
-## Knowledge base
-
-Durable, falsifiable facts in `board.db`; `knowledge/` is a generated view.
-
-- `add-fact --statement "<falsifiable sentence>" --tags "testing,auth" --source <card-id> [--body "..."]`
-  mints the next `KB-nnn`. Only mint facts that are falsifiable — "the auth
-  fixtures share a DB schema", not "auth is tricky".
-- `verify-fact <id>` when a fact is relied on and still holds — bumps its
-  verified date and clears any stale mark.
-- `retire-fact <id> [--superseded-by <id>]` when a fact is refuted or
-  superseded — retires it, never deletes it.
-- `facts [--tag <t>] [--stale] [--json]` lists live facts; facts older than
-  90 days show `[STALE]` and must be re-verified before they are trusted.
-
-## Backup and restore
-
-The live `board.db` and state root are never committed. `backup`/`restore`
-are the bridge to git — a diffable, mergeable snapshot in the repo.
-
-- `backup [--dir PATH]` dumps every table to JSON into
-  `.overseer/backups/` (or `--dir`), atomically. Run it before a merge or a push you want a safety net for.
-- `restore [--dir PATH]` rebuilds the central state root from a backup:
-  cards upsert by id with last-modified-wins, board-identity meta
-  (`repo_root`, `schema_version`) is never overwritten, and sprints, facts and
-  `usage.jsonl` are restored only where absent (fill-gaps, never clobbers).
-  Refuses loudly on an unknown schema or bad JSON.
-- `restore --from-bak FILE` puts back the pre-0.27.0 `board.db.pre-v2.*.bak`.
-- A repo that has run `init` gets an opt-in `PreToolUse` hook that runs
-  `backup` and commits `.overseer/backups/` before a Claude-issued `git push`
-  proceeds, so the push carries the snapshot.
+## Read when you reach it
+| File | Read when |
+|---|---|
+| `references/relationships.md` | Epics, `depends`, `park`/`unpark` |
+| `references/sprints.md` | `new-sprint`, `rollup-sprint`, sprint status |
+| `references/knowledge.md` | `add-fact`, `verify-fact`, `retire-fact`, `facts` |
+| `references/backup.md` | `backup`, `restore`, the pre-push snapshot hook |
 
 ## Reporting style
-
-Concise and factual, with the odd dry aside. Lead with card id and stage;
-budgets as `actual/estimate`. The user reads the board (CLI/dashboard), not
-your transcript — keep `board.db` the place where truth lives.
+Concise and factual, the odd dry aside. Lead with card id and stage; budgets as
+`actual/estimate`. The user reads the board, not your transcript — `board.db` is
+where truth lives.
