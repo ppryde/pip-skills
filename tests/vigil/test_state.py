@@ -65,6 +65,47 @@ class TestConsume:
         assert st.clear_flag(tmp_path).exists()
 
 
+    def test_two_racing_consumers_exactly_one_wins(self, tmp_path):
+        import threading
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        for _ in range(50):
+            st.cooldown_marker(tmp_path).unlink(missing_ok=True)  # let the next arm through
+            assert st.request_clear(tmp_path, "H") == "armed"
+            barrier = threading.Barrier(2)
+            wins: list[bool] = []
+
+            def consume() -> None:
+                barrier.wait()
+                wins.append(st.consume_clear_flag(tmp_path))
+
+            threads = [threading.Thread(target=consume) for _ in range(2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            assert sorted(wins) == [False, True]
+
+    def test_loser_of_the_unlink_race_reports_false(self, tmp_path, monkeypatch):
+        # Deterministic: the flag passes the regular-file check, then another
+        # consumer removes it before our unlink. The old exists-then-unlink
+        # code returned True here, so both consumers dispatched /clear.
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "H")
+        real = st.marker_exists
+
+        def raced(path):
+            seen = real(path)
+            if path == st.clear_flag(tmp_path):
+                path.unlink()  # the other consumer wins here
+            return seen
+
+        monkeypatch.setattr(st, "marker_exists", raced)
+        assert st.consume_clear_flag(tmp_path) is False
+        assert not st.cooldown_marker(tmp_path).exists()
+
+
 class TestConsumeHandoff:
     def test_returns_text_and_archives(self, tmp_path):
         ensure_root(tmp_path)

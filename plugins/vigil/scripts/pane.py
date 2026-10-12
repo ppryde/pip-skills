@@ -3,7 +3,7 @@
 Ported from skills/context-vigil's pane.py. Safe means: the prompt box is on
 screen (a ``❯`` row directly under a full-width rule), it holds nothing the
 person typed (the idle placeholder is drawn dim, SGR 2, and does not count), and
-no menu/dialog footer is showing. Anything we cannot read is unsafe: typing
+no menu/dialog footer or running-turn spinner (``esc to interrupt``) is showing. Anything we cannot read is unsafe: typing
 ``/clear`` + Enter into a dialog can answer a permission or trust prompt.
 """
 from __future__ import annotations
@@ -15,7 +15,13 @@ import subprocess
 _SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 _OTHER_ESC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
 _RULE = re.compile(r"^\s*─{10,}\s*$")
-_FOOTER = re.compile(r"(?i)enter to (select|confirm)|esc to (cancel|continue)")
+# Pattern strings are module constants so tests/vigil/test_shared_constants.py (VG-9)
+# can pin plugins/vigil and skills/context-vigil to the same wording.
+FOOTER_PATTERN = r"(?i)enter to (select|confirm)|esc to (cancel|continue)"
+# A running turn: the spinner line reads "(12s · ↓ 1.2k tokens · esc to interrupt)".
+BUSY_PATTERN = r"(?i)esc to interrupt"
+_FOOTER = re.compile(FOOTER_PATTERN)
+_BUSY = re.compile(BUSY_PATTERN)
 _BLANKS = " \t\xa0"
 _UNREADABLE = "?"  # typed_text sentinel: an SGR we cannot parse, so the row counts as typed
 
@@ -73,6 +79,8 @@ def hold_reason(screen: str) -> str | None:
         return "no empty prompt box is on screen"
     if _FOOTER.search(plain(screen)):
         return "a dialog or permission prompt is open"
+    if _BUSY.search(plain(screen)):
+        return "the session is busy (a turn is running)"
     if typed_text(row) != "":
         return "the prompt box is not empty"
     return None

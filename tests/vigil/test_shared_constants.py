@@ -98,3 +98,9 @@ def test_resume_prompts_name_their_own_tag_and_the_handover():
     for tag, text in (("vigil:", vigil), ("context-vigil:", skill), ("[context-vigil-mod]", mod_prompt.group(1))):
         assert text.startswith(tag), (tag, text)
         assert "handover" in text and "esume" in text, text
+
+
+def test_pane_safety_patterns_are_shared_by_vigil_and_skill():
+    # Both refuse to type into a dialog footer or a running turn; the wording must not drift.
+    for name in ("FOOTER_PATTERN", "BUSY_PATTERN"):
+        assert py_const(VIGIL / "pane.py", name) == py_const(SKILL / "pane.py", name), name

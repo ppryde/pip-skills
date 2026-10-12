@@ -226,14 +226,14 @@ def cmd_stop_guard_hook(args: argparse.Namespace) -> int:
 def cmd_pane_check_hook(args: argparse.Namespace) -> int:
     """Read-only Stop-hook helper: may the armed ``/clear`` be typed now?
 
-    Prints ``OK`` when nothing is armed (nothing will be typed) or the pane's
-    prompt is empty with no dialog open; otherwise ``HOLD:<reason>``. Never
-    consumes the flag, so a held handover stays armed for a later turn or the
-    human's own /clear.
+    Prints ``IDLE`` when nothing is armed (the hook then spawns no dispatch),
+    ``OK`` when armed and the pane's prompt is empty with no dialog open, and
+    otherwise ``HOLD:<reason>``. Never consumes the flag, so a held handover
+    stays armed for a later turn or the human's own /clear.
     """
     payload = _read_hook_payload()
     if not st.clear_requested(_hook_root(payload, args)):
-        print("OK")
+        print("IDLE")
         return 0
     pane = os.environ.get("TMUX_PANE", "")
     if not pane:

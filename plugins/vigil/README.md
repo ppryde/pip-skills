@@ -15,9 +15,15 @@ other plugin.
   checkpoints and you type `/clear`). Apple's bundled `screen` (v4.00.03) cannot
   drive the modern TUI and is not supported.
   Before typing, the Stop hook reads the pane (`tmux capture-pane`): it only
-  sends `/clear` into an empty prompt with no dialog open. Otherwise (or if the
-  pane cannot be read, or the Stop was itself caused by a Stop hook) it sends
-  nothing, leaves the handover armed and tells you via a systemMessage.
+  sends `/clear` into an empty prompt with no dialog open and no turn running
+  (`esc to interrupt` on screen). Otherwise (or if the pane cannot be read) it
+  sends nothing, leaves the handover armed and tells you via a systemMessage;
+  a Stop that was itself caused by a Stop hook sends nothing and says nothing.
+  The pane is checked again after the `VIGIL_CLEAR_DELAY` wait (default 1s).
+  If it has stopped being safe by then (you started typing, a dialog opened, a
+  turn began), the dispatch is dropped **silently**: the hook has already
+  returned, so no message can reach you. The handover stays armed and completes
+  at the next Stop, or when you type `/clear` yourself.
 
 ## What it does
 

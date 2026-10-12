@@ -2,7 +2,8 @@
 
 Safe means: the prompt box is on screen (a ``❯`` row directly under a full-width
 rule), it holds nothing the person typed (the idle placeholder is drawn dim, SGR 2,
-and does not count), and no menu/dialog footer is showing. Anything we cannot read
+and does not count), and no menu/dialog footer or running-turn spinner
+(``esc to interrupt``) is showing. Anything we cannot read
 is unsafe: typing into a dialog can answer a permission prompt or a trust prompt.
 """
 from __future__ import annotations
@@ -15,7 +16,13 @@ from context_vigil import tmux
 _SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 _OTHER_ESC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
 _RULE = re.compile(r"^\s*─{10,}\s*$")
-_FOOTER = re.compile(r"(?i)enter to (select|confirm)|esc to (cancel|continue)")
+# Pattern strings are module constants so tests/vigil/test_shared_constants.py (VG-9)
+# can pin plugins/vigil and skills/context-vigil to the same wording.
+FOOTER_PATTERN = r"(?i)enter to (select|confirm)|esc to (cancel|continue)"
+# A running turn: the spinner line reads "(12s · ↓ 1.2k tokens · esc to interrupt)".
+BUSY_PATTERN = r"(?i)esc to interrupt"
+_FOOTER = re.compile(FOOTER_PATTERN)
+_BUSY = re.compile(BUSY_PATTERN)
 _BLANKS = " \t\xa0"
 _UNREADABLE = "?"  # typed_text sentinel: an SGR we cannot parse, so the row counts as typed
 
@@ -72,6 +79,8 @@ def safe_to_type(screen: str) -> bool:
         return False
     if _FOOTER.search(plain(screen)):
         return False
+    if _BUSY.search(plain(screen)):
+        return False   # a turn is running: typed keys would queue behind it
     return typed_text(row) == ""
 
 

@@ -49,8 +49,13 @@ fi
 # Never type /clear into a pane that is not an empty prompt: a dialog or
 # permission prompt would take it as an answer, and typed text would be
 # clobbered. Unsafe or unreadable -> keep the flag armed and say why.
+# Nothing armed at this Stop -> no dispatch at all: a delayed subshell spawned
+# now would consume a flag armed DURING its delay and type into a busy turn.
 pane_check="$(printf '%s' "$input" \
   | "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" pane-check-hook 2>/dev/null || true)"
+if [ "$pane_check" = "IDLE" ]; then
+  exit 0
+fi
 if [ "$pane_check" != "OK" ]; then
   why="${pane_check#HOLD:}"
   [ "$why" = "$pane_check" ] && why="the pane could not be checked"
@@ -61,6 +66,8 @@ fi
 # Dispatch detached. The flag is consumed only AFTER the post-sleep pane
 # re-check passes (the person may have started typing, or a dialog opened,
 # during the delay): a held dispatch leaves the handover armed, untouched.
+# That hold is SILENT — the hook has already returned, so no systemMessage can
+# reach the person; the next Stop (or their own /clear) completes it.
 delay="${VIGIL_CLEAR_DELAY:-1}"
 (
   sleep "$delay"

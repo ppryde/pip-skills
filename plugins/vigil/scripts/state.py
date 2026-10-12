@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 import time
 from pathlib import Path
 
@@ -220,8 +221,19 @@ def consume_clear_flag(repo_root: Path) -> bool:
     if not is_active(repo_root) or is_paused(repo_root):
         return False
     if not marker_exists(clear_flag(repo_root)):
+        return False  # a symlink or other non-file is never a request
+    # Claiming the flag IS the test: of two racing Stop hooks exactly one wins
+    # the rename; the other gets FileNotFoundError and dispatches nothing. A
+    # rename, not unlink(): on APFS two concurrent unlink() calls of one path
+    # can BOTH succeed (measured: ~75% of 2000 two-thread races), so unlink
+    # cannot pick a single winner. rename() to a unique name can (0 of 10000).
+    flag = clear_flag(repo_root)
+    claimed = flag.with_name(f"{flag.name}.consumed-{os.getpid()}-{secrets.token_hex(4)}")
+    try:
+        os.rename(flag, claimed)
+    except FileNotFoundError:
         return False
-    clear_flag(repo_root).unlink(missing_ok=True)  # remove FIRST: cannot re-fire
+    claimed.unlink(missing_ok=True)
     _ensure_session_root(repo_root)
     touch_private(cooldown_marker(repo_root))
     return True

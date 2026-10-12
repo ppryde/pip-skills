@@ -26,13 +26,16 @@ TRUST = screen(" Quick safety check: Is this a project you created or one you tr
 PERMISSION = screen(" Do you want to proceed?", " ❯ 1. Yes", "   2. No",
                     " Esc to cancel · Tab to amend")
 REMOTE_MENU = screen("   Remote Control", "   ❯ Continue", "   Enter to select · Esc to continue")
+BUSY = screen("⏺ Reading files…", "",
+              "\x1b[38;5;174m✻\x1b[39m Cogitating… (12s · ↓ 1.2k tokens · esc to interrupt)",
+              "", RULE, EMPTY_ROW, RULE, STATUS)
 TRANSCRIPT_PROMPT_ONLY = screen("❯ Use the Bash tool to run exactly: sleep 30",
                                 "  Ran 2 shell commands")
 
 
 @pytest.mark.parametrize("text,safe", [
     (IDLE, True), (IDLE_EMPTY, True),
-    (TYPED, False), (TRUST, False), (PERMISSION, False), (REMOTE_MENU, False),
+    (TYPED, False), (TRUST, False), (PERMISSION, False), (REMOTE_MENU, False), (BUSY, False),
     (TRANSCRIPT_PROMPT_ONLY, False), ("", False),
 ])
 def test_safe_to_type(text: str, safe: bool) -> None:

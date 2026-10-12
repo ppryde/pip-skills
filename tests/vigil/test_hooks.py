@@ -21,6 +21,11 @@ RULE = "─" * 40
 # A idle Claude Code prompt: the placeholder is drawn dim (SGR 2) so it is not "typed".
 SAFE_SCREEN = f"output\n{RULE}\n❯ \x1b[2mTry something\x1b[0m\n{RULE}\n"
 TYPED_SCREEN = f"output\n{RULE}\n❯ half a sentence\n{RULE}\n"
+# A turn is running: the prompt box is empty but the spinner line shows.
+BUSY_SCREEN = (
+    f"output\n✻ Cogitating… (12s · ↓ 1.2k tokens · esc to interrupt)\n\n"
+    f"{RULE}\n❯ \x1b[2mTry something\x1b[0m\n{RULE}\n"
+)
 DIALOG_SCREEN = (
     f"Allow this tool?\n❯ 1. Yes\n  2. No\nEnter to select · Esc to cancel\n"
 )
@@ -303,6 +308,43 @@ class TestStopHook:
         bindir, marker = _fake_tmux(tmp_path, screen)
         result = _run(STOP, {"cwd": str(tmp_path)}, _auto_env(bindir), tmp_path)
         self._assert_held(tmp_path, result, marker, st, "dialog or permission prompt")
+
+    def test_busy_session_holds(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")
+        bindir, marker = _fake_tmux(tmp_path, BUSY_SCREEN)
+        result = _run(STOP, {"cwd": str(tmp_path)}, _auto_env(bindir), tmp_path)
+        self._assert_held(tmp_path, result, marker, st, "the session is busy")
+
+    def test_turn_starting_during_the_delay_holds_and_stays_armed(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")
+        # idle at Stop; the person submits a prompt during the delay (box empty again)
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN, later_screen=BUSY_SCREEN)
+        env = _auto_env(bindir)
+        env["VIGIL_CLEAR_DELAY"] = "0.5"
+        result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0 and result.stdout.strip() == ""
+        time.sleep(1.5)  # the detached subshell has run its re-check
+        assert not marker.exists()  # no rename-window, no send-keys
+        assert st.clear_flag(tmp_path).exists()  # never consumed
+
+    def test_unarmed_stop_spawns_no_dispatch(self, tmp_path, monkeypatch):
+        from scripts import state as st
+        monkeypatch.setenv("TMUX_PANE", "%9")
+        st.begin(tmp_path)  # active, nothing armed
+        bindir, marker = _fake_tmux(tmp_path, SAFE_SCREEN)
+        env = _auto_env(bindir)
+        env["VIGIL_CLEAR_DELAY"] = "0.3"
+        result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0 and result.stdout.strip() == ""
+        # Arm DURING what would have been the delay: a stale subshell would eat it.
+        st.request_clear(tmp_path, "ARMED AFTER THE STOP")
+        time.sleep(1.2)
+        calls = (tmp_path / "all-calls").read_text().splitlines()
+        assert calls == ["has-session"]  # no display-message, capture-pane or send-keys
+        assert not marker.exists()
+        assert st.clear_flag(tmp_path).exists()  # left for the next Stop
 
     def test_capture_failure_holds_with_system_message(self, tmp_path, monkeypatch):
         st = _promote_and_arm(tmp_path, "%9")
