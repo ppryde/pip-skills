@@ -124,9 +124,11 @@ turns of the same agent x the cache-read price at each turn's time (unpriced tur
 never costed as $0). `sessions_failed` and `sessions_pending` count finished sessions with no
 rows yet, so unmeasured sessions are visible. The rows come from `concordance replay`, which
 `chronicle sync` runs as an optional last step for finished sessions. The step never fails a
-sync and stays inside the dashboard's 120 s timeout: it gets min(45 s, 90 s minus what sync
-already spent), 30 s per replay in its own process group (killed as a group on timeout), and a
-failed session is skipped until it grows. Set `CHRONICLE_NO_CONCORDANCE=1` to switch it off.
+sync and stays inside the dashboard's 120 s timeout: it gets min(60 s, 90 s minus what sync
+already spent), replays included; each replay has 30 s in its own process group (killed as a
+group on timeout) and starts only while those full 30 s still fit, so sync never runs past
+90 s and a failure always means "needed more than 30 s". A failed session is skipped until it
+grows. Set `CHRONICLE_NO_CONCORDANCE=1` to switch it off.
 Chronicle never imports concordance (it only calls its CLI) and stores numbers and labels only.
 
 ### Several Claude accounts (config dirs)

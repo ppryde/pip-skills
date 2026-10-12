@@ -348,9 +348,38 @@ def test_cmd_sync_survives_concordance_blowup(builder, monkeypatch, capsys) -> N
 
 
 def test_step_budget_is_what_the_dashboards_timeout_leaves() -> None:
-    assert concordance.step_budget(0.0) == 45.0
+    assert concordance.step_budget(0.0) == 60.0
     assert concordance.step_budget(60.0) == 30.0
     assert concordance.step_budget(90.0) == 0.0 and concordance.step_budget(500.0) == 0.0
+    # every replay must be able to finish by the ceiling, leaving the rest of the dashboard's
+    # 120 s for interpreter start-up, sync's own teardown and the dashboard's spawn
+    assert concordance.SYNC_CEILING + 30 <= 120
+
+
+def test_a_replay_starts_only_when_its_full_timeout_still_fits(builder, projects, tmp_path,
+                                                               monkeypatch) -> None:
+    conn, _ = _finished_session(builder)
+    _more_sessions(projects, conn, 3)
+    now = [0.0]
+
+    def fake(cmd, timeout):
+        assert timeout == concordance.REPLAY_TIMEOUT   # never shortened to fit the budget
+        now[0] += 20
+        return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
+    monkeypatch.setattr(concordance, "_exec", fake)
+    out = concordance.sync_step(conn, now=time.time() + 10**7, env=_fake_cli(tmp_path),
+                                budget=75, clock=lambda: now[0])
+    # starts at 0, 20 and 40 s (each + 30 s <= 75); at 60 s a full replay no longer fits
+    assert out["replayed"] == 3 and out["failed"] == 0
+
+
+def test_step_is_skipped_when_a_full_replay_no_longer_fits(builder, tmp_path, monkeypatch) -> None:
+    conn, _ = _finished_session(builder)
+    monkeypatch.setattr(concordance, "_exec", lambda cmd, timeout: 1 / 0)
+    out = concordance.sync_step(conn, now=time.time() + 10**7, env=_fake_cli(tmp_path),
+                                sync_started=0.0, clock=lambda: 65.0)   # 25 s left < 30 s
+    assert out == {"replayed": 0, "failed": 0, "skipped": 1}
 
 
 def test_step_budget_follows_the_time_sync_already_spent(builder, projects, tmp_path,
@@ -366,7 +395,7 @@ def test_step_budget_follows_the_time_sync_already_spent(builder, projects, tmp_
     monkeypatch.setattr(concordance, "_exec", fake)
     out = concordance.sync_step(conn, now=time.time() + 10**7, env=_fake_cli(tmp_path),
                                 sync_started=0.0, clock=lambda: now[0])
-    assert out["replayed"] == 2   # starts at 0 s and 20 s of the step; the third would be at 40 s
+    assert out["replayed"] == 1   # starts at 0 s of the step; at 20 s a full 30 s no longer fits
 
 
 def test_step_is_skipped_when_sync_already_spent_its_share(builder, tmp_path, monkeypatch) -> None:

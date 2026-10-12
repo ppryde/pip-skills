@@ -43,16 +43,18 @@ def store_rows(conn: sqlite3.Connection, session_id: str, rows: list[dict[str, o
 
 
 # The overseer dashboard runs `chronicle sync` under a 120 s timeout. The step must finish
-# inside it: it never starts once sync has spent SYNC_CEILING, runs at most STEP_BUDGET, and
-# one replay (REPLAY_TIMEOUT) may overrun the budget by no more than the ceiling's headroom.
+# inside it: a replay starts only while its full REPLAY_TIMEOUT still fits in the budget, so
+# the step never runs past STEP_BUDGET, nor sync past SYNC_CEILING; the remaining 30 s cover
+# interpreter start-up, sync's teardown and the dashboard's spawn. A timeout is never
+# shortened to fit, so a failure always means "needed more than REPLAY_TIMEOUT".
 REPLAY_TIMEOUT = 30.0    # per session; a hung concordance costs at most this
-STEP_BUDGET = 45.0       # whole step; no new session starts once this has elapsed
-SYNC_CEILING = 90.0      # no new session starts once sync + step have spent this
+STEP_BUDGET = 60.0       # whole step, replays included
+SYNC_CEILING = 90.0      # sync + step, replays included
 STARTED_TTL = 600.0      # a started marker this fresh means a replay may still be running
 
 
 def step_budget(sync_elapsed: float) -> float:
-    """Seconds the step may spend starting sessions, given what sync already spent."""
+    """Seconds the step may spend, replays included, given what sync already spent."""
     return max(0.0, min(STEP_BUDGET, SYNC_CEILING - sync_elapsed))
 
 
@@ -109,8 +111,9 @@ def sync_step(conn: sqlite3.Connection, *, now: float | None = None, limit: int 
     A failure is remembered per last_activity_at, so a session that keeps failing is
     skipped until it grows; a session whose replay started under STARTED_TTL ago and has no
     outcome is skipped too (chronicle may have been killed mid-replay). The budget is what
-    the caller's timeout leaves after ``sync_started`` (a ``clock`` reading); when none is
-    left the step is skipped. Never raises."""
+    the caller's timeout leaves after ``sync_started`` (a ``clock`` reading); a replay starts
+    only while its full timeout still fits, and when not even one fits the step is skipped.
+    Never raises."""
     out = {"replayed": 0, "failed": 0, "skipped": 0}
     e = os.environ if env is None else env
     if e.get("CHRONICLE_NO_CONCORDANCE") == "1":
@@ -122,7 +125,7 @@ def sync_step(conn: sqlite3.Connection, *, now: float | None = None, limit: int 
         t = time.time() if now is None else now
         if budget is None:
             budget = step_budget(0.0 if sync_started is None else clock() - sync_started)
-            if budget <= 0:
+            if budget < REPLAY_TIMEOUT:   # not even one full replay fits
                 out["skipped"] += 1
                 return out
         # the marker is compared in Python: SQLite's REAL-to-TEXT cast differs from str(float)
@@ -145,7 +148,7 @@ def sync_step(conn: sqlite3.Connection, *, now: float | None = None, limit: int 
     out["skipped"] += len(pending) - len(todo)
     spent_from = clock()
     for sid, last, path, _, _, _ in todo[:limit]:
-        if clock() - spent_from >= budget:
+        if clock() - spent_from + REPLAY_TIMEOUT > budget:   # a full replay must still fit
             break
         with contextlib.suppress(Exception), conn:  # best effort: it only guards against stacking
             conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
