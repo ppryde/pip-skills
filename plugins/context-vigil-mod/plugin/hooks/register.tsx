@@ -1442,7 +1442,9 @@ export const register: Register = on => {
         await update($, awaitingA, () => ({ ...awaitingNow, attempts: awaitingNow.attempts + 1, started: false, turnId: undefined }))
         submitInstruction($, awaitingNow.reason)
       } else {
+        // Told it failed: a later save is the model's own, asked about, never cleared silently.
         await update($, awaitingA, () => null)
+        await withdrawConsent($)
         await notify($, V.handoverFailed)
         await log($, 'guard.wait', { reason: 'tool-not-called' })
       }

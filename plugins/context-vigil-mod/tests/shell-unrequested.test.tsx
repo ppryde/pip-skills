@@ -35,9 +35,9 @@ async function clearsAndResumesFrom($: Engine, w: World, file: string) {
   expect(w.submits.at(-1)?.text).toContain(`Resume from the handover injected above (saved at ${file})`)
 }
 
-// Root cause: the person's request was the one-shot `awaiting` slot. Once the instruction was given
-// up on (or spent by an earlier save), the model's save of the handover they asked for read as
-// volunteered: "not asked for, so nothing was cleared". Every explicit control now records consent.
+// Root cause: the person's request was the one-shot `awaiting` slot. Once an earlier save spent it,
+// a second save from the same request (its clear still waiting) read as volunteered: "not asked
+// for, so nothing was cleared", and the clear used the older file. Every explicit control now records consent.
 const starts: [string, ($: Engine, w: World) => Promise<void>][] = [
   ['the bar\'s Hand over now', async ($, w) => {
     await $.session.measure(measure(36))
@@ -59,41 +59,38 @@ const starts: [string, ($: Engine, w: World) => Promise<void>][] = [
 ]
 
 for (const [name, start] of starts) {
-  test(`${name}: a save after the instruction was given up on still clears and resumes, with no dialog`, async ($, on) => {
+  test(`${name}: a second save while its clear waits is still asked for, and the newer one is used`, async ($, on) => {
     const w = world(on)
     await $.session.start(START)
     await $.prompt.submit(human('hi'))
     await start($, w)
     expect(w.submits.at(-1)?.text).toContain(TOOL)
-    await instructionFails($, w)
-    await $.prompt.submit(human('go on then'))       // no mention of a handover
+    w.draft.value = 'half a sen'
     await $.tool.call(call() as never)
     await w.clock.settle()
+    await $.tool.call(call('h2') as never)
+    await w.clock.settle()
     expect(unasked(w)).toBe(0)
-    expect(w.asks.map(q => q.question)).not.toContain(ASK)
-    await clearsAndResumesFrom($, w, FILE(1))
+    expect(w.asks.map(q => q.question)).not.toContain(V.unrequestedAsk(FILE(2)))
+    w.draft.value = ''
+    await w.clock.advance(2000)
+    await clearsAndResumesFrom($, w, FILE(2))
   })
 }
 
-test('a second save from the same request while its clear waits on a draft: still asked for, and the newer one is used', async ($, on) => {
+test('told the handover failed (no tool call, twice): the request is over, a later save gets the dialog', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.session.measure(measure(36))
-  const ui = await $.ui.mount(BAND())
-  await ui.press({ key: 'handover' })
-  await ui.unmount()
+  await $.command.run(cmd('vho'))
   await w.clock.settle()
-  w.draft.value = 'half a sen'
+  await instructionFails($, w)
+  expect(w.state.get('context-vigil-mod.consent')).toBeNull()
+  await $.prompt.submit(human('go on then'))
   await $.tool.call(call() as never)
   await w.clock.settle()
-  await $.tool.call(call('h2') as never)           // the queued instruction lands after the model already answered
-  await w.clock.settle()
-  expect(unasked(w)).toBe(0)
   expect(clears(w)).toBe(0)
-  w.draft.value = ''
-  await w.clock.advance(2000)
-  await clearsAndResumesFrom($, w, FILE(2))
+  expect(w.asks.map(q => q.question)).toEqual([ASK])
 })
 
 test('the request ends when its clear is issued: a save after it is the repeat line, no dialog', async ($, on) => {
@@ -130,12 +127,14 @@ test('the request lapses after 30 minutes with no clear', async ($, on) => {
   await $.session.start(START)
   await $.command.run(cmd('vho'))
   await w.clock.settle()
-  await instructionFails($, w)
-  await w.clock.advance(31 * MIN)
+  w.draft.value = 'half a sen'                     // the clear waits on the draft
   await $.tool.call(call() as never)
   await w.clock.settle()
+  await w.clock.advance(31 * MIN)
+  await $.tool.call(call('h2') as never)
+  await w.clock.settle()
   expect(clears(w)).toBe(0)
-  expect(w.asks.map(q => q.question)).toEqual([ASK])
+  expect(w.asks.map(q => q.question)).toEqual([V.unrequestedAsk(FILE(2))])
 })
 
 // A handover the model saved on its own: a dialog, phone and terminal alike.
