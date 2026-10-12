@@ -117,7 +117,7 @@ than that ingest; reads never delete.
   local and exactly one week apart, and `five_hour` boundaries are quantised to ten
   minutes and bit-identical across concurrent sessions.
 - The full payload is stored per session — any future CC field is captured with no schema change (one exception: a blank `context_window`, as after `/compact`, keeps the previous reading).
-- `status_line_pr` (`number`, optional `url`/`review_state`, and `at`, epoch seconds) is the `pr` the engine's own payload carried on the last ingest that came from a status-line command; it is dropped when that payload has none, and a census mod's write (it sends `census_mod`) carries it forward untouched. A mod reads it as the word below its own events and above gh.
+- `status_line_pr` (`number`, `branch`, optional `url`/`review_state`, and `at`, epoch seconds) is the `pr` the engine's own payload carried on the last ingest that came from a status-line command, with the branch that ingest saw; it is dropped when that payload has none or there is no branch (detached HEAD), and a census mod's write (it sends `census_mod`) carries it forward untouched. A mod reads it as the word below its own events and above gh.
 - `updated_at` is "last rendered": the status line reruns on `refreshInterval` as well as after
   each API response, so a dormant TUI keeps refreshing it. `active_at` is "last active": it moves
   only when the payload's activity counters (prompt id, cost, API duration, token totals, cache

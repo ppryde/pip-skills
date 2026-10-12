@@ -14,7 +14,7 @@ const NO = { offered: true, pr: false }
 const refresh = ($: any) => $.command.run({ command: 'pr-refresh', args: '', origin: { kind: 'composer' } }) as Promise<{ text: string }>
 const GH = JSON.stringify([{ number: 102, url: 'https://github.com/o/r/pull/102', reviewDecision: 'APPROVED' }])
 // What census's ingest leaves beside the payload when a status-line command sent a pr (`at` is epoch seconds).
-const lineFile = (pr: object, agoSec = 10) => JSON.stringify({ updated_at: 1, payload: {}, status_line_pr: { ...pr, at: NOW / 1000 - agoSec } })
+const lineFile = (pr: object, agoSec = 10, branch = 'main') => JSON.stringify({ updated_at: 1, payload: {}, status_line_pr: { branch, ...pr, at: NOW / 1000 - agoSec } })
 
 // ---- /census-mod:pr-refresh ------------------------------------------------------------------------------------------
 
@@ -181,6 +181,48 @@ test('a status-line word older than five minutes (the command is not running) an
   w.files.set(SESSION_FILE, '{not json')
   await w.clock.advance(31 * SEC)
   expect(w.ingests.at(-1)?.payload).not.toHaveProperty('pr')
+})
+
+test('after a checkout to a branch with no PR, the old branch\'s status-line word is neither drawn nor recorded', async ($, on) => {
+  const w = world(on)
+  w.store.set('census-mod:setup', NO)
+  w.remote.value = 'git@github.com:o/r.git\n'
+  w.files.set(SESSION_FILE, lineFile({ number: 42, url: 'u42' }))
+  await $.session.start(START)
+  await w.clock.advance(2 * SEC)
+  expect(w.ingests.at(-1)?.payload.pr).toMatchObject({ number: 42 })
+
+  w.git.status = '# branch.oid abc\n# branch.head other\n'
+  await $.classic.FileChanged({ file_path: '/repo/.git/HEAD', event: 'change' } as never)
+  await w.clock.advance(5100)
+  await w.clock.advance(31 * SEC) // a tick too: the file still names main
+  expect(w.ingests.at(-1)?.payload.census_mod.git.branch).toBe('other')
+  expect(w.ingests.at(-1)?.payload).not.toHaveProperty('pr')
+  expect(w.store.get('pr:o/r#other')).toBeUndefined()
+
+  w.files.set(SESSION_FILE, lineFile({ number: 50, url: 'u50' }, 1, 'other')) // the status line runs on the new branch
+  await w.clock.advance(31 * SEC)
+  expect(w.ingests.at(-1)?.payload.pr).toMatchObject({ number: 50 })
+})
+
+test('a gh answer is drawn through the same precedence as the tick: the status line\'s fresh pr outranks gh\'s "none"', async ($, on) => {
+  const w = world(on)
+  w.store.set('census-mod:setup', NO)
+  w.remote.value = 'git@github.com:o/r.git\n'
+  w.gh.stdout = '[]'
+  w.files.set(SESSION_FILE, lineFile({ number: 42, url: 'u42', review_state: 'approved' }))
+  await $.session.start(START)
+  await w.clock.advance(2 * SEC)
+  const prIngests = () => w.ingests.filter(i => i.payload.census_mod.event === 'pr').length
+  const before = prIngests()
+
+  const r = await refresh($)
+  expect(r.text).toBe('census-mod: PR #42 (approved) is open on main.')
+  await w.clock.advance(2 * SEC)
+  expect(w.ingests.at(-1)?.payload.pr).toMatchObject({ number: 42 })
+  await w.clock.advance(31 * SEC)
+  expect(w.ingests.at(-1)?.payload.pr).toMatchObject({ number: 42 })
+  expect(prIngests()).toBe(before) // no flip to none and back
 })
 
 // ---- the prompt hint's "PR #N" ---------------------------------------------------------------------------------------

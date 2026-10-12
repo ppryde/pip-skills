@@ -117,16 +117,18 @@ test('an unconfirmed PR is drawn in grey; a confirmed one keeps its review colou
   expect(fresh[0]?.some(r => r.tone === 'green')).toBe(true)
 })
 
-test('a status-line word is a drawable PR only when well-formed and fresh', () => {
+test('a status-line word is a drawable PR only when well-formed, fresh and of this branch', () => {
   const NOW = 1_791_000_000_000
   const text = (pr: object | undefined) => JSON.stringify({ payload: {}, ...(pr ? { status_line_pr: pr } : {}) })
-  const ok = { number: 42, url: 'u', review_state: 'approved', at: NOW / 1000 - 30 }
-  expect(payloadPrOf(text(ok), NOW)).toEqual({ number: 42, url: 'u', reviewState: 'approved' })
-  expect(payloadPrOf(text({ number: 42, at: NOW / 1000 }), NOW)).toEqual({ number: 42, url: '' })
-  expect(payloadPrOf(text({ ...ok, at: NOW / 1000 - 301 }), NOW)).toBeNull() // the command is not running
-  for (const bad of [undefined, { number: 0, at: NOW / 1000 }, { number: '4', at: NOW / 1000 }, { number: 4.5, at: NOW / 1000 }, { number: 4 }, { number: 4, at: 'now' }]) expect(payloadPrOf(text(bad as object), NOW)).toBeNull()
-  expect(payloadPrOf('{nope', NOW)).toBeNull()
-  expect(payloadPrOf('[]', NOW)).toBeNull()
+  const ok = { number: 42, branch: 'main', url: 'u', review_state: 'approved', at: NOW / 1000 - 30 }
+  expect(payloadPrOf(text(ok), NOW, 'main')).toEqual({ number: 42, url: 'u', reviewState: 'approved' })
+  expect(payloadPrOf(text({ number: 42, branch: 'main', at: NOW / 1000 }), NOW, 'main')).toEqual({ number: 42, url: '' })
+  expect(payloadPrOf(text({ ...ok, at: NOW / 1000 - 301 }), NOW, 'main')).toBeNull() // the command is not running
+  expect(payloadPrOf(text(ok), NOW, 'feat/y')).toBeNull() // another branch's word (a checkout since)
+  expect(payloadPrOf(text({ ...ok, branch: undefined }), NOW, 'main')).toBeNull() // no branch named: nothing to match
+  for (const bad of [undefined, { number: 0, at: NOW / 1000 }, { number: '4', at: NOW / 1000 }, { number: 4.5, at: NOW / 1000 }, { number: 4 }, { number: 4, at: 'now' }]) expect(payloadPrOf(text(bad && { branch: 'main', ...bad }), NOW, 'main')).toBeNull()
+  expect(payloadPrOf('{nope', NOW, 'main')).toBeNull()
+  expect(payloadPrOf('[]', NOW, 'main')).toBeNull()
 })
 
 test('the hint names a PR only as "PR #<digits>"', () => {

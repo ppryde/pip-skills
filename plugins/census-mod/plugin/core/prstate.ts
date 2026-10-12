@@ -126,18 +126,20 @@ export const PAYLOAD_PR_FRESH_MS = 5 * 60_000
 
 /**
  * The `status_line_pr` of a census session record (written by census's ingest when a status-line command sends a
- * payload with `pr`): a drawable PR when it is well-formed and fresh, else null. `at` is the writer's epoch seconds.
+ * payload with `pr`): a drawable PR when it is well-formed, fresh and of `branch` (the one the ingest saw; after a
+ * checkout the word is the old branch's until the command runs again), else null. `at` is the writer's epoch seconds.
  */
-export function payloadPrOf(recordText: string, now: number): Pr | null {
+export function payloadPrOf(recordText: string, now: number, branch: string): Pr | null {
   let data: unknown
   try {
     data = JSON.parse(recordText)
   } catch {
     return null
   }
-  const pr = typeof data === 'object' && data !== null ? (data as { status_line_pr?: { number?: unknown; url?: unknown; review_state?: unknown; at?: unknown } }).status_line_pr : undefined
+  const pr = typeof data === 'object' && data !== null ? (data as { status_line_pr?: { number?: unknown; branch?: unknown; url?: unknown; review_state?: unknown; at?: unknown } }).status_line_pr : undefined
   if (!pr || typeof pr !== 'object') return null
   if (typeof pr.number !== 'number' || !Number.isInteger(pr.number) || pr.number <= 0) return null
+  if (pr.branch !== branch) return null
   if (typeof pr.at !== 'number' || !Number.isFinite(pr.at) || now - pr.at * 1000 > PAYLOAD_PR_FRESH_MS) return null
 
   return { number: pr.number, url: typeof pr.url === 'string' ? pr.url : '', ...(typeof pr.review_state === 'string' && pr.review_state ? { reviewState: pr.review_state } : {}) }

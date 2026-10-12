@@ -657,18 +657,22 @@ def _mod_git(payload: dict[str, Any]) -> dict[str, Any] | None:
     return {k: block[k] for k in _NO_GIT} if ok else None
 
 
-def _status_line_pr(previous: Any, payload: dict[str, Any], now: float) -> dict[str, Any] | None:
+def _status_line_pr(
+    previous: Any, payload: dict[str, Any], branch: str | None, now: float
+) -> dict[str, Any] | None:
     """The PR the engine's own status-line payload carried (``pr``), kept apart from ``payload`` so a census mod's
     write (which draws its own ``pr``) does not lose it: a status-line command's ingest sets it from ``payload.pr``
-    (and drops it when the payload has none); a mod's ingest (it sends ``census_mod``) carries it forward untouched."""
+    (and drops it when the payload has none); a mod's ingest (it sends ``census_mod``) carries it forward untouched.
+    It names the ``branch`` the ingest saw, so a reader on another branch (after a checkout) can refuse it; with no
+    branch (detached HEAD, no git) there is nothing to match, so nothing is kept."""
     if isinstance(payload.get("census_mod"), dict):
         kept = previous.get("status_line_pr") if isinstance(previous, dict) else None
         return kept if isinstance(kept, dict) else None
     pr = payload.get("pr")
     number = pr.get("number") if isinstance(pr, dict) else None
-    if not isinstance(number, int) or isinstance(number, bool) or number <= 0:
+    if not isinstance(number, int) or isinstance(number, bool) or number <= 0 or not branch:
         return None
-    out: dict[str, Any] = {"number": number, "at": now}
+    out: dict[str, Any] = {"number": number, "branch": branch, "at": now}
     for key in ("url", "review_state"):
         if isinstance(pr.get(key), str) and pr[key]:
             out[key] = pr[key]
@@ -700,7 +704,7 @@ def build_entry(
         "git": git_block,
         "payload": payload,
     }
-    status_line_pr = _status_line_pr(previous, payload, now)
+    status_line_pr = _status_line_pr(previous, payload, entry["branch"], now)
     if status_line_pr is not None:
         entry["status_line_pr"] = status_line_pr
     # Replaced wholesale each ingest: a session that left tmux must not keep a pane.

@@ -153,8 +153,10 @@ lacks keeps its old value.
   two minutes (GitHub may not have listed a new PR yet).
 - Gaps, which only gh covers: PRs opened outside the session, remote reviews and merges on github.com. A local session
   never receives a GitHub event for them (see the WF-269 notes: `session.receive` with source `github` belongs to cloud
-  auto-fix), so an external merge reaches census-mod only through `/census-mod:pr-refresh`, a Yes answer, or the
-  status-line source below.
+  auto-fix). An external merge or close of a PR the branch already has a record for (an event record, or a gh one)
+  reaches census-mod **only** through `/census-mod:pr-refresh` or a Yes answer: the status-line source below cannot
+  clear it, because events outrank it and its absent `pr` is never taken as a close. The status-line source can show a
+  PR opened outside the session, and stops showing it once closed, only while the branch has no record at all.
 - Subagents: a subagent's Bash `tool.call` carries `agentId`, and its result carries `gitOperation` exactly like the main
   loop's (probed for commit and push, and for `gh pr` create, ready, merge and close); census-mod does not filter on
   `agentId`, so a PR a subagent opens, readies, merges or closes moves the record. A command that exits non-zero comes
@@ -173,10 +175,12 @@ Precedence is **the session's own events > the status-line command's `pr` > gh**
 - **Status-line command's pr.** Where this account's status line command carries census's ingest block (or is `census
   ingest` / `census statusline`), the engine's payload `pr` (`number`, `url`, `review_state`; absent without an open PR)
   is kept by census's ingest in the session record as `status_line_pr` (with its write time). census-mod reads it from
-  `<census dir>/sessions/<session id>.json` on its 30 s tick and when a branch or PR record moves, and uses it when no
-  event record covers the branch, ahead of a gh record. It is ignored when older than 5 minutes (the command is not
-  running), is never taken as a close (an absent `pr` means "none open or not fetched yet"), and the mod's own writes
-  carry it forward untouched. Engine freshness: about 1 s for changes in the session, about 2.5 min for outside changes.
+  `<census dir>/sessions/<session id>.json` on its 30 s tick, when a branch or PR record moves and after a gh answer,
+  and uses it when no event record covers the branch, ahead of a gh record. It names the branch the ingest saw and is
+  used only on that branch (after a checkout it waits for the command to run again). It is ignored when older than 5
+  minutes (the command is not running), is never taken as a close (an absent `pr` means "none open or not fetched
+  yet"), and the mod's own writes carry it forward untouched. Engine freshness: about 1 s for changes in the session,
+  about 2.5 min for outside changes. So it cannot retire a recorded PR merged elsewhere; run `/census-mod:pr-refresh`.
 - **Prompt-hint confirmation (off by default).** `CENSUS_MOD_PR_HINT=1` makes the mod read `PR #N` from the engine's
   prompt hint. When the branch's record is that open PR and unconfirmed (after a push, or old), it is confirmed: the grey
   goes, the record keeps its own source. The hint never closes, reopens or starts a record (it carries no URL and lags a

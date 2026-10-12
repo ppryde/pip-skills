@@ -369,12 +369,12 @@ async function refreshGh($: EngineInterface, why: Why): Promise<GhOutcome> {
   await $.store.set(key, entry).catch(() => undefined)
   if (!snap || snap.git?.branch !== branch) return answered ? 'answered' : 'failed'
   // Only an answer is a word about the PR: a failed or backed-off gh must not reopen or refresh a record.
-  if (answered) snap.pr = (await recordGhAnswer($, branch, entry, now)) ?? entry.pr
-  else {
-    const recorded = await recordedPr($)
-    snap.pr = recorded === undefined ? entry.pr : recorded
-  }
-  if (before?.number !== entry.pr?.number || before?.reviewState !== entry.pr?.reviewState) record($, 'pr')
+  if (answered) await recordGhAnswer($, branch, entry, now)
+  // One precedence decides every draw (events > status-line pr > gh), as on the tick; no record falls back to the cache.
+  const recorded = await recordedPr($)
+  if (!snap) return answered ? 'answered' : 'failed'
+  snap.pr = recorded === undefined ? entry.pr : recorded
+  if (before?.number !== snap.pr?.number || before?.reviewState !== snap.pr?.reviewState) record($, 'pr')
   repaint($)
 
   return answered ? 'answered' : 'failed'
@@ -414,20 +414,20 @@ async function recordedPr($: EngineInterface): Promise<Snap['pr'] | undefined> {
   const now = await nowMs($)
   // The session's own events outrank the status-line payload's pr, which outranks gh.
   if (rec?.source === 'event') return toPr(rec, now)
-  const line = await payloadPr($, now)
+  const line = await payloadPr($, branch, now)
   if (line) return line
 
   return rec ? toPr(rec, now) : undefined
 }
 
 /** The pr a status-line COMMAND wrote into this session's census record (census's ingest keeps it as `status_line_pr`). */
-async function payloadPr($: EngineInterface, now: number): Promise<Snap['pr']> {
+async function payloadPr($: EngineInterface, branch: string, now: number): Promise<Snap['pr']> {
   const sid = snap?.sessionId
   const dir = censusDir(rawEnv)
   if (!sid || !dir || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(sid)) return null
   const text = await $.fs.read(joinPath(dir, 'sessions', `${sid}.json`)).catch(() => undefined)
 
-  return typeof text === 'string' ? payloadPrOf(text, now) : null
+  return typeof text === 'string' ? payloadPrOf(text, now, branch) : null
 }
 
 /** The drawn PR of the current branch from its record; null when the record says none (or there is none). */
@@ -487,9 +487,9 @@ async function applyGitOperation($: EngineInterface, result: unknown, command: s
 }
 
 /** gh's answer for the branch, as the newest word in its record. An empty answer closes an event record only once it has had time to be listed. */
-async function recordGhAnswer($: EngineInterface, branch: string, entry: GhEntry, now: number): Promise<Snap['pr']> {
+async function recordGhAnswer($: EngineInterface, branch: string, entry: GhEntry, now: number): Promise<void> {
   const repo = await repoName($)
-  if (!repo) return null
+  if (!repo) return
   const key = prKey(repo, branch)
   const old = await readRecord($, key)
   const ctx = { sessionId: snap?.sessionId ?? '', worktree: snap?.worktreePath ?? snap?.cwd ?? '', source: 'gh' as const }
@@ -500,8 +500,6 @@ async function recordGhAnswer($: EngineInterface, branch: string, entry: GhEntry
     next = applyPatch(old, { number: old.number, state: 'closed', lastAction: 'gh' }, now, ctx)
   }
   if (next && next !== old) await $.store.set(key, next).catch(() => undefined)
-
-  return toPr(next, now)
 }
 
 const GH_LISTING_GRACE_MS = 2 * 60_000
