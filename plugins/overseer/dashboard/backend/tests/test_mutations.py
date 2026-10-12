@@ -312,7 +312,7 @@ def test_pull_children_moves_children_to_parent_stage(client: TestClient, root: 
     child2_id = _new_card(root, "K2")
     run_overseer(root, "set-field", child1_id, "--parent", parent_id)
     run_overseer(root, "set-field", child2_id, "--parent", parent_id)
-    run_overseer(root, "set-stage", parent_id, "implementation")
+    run_overseer(root, "set-stage", parent_id, "implementation", "--force-gate", "test fixture")
 
     resp = client.post(f"/api/card/{parent_id}/pull-children")
 
@@ -531,3 +531,37 @@ def test_every_post_api_route_requires_token_and_no_get_route_does(root: Path) -
     # /api) would make every assertion above vacuously true.
     assert checked_post >= 14
     assert checked_get >= 4
+
+
+# --- stage gates (WF-265 D2) --------------------------------------------------
+
+def test_move_to_a_gated_stage_is_a_409_with_the_gate_line(client: TestClient, root: Path) -> None:
+    card_id = _new_card(root)
+
+    resp = client.post(f"/api/card/{card_id}/move", json={"stage": "implementation"})
+
+    assert resp.status_code == 409
+    assert "GATE: ## Plan is empty" in resp.json()["detail"]
+    assert _show(root, card_id)["stage"] in (None, "")
+
+
+def test_force_gate_needs_a_reason(client: TestClient, root: Path) -> None:
+    card_id = _new_card(root)
+    for blank in ("", "   "):
+        resp = client.post(f"/api/card/{card_id}/move",
+                           json={"stage": "implementation", "force_gate": blank})
+        assert resp.status_code == 400
+        assert "reason" in resp.json()["detail"]
+    assert _show(root, card_id)["stage"] in (None, "")
+
+
+def test_force_gate_with_a_reason_moves_and_records_it(client: TestClient, root: Path) -> None:
+    card_id = _new_card(root)
+
+    resp = client.post(f"/api/card/{card_id}/move",
+                       json={"stage": "implementation", "force_gate": "plan agreed in standup"})
+
+    assert resp.status_code == 200
+    shown = _show(root, card_id)
+    assert shown["stage"] == "implementation"
+    assert "GATE FORCED (new -> implementation): dashboard: plan agreed in standup" in shown["body"]

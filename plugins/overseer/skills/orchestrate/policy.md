@@ -10,6 +10,8 @@ models the harness offers (currently haiku / sonnet / opus-or-better).
 | M | mid | 1–2 × mid | 2 × mid, distinct lenses | 3 | 100k without a report |
 | L | strong | mid, chunked | round 1: 3 (one strong); rounds 2+: 2 (strong retained) | 4 | 160k without a report |
 
+An `XL` card (it should be split) uses the L rounds cap, 4; a card with no complexity is treated as M (cap 3).
+
 ## Right-sizing the ceremony
 
 Applied once, at pickup, before bootstrap commits to a path. The full

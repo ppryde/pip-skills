@@ -319,6 +319,30 @@ def backfill_evidence(conn: sqlite3.Connection) -> tuple[int, int]:
 # --- upgrade orchestration ------------------------------------------------
 
 
+def gates_floor(*, populated: bool) -> str:
+    """First card-creation DATE the stage gates bind: today for an empty board,
+    tomorrow for one that already holds cards (see ``finish_v2``)."""
+    from datetime import date, timedelta
+
+    day = date.today() + timedelta(days=1 if populated else 0)
+    return day.isoformat()
+
+
+def stamp_gates_from(conn: sqlite3.Connection) -> None:
+    """A D1-era board (already at schema v2, so ``finish_v2`` never ran for it)
+    gets ``gates_from`` the first time D2 code connects -- the install, not the
+    first refused move -- so cards created after the upgrade are bound even
+    when no gate check has happened yet. Cards of the stamp day stay exempt
+    (the stamp is a date, and today's earlier cards have no evidence)."""
+    from scripts.db import get_meta, set_meta
+
+    if get_meta(conn, "gates_from") is not None:
+        return
+    populated = conn.execute("SELECT 1 FROM cards LIMIT 1").fetchone() is not None
+    set_meta(conn, "gates_from", gates_floor(populated=populated))
+    conn.commit()
+
+
 def finish_v2(conn: sqlite3.Connection, state: "Path | None", *, imported: bool) -> None:
     """Inside the upgrade transaction: import the legacy files, backfill evidence
     (populated boards only) and stamp the markers. ``gates_since`` is the moment
@@ -335,6 +359,13 @@ def finish_v2(conn: sqlite3.Connection, state: "Path | None", *, imported: bool)
     set_meta(conn, "state_imported_v2", now)
     if get_meta(conn, "gates_since") is None:
         set_meta(conn, "gates_since", now)
+    # D2: the gates bind cards created on or after this DATE (cards carry a
+    # date, not a time). A fresh board binds from today; a populated one from
+    # tomorrow, because today's pre-upgrade cards have no recorded evidence.
+    # (A D1-era board has no gates_from yet and is stamped at its first gate
+    # check, see ``gates_floor``.)
+    if get_meta(conn, "gates_from") is None:
+        set_meta(conn, "gates_from", gates_floor(populated=imported))
     set_meta(conn, "views_exported_at", "0")
     set_meta(conn, "views_reimported_at", now_epoch())
     if imported:

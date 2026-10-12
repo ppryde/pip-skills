@@ -175,6 +175,7 @@ edge cases (a maintained dispute, a deadlock, an L panel's round-1 lens set).
    --reason "user: review deadlock — <summary>"`.
 6. The report hook logs every verdict under the round's header in
    `## Review log` — never call `log-review` yourself in this loop.
+7. A `GATE:` refusal (exit 3) → `references/gates.md`.
 
 ## Dispatch
 - **Prompt = bundle path.** Always `dispatch-prep` first; the agent's whole
@@ -325,7 +326,7 @@ dispatches. Full mapping + the cleanup/disposal procedure: `references/superpowe
 ## References — read each only when you reach its trigger
 | File | Read when |
 |---|---|
-| `references/review-loop.md` | The inlined review loop above hits a dispute, deadlock, round-cap, or an L card's round-1 panel — not on every plan-review/impl-review entry |
+| `references/review-loop.md` | The inlined review loop above hits a dispute, deadlock, round-cap, or an L card's round-1 panel |
 | `references/knowledge.md` | Injecting `{{knowledge}}`, or adjudicating a Learned line / verifying / retiring a fact |
 | `references/stacking.md` | Considering an S-card stack / batched PR |
 | `references/sprints.md` | Activating a sprint, or running `conflicts` at a plan gate |
