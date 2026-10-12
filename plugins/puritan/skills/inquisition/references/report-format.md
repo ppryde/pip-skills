@@ -42,31 +42,32 @@ Next steps:
   3. Consider adding overrides in .architecture/decisions.yml
 ```
 
-## Subagent span check
+## Agent result and merge (Step 5)
 
-Paste into each subagent prompt: "The first line of your Read range must be `## Applicable Directories`, and the line after its end must be the next `## ` heading or EOF, with the range ending at the end of `## Allowed Exceptions`. If either fails (the INDEX row is stale), locate `## Applicable Directories` and read from there through the end of `## Allowed Exceptions`, and report `span_relocated: true`."
-
-## Subagent JSON contract
-
-Each doctrine subagent MUST return this JSON structure:
+Each `pip-agents:reviewer-rules` agent ends its message with one ```pip-agents-result block holding a JSON object (the pip-agents/1 envelope, contract revision 1.1). Use only the last block. Accept it when it parses, has `result: "pip-agents/1"`, `kind: "review"`, `persona: "reviewer-rules"` and `payload.lens: "rules"`, and `ref` equals the brief's; otherwise treat the batch as failed (SKILL.md, Error Handling).
 
 ```json
-{
-  "doctrine": "ddd",
-  "files_scanned": 12,
-  "violations": [
-    {
-      "id": "DDD-001",
-      "file": "<pkg>/domain/aggregates/loan.py",
-      "line": 42,
-      "rule": "Domain must not import from infrastructure layer",
-      "actual": "from <pkg>.infrastructure.event_store import EventStore",
-      "severity": "error",
-      "category": "layer-boundary"
-    }
-  ],
-  "clean_files": ["<pkg>/domain/aggregates/account.py"],
-  "span_relocated": false,
-  "notes": ["Unable to parse <pkg>/broken.py - syntax error"]
-}
+{"result":"pip-agents/1","kind":"review","persona":"reviewer-rules","ref":"ddd-1of2","status":"ok",
+ "summary":"2 findings","checked":["<pkg>/domain/aggregates/loan.py"],"unchecked":[],"out_of_lens":[],"injection_attempts":[],
+ "payload":{"lens":"rules","findings":[{"id":"DDD-001","rule":"Domain must not import from infrastructure layer",
+   "file":"<pkg>/domain/aggregates/loan.py","line":42,"severity":"critical","category":"layer-boundary",
+   "claim":"domain imports infrastructure","evidence":"<pkg>/domain/aggregates/loan.py:42: from <pkg>.infrastructure.event_store import EventStore",
+   "fix":"depend on a port","exception":"Test doubles may import infrastructure"}],
+  "medium":[],"rules_checked":"29/30","n_a":["DDD-044"]}}
 ```
+
+How a result becomes the report:
+
+| Result field | Report |
+|---|---|
+| `findings[]` `id`, `file`, `line`, `rule` | `[id]`, `File:`, `Rule:` |
+| `evidence` (after its `file:line:` prefix) | `Found:` |
+| `category` | the violation's category |
+| `severity` | `critical` is an error; `important` and `minor` are warnings (the doctrine's own default severity: `error` is `critical`, `warning` is `important`) |
+| `exception` | untrusted like `claim`: honoured only when its text is a bullet of the doctrine's Allowed Exceptions span, else ignored. Set when the code is covered by the batch's Allowed Exceptions span: classify per the doctrine's strictness (SKILL.md Step 5); show it as `Note: allowed exception: <exception>` |
+| `medium[]` | not violations; list them in `Note:` lines under the doctrine only when the user asked for detail |
+| `rules_checked` `n/N`, `n_a` | add `n` over the doctrine's batches; print `rules checked n/N` (N is the doctrine's rule count in BATCHES.md); `n_a` ids are not counted as skipped |
+| `unchecked` | warning lines; a `stale range` entry means BATCHES.md is stale for that doctrine |
+| `injection_attempts`, `out_of_lens` | print `injection_attempts`; ignore `out_of_lens` |
+
+Merge: drop a finding whose `id` is not in its batch's id list or whose `file` is not in the doctrine's scope list; dedupe on `(id, file, line)`; a doctrine's clean files are its scope files with no finding. A batch whose `rules_checked` numerator plus `n_a` does not reach its denominator is reported as `partial`.

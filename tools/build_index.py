@@ -5,7 +5,7 @@ Stdlib only. Deterministic: rows are sorted, output is UTF-8 with LF line
 endings, and nothing time- or machine-dependent is written.
 
     python3 tools/build_index.py optimise-orm [--check]
-    python3 tools/build_index.py doctrines    [--check]
+    python3 tools/build_index.py doctrines    [--check]   # writes doctrines/INDEX.md and doctrines/BATCHES.md
 
 Without --check the index is (re)written in place. With --check nothing is
 written: both sides are normalised CRLF -> LF, and on drift a unified diff is
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import importlib.util
 import re
 import sys
 from pathlib import Path
@@ -224,7 +225,7 @@ def optimise_orm_index(root: Path) -> tuple[Path, str]:
                 "`# noqa: optimise-orm <alias>` suppresses the canonical code on that line."]
         out += [f"- {aid} -> {of}" for aid, of, _ in alias_rows]
     out += [""]
-    return cdir / "INDEX.md", "\n".join(out)
+    return [(cdir / "INDEX.md", "\n".join(out))]
 
 
 # ------------------------------------------------------------------- doctrines
@@ -298,7 +299,20 @@ def doctrine_entry(path: Path) -> dict:
             if (m := re.match(r"-\s+\*\*([\w.-]+\.md)\*\*", l))]
     audit_start = top["Applicable Directories"][1]
     audit_end = top["Cross-Reference"][1] - 1
+    cats = [(line, t) for line, level, t in hs if level == 3 and cat_line < line <= cat_end]
+    cat_spans = [(line, (cats[k + 1][0] - 1) if k + 1 < len(cats) else cat_end) for k, (line, _) in enumerate(cats)]
+    rule_ids: list[str] = []
+    rule_cat: list[str] = []
+    for (a, b), (_, title_) in zip(cat_spans, cats):
+        for row in lines[a:b]:
+            m = re.match(r"^\|\s*([A-Z]{2,5}-\d+)\s*\|", row)
+            if m:
+                rule_ids.append(m.group(1))
+                rule_cat.append(title_)
     return {
+        "rule_ids": rule_ids, "rule_cat": rule_cat, "cat_spans": cat_spans,
+        "preamble": (audit_start, (cats[0][0] - 1) if cats else cat_end),
+        "exceptions": (top["Allowed Exceptions"][1], audit_end),
         "name": path.stem, "file": path.name, "title": title,
         "prefix": "/".join(prefixes), "lo": nums[0] if nums else 0, "hi": nums[-1] if nums else 0,
         "rules": len(ids), "categories": categories,
@@ -315,7 +329,7 @@ def doctrines_index(root: Path) -> tuple[Path, str]:
         raise SourceError(f"{ddir}: not found")
     entries, problems = [], []
     for p in sorted(ddir.glob("*.md")):
-        if p.name.startswith("_") or p.name in ("INDEX.md", "README.md"):
+        if p.name.startswith("_") or p.name in ("INDEX.md", "README.md", "BATCHES.md"):
             continue
         try:
             entries.append(doctrine_entry(p))
@@ -350,7 +364,68 @@ def doctrines_index(root: Path) -> tuple[Path, str]:
             f"- cross-refs: {', '.join(planned) or 'none'}",
             f"- audit: {e['audit']}", "",
         ]
-    return ddir / "INDEX.md", "\n".join(out)
+    return [(ddir / "INDEX.md", "\n".join(out)), (ddir / "BATCHES.md", doctrine_batches(entries))]
+
+
+def _batching():
+    spec = importlib.util.spec_from_file_location("_pip_agents_batching", Path(__file__).resolve().parent / "batching.py")
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    sys.modules[spec.name] = mod  # dataclasses resolve their module through sys.modules
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Sort and join spans that touch (end + 1 == next start)."""
+    out: list[tuple[int, int]] = []
+    for a, b in sorted(spans):
+        if out and a <= out[-1][1] + 1:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
+
+
+def doctrine_batches(entries: list[dict]) -> str:
+    """BATCHES.md: per doctrine, the batches one `pip-agents:reviewer-rules` dispatch each audits (subagents.verdict change 10).
+
+    A batch = the preamble span (Applicable Directories to the line before the first category) + the contiguous
+    category span(s) of its rules + the Allowed Exceptions span; adjoining spans are merged. At most BATCH_CAP rules.
+    """
+    b = _batching()
+    units = [b.Unit(e["name"], tuple(e["rule_ids"]), tuple(e["rule_cat"])) for e in entries]
+    by_name = {e["name"]: e for e in entries}
+    planned = b.plan_batches(units)
+    per_doctrine: dict[str, list] = {}
+    for batch in planned:
+        for span in batch.spans:
+            per_doctrine.setdefault(span.unit, []).append(span)
+    out = [
+        "# Doctrine Batches", "", GENERATED, "",
+        f"One line per batch. A batch is what ONE `pip-agents:reviewer-rules` agent audits: at most {b.BATCH_CAP} rules "
+        "(`tools/batching.py`), as the line spans listed (`Read(file, offset=<a>, limit=<b>-<a>+1)` for each span, "
+        "1-based like INDEX.md), and exactly the rule ids in parentheses. Each span starts on a heading and ends on the "
+        "line before the next heading. A batch always carries the doctrine's preamble and Allowed Exceptions spans.", "",
+    ]
+    for e in entries:
+        spans = per_doctrine.get(e["name"], [])
+        n = len(spans)
+        out += [f"## {e['name']}", "", f"- file: {e['file']}", f"- rules: {e['rules']} in {n} batch{'es' if n != 1 else ''}"]
+        cat_index = {}
+        for k, (a, bb) in enumerate(e["cat_spans"]):
+            cat_index[k] = (a, bb)
+        cat_order: list[str] = []
+        for c in e["rule_cat"]:
+            if c not in cat_order:
+                cat_order.append(c)
+        for k, span in enumerate(spans, 1):
+            ids = e["rule_ids"][span.start:span.end]
+            ks = sorted({cat_order.index(c) for c in e["rule_cat"][span.start:span.end]})
+            lines_ = [e["preamble"], e["exceptions"]] + [cat_index[x] for x in range(ks[0], ks[-1] + 1)]
+            rng = ",".join(f"L{x}-{y}" for x, y in merge_spans(lines_))
+            out.append(f"- batch: {k}/{n} {rng} ({','.join(ids)})")
+        out.append("")
+    return "\n".join(out)
 
 
 # ------------------------------------------------------------------------ main
@@ -365,23 +440,27 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", type=Path, default=REPO, help="repo root (default: this checkout)")
     args = ap.parse_args(argv)
     try:
-        target, content = GENERATORS[args.index](args.root)
+        outputs = GENERATORS[args.index](args.root)
     except SourceError as exc:
         print(f"build_index: {args.index}: malformed source\n{exc}", file=sys.stderr)
         return 2
     if args.check:
-        have = read_lf(target) if target.exists() else ""
-        if have == content:
-            return 0
-        rel = target.relative_to(args.root) if target.is_relative_to(args.root) else target
-        sys.stdout.writelines(difflib.unified_diff(
-            have.splitlines(keepends=True), content.splitlines(keepends=True),
-            fromfile=f"{rel} (committed)", tofile=f"{rel} (generated)"))
-        print(f"\nbuild_index: {rel} has drifted; run `python3 tools/build_index.py {args.index}`",
-              file=sys.stderr)
-        return 1
-    with open(target, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(content)
+        status = 0
+        for target, content in outputs:
+            have = read_lf(target) if target.exists() else ""
+            if have == content:
+                continue
+            rel = target.relative_to(args.root) if target.is_relative_to(args.root) else target
+            sys.stdout.writelines(difflib.unified_diff(
+                have.splitlines(keepends=True), content.splitlines(keepends=True),
+                fromfile=f"{rel} (committed)", tofile=f"{rel} (generated)"))
+            print(f"\nbuild_index: {rel} has drifted; run `python3 tools/build_index.py {args.index}`",
+                  file=sys.stderr)
+            status = 1
+        return status
+    for target, content in outputs:
+        with open(target, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(content)
     return 0
 
 

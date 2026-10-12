@@ -9,7 +9,8 @@ import pytest
 
 from conftest import CONTRACT, EXAMPLES
 
-PERSONA_OF = {"review": "reviewer-scope", "validate": "validator", "locate": "explorer", "run": "gatekeeper"}
+PERSONA_OF = {"review": "reviewer-scope", "validate": "validator", "locate": "explorer", "run": "gatekeeper",
+              "summary": "summariser", "research": "researcher"}
 VALIDATE_IDS = ["c1", "c2"]
 
 
@@ -223,7 +224,7 @@ def test_revision_hash():
     rev, digest = (CONTRACT / "REVISION").read_text().split()
     want = hashlib.sha256((CONTRACT / "brief.schema.json").read_bytes() + (CONTRACT / "result.schema.json").read_bytes()).hexdigest()
     assert digest == want, "a schema edit needs a REVISION bump (and a rebuild)"
-    assert rev == "1.0"
+    assert rev == "1.1"
 
 
 def test_persona_kind_must_match_tools_table(vr):
@@ -253,8 +254,9 @@ def _fill(skel):
     return go(skel)
 
 
-@pytest.mark.parametrize("name", ["explorer", "gatekeeper", "reviewer-correctness", "reviewer-rules", "reviewer-scope",
-                                  "reviewer-security", "validator"])
+@pytest.mark.parametrize("name", ["explorer", "gatekeeper", "implementer", "planner", "researcher", "reviewer-correctness",
+                                  "reviewer-rules", "reviewer-scope", "reviewer-security", "summariser", "validator",
+                                  "verifier"])
 def test_skeleton_filled_literally_validates(vr, ba, name):
     pmap = json.loads((CONTRACT / "personas.json").read_text())
     skel = json.loads(ba.skeleton(vr.result_schema(), pmap[name]["kind"], name, pmap[name].get("lens")))

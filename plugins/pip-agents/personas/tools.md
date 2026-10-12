@@ -4,7 +4,7 @@ Owned by the permissions audit (subagent-permissions.md + verdict). build_agents
 composed `tools:` equals its row. Day one: every grant is `unobserved:` (no `pip-agents:*` runs can exist before consumer
 PRs B-G), and the generator proposes nothing below `--min-runs 10` (permissions verdict change 8).
 
-Never granted to any persona: Agent, Skill, Edit, Write, MCP, WebFetch/WebSearch. No persona carries `disallowedTools`
+Never granted to any persona: Agent, Skill, MCP, WebFetch/WebSearch. Edit and Write only to the persona of kind `change` (the implementer), nowhere else. No persona carries `disallowedTools`
 (F5: denying ToolSearch loads every MCP schema, 93.5k tokens). `tools` is never omitted (omission grants everything, F4).
 
 | persona | kind | tools | evidence for each grant | withheld, and why |
@@ -16,18 +16,18 @@ Never granted to any persona: Agent, Skill, Edit, Write, MCP, WebFetch/WebSearch
 | validator | validate | Read, Grep, Glob | No runs (unobserved). subagents.verdict change 4 | Bash: verdict change 4 (perm §3.4 "as reviewer minus Write" superseded). Claims needing execution return `refuted` with `unverified:`; the lead may route them to reviewer-correctness |
 | gatekeeper | run | Bash, Read, Monitor | No runs. Runs the one named script (`collect.py`, #11/#12); Read confirms `out:` and reads its `counts`. Monitor (session 3): the charter line "use Monitor, not sleep" goes verbatim into every Bash-bearing body, so the tool it names must exist; same resolution probe as reviewer-correctness | Grep, Glob: F11; locator work goes through the named command |
 | explorer | locate | Read, Grep, Glob | No runs (unobserved). Consumer #7 django grep pass is two Grep scans (imports, attribute uses) over a target list; Glob expands the target; Read confirms a hit is an import or attribute use, not a comment | Bash: F11 (Bash would remove Grep/Glob and force pipes the charter forbids); the gatekeeper route was rejected because the two-grep pass needs a pipe. Edit, Write: never |
+| planner | plan | Read, Grep, Glob | No runs (unobserved). Reads the task and the code it names; the plan is returned in the result, so no Write | Bash: F11 and nothing it needs to run. Edit, Write: it plans, it never edits (and no plan file: `steps` carries the plan) |
+| implementer | change | Read, Edit, Write, Bash, Monitor | No runs (unobserved). Builds from a step: edits inside the brief's `target:`, runs the brief's `tests:`, commits with git. overseer-implementer is Bash, Read, Edit, Write | Grep, Glob: F11 (Bash removes them; `git grep` instead). Agent, Skill: never; the brief carries the step, so no `superpowers:*` skill is needed. The only persona that may hold Edit and Write (build_agents.py allows them for kind change only) |
+| verifier | test | Read, Bash, Monitor | No runs (unobserved). Runs the brief's one `tests:` command and reads its output | Grep, Glob: F11. Edit, Write: never |
+| summariser | summary | Read | No runs (unobserved). Reads the target files and digests them | Grep, Glob, Bash: a digest needs the text, not a search or a shell |
+| researcher | research | Read, Grep, Glob | No runs (unobserved). Searches and reads local files to answer one question | Bash: F11. WebFetch, WebSearch: never granted to any persona; web research stays with the lead |
 
 Charter text in every Bash-bearing body (permissions verdict counsel; 335 worktree-guard + 59 sleep-guard denials):
 "One plain command per Bash call; use Monitor, not sleep." Never an allow rule (WORKER_BRIEF rule).
 
-## Specialists considered and not built (DECISIONS.md "Specialists"; owner asked, see STATUS.md)
+## Specialists (owner decision 2026-10-11: all five, even without a consumer)
 
-| candidate | would need | why not now |
-|---|---|---|
-| planner | Read, Grep, Glob, Write (plan file) | only consumer is overseer orchestrate (#15), whose agents stay (subagents.verdict Q3) |
-| implementer | Read, Grep, Glob, Bash, Edit, Write, Skill | same; also orchestrate SKILL.md:145 sends MCP-needing chunks to general-purpose, and pip-agents never grants MCP |
-| verifier / test-runner | Read, Bash, Monitor | same; overseer-verifier stays; reviewer-correctness already runs a brief's `tests:` command |
-| summariser | Read | no spawn site; review-clone keeps theme extraction in the main session on purpose |
-| researcher / scout | Read, Grep, Glob, WebFetch | no spawn site; the built-in Explore agent covers ad-hoc use; WebFetch is never granted |
-
-Each would also add a line to every session's agent listing whether used or not (verdict counsel: listing cost is per session).
+planner, implementer, verifier, summariser and researcher are built on `specialist-base` with the same contract, and each README row says
+whether a consumer is wired. None has one yet ("library, no consumer yet"): overseer keeps its own five agents (subagents.verdict Q3), review-clone
+keeps theme extraction in the main session, and the built-in Explore agent covers ad-hoc search. Each persona is one line in every session's
+agent listing whether used or not (verdict counsel), which is the cost the owner accepted.

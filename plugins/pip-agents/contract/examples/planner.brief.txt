@@ -1,0 +1,5 @@
+brief: pip-agents/1
+kind: plan
+ref: plan-export
+intent: /tmp/pip-agents/p1/task.md
+target: /tmp/pip-agents/p1/scope.txt

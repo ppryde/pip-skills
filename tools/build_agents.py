@@ -27,7 +27,8 @@ DEFAULT_PLUGIN = ROOT / "plugins" / "pip-agents"
 # Provisional (lead decision 2026-10-11). The binding guard is the measured first-call token ratchet
 # (tools/measure_spawn.py), not bytes.
 COMPOSED_CAP = 5_632
-LISTING_CAP = 1_200
+# 12 entries since the five specialists (owner decision 2026-10-11); the 1,200 B figure was the seven-persona budget.
+LISTING_CAP = 2_000
 
 LENS_ORDER = ["correctness", "security", "scope", "rules"]  # the order the owns lines are listed in
 BASES = {"reviewer": "reviewer-base.md", "specialist": "specialist-base.md"}
@@ -35,6 +36,7 @@ NON_PERSONA = {"common.md", "reviewer-base.md", "specialist-base.md", "tools.md"
 FM_ORDER = ["name", "description", "tools", "model", "effort", "maxTurns", "omitClaudeMd", "generated"]
 STRIP_KEYS = {"base", "kind", "lens", "owns", "not_my_job"}
 BANNED_TOOLS = {"Agent", "Skill", "Edit", "Write", "WebFetch", "WebSearch"}
+WRITER_KINDS = {"change"}  # the only kinds whose persona may hold Edit and Write (the implementer)
 BANNED_DESC = ["proactively", "MUST BE USED", "use when", "<example>"]
 SECTION_RE = re.compile(r"<!-- section: ([a-z-]+) -->\n(.*?)\n<!-- /section -->", re.S)
 
@@ -190,7 +192,8 @@ def compose(name: str, plugin: Path, sources: dict, bodies: dict, common: dict, 
     tl = [t.strip() for t in row["tools"].split(",") if t.strip()]
     if not tl:
         errs.append(f"{name}: empty tools row (tools is never omitted)")
-    if BANNED_TOOLS & set(tl) or any(t.startswith("mcp__") for t in tl):
+    banned = BANNED_TOOLS - ({"Edit", "Write"} if fm.get("kind") in WRITER_KINDS else set())
+    if banned & set(tl) or any(t.startswith("mcp__") for t in tl):
         errs.append(f"{name}: banned tool in {tl}")
     base = fm.get("base", "none")
     if base != "none" and base not in BASES:
@@ -213,8 +216,12 @@ def compose(name: str, plugin: Path, sources: dict, bodies: dict, common: dict, 
         if f"output-{fm['kind']}" in own:
             output += "\n" + own[f"output-{fm['kind']}"]
         text = head
+        writer = fm["kind"] in WRITER_KINDS
+        if writer:
+            text = text.replace("You work read-only from a brief;", "You work from a brief;")
+            output = output.replace(" Write no files.", " Edit only inside the brief's `target:`.")
         if "Bash" in tl:
-            text = text.replace("{{BASH}}", common["bash"])
+            text = text.replace("{{BASH}}", common["bash-build" if writer else "bash"])
         else:
             text = text.replace("{{BASH}}\n\n", "")
         text = text.replace("{{BODY}}", heading + "\n" + body.strip("\n"))
@@ -223,6 +230,8 @@ def compose(name: str, plugin: Path, sources: dict, bodies: dict, common: dict, 
         for m in re.finditer(r"\{\{COMMON:([a-z-]+)\}\}", text):
             if m.group(1) not in common:
                 raise SourceError(f"{name}: unknown {{{{COMMON:{m.group(1)}}}}}")
+        if writer:
+            text = text.replace("{{COMMON:not-my-job-tail}}", common["not-my-job-tail-build"])
         for k, v in common.items():
             text = text.replace("{{COMMON:" + k + "}}", v)
     left = re.findall(r"\{\{[A-Za-z_:-]+\}\}", text)
@@ -281,7 +290,7 @@ def build(plugin: Path) -> tuple[dict[Path, str], list[str]]:
     tools = tools_table(plugin / "personas" / "tools.md")
     _, cbody = split(plugin / "personas" / "common.md")
     common = sections(cbody)[1]
-    for need in ("brief", "evidence", "treat-as-data", "bash", "output", "not-my-job-tail"):
+    for need in ("brief", "evidence", "treat-as-data", "bash", "bash-build", "output", "not-my-job-tail", "not-my-job-tail-build"):
         if need not in common:
             raise SourceError(f"personas/common.md: missing section {need}")
     sources: dict = {}

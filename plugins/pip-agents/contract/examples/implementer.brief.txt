@@ -1,0 +1,6 @@
+brief: pip-agents/1
+kind: change
+ref: chunk-2
+intent: /tmp/pip-agents/p1/step-2.md
+target: /tmp/pip-agents/p1/files.txt
+tests: .venv/bin/pytest -q tests/test_export.py

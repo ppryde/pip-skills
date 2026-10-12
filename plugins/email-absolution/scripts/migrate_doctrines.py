@@ -229,6 +229,7 @@ GEN_NO = ["DELIV-001", "DELIV-002", "DELIV-003", "DELIV-006", "DELIV-011", "DELI
           "DELIV-018", "DELIV-019", "DELIV-020"]
 for _id in GEN_NO:
     APPLIES[_id] = "gen=no"
+APPLIES["UX-016"] = "type=marketing"  # SC-2 (owner, 2026-10-11): transactional mail carries no unsubscribe requirement
 # TOOL-008 is esp-conditional and audit-only (tooling.md is already scribe: skip, so no gen key needed)
 
 # Absolute block rewrites: header statement, rationale line(s) and detect. Idempotent by construction.
@@ -342,6 +343,7 @@ REWRITE = {
     ),
 }
 RATIONALE_APPEND = {
+    "UX-016": "Marketing mail only: transactional mail carries no unsubscribe requirement (owner decision SC-2).",
     "HTML-008": "Padding is honoured on `<td>` and ignored on `<p>`, `<div>`, `<a>` and `<img>` in Outlook, so apply it to the `<td>`.",
 }
 

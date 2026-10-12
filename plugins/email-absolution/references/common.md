@@ -83,6 +83,7 @@ Flags come from the config: `--email-type` always, the others only when the key 
 | `scan --files <F...>` | Phase 1 run for you: `file:line \| id \| matched line` for each active regex rule; `[verify]` means read the line before recording a finding. Lists binary, over-2-MiB, symlink, outside-repo (realpath not under the git toplevel) and non-regular files under `skipped:` (never followed) and prints `scan timed out: <file>` for a file that exceeds 5 s: apply Phase 1 to those by hand |
 | `savepath <path>` | Scribe save check: prints `ok`, `exists` or `outside-repo` (exit 0, 3, 4); symlinks resolved |
 | `batches` | the audit split: `batch N \| doctrines \| count \| ids`; pass a batch's ids to `select --ids` / `scan --ids` (`audit.md §Dispatch`) |
+| `prepare --out-dir D --files <F...>` | the fan-out in one call: writes `D/scope.txt`, `D/batch-N.md`, `D/batch-N.scan.txt` and prints the batch and `alias:` lines for the `pip-agents:reviewer-rules` briefs (`audit.md §Dispatch`) |
 | `constraints` | Scribe's binding rules: statements only, grouped mortal, venial, counsel; honours `gen=no` and skips tooling |
 | `show <ID...>` | the full rule block (rationale, source, detect) and its `file:line`; use it for the reason and fix text of a finding |
 

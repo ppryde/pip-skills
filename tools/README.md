@@ -10,7 +10,7 @@ Stdlib-only, deterministic (sorted rows, LF line endings), no dependencies to pi
 
 ```
 python3 tools/build_index.py optimise-orm [--check]   # plugins/django-inquisition/skills/optimise-orm/checks/INDEX.md
-python3 tools/build_index.py doctrines    [--check]   # plugins/puritan/skills/doctrines/INDEX.md
+python3 tools/build_index.py doctrines    [--check]   # plugins/puritan/skills/doctrines/INDEX.md and BATCHES.md (agent batches, at most 30 rules, from tools/batching.py)
 ```
 
 - `--check` writes nothing. It normalises CRLF to LF on both sides, prints a unified diff on drift
@@ -66,12 +66,24 @@ python3 tools/measure_spawn.py report <session-dir> [--persona NAME]
   | reviewer-correctness | 8,317 | 8,733 |
   | reviewer-security | 5,481 | 5,755 |
   | reviewer-scope | 5,456 | 5,729 |
-  | reviewer-rules | 5,292 | 5,557 |
+  | reviewer-rules | 5,603 (was 5,292, +5.9 %: see below) | 5,883 |
   | validator | 5,010 | 5,260 |
   | gatekeeper | 6,965 | 7,313 |
   | explorer | 4,581 | 4,810 |
+  | planner (adoption 1) | 4,595 | 4,825 |
+  | implementer (adoption 1) | 8,270 | 8,684 |
+  | verifier (adoption 1) | 7,508 | 7,883 |
+  | summariser (adoption 1) | 2,904 | 3,049 |
+  | researcher (adoption 1) | 4,509 | 4,735 |
 
-  Main-session agent-listing delta: +472 to +506 tokens (35,346 without the plugin, 35,818 and 35,852 with it).
+  reviewer-rules rose 311 tokens (+5.9 %, over the 5 % ratchet) in adoption 1, on purpose: its lens gained what its three
+  consumers need and a generic rules lens cannot do without (an `exceptions:` flag and the `exception` finding field for
+  puritan's allowed exceptions, pre-run pattern matches in `context:` for email, the stale-range report, the severity
+  mapping, `key=value` values in `claim` for django's savings). The alternative was one persona per consumer, which costs a
+  listing line in every session each. The ceiling for later PRs is 5 % above the new figure.
+
+  Main-session agent-listing delta: +472 to +506 tokens for the first seven personas (35,346 without the plugin, 35,818 and
+  35,852 with it); the five specialists add five more one-sentence entries (LISTING_CAP raised from 1,200 B to 2,000 B).
   The two `Bash, Monitor` personas (reviewer-correctness, gatekeeper) are the dearest spawns; `Monitor` resolves
   for both (tool list read back: Read, Bash, Monitor).
 - Tests: `tests/agents/` (run by `tests/run.sh`). Sync to wf-claude-market: copy `plugins/pip-agents/`, the three

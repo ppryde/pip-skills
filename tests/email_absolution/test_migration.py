@@ -131,7 +131,11 @@ def test_ghost_table_aware_html004_and_retitled_render018(by_id):
     assert "ignored by Outlook" in s and "width" in s
 
 
-def test_unsubscribe_conditionality_is_untouched(by_id):
-    """SC-2 is an owner question: UX-016 stays mortal on both tracks."""
-    assert (by_id["UX-016"].transactional, by_id["UX-016"].marketing) == ("mortal", "mortal")
-    assert not by_id["UX-016"].applies
+def test_unsubscribe_rule_is_marketing_only(by_id, R, docs):
+    """SC-2 (owner, 2026-10-11): transactional mail carries NO unsubscribe requirement; marketing keeps it."""
+    assert by_id["UX-016"].applies == {"type": ["marketing"]}
+    assert by_id["UX-016"].marketing == "mortal"
+    marketing, _, _ = R.select_rules(docs, R.Config("marketing"))
+    transactional, _, _ = R.select_rules(docs, R.Config("transactional"))
+    assert "UX-016" in {r.id for r in marketing}
+    assert "UX-016" not in {r.id for r in transactional}

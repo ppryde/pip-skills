@@ -1,0 +1,5 @@
+brief: pip-agents/1
+kind: research
+ref: where-retry
+target: /tmp/pip-agents/p1/scope.txt
+question: Where is the retry policy for outbound webhooks decided?

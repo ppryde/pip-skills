@@ -19,9 +19,10 @@ Audits a Django file or symbol against ~70 ORM-performance heuristics, ranks fin
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--parallel` | off | One subagent per active check-group (8 in flight); lead merges + ranks. Skip when target < 50 LoC |
-| `--thorough` | off | Skip the trigger filter: read every active group file whole and evaluate every check (the pre-index behaviour) |
+| `--parallel` | off | Fan out one `pip-agents:reviewer-rules` agent per batch of nominated checks (Step 5); lead merges + ranks. Skip when target < 50 LoC |
+| `--thorough` | off | Skip the trigger filter: nominate and evaluate every active check; implies fan-out |
 | `--no-explain` | EXPLAIN on | Skip EXPLAIN even when the DB is reachable |
+| `--explain-analyze` | off | Allow `EXPLAIN ANALYZE` (local or test DB, SELECTs only; `references/explain.md`) |
 | `--report` | off | Write `reports/optimise-orm/<target-slug>-<timestamp>.md` |
 | `--engine=<pg\|mysql\|sqlite\|oracle>` | auto | Override DB-engine detection |
 | `--only=<group,...>` / `--skip=<group,...>` | all | Run a subset of groups (e.g. `--only=indexes,fetching`); cannot be combined |
@@ -52,25 +53,17 @@ Read the resolved file(s) and list candidate sites: QuerySet expressions, model 
 **Suppression:** `# noqa: optimise-orm <CODE>` suppresses that code on that line; a bare `# noqa: optimise-orm` suppresses every code on it. An alias code (INDEX) suppresses its canonical code. Suppressed findings are counted (`suppressed: N`) and never shown in the body.
 
 ### Step 4: Caller-discovery
-For FETCH-020/022. Take the models the target references; run an **import scan** (files importing them) and an **attribute scan** (attribute access on instances in those files); build `{model → {field → [callers]}}`. Zero hits: downgrade FETCH-020/022 to `confidence: low` (keep them). Over 300 LoC or 20 models: delegate the greps.
+For FETCH-020/022. Take the models the target references; run an **import scan** (files importing them) and an **attribute scan** (attribute access on instances in those files); build `{model → {field → [callers]}}`. Zero hits: downgrade FETCH-020/022 to `confidence: low` (keep them). Over 300 LoC or 20 models: dispatch one `pip-agents:explorer` for both scans (`references/fan-out.md`, Explorer) and build the map from its `hits`.
 
 ### Step 5: Check execution
-1. **Triggers: run the scanner once, before any check is opened.** `python3 ${CLAUDE_PLUGIN_ROOT}/skills/optimise-orm/scripts/triggers.py <target> <model, template and settings files Steps 3-4 resolved> [--groups=<active groups, comma-separated>]`. It runs every trigger and prints one line per nominated check: `CODE severity group.md offset limit | file:lines`. Every `critical` row is nominated even without a hit. Never grep triggers, read INDEX.md or guess checks. PAT-070/WRITE-005 print only if you also pass the settings file and every file where Step 2 found a `@receiver` or `save()`/`delete()` override. `skipped:`/`truncated:` files were not (fully) scanned: use `--thorough` for them.
+1. **Triggers: run the scanner once, before any check is opened.** `python3 ${CLAUDE_PLUGIN_ROOT}/skills/optimise-orm/scripts/triggers.py <target> <model, template and settings files Steps 3-4 resolved> [--groups=<active groups, comma-separated>] [--thorough]`. It runs every trigger and prints one line per nominated check: `CODE severity group.md offset limit | file:lines`. Every `critical` row is nominated even without a hit. Never grep triggers, read INDEX.md or guess checks. PAT-070/WRITE-005 print only if you also pass the settings file and every file where Step 2 found a `@receiver` or `save()`/`delete()` override. `skipped:`/`truncated:` files were not (fully) scanned: use `--thorough` for them.
 2. **Open** each nominated check: `Read(checks/<group.md>, offset, limit)` using the printed numbers. Apply its Signature, Confidence rules and Savings formula with the Step 2-4 context. A trigger hit only nominates; the signature decides.
 3. Never report a code you did not open. Aliases (INDEX) are never run.
 
-`--thorough`: skip 1 and read every active group file whole, evaluating all checks. `--parallel`: give each group's subagent its scanner lines, the Step 2-4 context and these rules; it opens only those (all of its group under `--thorough`). On failure continue, noting `Note: <group> check-group failed (<reason>). Results may be incomplete.`
-
-Finding contract:
-```json
-{"group": "fetching", "findings": [{"id": "FETCH-001", "severity_internal": "high",
-  "location": "apps/orders/views.py:42", "savings_basis": "static", "savings_low_ms": 50,
-  "savings_high_ms": 200, "savings_midpoint_ms": 125, "confidence": "high",
-  "signals_caveat": null, "explain_evidence": null}]}
-```
+**Fan-out** (more than 30 nominated checks, `--parallel` or `--thorough`): **read `references/fan-out.md`** and follow it in place of 2-3.
 
 ### Step 6: EXPLAIN
-If EXPLAIN is reachable, `--no-explain` is unset and findings exist, **read `references/explain.md`** and follow it. Otherwise skip.
+If EXPLAIN is reachable, `--no-explain` is unset and findings exist, **read `references/explain.md`**: plain `EXPLAIN` unless `--explain-analyze`. Otherwise skip.
 
 ### Step 7: Ranking
 **Dedupe** (same line, same root cause; keep one): IDX-040 over PAT-010 and IDX-020 over PAT-020 (aliases); FETCH-020 vs FETCH-022 keep the higher confidence; FETCH-011 vs JOIN-010 keep the first and note the other.
@@ -89,7 +82,7 @@ unknown savings (`?`)                          → internal-severity tier as-is
 | Adjustment | Effect |
 |---|---|
 | Confidence `low` AND `savings_basis == "static"` | drop one tier |
-| EXPLAIN corroborates (cost ratio ≥ 5×) | bump one tier (cap `critical`) |
+| EXPLAIN corroborates (`explain.md`) | bump one tier (cap `critical`) |
 | Engine-specific check on the wrong engine (e.g. IDX-040 GIN on SQLite) | demote to `info`, shown as a header banner with a note |
 | `signals_caveat` present | tier stays; caveat shown inline |
 | Audit framework detected | WRITE escalation per `references/audit-context.md` |
@@ -112,7 +105,7 @@ Total = sum of midpoints; range = sum of lows to sum of highs. With `--report`, 
 | Mistake | Fix |
 |---|---|
 | Whole group files without `--thorough`, or no scanner run | Run `triggers.py` first; `Read` nominated spans only |
-| EXPLAIN ANALYZE on a write | EXPLAIN without ANALYZE; wrap SELECT EXPLAIN in BEGIN…ROLLBACK |
+| `ANALYZE` without `--explain-analyze`, on a write, or on a non-local DB | Plain `EXPLAIN` only (`references/explain.md`) |
 | FETCH-020/022 with zero caller evidence | `confidence: low`; do not drop |
 | Escalating WRITE-006/007 without an audit package | Only when `audit_framework=true`; never for plain listeners or `pghistory` |
 | Sorting by internal severity | Sort key is `-savings_midpoint_ms` first |

@@ -1,13 +1,13 @@
 {
   "files": {
-    "contract/REVISION": "bcdbef58e7667d6f467b88a19738eb917dc3a35b1c275c6be12114e2e2a8c77c",
-    "contract/brief.schema.json": "f3c1bd9dc66600ff79c4b976b5d078e62e946c389da01a1de75c448d1964a1fc",
-    "contract/personas.json": "6818b34d35dcad384726751bd55e5daaaa77beafd63e968e22316dedbf654563",
-    "contract/result.schema.json": "5989ca671e7549080738735f9894bf3d3fd38dd75fd0f828179c95ee6513ce4e",
-    "scripts/batching.py": "0c27cc5b0e70111f3f3f1ca34ee9ddd0f64bcc5b7032492295761ea0a7e116d6",
-    "scripts/validate_result.py": "8db33cd9a594ae8566209ad31e8315e3b17a23abc087129ddd04ddfcda0f703c"
+    "contract/REVISION": "cbe20550ecba8ff38246e56d4e6f98199010e18b96ad362b9f0827b8064fe27c",
+    "contract/brief.schema.json": "a8e476000e7b15a0ad0c2acb3a5fe1678c310b46ba6d33acf6a4b141658a4ee6",
+    "contract/personas.json": "0f86ea1d8122b849dcca3eef235ef999f2576fd850390e6aa280abdad0b6fe1b",
+    "contract/result.schema.json": "b99785c9181699757e6e0fd93c0665176e92cf0664b0335cc95b13fea257447c",
+    "scripts/batching.py": "aaa45753fba0c2daf7864b255bb91984922ae6126af3bda3b4c0b823602019e6",
+    "scripts/validate_result.py": "656e2e1747570b53f30ce3b2649c3337a7cc028aade3dd7878999202a3f622bc"
   },
-  "revision": "1.0 ad43d9304a698666604368f397c12bd31a214c919532985c189c65e81b8a2d09",
+  "revision": "1.1 9817261fa6b4d7c8860f586145bc2f40a3644604c45721fd6e1c04c606762cc7",
   "sources": {
     "contract/REVISION": "plugins/pip-agents/contract/REVISION",
     "contract/brief.schema.json": "plugins/pip-agents/contract/brief.schema.json",
