@@ -12,6 +12,11 @@ orchestrator wrote with the Write tool; finding text is never an argument.
                --config PATH  [--profile NAME | --reviewer KEY ...]
                [--scope changed|full] [--output report|inline|interactive]
                | --list reviewers|strategies
+               | --args TOKEN...   the /review-panel words, one precedence:
+                 reserved words (reviewers strategies full interactive inline),
+                 then a profile name, then reviewer keys; anything else is an
+                 error listing the valid values. Ad-hoc reviewers run on
+                 defaults when the config file is absent.
              stdout {"status":"ok","review":{strategy,scope,targets,reviewers:
              [{key,source,name,strictness}],context,output,output_file}}
              {"status":"config-missing"} exit 3 when the config file is absent;
@@ -72,6 +77,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != Path(__file__).resolve().parent]
 sys.path.insert(0, str(_ROOT))
 
+from scripts.arguments import parse_arguments  # noqa: E402
 from scripts.config import (  # noqa: E402
     VALID_OUTPUT, VALID_SCOPE, VALID_STRICTNESS,
     ConfigError, load_config, resolve_adhoc, resolve_profile,
@@ -189,18 +195,32 @@ def cmd_resolve(args) -> int:
         _emit({"status": "ok", "strategies": discover_strategies(Path(args.strategies_dir))})
         return 0
     path = Path(args.config)
-    if not path.exists():
-        _emit({"status": "config-missing", "config": args.config})
-        return 3
+    exists = path.exists()
     try:
-        config = load_config(path)
-        review = (resolve_adhoc(config, args.reviewer) if args.reviewer
-                  else resolve_profile(config, args.profile))
-        if args.scope:
-            review = replace(review, scope=args.scope)
-        if args.output:
-            review = replace(review, output=args.output)
+        config = load_config(path) if exists else {}
+        scope, output = args.scope, args.output
+        keys, profile = args.reviewer, args.profile
+        if args.args is not None:
+            req = parse_arguments(args.args, config, available_reviewers(reviewers_dir),
+                                  discover_strategies(Path(args.strategies_dir)))
+            if req.list == "reviewers":
+                _emit({"status": "ok", "reviewers": available_reviewers(reviewers_dir)})
+                return 0
+            if req.list == "strategies":
+                _emit({"status": "ok",
+                       "strategies": discover_strategies(Path(args.strategies_dir))})
+                return 0
+            keys, profile = list(req.reviewers) or None, req.profile
+            scope, output = req.scope or scope, req.output or output
+        if not keys and not exists:  # a profile needs the config; ad-hoc runs on defaults
+            _emit({"status": "config-missing", "config": args.config})
+            return 3
+        review = (resolve_adhoc(config, keys, scope=scope, output=output) if keys
+                  else resolve_profile(config, profile, scope=scope, output=output))
     except ConfigError as exc:
+        if args.args is not None and not exists:
+            _emit({"status": "config-missing", "config": args.config, "detail": str(exc)})
+            return 3
         _emit({"status": "error", "error": str(exc)})
         return 1
     _emit({"status": "ok", "review": _review_dict(review)})
@@ -380,6 +400,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--scope", choices=sorted(VALID_SCOPE))
     r.add_argument("--output", choices=sorted(VALID_OUTPUT))
     r.add_argument("--list", choices=["reviewers", "strategies"])
+    r.add_argument("--args", nargs="*", metavar="TOKEN",
+                   help="the raw /review-panel argument words (validated here)")
     r.add_argument("--reviewers-dir", default=str(_REVIEWERS_DIR))
     r.add_argument("--strategies-dir", default=str(_STRATEGIES_DIR))
     r.set_defaults(fn=cmd_resolve)

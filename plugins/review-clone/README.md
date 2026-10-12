@@ -22,14 +22,18 @@ chosen). The collector dispatch and the slash-command render are written once, i
 
 ## Storage
 
-Personas are personal and portable across repos:
+Personas are personal, portable across repos, and kept per Claude account under its config dir (`${CLAUDE_CONFIG_DIR:-~/.claude}`), never in your repo. Directories are 0700 and files 0600:
 
 ```
-~/.claude/review-clone/<alias>/PERSONA.md         # rules + voice
-~/.claude/review-clone/<alias>/raw/               # cached scrape
-~/.claude/review-clone/<alias>/snapshot.json      # provenance
-~/.claude/commands/review-as-<alias>.md           # auto-registered command
+<config dir>/review-clone/personas/<alias>/PERSONA.md      # rules + voice
+<config dir>/review-clone/personas/<alias>/raw/            # cached scrape (delete with `collect.py cleanup`)
+<config dir>/review-clone/personas/<alias>/digest.jsonl    # compact corpus the extraction reads (always the full corpus)
+<config dir>/review-clone/personas/<alias>/digest-new.jsonl # only the comments the last refresh added
+<config dir>/review-clone/personas/<alias>/snapshot.json   # provenance, watermark, errors
+<config dir>/commands/review-as-<alias>.md                 # auto-registered command
 ```
+
+Personas from earlier versions under `~/.claude/review-clone/<alias>/` are still read (never written); the next refresh moves them to the new location. `/review-as-<alias>` can write a review file to `.review-clone/` in the repo: add it to `.gitignore` (the skill prints a hint and does not edit it).
 
 ## Requirements
 
@@ -40,9 +44,15 @@ Personas are personal and portable across repos:
 ## Limits (v1)
 
 - Window capped at 6 months
-- Pre-extract gate prompts above 100 PRs or 200 comments
+- Pre-extract gate prompts above 100 PRs or 200 comments (theme extraction reads the digest, not the raw files)
 - Drift log capped at 20 entries; older entries archived to `drift.log`
 
 ## Privacy
 
-`review-clone` derives personas from **public** GitHub review comments. The cloned person is not notified. A disclaimer line is written into every PERSONA.md.
+`review-clone` derives personas from GitHub review comments. The cloned person is not notified. A disclaimer line is written into every PERSONA.md.
+
+Private and internal repos are allowed when your `gh` login can read them (`collect.py check` verifies this first). Their raw comments and diff hunks are stored only on your machine, owner-only; the persona is marked `private_source` with a matching disclaimer, and the skill offers to delete the raw scrape afterwards (`collect.py cleanup --alias <alias>`). Later refreshes (`collect.py --incremental`) only fetch comments newer than the stored watermark and merge them in, so nothing old is lost; the watermark is held back while any PR failed. Other collector commands: `check --repo`, `digest --alias [--since]`, `cleanup --alias`; flags `--workers` (max 4), `--fresh` (ignore a checkpoint). Personas from older versions under `<config dir>/review-clone/<alias>/` are read-only and are not touched by `cleanup`; the legacy fallback never reads another account's config dir.
+
+## Collector
+
+`collect.py` fetches 3 PRs at a time, backs off on rate limits (`Retry-After`), records PRs that fail in the snapshot's `errors` instead of aborting, and checkpoints each PR, so an interrupted run resumes when you run the same command again.
