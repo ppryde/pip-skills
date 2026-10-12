@@ -175,7 +175,10 @@ def prepare(
         else:
             target = directory / "diff.patch"
             try:
-                target.write_text(gitops.diff_against_base(worktree))
+                review = gitops.review_diff(worktree)
+                target.write_text(review.text)
+                for warning in review.warnings:
+                    print(f"dispatch-prep: {warning}", file=sys.stderr)
             except gitops.GitError as exc:
                 raise BundleError(f"could not write the diff: {exc}") from exc
         values["target_path"] = str(target)
