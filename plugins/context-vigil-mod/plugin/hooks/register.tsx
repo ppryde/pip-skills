@@ -210,6 +210,7 @@ function submitInstruction($: EngineInterface, reason: PendingReason) {
     // A rejected submit must not leave the handover waiting for a turn that never comes.
     void (async () => {
       await update($, awaitingA, () => null)
+      await withdrawConsent($)   // told it failed: a later save is asked about, never cleared silently
       await notify($, V.handoverFailed)
       await log($, 'guard.wait', { reason: 'submit-rejected' })
     })()

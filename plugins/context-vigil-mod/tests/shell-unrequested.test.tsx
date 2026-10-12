@@ -122,6 +122,22 @@ test('Esc on the instruction turn takes the request back: a later save is volunt
   expect(w.asks.map(q => q.question)).toEqual([ASK])
 })
 
+test('told the handover failed (the instruction submit refused): the request is over, a later save gets the dialog', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  w.submitRefused.value = true
+  await $.command.run(cmd('vho'))
+  await w.clock.settle()
+  expect(w.notices).toContain(V.handoverFailed)
+  expect(w.state.get('context-vigil-mod.consent')).toBeNull()
+  w.submitRefused.value = false
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(clears(w)).toBe(0)
+  expect(w.asks.map(q => q.question)).toEqual([ASK])
+})
+
 test('the request lapses after 30 minutes with no clear', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
