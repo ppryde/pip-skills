@@ -216,10 +216,11 @@ def test_scribe_uses_constraints_not_a_hand_digest():
     assert "from `rendering.md`" not in t and "(from `gotchas.md`)" not in t
 
 
-def test_scribe_footer_rule_limits_sc2_to_the_address():
+def test_scribe_footer_rule_makes_the_unsubscribe_link_marketing_only():
     t = text(skill_md("scribe"))
-    assert "unsubscribe link is always present" in t
-    assert "so is the physical mailing address (DELIV-012)" in t and "venial sin (should), never a mortal" in t
+    assert "marketing email always carries the unsubscribe link" in t
+    assert "transactional email needs none" in t
+    assert "the physical mailing address is always present (DELIV-012)" in t and "venial sin (should), never a mortal" in t
 
 
 def test_elder_dispatch_default_and_precedence_documented():

@@ -55,7 +55,7 @@ python3 '${CLAUDE_PLUGIN_ROOT}/scripts/rules.py' constraints --email-type '<mark
 
 It lists the statements of every rule that applies, grouped by the active severity. Generate a complete, send-ready template that satisfies every `MORTAL` statement (non-negotiable) and every `VENIAL` one (should be met); `COUNSEL` is optional. The output wins over any habit or example here. `tooling` rules are the caller's pipeline concern and are not listed.
 
-Footer: the unsubscribe link is always present, and so is the physical mailing address (DELIV-012). For transactional email without promotional content, omitting the address is a venial sin (should), never a mortal one; say so if the caller asks for it to be left out. Single-quote the config values in the command; one containing a single quote, a newline or a leading `-` is not run (`common.md §Rules`).
+Footer: marketing email always carries the unsubscribe link and transactional email needs none; the physical mailing address is always present (DELIV-012). For transactional email without promotional content, omitting the address is a venial sin (should), never a mortal one; say so if the caller asks for it to be left out. Single-quote the config values in the command; one containing a single quote, a newline or a leading `-` is not run (`common.md §Rules`).
 
 ### Step 5: Output the template
 

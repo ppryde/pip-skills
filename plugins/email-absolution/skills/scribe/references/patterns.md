@@ -89,6 +89,6 @@ payment method (last 4 digits), billing address, footer.
 | Relative `href` values | All URLs must be absolute HTTPS |
 | Omitting default/fallback filters | Every output tag needs a fallback, including URLs and integers |
 | Forgetting the preheader | First element inside `<body>` is the hidden preheader div (six-property recipe, GOTCHA-028) |
-| Omitting the unsubscribe link | Required by CAN-SPAM, GDPR, CASL and Google/Yahoo 2024 |
+| Omitting the unsubscribe link (marketing) | Required by CAN-SPAM, GDPR, CASL and Google/Yahoo 2024; transactional mail needs none |
 | Inline JavaScript | Forbidden in email: stripped, and may trigger spam filters |
 | Layout-critical styles only in a `<head>` `<style>` block | Inline them; keep `@media` and dark-mode rules in `<style>` as an enhancement only (HTML-009) |
