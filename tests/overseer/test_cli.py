@@ -45,6 +45,14 @@ class TestInitAndNewCard:
         assert card.budget_estimate == 400_000
         assert "## Goal" in card.body
 
+    def test_new_card_mints_and_inserts_under_one_writer_lock(self, repo, monkeypatch):
+        from scripts import db
+        seen = []
+        real = db.mint_id
+        monkeypatch.setattr(db, "mint_id", lambda c: (seen.append(db.in_txn(c)), real(c))[1])
+        assert run(repo, "new-card", "--title", "Locked") == 0
+        assert seen == [True]
+
     def test_new_card_jira_id(self, repo, capsys):
         run(repo, "new-card", "--title", "Webhooks", "--jira", "PROJ-142")
         assert "PROJ-142" in capsys.readouterr().out
@@ -632,26 +640,14 @@ class TestKnowledgeVerifyRetire:
         assert run(repo, "verify-fact", "KB-404") == 1
         assert "error:" in capsys.readouterr().err
 
-    def test_verify_corrupt_fact_errors_cleanly(self, repo, capsys):
-        run(repo, "add-fact", "--statement", "A", "--source", "WF-1")
-        kb = state_root(repo) / "knowledge"
-        fact_path = next((kb / "facts").glob("KB-001-*.md"))
-        fact_path.write_text(
-            "---\nid: KB-001\nstatement: x\nstatus: bogus\n---\nbody\n"
-        )
+    def test_verify_fact_with_a_bad_id_errors_cleanly(self, repo, capsys):
         capsys.readouterr()
-        assert run(repo, "verify-fact", "KB-001") == 1
+        assert run(repo, "verify-fact", "../x") == 1
         assert "error:" in capsys.readouterr().err
 
-    def test_retire_corrupt_fact_errors_cleanly(self, repo, capsys):
-        run(repo, "add-fact", "--statement", "A", "--source", "WF-1")
-        kb = state_root(repo) / "knowledge"
-        fact_path = next((kb / "facts").glob("KB-001-*.md"))
-        fact_path.write_text(
-            "---\nid: KB-001\nstatement: x\nstatus: bogus\n---\nbody\n"
-        )
+    def test_retire_fact_with_a_bad_id_errors_cleanly(self, repo, capsys):
         capsys.readouterr()
-        assert run(repo, "retire-fact", "KB-001") == 1
+        assert run(repo, "retire-fact", "../x") == 1
         assert "error:" in capsys.readouterr().err
 
 

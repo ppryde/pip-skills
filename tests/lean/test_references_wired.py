@@ -25,6 +25,12 @@ EXEMPT_DANGLING: dict[str, dict[str, str]] = {
         "references/common.md": "plugin-level shared reference at <plugin root>/references/",
         "references/audit.md": "plugin-level shared reference at <plugin root>/references/",
     },
+    "plugins/review-clone/skills/review-as": {
+        "references/collect-and-render.md": "plugin-level shared reference at <plugin>/references/ (WF-268 lean bundle)",
+    },
+    "plugins/review-clone/skills/clone-reviewer": {
+        "references/collect-and-render.md": "plugin-level shared reference at <plugin>/references/ (WF-268 lean bundle)",
+    },
     "plugins/overseer/skills/ledger": {
         "references/telemetry.md": "names the orchestrate skill's reference (cross-skill pointer)",
         "references/review-loop.md": "names the orchestrate skill's reference (cross-skill pointer)",

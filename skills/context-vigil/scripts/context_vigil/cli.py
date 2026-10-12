@@ -470,7 +470,12 @@ def _cmd_install(args: argparse.Namespace) -> int:
     try:
         install.apply(plan)
     except OSError as exc:
-        raise CliError(f"install failed part-way ({exc}); re-run, or `uninstall --yes`") from exc
+        failed = getattr(exc, "rollback_failed", None)
+        if failed:
+            raise CliError(f"install failed part-way ({exc}); could not restore "
+                           f"{', '.join(failed)} — re-run, or `uninstall --yes`") from exc
+        raise CliError(f"install failed part-way ({exc}); every file it had written was "
+                       "rolled back (directories it created may remain, empty) — fix the cause and re-run") from exc
     print("\n".join(_installed_lines(plan)))
     return 0
 

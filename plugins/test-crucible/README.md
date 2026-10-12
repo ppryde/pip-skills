@@ -25,6 +25,14 @@ flattering number:
 | 5 · re-measure | Working down a list drawn up before anything changed |
 | 6 · review | Shipping a guard that cannot fail, and a speedup whose cost nobody named |
 
+## Layout
+
+`SKILL.md` holds the two-jobs framing, the questions, Phases 1, 2 and 5 in full, and for
+Phases 3, 4 and 6, the report and Track B a one-line rule plus a hard "read
+`references/<file>.md`" instruction at the step that needs it. The detail (measured cases,
+the allowlist example, the five review questions, the report table, the dryness track and
+the phase-less traps) lives in `references/`. Nothing was reworded in the move.
+
 ## Portability
 
 The method is language-agnostic. The worked commands are pytest, and the bundled

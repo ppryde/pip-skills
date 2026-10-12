@@ -21,8 +21,9 @@ knowledge base, in one central per-repo folder
 `overseer init`/`OVERSEER_CENTRAL`), shared across every worktree of this
 repo so claims are atomic; `board.db` is the source of truth, read directly
 by the CLI, dashboard and `resume` (the generated `ledger.md` view is
-retired, WF-072). Sprints, usage and the knowledge base remain file-based
-under this **state root**. A legacy `.workflow/` tree is
+retired, WF-072). Sprints and knowledge facts live in `board.db` too; the
+`sprints/` and `knowledge/` files under the **state root** are generated views.
+A legacy `.workflow/` tree is
 imported into the central folder once, on first connect after upgrade, then
 left in place unused. **Never edit `board.db` or state-root files
 directly**; drive everything through the CLI:
@@ -141,9 +142,7 @@ python .../cli.py --root . resume
 
 ## Knowledge base
 
-A living store of durable, falsifiable facts under the state root
-(`knowledge/`). The CLI is the only writer; the index (`knowledge.md`) is a
-view.
+Durable, falsifiable facts in `board.db`; `knowledge/` is a generated view.
 
 - `add-fact --statement "<falsifiable sentence>" --tags "testing,auth" --source <card-id> [--body "..."]`
   mints the next `KB-nnn`. Only mint facts that are falsifiable — "the auth
@@ -151,7 +150,7 @@ view.
 - `verify-fact <id>` when a fact is relied on and still holds — bumps its
   verified date and clears any stale mark.
 - `retire-fact <id> [--superseded-by <id>]` when a fact is refuted or
-  superseded — moves it to `retired/`, never deletes it.
+  superseded — retires it, never deletes it.
 - `facts [--tag <t>] [--stale] [--json]` lists live facts; facts older than
   90 days show `[STALE]` and must be re-verified before they are trusted.
 
@@ -160,14 +159,14 @@ view.
 The live `board.db` and state root are never committed. `backup`/`restore`
 are the bridge to git — a diffable, mergeable snapshot in the repo.
 
-- `backup [--dir PATH]` dumps cards + meta to `cards.json`/`meta.json` and
-  copies sprints/usage/knowledge into `.overseer/backups/` (or `--dir`),
-  atomically. Run it before a merge or a push you want a safety net for.
+- `backup [--dir PATH]` dumps every table to JSON into
+  `.overseer/backups/` (or `--dir`), atomically. Run it before a merge or a push you want a safety net for.
 - `restore [--dir PATH]` rebuilds the central state root from a backup:
   cards upsert by id with last-modified-wins, board-identity meta
-  (`repo_root`, `schema_version`) is never overwritten, and sprint/usage/
-  knowledge files are restored only where absent locally (fill-gaps, never
-  clobbers). Refuses loudly on a schema-version mismatch or corrupt JSON.
+  (`repo_root`, `schema_version`) is never overwritten, and sprints, facts and
+  `usage.jsonl` are restored only where absent (fill-gaps, never clobbers).
+  Refuses loudly on an unknown schema or bad JSON.
+- `restore --from-bak FILE` puts back the pre-0.27.0 `board.db.pre-v2.*.bak`.
 - A repo that has run `init` gets an opt-in `PreToolUse` hook that runs
   `backup` and commits `.overseer/backups/` before a Claude-issued `git push`
   proceeds, so the push carries the snapshot.

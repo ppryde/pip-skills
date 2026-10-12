@@ -13,6 +13,13 @@ Clone a reviewer's voice and rules from their public GitHub review history. Ever
 
 A review can be emitted to chat, written to a file, or **posted inline onto the open PR** — one comment per finding, each prefixed `[From <alias>]:` so the clone is never mistaken for the real reviewer. Posting always asks for confirmation first.
 
+## Layout
+
+`review-as` loads the persona, then reads one reference for the mode it was asked for
+(`mode-review`, `mode-refresh` or `mode-chat`; `post-inline-pr` only when that output is
+chosen). The collector dispatch and the slash-command render are written once, in
+`references/collect-and-render.md`, and read by both `clone-reviewer` and `review-as` refresh.
+
 ## Storage
 
 Personas are personal and portable across repos:
