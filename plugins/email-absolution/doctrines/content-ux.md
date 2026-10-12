@@ -76,7 +76,8 @@ Guards against content, copy, and structural UX patterns that undermine the effe
 > `detect: contextual` — check password-reset template type for expiry time copy
 
 **[UX-016]** `transactional: mortal | marketing: mortal` — Unsubscribe link must be clearly visible in the footer — not hidden, minimised, or rendered in low-contrast text.
-> Deliberately obscuring the unsubscribe mechanism is a dark pattern flagged by Gmail's spam classifier. It also violates GDPR/ICO requirements for easy unsubscribe access. Source: Google Postmaster Tools documentation 2023; ICO Direct Marketing Guidance 2020.
+> Deliberately obscuring the unsubscribe mechanism is a dark pattern flagged by Gmail's spam classifier. It also violates GDPR/ICO requirements for easy unsubscribe access. Marketing mail only: transactional mail carries no unsubscribe requirement (owner decision SC-2). Source: Google Postmaster Tools documentation 2023; ICO Direct Marketing Guidance 2020.
+> `applies: type=marketing`
 > `detect: contextual` — check footer for unsubscribe link presence and verify it is not rendered in text smaller than 10px or contrast below 3:1
 
 **[UX-017]** `transactional: venial | marketing: venial` — Transactional emails must include trust signals: company trading name, a reference number, and a support contact method.

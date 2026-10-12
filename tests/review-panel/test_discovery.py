@@ -37,12 +37,39 @@ def test_review_clone_root_prefers_env(tmp_path):
     assert review_clone_root() == Path(os.environ["REVIEW_CLONE_ROOT"])
 
 
-def test_review_clone_root_falls_back_to_home_claude(monkeypatch, tmp_path):
-    # review-clone ignores CLAUDE_CONFIG_DIR, so discovery must too.
+def test_review_clone_root_follows_the_account_config_dir(monkeypatch, tmp_path):
+    # review-clone stores personas under <config dir>/review-clone/personas (RA-8).
     monkeypatch.delenv("REVIEW_CLONE_ROOT", raising=False)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    assert review_clone_root() == tmp_path / "cfg" / "review-clone" / "personas"
+
+
+def test_review_clone_root_defaults_to_home_claude(monkeypatch, tmp_path):
+    monkeypatch.delenv("REVIEW_CLONE_ROOT", raising=False)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    assert review_clone_root() == tmp_path / "home" / ".claude" / "review-clone"
+    assert review_clone_root() == tmp_path / "home" / ".claude" / "review-clone" / "personas"
+
+
+def test_legacy_root_is_read_only_fallback_and_never_with_the_env_override(monkeypatch, tmp_path):
+    from scripts.discovery import review_clone_legacy_roots, review_clone_roots
+    assert review_clone_legacy_roots() == []  # REVIEW_CLONE_ROOT is pinned by the fixture
+    monkeypatch.delenv("REVIEW_CLONE_ROOT", raising=False)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    assert review_clone_roots() == [tmp_path / "cfg" / "review-clone" / "personas", tmp_path / "cfg" / "review-clone"]
+
+
+def test_discovery_and_reading_see_new_and_legacy_personas(monkeypatch, tmp_path):
+    from scripts.personas import read_persona
+    monkeypatch.delenv("REVIEW_CLONE_ROOT", raising=False)
+    cfg = tmp_path / "cfg"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
+    for base, alias in ((cfg / "review-clone" / "personas", "newone"), (cfg / "review-clone", "oldone")):
+        (base / alias).mkdir(parents=True)
+        (base / alias / "PERSONA.md").write_text("---\nalias: x\n---\n## Rules\n")
+    assert discover_clone_personas() == ["newone", "oldone"]
+    assert read_persona("newone") is not None and read_persona("oldone") is not None
+    assert read_persona("ghost") is None
 
 
 def test_discover_clone_personas(tmp_path):

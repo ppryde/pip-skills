@@ -10,7 +10,7 @@ Stdlib-only, deterministic (sorted rows, LF line endings), no dependencies to pi
 
 ```
 python3 tools/build_index.py optimise-orm [--check]   # plugins/django-inquisition/skills/optimise-orm/checks/INDEX.md
-python3 tools/build_index.py doctrines    [--check]   # plugins/puritan/skills/doctrines/INDEX.md
+python3 tools/build_index.py doctrines    [--check]   # plugins/puritan/skills/doctrines/INDEX.md and BATCHES.md (agent batches, at most 30 rules, from tools/batching.py)
 ```
 
 - `--check` writes nothing. It normalises CRLF to LF on both sides, prints a unified diff on drift
@@ -66,12 +66,24 @@ python3 tools/measure_spawn.py report <session-dir> [--persona NAME]
   | reviewer-correctness | 8,317 | 8,733 |
   | reviewer-security | 5,481 | 5,755 |
   | reviewer-scope | 5,456 | 5,729 |
-  | reviewer-rules | 5,292 | 5,557 |
+  | reviewer-rules | 5,603 (was 5,292, +5.9 %: see below) | 5,883 |
   | validator | 5,010 | 5,260 |
   | gatekeeper | 6,965 | 7,313 |
   | explorer | 4,581 | 4,810 |
+  | planner (adoption 1) | 4,595 | 4,825 |
+  | implementer (adoption 1) | 8,270 | 8,684 |
+  | verifier (adoption 1) | 7,508 | 7,883 |
+  | summariser (adoption 1) | 2,904 | 3,049 |
+  | researcher (adoption 1) | 4,509 | 4,735 |
 
-  Main-session agent-listing delta: +472 to +506 tokens (35,346 without the plugin, 35,818 and 35,852 with it).
+  reviewer-rules rose 311 tokens (+5.9 %, over the 5 % ratchet) in adoption 1, on purpose: its lens gained what its three
+  consumers need and a generic rules lens cannot do without (an `exceptions:` flag and the `exception` finding field for
+  puritan's allowed exceptions, pre-run pattern matches in `context:` for email, the stale-range report, the severity
+  mapping, `key=value` values in `claim` for django's savings). The alternative was one persona per consumer, which costs a
+  listing line in every session each. The ceiling for later PRs is 5 % above the new figure.
+
+  Main-session agent-listing delta: +472 to +506 tokens for the first seven personas (35,346 without the plugin, 35,818 and
+  35,852 with it); the five specialists add five more one-sentence entries (LISTING_CAP raised from 1,200 B to 2,000 B).
   The two `Bash, Monitor` personas (reviewer-correctness, gatekeeper) are the dearest spawns; `Monitor` resolves
   for both (tool list read back: Read, Bash, Monitor).
 - Tests: `tests/agents/` (run by `tests/run.sh`). Sync to wf-claude-market: copy `plugins/pip-agents/`, the three
@@ -103,3 +115,26 @@ python3 tools/derive_agent_tools.py --evidence permits.json --check      # diff 
   or listed `unobserved` with a one-line reason. **Day one every grant is `unobserved`**: no `pip-agents:*` run can exist
   before the consumer PRs move dispatches onto the personas, so that is the starting state, not a defect. The scan of the
   work account (aggregates only) is the owner's own act and is not part of any PR.
+
+## sync_contract.py (pip-agents vendoring, WF-270 PR E)
+
+Stdlib only. A consumer skill cannot reach a dependency plugin's files (`${CLAUDE_PLUGIN_ROOT}` is the consumer's own
+root; probe recorded in PR A), so each consumer carries a byte-identical copy of what it needs, the census-mod bundle
+precedent.
+
+```
+python3 tools/sync_contract.py              # write plugins/<consumer>/vendor/pip-agents/ for every consumer
+python3 tools/sync_contract.py --check      # write nothing; list drift, exit 1
+python3 tools/sync_contract.py review-clone # one consumer
+```
+
+- Bundle: `scripts/validate_result.py` and `contract/{result,brief}.schema.json`, `personas.json`, `REVISION` from
+  `plugins/pip-agents/`, `scripts/batching.py` from `tools/batching.py` (so `BATCH_CAP` has one definition), and
+  `VENDORED.json` (the contract revision and a sha256 per file, regenerated each sync). Consumers: `CONSUMERS` in the
+  tool (review-panel, review-clone); a consumer also declares `"dependencies": ["pip-agents"]`.
+- `tests/agents/test_sync_contract.py` fails on any drift, a missing or extra file, a consumer without the dependency,
+  and checks the vendored validator runs standalone under `python3 -I`.
+- When `contract/` changes (a revision bump) or `validate_result.py` changes, re-run the tool in the same PR and bump
+  every consumer's version. Sync to wf-claude-market: copy `tools/sync_contract.py`, `tests/agents/` and each
+  consumer's `vendor/`; wf runs the same `--check`, and a consumer is synced only after `pip-agents` is in wf's
+  marketplace at the same or higher version.

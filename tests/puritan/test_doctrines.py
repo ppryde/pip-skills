@@ -8,7 +8,7 @@ REPO = Path(__file__).resolve().parents[2]
 DOCTRINES = REPO / "plugins/puritan/skills/doctrines"
 SECTIONS = ["When to Use", "Why Use It", "Pros and Cons", "Applicable Directories", "Violation Catalog",
             "Allowed Exceptions", "Cross-Reference", "Sources and Authority", "Detection Signatures"]
-FILES = sorted(p for p in DOCTRINES.glob("*.md") if not p.name.startswith("_") and p.name not in ("INDEX.md", "README.md"))
+FILES = sorted(p for p in DOCTRINES.glob("*.md") if not p.name.startswith("_") and p.name not in ("INDEX.md", "README.md", "BATCHES.md"))
 
 
 def text(p):

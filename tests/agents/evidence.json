@@ -12,6 +12,23 @@
       "Monitor": "no pip-agents:* runs yet (consumer PRs B-G pending); backs the charter text 'use Monitor, not sleep'; explicit grant unverified",
       "Read": "no pip-agents:* runs yet (consumer PRs B-G pending); confirms out: and reads counts"
     },
+    "pip-agents:implementer": {
+      "Read": "no pip-agents:* runs yet (library persona, no consumer wired); reads the step and the files in target",
+      "Edit": "no pip-agents:* runs yet (library persona, no consumer wired); edits files inside target",
+      "Write": "no pip-agents:* runs yet (library persona, no consumer wired); creates files inside target",
+      "Bash": "no pip-agents:* runs yet (library persona, no consumer wired); git add/commit and the brief's tests command; overseer-implementer is Bash-heavy",
+      "Monitor": "no pip-agents:* runs yet (library persona, no consumer wired); backs the charter text 'use Monitor, not sleep'; explicit grant resolving is unverified"
+    },
+    "pip-agents:planner": {
+      "Read": "no pip-agents:* runs yet (library persona, no consumer wired); reads the task and the code it names",
+      "Grep": "no pip-agents:* runs yet (library persona, no consumer wired); finds the files a step touches",
+      "Glob": "no pip-agents:* runs yet (library persona, no consumer wired); expands the target"
+    },
+    "pip-agents:researcher": {
+      "Read": "no pip-agents:* runs yet (library persona, no consumer wired); reads what answers the question",
+      "Grep": "no pip-agents:* runs yet (library persona, no consumer wired); searches inside target",
+      "Glob": "no pip-agents:* runs yet (library persona, no consumer wired); expands the target"
+    },
     "pip-agents:reviewer-correctness": {
       "Bash": "no pip-agents:* runs yet (consumer PRs B-G pending); git diff/show/grep and the brief's tests: command; overseer-reviewer and GR reviewers were Bash-heavy",
       "Monitor": "no pip-agents:* runs yet (consumer PRs B-G pending); backs the charter text 'use Monitor, not sleep'; explicit grant resolving in a plugin agent is unverified",
@@ -32,10 +49,18 @@
       "Grep": "no pip-agents:* runs yet (consumer PRs B-G pending); source-to-sink tracing",
       "Read": "no pip-agents:* runs yet (consumer PRs B-G pending); reads the diff file the lead wrote"
     },
+    "pip-agents:summariser": {
+      "Read": "no pip-agents:* runs yet (library persona, no consumer wired); reads the target files it digests"
+    },
     "pip-agents:validator": {
       "Glob": "no pip-agents:* runs yet (consumer PRs B-G pending); expands the target",
       "Grep": "no pip-agents:* runs yet (consumer PRs B-G pending); locates the cited lines",
       "Read": "no pip-agents:* runs yet (consumer PRs B-G pending); reads the cited claims' files"
+    },
+    "pip-agents:verifier": {
+      "Read": "no pip-agents:* runs yet (library persona, no consumer wired); reads the output files of the test command",
+      "Bash": "no pip-agents:* runs yet (library persona, no consumer wired); runs the brief's one tests command",
+      "Monitor": "no pip-agents:* runs yet (library persona, no consumer wired); backs the charter text 'use Monitor, not sleep'; explicit grant resolving is unverified"
     }
   }
 }

@@ -2,9 +2,9 @@
 
 ## Mode: refresh
 
-### 1 — Pull since last scan (Haiku subagent)
+### 1 — Pull since last scan (pip-agents gatekeeper)
 
-Refresh is pure data gathering — no reasoning happens here. Drift detection and rule updates (Steps 3–4) stay on the main Opus session. Dispatch the collector as the **refresh** variant in `<plugin>/references/collect-and-render.md` (read it now): alias and repo from the persona frontmatter (`<repo>` is validated as the reference requires), handles from frontmatter joined with commas, `--months`, `--paths`/`--extensions` from the persona's filters, plus `--incremental` (it starts from the `watermark` in the persona's `snapshot.json`; for a persona with no snapshot yet, pass `--since '<last_scanned_at>'` instead). Its reply is the snapshot JSON: parse it (or re-read `snapshot.json` in the persona dir; `persona_io.py paths --alias '<alias>'` prints it) and continue from Step 2. New comments are merged into `raw/`; nothing old is lost.
+Refresh is pure data gathering — no reasoning happens here. Drift detection and rule updates (Steps 3–4) stay on the main Opus session. Dispatch the collector as the **refresh** variant in `<plugin>/references/collect-and-render.md` (read it now): alias and repo from the persona frontmatter (`<repo>` is validated as the reference requires), handles from frontmatter joined with commas, `--months`, `--paths`/`--extensions` from the persona's filters, plus `--incremental` (it starts from the `watermark` in the persona's `snapshot.json`; for a persona with no snapshot yet, pass `--since '<last_scanned_at>'` instead). `gate.py check-collect` prints the `snapshot` path and counts: read `snapshot.json` from that path (`persona_io.py paths --alias '<alias>'` prints it too) and continue from Step 2. New comments are merged into `raw/`; nothing old is lost.
 
 ### 2 — Pre-extract gate
 

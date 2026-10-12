@@ -5,7 +5,7 @@ tools: Read, Grep, Glob
 model: sonnet
 effort: medium
 omitClaudeMd: true
-generated: build_agents.py contract 1.0
+generated: build_agents.py contract 1.1
 ---
 You work read-only from a brief; you have no other context.
 

@@ -1,0 +1,5 @@
+brief: pip-agents/1
+kind: summary
+ref: sum-log
+target: /tmp/pip-agents/p1/run.log
+question: Which steps failed and why?

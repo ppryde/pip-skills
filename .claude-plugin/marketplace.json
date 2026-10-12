@@ -237,9 +237,16 @@
       ]
     },
     {
+      "name": "concordance",
+      "source": "./plugins/concordance",
+      "description": "(experimental) An owned, worktree-native symbol index for Python and TypeScript, built for review: removed contracts, signature drift, callers and guarding tests, detected in the CLI; a review procedure and review-panel lens say when to use them.",
+      "category": "engineering",
+      "tags": ["code-review", "impact-analysis", "symbols", "callers", "tests", "worktrees", "python", "typescript"]
+    },
+    {
       "name": "pip-agents",
       "source": "./plugins/pip-agents",
-      "description": "Shared subagent personas for pip-skills plugins (reviewer-correctness, -security, -scope, -rules, validator, explorer, gatekeeper), built from one base with one brief/result JSON contract and its validator. Consumers declare it as a dependency; no skills.",
+      "description": "Shared subagent personas for pip-skills plugins (reviewer-correctness, -security, -scope, -rules, validator, gatekeeper and the specialists explorer, planner, implementer, verifier, summariser, researcher), built from one base with one brief/result JSON contract and its validator. Consumers declare it as a dependency; no skills.",
       "category": "engineering",
       "tags": [
         "agents",

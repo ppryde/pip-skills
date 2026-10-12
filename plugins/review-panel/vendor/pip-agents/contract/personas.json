@@ -1,0 +1,42 @@
+{
+  "explorer": {
+    "kind": "locate"
+  },
+  "gatekeeper": {
+    "kind": "run"
+  },
+  "implementer": {
+    "kind": "change"
+  },
+  "planner": {
+    "kind": "plan"
+  },
+  "researcher": {
+    "kind": "research"
+  },
+  "reviewer-correctness": {
+    "kind": "review",
+    "lens": "correctness"
+  },
+  "reviewer-rules": {
+    "kind": "review",
+    "lens": "rules"
+  },
+  "reviewer-scope": {
+    "kind": "review",
+    "lens": "scope"
+  },
+  "reviewer-security": {
+    "kind": "review",
+    "lens": "security"
+  },
+  "summariser": {
+    "kind": "summary"
+  },
+  "validator": {
+    "kind": "validate"
+  },
+  "verifier": {
+    "kind": "test"
+  }
+}

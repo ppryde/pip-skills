@@ -7,6 +7,11 @@ Subcommands
   select ...             the active checklist for a config (never reads config files)
   batches ...            the active rules split into audit batches (one per doctrine, <= BATCH_CAP rules;
                          `select --ids` / `scan --ids` then give a subagent just its batch)
+  prepare --out-dir D --files F... ...
+                         the lead's one call before dispatch: writes D/scope.txt, D/batch-N.md (the batch's rules, one
+                         `### ID | sev | kind` block each) and D/batch-N.scan.txt (Phase 1 for that batch), and prints one
+                         `batch N | doctrines | count | md L1-n | scan | ids` line per batch plus alias lines (for subagents
+                         that hold no Bash: the pip-agents:reviewer-rules agents read these files)
   show ID [ID...]        the full rule block(s), with file:line
   constraints ...        Scribe view: binding statements only (honours gen=no)
   scan --files F... ...  Phase 1 for a config: file:line | id | matched line for every active
@@ -980,32 +985,118 @@ def scan_with_timeout(rules, text: str, seconds: float = None):
         signal.signal(signal.SIGALRM, old)
 
 
-def render_scan(docs, cfg: Config, files, rev: str = "") -> str:
+def render_scan(docs, cfg: Config, files, rev: str = "", labels: dict = None) -> str:
     active, _filt, warnings = select_rules(docs, cfg)
     rx = [r for r in active if r.detect is not None and r.detect.kind in ("regex", "hybrid")]
     out = list(warnings)
     out.append(f"# scan: {len(rx)} regex rules x {len(files)} file(s) | file:line | id | matched line "
                "([verify] = read the line and confirm before recording a finding)")
     skipped, timed_out, total = [], [], 0
+    labels = labels or {}
+    for fp in files:
+        label = labels.get(fp, fp)
+        text, why = read_blob(rev, fp) if rev else read_scannable(Path(fp))
+        if why:
+            skipped.append(f"skipped: {label} ({why})")
+            continue
+        try:
+            hits, extra = scan_with_timeout(rx, text)
+        except ScanTimeout:
+            timed_out.append(label)
+            continue
+        for n, rid, shown, flags in hits:
+            out.append(f"{label}:{n} | {rid} | {shown}" + (" [verify]" if "verify" in flags else ""))
+            total += 1
+        for rid, more in sorted(extra.items()):
+            out.append(f"{label} | {rid} | (+{more} more matching lines not listed)")
+    out += skipped
+    out += [f"scan timed out: {fp} (apply Phase 1 to this file by hand)" for fp in timed_out]
+    out.append(f"# scan done: {total} hit(s), {len(skipped)} skipped, {len(timed_out)} timed out")
+    return "\n".join(out) + "\n"
+
+
+# --------------------------------------------------------------------------- prepare
+
+def _batch_markdown(n: int, names, rules, cfg: Config) -> str:
+    """One batch as a file for a reviewer agent: a heading, then one `### ID | sev | kind` block per rule."""
+    out = [f"# Batch {n}: {'+'.join(names)} ({len(rules)} rules)", "",
+           f"email_type={cfg.email_type} esp={cfg.esp or '-'} templating={cfg.templating or '-'} "
+           f"targets={','.join(cfg.targets) or '-'}", ""]
+    for r in rules:
+        d = r.detect
+        flags = ",".join(verify_flags(r))
+        out.append(f"### {r.id} | {r.severity(cfg.email_type)} | {d.kind}" + (f" | {flags}" if flags else ""))
+        out.append(r.statement)
+        if d.kind in ("contextual", "hybrid"):
+            out.append(f"- check: {_check_text(r)}" + (" [advisory]" if d.advisory else ""))
+        if d.kind in ("regex", "hybrid"):
+            out += [f"- pattern: {row}" for row in _pattern_rows(r)]
+        out.append("")
+    return "\n".join(out)
+
+
+def render_prepare(docs, cfg: Config, files, out_dir, rev: str = "") -> str:
+    """Write the files a pip-agents:reviewer-rules agent needs (it has no Bash) and describe them.
+
+    out_dir must be absolute and outside the plugin. Scope = the files `scan` would read (no symlinks, nothing
+    outside the repo, no binary or oversize files); with `rev`, each is first copied from that commit into
+    out_dir/tree/<path>. Every path in the scope and in the scan files is the path the agent can open.
+    """
+    out_dir = Path(out_dir)
+    if not out_dir.is_absolute():
+        raise ValueError("--out-dir must be an absolute path")
+    real = out_dir.resolve()
+    if real == PLUGIN_ROOT or PLUGIN_ROOT in real.parents:
+        raise ValueError("--out-dir must be outside the plugin directory")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    active, filt, warnings = select_rules(docs, cfg)
+    scope, labels, skipped = [], {}, []
     for fp in files:
         text, why = read_blob(rev, fp) if rev else read_scannable(Path(fp))
         if why:
             skipped.append(f"skipped: {fp} ({why})")
             continue
-        try:
-            hits, extra = scan_with_timeout(rx, text)
-        except ScanTimeout:
-            timed_out.append(fp)
-            continue
-        for n, rid, shown, flags in hits:
-            out.append(f"{fp}:{n} | {rid} | {shown}" + (" [verify]" if "verify" in flags else ""))
-            total += 1
-        for rid, more in sorted(extra.items()):
-            out.append(f"{fp} | {rid} | (+{more} more matching lines not listed)")
-    out += skipped
-    out += [f"scan timed out: {fp} (apply Phase 1 to this file by hand)" for fp in timed_out]
-    out.append(f"# scan done: {total} hit(s), {len(skipped)} skipped, {len(timed_out)} timed out")
-    return "\n".join(out) + "\n"
+        if rev:
+            copy = out_dir / "tree" / fp
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            copy.write_text(text, encoding="utf-8")
+            labels[fp] = str(copy)
+        else:
+            labels[fp] = os.path.abspath(fp)
+        scope.append(fp)
+    (out_dir / "scope.txt").write_text("".join(labels[fp] + "\n" for fp in scope), encoding="utf-8")
+    bs = make_batches(active)
+    lines = list(warnings)
+    lines.append(f"# prepare: {len(bs)} batches | cap {BATCH_CAP} | {len(active)} active rules | {len(scope)} file(s) in scope "
+                 f"| dir {out_dir} | scope {out_dir / 'scope.txt'}")
+    scan_hits = scan_skipped = scan_timeouts = 0
+    for n, (names, rules) in enumerate(bs, 1):
+        ids = tuple(r.id for r in rules)
+        md = out_dir / f"batch-{n}.md"
+        md_text = _batch_markdown(n, names, rules, cfg)
+        md.write_text(md_text, encoding="utf-8")
+        scan_path = "-"
+        if any(r.detect.kind in ("regex", "hybrid") for r in rules):
+            bcfg = Config(cfg.email_type, cfg.esp, cfg.templating, cfg.targets, cfg.doctrine, ids)
+            text = render_scan(docs, bcfg, scope, rev, labels)
+            sp = out_dir / f"batch-{n}.scan.txt"
+            sp.write_text(text, encoding="utf-8")
+            scan_path = str(sp)
+            tail = text.rstrip().splitlines()[-1]
+            m = re.search(r"(\d+) hit\(s\), (\d+) skipped, (\d+) timed out", tail)
+            if m:
+                scan_hits += int(m.group(1))
+        lines.append(f"batch {n} | {'+'.join(names)} | {len(rules)} | {md} L1-{len(md_text.splitlines())} | {scan_path} | {','.join(ids)}")
+    active_ids = {r.id for r in active}
+    aliases = {}
+    for d in docs:
+        for r in d.rules:
+            if r.is_alias and r.alias_of in active_ids:
+                aliases.setdefault(r.alias_of, []).append(r.id)
+    lines += [f"alias: {canon} <- {','.join(sorted(group))}" for canon, group in sorted(aliases.items())]
+    lines += skipped
+    lines.append(f"# prepare done: {scan_hits} scan hit(s), {len(skipped)} file(s) skipped")
+    return "\n".join(lines) + "\n"
 
 
 # --------------------------------------------------------------------------- savepath
@@ -1108,6 +1199,11 @@ def main(argv=None) -> int:
     _add_cfg(sc)
     sc.add_argument("--files", nargs="+", required=True)
     sc.add_argument("--rev", default="", help="read the files from this commit (full sha) instead of the work tree")
+    pp = sub.add_parser("prepare")
+    _add_cfg(pp)
+    pp.add_argument("--out-dir", required=True, help="absolute scratch directory for the batch and scan files")
+    pp.add_argument("--files", nargs="+", required=True)
+    pp.add_argument("--rev", default="", help="read the files from this commit (full sha) instead of the work tree")
     hp = sub.add_parser("hunks")
     hp.add_argument("--base", required=True)
     hp.add_argument("--rev", default="")
@@ -1167,6 +1263,13 @@ def main(argv=None) -> int:
         return 0
     if a.cmd == "scan":
         sys.stdout.write(render_scan(docs, _cfg(a), a.files, a.rev))
+        return 0
+    if a.cmd == "prepare":
+        try:
+            sys.stdout.write(render_prepare(docs, _cfg(a), a.files, a.out_dir, a.rev))
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
         return 0
     if a.cmd == "show":
         text, missing = render_show(docs, a.ids)

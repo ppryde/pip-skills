@@ -42,3 +42,15 @@ def test_private_source_is_carried_through_the_flow():
 def test_gitignore_hint_not_an_edit():
     t = TEXTS[PLUGIN / "skills/review-as/references/mode-review.md"]
     assert ".gitignore" in t and "Do not edit any ignore file" in t
+
+
+def test_gate_subcommands_named_in_skills_exist():
+    used = {m for t in TEXTS.values() for m in re.findall(r"gate\.py (\w[\w-]*)", t)}
+    assert used == {"brief-collect", "check-collect", "batches", "review-ingest"}, used
+
+
+def test_collectors_go_through_the_gatekeeper_not_a_general_purpose_agent():
+    t = TEXTS[PLUGIN / "references/collect-and-render.md"]
+    assert 'subagent_type: "pip-agents:gatekeeper"' in t
+    assert "general-purpose" not in t and "Haiku subagent" not in t
+    assert "pip-agents:reviewer-rules" in TEXTS[PLUGIN / "skills/review-as/references/mode-review.md"]

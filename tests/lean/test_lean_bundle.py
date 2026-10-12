@@ -147,10 +147,10 @@ def test_shared_collect_and_render_is_wired_from_both_skills():
 
 def test_shared_reference_carries_every_collector_and_render_rule():
     text = read_lf(SHARED)
-    for needle in ('model: "haiku"', "Do not run `collect.py` directly", "single quotes",
+    for needle in ('"pip-agents:gatekeeper"', "Do not run `collect.py` directly", "single quotes",
                    "[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", "[A-Za-z0-9-]+", "newline or NUL",
                    "--paths=''", "gh` >= 2.48", "--since '<last_scanned_at>'",
-                   "must not interpret", "ERROR:", "stop and ask rather than escaping it",
+                   "never retries or alters it", "stderr_tail", "stop and ask rather than escaping it",
                    "do not invent extra fields", "`{{RULE_COUNT}}` is 0"):
         assert needle in text, needle
     for placeholder in ("ALIAS", "REPO", "RULE_COUNT", "COMMENT_COUNT", "PR_COUNT",

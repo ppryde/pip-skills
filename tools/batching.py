@@ -100,6 +100,8 @@ def _split(unit: Unit) -> list[Batch]:
 
 def _rebalance(name: str, batches: list[Batch]) -> list[Batch]:
     """No batch of a split unit stays under BATCH_FLOOR: merge it into a neighbour, or cut the pair evenly."""
+    if BATCH_CAP < 2 * BATCH_FLOOR:  # an even cut of an over-cap pair would leave both halves under the floor, forever
+        raise ValueError(f"BATCH_CAP ({BATCH_CAP}) must be at least 2 * BATCH_FLOOR ({BATCH_FLOOR})")
     spans = [b.spans[0] for b in batches]
     i = 0
     while len(spans) > 1 and i < len(spans):
