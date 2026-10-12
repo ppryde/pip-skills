@@ -10,7 +10,7 @@ Stdlib-only, deterministic (sorted rows, LF line endings), no dependencies to pi
 
 ```
 python3 tools/build_index.py optimise-orm [--check]   # plugins/django-inquisition/skills/optimise-orm/checks/INDEX.md
-python3 tools/build_index.py doctrines    [--check]   # plugins/puritan/skills/doctrines/INDEX.md
+python3 tools/build_index.py doctrines    [--check]   # plugins/puritan/skills/doctrines/INDEX.md and BATCHES.md (agent batches, at most 30 rules, from tools/batching.py)
 ```
 
 - `--check` writes nothing. It normalises CRLF to LF on both sides, prints a unified diff on drift

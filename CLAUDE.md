@@ -70,7 +70,7 @@ SKILL.md <= 10 KB target; procedures for one mode or phase go in `references/` w
 
 ## Subagents
 
-Dispatch a `pip-agents:` persona with a `pip-agents/1` brief of paths, never pasted rule text; at most 30 judgement rules per agent (`tools/batching.py`). `agents/` is generated: edit `plugins/pip-agents/personas/` and run `python3 tools/build_agents.py` (`--check` is the drift test).
+Dispatch a `pip-agents:` persona with a `pip-agents/1` brief of paths, never pasted rule text; at most 30 judgement rules per agent (`tools/batching.py`). `agents/` is generated: edit `plugins/pip-agents/personas/` and run `python3 tools/build_agents.py` (`--check` is the drift test). Consumers: puritan (`doctrines/BATCHES.md`), email-absolution (`rules.py prepare`), django-inquisition (`triggers.py --batches`); each keeps the cap in step with `tools/batching.py` by a test.
 
 ## Test isolation — clean up after yourself
 
