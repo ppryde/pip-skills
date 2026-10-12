@@ -9,10 +9,13 @@ import subprocess
 from pathlib import Path
 
 
+MAX_STATUS_LINES = 40
+
+
 def _git(cwd: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
-            ["git", *args], cwd=cwd, capture_output=True, text=True
+            ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=10
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -44,7 +47,12 @@ def session_snapshot(cwd: Path, limit: int = 10) -> str:
     if branch is not None:
         lines += ["", "## Git", "", f"- Branch: `{branch}`"]
         if status:
-            lines += ["- Status:", "", "```", status, "```"]
+            status_lines = status.splitlines()
+            if len(status_lines) > MAX_STATUS_LINES:
+                extra = len(status_lines) - MAX_STATUS_LINES
+                status_lines = status_lines[:MAX_STATUS_LINES]
+                status_lines.append(f"... {extra} more")
+            lines += ["- Status:", "", "```", "\n".join(status_lines), "```"]
         else:
             lines.append("- Status: clean")
         recent = _recent_tracked(cwd, limit)

@@ -13,15 +13,21 @@ description: >
 
 Two jobs, one lifecycle: **measure** context accumulation, and **hand over**
 (reset + resume) before the window overflows. Vigil is self-contained — it needs
-no other plugin. State lives in `.claude/vigil/` in the working directory,
-self-ignored via its own `.gitignore` — it never edits the repo's own.
+no other plugin; if the census plugin is installed, ctx % is read from it
+(worktree-correct, more accurate), otherwise from the session transcript, which
+is a less reliable estimate. State lives outside the repo, in
+`$CLAUDE_CONFIG_DIR/vigil/` (private, symlinks never followed); old in-repo
+`.claude/vigil/` files are ignored (README: migration).
 
-Drive it through the CLI (locate `cli.py` relative to this skill; when installed
-as a plugin the scripts live under the plugin root):
+Drive it through the `vigil` CLI (the plugin's `bin/` is on the Bash PATH;
+`--root` defaults to `.`):
 
 ```bash
-python .../scripts/cli.py --root . <command>
+vigil <command>
 ```
+
+Fallback if `vigil` is not found: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/cli.py <command>`.
+Hooks run PATH `python3`; `VIGIL_PYTHON` overrides.
 
 ## Begin the watch
 Run `begin` to activate vigil for this directory. It reports **auto** (under
@@ -36,11 +42,13 @@ it at natural stop points.
 
 ## Hand over — you decide, never a blind threshold
 Hand over when: (a) `ctx NN%` is over threshold AND you are at a clean stop
-point; (b) you finish a coherent unit of work; or (c) the user asks. Run:
+point; (b) `ctx NN%` is nearing the threshold and you have just finished a
+coherent unit of work; or (c) the user asks. Run:
 
 ```
 handover [--notes "the critical prose a fresh you must know"] \
-         [--content-file F | -] [--no-snapshot] [--title "short task name"]
+         [--content-file F | -] [--no-snapshot] [--title "short task name"] \
+         [--inline PATH]
 ```
 
 The handover document is assembled from a generic session snapshot (cwd, git
@@ -48,17 +56,14 @@ branch + status, recently-modified files), plus any `--content-file` blob (a
 caller can pipe richer context via `-`), plus your `--notes`. `--no-snapshot`
 drops the generic capture when the caller supplies the whole payload. In auto
 mode the Stop hook sends `/clear` at turn end; in manual mode you tell the user
-to type `/clear`. Either way `SessionStart` re-injects the handover — once (it is
-archived to `.claude/vigil/archive/` on inject) — and you resume lean. After an auto
-`/clear`, injected context alone can't start a turn, so vigil also types a
-resume prompt into the pane so the fresh session picks the work back up
-hands-free — no human keystroke needed to get going again.
+to type `/clear`. Either way `SessionStart` re-injects the handover — once, after a `/clear` only
+(archived, newest 20 kept) — and you resume lean. After an auto
+`/clear`, vigil also types a resume prompt into the pane (injected context alone
+can't start a turn), so the fresh session resumes hands-free.
 
-Pass `--title "<3-6 word summary>"` to also rename the tmux window at the
-moment the Stop hook dispatches `/clear` — so a window showing many parallel
-sessions tells you what each one is doing without attaching. Auto mode
-(tmux) only: there's no window to rename in manual mode, and the title is
-silently dropped if the cycle never dispatches.
+Pass `--title "<3-6 word summary>"` to also rename the tmux window when the Stop
+hook dispatches `/clear`, so parallel sessions show what each is doing. Auto mode
+only; dropped silently if the cycle never dispatches.
 
 ## Defer and pause
 Never clear a discussion out from under a live human. While a live exchange is
@@ -67,17 +72,16 @@ in progress, hold off; run `pause` when someone joins an unattended run, and
 
 ## Config
 `config get|set context.threshold|context.mode|context.window`. `mode` governs
-how the handover body references supporting documents — `/clear` always
-continues in the same place, so this is a document concern, not a relaunch
-concern: `local` (default) leaves them as file paths the next session can open;
+how the handover body references supporting documents: `local` (default) leaves them as file paths the next session can open;
 `remote` inlines them, since a remote session cannot open file paths — use
 repeatable `handover --inline <path>` to embed what the next session must read.
-Defaults: threshold 35, window 200000.
+Defaults: threshold 35; window is detected (200000 only when unknown).
 
 ## The trigger — you get nudged, you decide
 A `UserPromptSubmit` hook watches `ctx NN%` every turn (census-backed, so it's
-worktree-correct and cheap). The first turn it sees you over threshold, it
-nudges you once — via `additionalContext`, not a blind auto-handover — and
+worktree-correct and cheap); a `PostToolUse` hook matched to `TaskCreate|TaskUpdate`
+does the same at task boundaries (an unattended run is nudged only if it uses the
+Task tools). The first time it sees you over threshold, it nudges you once — via `additionalContext`, not a blind auto-handover — and
 arms a `handover-gate` so it won't nag again until the cycle completes. On the
 nudge: finish or park in-flight subagents, judge whether this is a sane
 stopping point, then write a rich handover and run `handover`. The gate clears

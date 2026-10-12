@@ -265,6 +265,33 @@ def test_failed_new_session_falls_back_to_plain_claude(stubs: Path, repo: Path) 
     assert "claude --model opus" in log
 
 
+def test_flags_after_double_dash_do_not_make_the_launch_noninteractive(
+        stubs: Path, repo: Path) -> None:
+    _running_tmux(stubs)
+    log = _run(stubs, repo, "--", "-p")
+    assert "new-session" in log
+
+
+def test_duplicate_session_race_retries_with_the_next_name(stubs: Path, repo: Path) -> None:
+    """Another launch took cc-repo-1 between our probe and new-session: take cc-repo-2."""
+    log = stubs.parent / "calls.log"
+    taken = stubs.parent / "taken-1"
+    (stubs / "tmux").write_text(
+        f'#!/usr/bin/env bash\necho "tmux $*" >> "{log}"\n'
+        f'if [[ " $* " == *" has-session "* ]]; then\n'
+        f'  [[ " $* " == *" =cc-repo-1 "* && -e "{taken}" ]] && exit 0\n  exit 1\nfi\n'
+        'if [[ " $* " == *" new-session "* ]]; then\n'
+        f'  if [[ " $* " == *" cc-repo-1 "* ]]; then : > "{taken}"; exit 1; fi\n'
+        '  env -i "${@: -2:1}" "${@: -1}"\nfi\nexit 0\n')
+    (stubs / "claude").write_text(
+        f'#!/usr/bin/env bash\necho "claude cvs=${{CONTEXT_VIGIL_SESSION-unset}}" >> "{log}"\n')
+    out = _run(stubs, repo)
+    sessions = [ln for ln in out.splitlines() if "new-session" in ln]
+    assert len(sessions) == 2
+    assert "-s cc-repo-2" in sessions[1] and "CONTEXT_VIGIL_SESSION=cc-repo-2" in sessions[1]
+    assert "claude cvs=cc-repo-2" in out
+
+
 def test_attach_inside_tmux_refuses(stubs: Path, repo: Path, live,
                                     monkeypatch: pytest.MonkeyPatch) -> None:
     live("cc-repo-1")

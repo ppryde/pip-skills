@@ -2,7 +2,7 @@ import pytest
 
 from scripts import db
 from scripts.cli import main
-from scripts.knowledge import knowledge_root, load_facts
+from scripts.knowledge import load_facts
 from scripts.pending import add_pending, load_pending, set_status
 
 
@@ -16,35 +16,54 @@ def run(repo, *argv):
     return main(["--root", str(repo), *argv])
 
 
-class TestQueue:
-    def test_add_load_and_status(self, repo):
-        f = add_pending(repo, "WF-001", "a fact", ["x"], "/d/r1-A.md")
-        assert f.id.startswith("P-") and f.status == "pending"
-        assert [p.statement for p in load_pending(repo)] == ["a fact"]
-        set_status(repo, f.id, "rejected", "not durable")
-        assert load_pending(repo)[0].reason == "not durable"
-        with pytest.raises(ValueError, match="already rejected"):
-            set_status(repo, f.id, "accepted")
-        with pytest.raises(FileNotFoundError):
-            set_status(repo, "P-nope", "accepted")
+@pytest.fixture
+def conn(repo):
+    c = db.connect(repo, migrate=False)
+    yield c
+    c.close()
 
-    def test_corrupt_line_is_skipped(self, repo):
-        add_pending(repo, "WF-001", "ok", [], "")
-        path = knowledge_root(repo) / "pending.jsonl"
-        path.write_text(path.read_text() + "{broken\n")
-        assert len(load_pending(repo)) == 1
+
+class TestQueue:
+    def test_add_load_and_status(self, conn):
+        f = add_pending(conn, "WF-001", "a fact", ["x"], "/d/r1-A.md")
+        assert f.id.startswith("P-") and f.status == "pending"
+        assert [p.statement for p in load_pending(conn)] == ["a fact"]
+        set_status(conn, f.id, "rejected", "not durable")
+        assert load_pending(conn)[0].reason == "not durable"
+        with pytest.raises(ValueError, match="already rejected"):
+            set_status(conn, f.id, "accepted")
+        with pytest.raises(FileNotFoundError):
+            set_status(conn, "P-nope", "accepted")
+
+    def test_adjudication_is_conditional_so_a_race_has_one_winner(self, repo):
+        a = db.connect(repo, migrate=False)
+        b = db.connect(repo, migrate=False)
+        f = add_pending(a, "WF-001", "x", [], "")
+        set_status(a, f.id, "accepted")
+        with pytest.raises(ValueError, match="already accepted"):
+            set_status(b, f.id, "rejected", "late")
+        assert load_pending(b)[0].status == "accepted"
+
+    def test_an_add_during_another_connections_adjudication_is_not_lost(self, repo):
+        a = db.connect(repo, migrate=False)
+        b = db.connect(repo, migrate=False)
+        first = add_pending(a, "WF-001", "one", [], "")
+        with db.txn(a):
+            set_status(a, first.id, "rejected", "r")
+        add_pending(b, "WF-002", "two", [], "")
+        assert [p.statement for p in load_pending(a)] == ["one", "two"]
 
 
 class TestCli:
-    def test_facts_pending_accept_reject(self, repo, capsys):
-        a = add_pending(repo, "WF-001", "keep me", ["t"], "/d/r1-A.md")
-        b = add_pending(repo, "WF-002", "drop me", [], "/d/r1-B.md")
+    def test_facts_pending_accept_reject(self, repo, conn, capsys):
+        a = add_pending(conn, "WF-001", "keep me", ["t"], "/d/r1-A.md")
+        b = add_pending(conn, "WF-002", "drop me", [], "/d/r1-B.md")
         capsys.readouterr()
         assert run(repo, "facts", "--pending", "--card", "WF-001") == 0
         assert capsys.readouterr().out.strip() == f"{a.id} WF-001 (t): keep me"
         assert run(repo, "accept-fact", a.id) == 0
         kb_id = capsys.readouterr().out.strip()
-        facts, _ = load_facts(knowledge_root(repo))
+        facts, _ = load_facts(conn)
         assert [(x.id, x.statement, x.source) for x in facts] == [
             (kb_id, "keep me", "WF-001 /d/r1-A.md")]
         assert run(repo, "reject-fact", b.id, "--reason", "noise") == 0
@@ -53,18 +72,18 @@ class TestCli:
         assert run(repo, "facts", "--pending") == 0
         assert capsys.readouterr().out.strip() == "No pending facts."
 
-    def test_accept_fact_does_not_duplicate_on_reaccept_or_reject(self, repo, capsys):
-        a = add_pending(repo, "WF-001", "keep me", ["t"], "/d/r1-A.md")
-        b = add_pending(repo, "WF-002", "drop me", [], "/d/r1-B.md")
+    def test_accept_fact_does_not_duplicate_on_reaccept_or_reject(self, repo, conn, capsys):
+        a = add_pending(conn, "WF-001", "keep me", ["t"], "/d/r1-A.md")
+        b = add_pending(conn, "WF-002", "drop me", [], "/d/r1-B.md")
         assert run(repo, "accept-fact", a.id) == 0
         capsys.readouterr()
         assert run(repo, "accept-fact", a.id) == 1
-        facts, _ = load_facts(knowledge_root(repo))
+        facts, _ = load_facts(conn)
         assert len(facts) == 1
 
         assert run(repo, "reject-fact", b.id, "--reason", "noise") == 0
         assert run(repo, "accept-fact", b.id) == 1
-        facts, _ = load_facts(knowledge_root(repo))
+        facts, _ = load_facts(conn)
         assert len(facts) == 1
 
     def test_set_section(self, repo, tmp_path):
@@ -91,7 +110,7 @@ class TestCli:
         run(repo, "new-card", "--title", "T")
         capsys.readouterr()
         assert run(repo, "set-section", "WF-001", "--section", "Plan") == 1
-        assert "one of the arguments --file --text is required" in capsys.readouterr().err
+        assert "one of the arguments --file/--text-file --text is required" in capsys.readouterr().err
         capsys.readouterr()
         assert run(repo, "set-section", "WF-001", "--section", "Plan",
                    "--file", "x", "--text", "y") == 1

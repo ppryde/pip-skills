@@ -2,6 +2,7 @@
 branch (never assume ``main``), diff a worktree against it, add a worktree."""
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -10,8 +11,21 @@ class GitError(RuntimeError):
     """A git command overseer depends on failed."""
 
 
-def _git(cwd: Path, *argv: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", *argv], cwd=cwd, capture_output=True, text=True, check=False)
+def _git(
+    cwd: Path, *argv: str, timeout: float | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run git without ever prompting (no stdin, no terminal credential
+    prompt). ``timeout`` raises ``subprocess.TimeoutExpired`` for the caller."""
+    return subprocess.run(
+        ["git", *argv],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        timeout=timeout,
+    )
 
 
 def base_ref(repo: Path) -> str:
@@ -38,7 +52,10 @@ def diff_against_base(worktree: Path) -> str:
 def worktree_add(repo: Path, path: Path, branch: str, start: str) -> None:
     """Create ``branch`` at ``start`` checked out in a new worktree at
     ``path``. Fetches first (best effort) so ``origin/<base>`` is current."""
-    _git(repo, "fetch", "--quiet", "origin")
+    try:
+        _git(repo, "fetch", "--quiet", "origin", timeout=60)
+    except subprocess.TimeoutExpired:
+        pass  # best effort: carry on with the refs we have
     result = _git(repo, "worktree", "add", "-b", branch, str(path), start)
     if result.returncode != 0:
         raise GitError(result.stderr.strip() or "git worktree add failed")

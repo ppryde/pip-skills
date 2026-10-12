@@ -1,13 +1,12 @@
 // Every user-facing string, emoji-led, in one place.
 export type WaitReason =
-  | 'draft' | 'latched' | 'classic' | 'rc-unanswered' | 'rc-declined' | 'rc-holdback'
+  | 'draft' | 'latched' | 'classic' | 'rc-declined' | 'rc-holdback'
   | 'countdown' | 'countdown-start'
 
 const WAIT: Record<WaitReason, string> = {
   'draft': '✍️ Handover waiting — there is a draft in your prompt box',
   'latched': '⏳ Handover waiting — the usage limit is in force',
   'classic': '🕯️ Handover skipped — classic context-vigil is active here',
-  'rc-unanswered': '📱 Handover saved — auto-clear in Remote Control is not switched on (/vigil-setup rc)',
   'rc-declined': '📱 Handover saved — auto-clear is off for Remote Control sessions',
   'rc-holdback': '📱 Handover waiting — you were active on the phone a moment ago',
   'countdown': '🧹 Handover countdown running — send anything to cancel',
@@ -23,10 +22,18 @@ export const V = {
   lastLightOff: '🌅 Last light is off for this session — 5-minute prompt cache (/vigil-setup last-light)',
   lastLightBackOn: '🌅 Last light is back on — 1-hour prompt cache',
   nudge: (pct: number) => `🕯️ Context at ${pct}% — say "hand over" (or /vho) when you're ready 📜`,
+  nudgeAsk: (pct: number) => `🕯️ Context is at ${pct}%. Hand over now?`,
   handoverSaved: (path: string) => `📜 Handover saved — ${path}`,
   clearSkippedAttended: '📜 Handover saved — you came back, so nothing was cleared; /vho or /clear when you are ready',
   clearSkippedAutoOff: '📜 Handover saved — auto mode was switched off, so nothing was cleared; /vho or /clear when you are ready',
   handoverUnrequested: (path: string) => `📜 Handover saved — ${path} — it was not asked for, so nothing was cleared; /vho or /clear when you want to use it`,
+  handoverRepeat: (path: string) => `📜 Handover saved — ${path} — not asked for; the one you asked for stays the one the clear resumes from`,
+  unrequestedAsk: (path: string) => `📜 Handover saved, not requested — the model wrote one on its own (${path}). Use it?`,
+  unrequestedHeader: '📜 Handover',
+  unrequestedUpdate: '📝 Update it, then clear',
+  unrequestedClear: '🧹 Clear now',
+  unrequestedLeave: '✋ Leave it',
+  unrequestedGone: '📜 That handover is no longer the latest one — nothing was cleared',
   deferredDropped: '⏳ The handover that waited on the usage limit was not run — /vho when you want one',
   handoverInterrupted: '📜 Handover interrupted — nothing was cleared; /vho when you want one',
   resumeStale: (path: string) => `📜 Handover injected (${path}) — it was written before later turns, so no automatic resume; say where to pick up`,
@@ -40,7 +47,7 @@ export const V = {
   clearRejected: '🧹 /clear was refused — the handover is still pending; /clear to resume from it',
   countdownLine: (s: number) => `🧹 Handing over in ${s} s — 0 or send anything to cancel`,
   cancel: '✖ Cancel',
-  rcAsk: '📱 First Remote Control session with auto mode — one quick question about auto-clear',
+  rcHint: '📱 Auto-clear also runs on the phone — /vigil-setup rc to change',
   setupUsage: '⚙️ /vigil-setup [nudge|bar|auto|last-light|limits|rc] — that step name is not one of these',
   countdownCancelled: '🧹 Handover countdown cancelled — the handover is saved; /clear to resume from it',
   pendingOffer: (path: string) => `📜 A handover is waiting (${path}) — /clear to resume from it`,
@@ -60,6 +67,7 @@ export const V = {
   handoverRequested: '📜 Handing over — as /vho',
   settingUp: '⚙️ Setting up context-vigil-mod…',
   renameFailed: '🏷️ couldn\'t name the new session — carrying on',
+  archiveFailed: '🏷️ couldn\'t mark this session as archived — handing over anyway',
   resumeFailed: (path: string | null, held: string | null) =>
     `▶️ Couldn't resume${path ? ` — the handover is at ${path}` : ''}${held ? ` — your message was not sent: ${held}` : ''}`,
   heldNotSent: (held: string) => `🌅 Your held message was not sent: ${held}`,

@@ -5,24 +5,38 @@ checks:
   - id: CARD-001
     title: len(qs) evaluates entire queryset
     severity_base: high
+    kind: perf
+    trigger: '\blen\(\s*\w+\s*\)'
   - id: CARD-002
     title: qs.count() > 0 should be qs.exists()
     severity_base: medium
+    kind: perf
+    trigger: '\.count\(\)\s*(>|!=|==|<=|>=)\s*[01]\b'
   - id: CARD-003
     title: if qs triggers full evaluation
     severity_base: high
+    kind: perf
+    trigger: '\b(if|elif|while)\s+(not\s+)?\w+\s*:|\bbool\(\w+\)'
   - id: CARD-010
     title: Loop of .get(pk=…) should be in_bulk()
     severity_base: high
+    kind: perf
+    trigger: '\.get\(\s*(pk|id)\s*='
   - id: CARD-011
     title: filter(pk__in=…) then dict-build → use in_bulk()
     severity_base: low
+    kind: perf
+    trigger: '\.filter\(\s*pk__in='
   - id: CARD-020
     title: Paginator on huge table without .count override
     severity_base: medium
+    kind: perf
+    trigger: '\bPaginator\(|paginate_by|pagination_class'
   - id: CARD-021
     title: Deep OFFSET paging
     severity_base: medium
+    kind: perf
+    trigger: '\[\s*\d{3,}\s*:|page_number|\boffset\b|\.page\('
 ---
 
 # Cardinality
@@ -61,11 +75,11 @@ count = Order.objects.filter(status="open").count()
 
 ### CARD-002
 
-**Signature:** `qs.count() > 0`, `qs.count() != 0`, `qs.count() >= 1` or equivalent comparison used to test existence. `qs.exists()` issues a `SELECT 1 ... LIMIT 1` which short-circuits at the first matching row.
+**Signature:** `qs.count() > 0`, `qs.count() != 0`, `qs.count() >= 1`, `qs.count() == 0` (→ `not qs.exists()`) or equivalent comparison used to test existence. `qs.exists()` issues a `SELECT 1 ... LIMIT 1` which short-circuits at the first matching row.
 
 **Grep / AST hints:**
 ```regex
-\.count\(\)\s*[>!<]=?\s*0
+\.count\(\)\s*(>|!=|==|<=)\s*0
 ```
 Also catch: `\.count\(\)\s*>=\s*1`
 
@@ -87,6 +101,7 @@ if Order.objects.filter(user=user).count() > 0:
 # After
 if Order.objects.filter(user=user).exists():
     ...
+# `if qs.count() == 0:` becomes `if not qs.exists():`
 ```
 
 ---
@@ -117,7 +132,9 @@ orders = Order.objects.filter(status="open")
 if orders:
     process(orders)
 
-# After
+# After — only worthwhile if `orders` is not used afterwards: process(orders)
+# evaluates the queryset anyway, so exists() adds a second query when it is reused
+# (in that case keep `if orders:` or build `list(orders)` once)
 if orders.exists():
     process(orders)
 ```
@@ -126,7 +143,7 @@ if orders.exists():
 
 ### CARD-010
 
-**Signature:** A loop iterates over a collection of primary keys and calls `.get(pk=pk)` inside the loop — issuing one query per PK. `in_bulk(pks)` retrieves all objects in a single query and returns a `{pk: obj}` dict.
+**Signature:** A loop iterates over a collection of primary keys and calls `.get(pk=pk)` inside the loop — issuing one query per PK. `in_bulk(pks)` retrieves all objects in a single query and returns a `{pk: obj}` dict. Unlike `.get()`, `in_bulk` silently omits missing PKs instead of raising `DoesNotExist`.
 
 **Grep / AST hints:**
 ```regex
@@ -152,7 +169,7 @@ for pk in pk_list:
 
 # After
 obj_map = MyModel.objects.in_bulk(pk_list)  # 1 query
-objects = [obj_map[pk] for pk in pk_list if pk in obj_map]
+objects = [obj_map[pk] for pk in pk_list if pk in obj_map]  # missing pks are skipped, no DoesNotExist
 ```
 
 ---

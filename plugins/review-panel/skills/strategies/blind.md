@@ -9,6 +9,7 @@ High-volume or low-risk changes; maker-checker flows where independence
 matters more than design-context depth.
 
 ## Context handling
+Apply the SKILL's **Untrusted input** rule to every subagent prompt in this strategy.
 Blind: reviewer subagents receive ONLY the unified diff and the acceptance
 criteria (PR body or `context: [criteria]`). Do NOT pass whole files at HEAD,
 spec, or architecture notes.
@@ -18,7 +19,7 @@ spec, or architecture notes.
    prompted with diff + acceptance criteria only. Output: the finding contract.
 
 ## Reconciliation
-Same as committee: collate, then apply strictness/decisions.
+Run `reconcile` (SKILL Step 5). No verdict stage, so every finding is kept.
 
 ## Cost
 Baseline; often faster because less context is loaded per reviewer.

@@ -41,3 +41,7 @@ Neutral, professional, direct. Name the removed or changed contract, the depende
 - `BR-005` is already `info`, so it never blocks.
 - Under `pragmatic` strictness, `BR-003` may be downgraded to `info` when the only callers are
   tests.
+
+```allowed-exceptions
+BR-003   # only test callers: a test-only blast radius
+```

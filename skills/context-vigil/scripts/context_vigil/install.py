@@ -214,7 +214,7 @@ def _our_commands(record: Dict[str, Any]) -> Set[str]:
 
 
 def _is_capture(command: str, record: Dict[str, Any]) -> bool:
-    return "capture.sh" in command and any(d in command for d in _skill_dirs(record))
+    return command in {f'bash "{Path(d) / "scripts" / "capture.sh"}"' for d in _skill_dirs(record)}
 
 
 class _DuplicateKey(ValueError):
@@ -579,6 +579,18 @@ def _settings_existed_before() -> bool:
     return prior if isinstance(prior, bool) else settings_path().exists()
 
 
+_SHELL_UNSAFE = '"$`\\'
+
+
+def _refuse_unsafe_skill_dir() -> None:
+    """Hook and status-line commands quote the skill dir in double quotes: a dir holding
+    a shell-special character would be interpreted by the shell, so refuse it."""
+    path = str(paths.skill_dir())
+    if any(ch in path for ch in _SHELL_UNSAFE):
+        raise InstallError(f"the skill directory {path!r} contains a shell-special character "
+                           "(one of \" $ ` \\); move the skill and re-run (nothing was changed)")
+
+
 def plan_install(threshold: Optional[int], launcher: Optional[str] = None,
                  last_light: Optional[bool] = None,
                  last_light_threshold: Optional[int] = None,
@@ -587,6 +599,10 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None,
         config.coerce("context.threshold", threshold)
     if last_light_threshold is not None:
         config.coerce("last_light.threshold", last_light_threshold)
+    _refuse_unsafe_skill_dir()
+    if bar and not mod_dir().is_dir():
+        raise InstallError(f"--bar on needs the vigil bar mod at {mod_dir()}, which this "
+                           "skill does not ship; nothing was changed")
     before, data = _read_settings()
     plan = Plan(threshold=threshold, last_light=last_light,
                 last_light_threshold=last_light_threshold)
@@ -700,28 +716,90 @@ def write_atomic(path: Path, text: str) -> None:
             tmp.unlink()
 
 
+def _snapshot(path: Path) -> Tuple[Path, Optional[bytes], Optional[int]]:
+    """(real target, its bytes or None when absent, its mode) before we touch it."""
+    target = path.resolve()
+    try:
+        return target, target.read_bytes(), stat.S_IMODE(os.stat(str(target)).st_mode)
+    except FileNotFoundError:
+        return target, None, None
+
+
+def _restore(target: Path, data: Optional[bytes], mode: Optional[int]) -> None:
+    """Put one file back as ``_snapshot`` found it: same bytes and mode, or gone."""
+    if data is None:
+        target.unlink(missing_ok=True)
+        return
+    fd, name = tempfile.mkstemp(dir=str(target.parent), prefix=f"{paths.TMP_PREFIX}{target.name}.",
+                                suffix=USER_TMP_SUFFIX)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        os.replace(name, str(target))
+        if mode is not None:
+            os.chmod(str(target), mode)
+    finally:
+        if os.path.lexists(name):
+            os.unlink(name)
+
+
+def _roll_back(done: List[Tuple[Path, Optional[bytes], Optional[int]]]) -> Tuple[List[str], List[str]]:
+    """Undo ``done``; (restored paths, paths that could not be restored)."""
+    restored: List[str] = []
+    failed: List[str] = []
+    # The first snapshot of each path is the original; restore newest-touched first.
+    originals: Dict[Path, Tuple[Optional[bytes], Optional[int]]] = {}
+    for target, data, mode in done:
+        originals.setdefault(target, (data, mode))
+    for target in reversed(list(originals)):
+        data, mode = originals[target]
+        try:
+            _restore(target, data, mode)
+            restored.append(str(target))
+        except OSError:
+            failed.append(str(target))
+    return restored, failed
+
+
 def apply(plan: Plan) -> None:
+    """Write the plan. If any write fails part-way, every user file already written is
+    put back as it was (CV-9) and the error is re-raised with ``rolled_back`` (paths
+    restored) and ``rollback_failed`` (paths that could not be) set on it.
+
+    The install record is written first and kept on failure: it only names what this
+    install would have written, and ``uninstall`` ignores entries that are not there."""
     record_path = paths.install_record_path()
     uninstalling = bool(plan.record.get("uninstall"))
     if plan.record and not uninstalling:
         # Record first: a crash mid-apply must never leave an unrecorded edit.
         paths.write_private(record_path, json.dumps(plan.record, indent=2) + "\n")
-    for change in plan.changes:
-        if change.before == change.after:
-            continue
-        if change.after == "" and change.path == settings_path():
-            change.path.unlink(missing_ok=True)
-            continue
-        write_atomic(change.path, change.after)
-    if uninstalling:
-        record_path.unlink(missing_ok=True)
-        return
-    if plan.threshold is not None:
-        config.set_value(Path.cwd(), "context.threshold", str(plan.threshold))
-    if plan.last_light is not None:
-        config.set_value(Path.cwd(), "last_light.enabled", "on" if plan.last_light else "off")
-    if plan.last_light_threshold is not None:
-        config.set_value(Path.cwd(), "last_light.threshold", str(plan.last_light_threshold))
+    done: List[Tuple[Path, Optional[bytes], Optional[int]]] = []
+    try:
+        for change in plan.changes:
+            if change.before == change.after:
+                continue
+            done.append(_snapshot(change.path))
+            if change.after == "" and change.path == settings_path():
+                change.path.unlink(missing_ok=True)
+                continue
+            write_atomic(change.path, change.after)
+        if uninstalling:
+            record_path.unlink(missing_ok=True)
+            return
+        if plan.threshold is not None or plan.last_light is not None \
+                or plan.last_light_threshold is not None:
+            done.append(_snapshot(paths.global_config_path()))
+        if plan.threshold is not None:
+            config.set_value(Path.cwd(), "context.threshold", str(plan.threshold))
+        if plan.last_light is not None:
+            config.set_value(Path.cwd(), "last_light.enabled", "on" if plan.last_light else "off")
+        if plan.last_light_threshold is not None:
+            config.set_value(Path.cwd(), "last_light.threshold", str(plan.last_light_threshold))
+    except BaseException as exc:
+        restored, failed = _roll_back(done)
+        exc.rolled_back = restored            # type: ignore[attr-defined]
+        exc.rollback_failed = failed          # type: ignore[attr-defined]
+        raise
 
 
 def plan_uninstall() -> Plan:

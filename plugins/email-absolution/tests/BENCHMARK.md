@@ -6,6 +6,11 @@ compilation traps, and deliberate content/tone violations. Use these to verify
 skill output, regression-test after doctrine changes, and measure how many
 planted violations the skill catches vs misses.
 
+**Alias-aware matching.** Duplicate rules are aliases of one canonical rule
+(`doctrines/INDEX.md`, Aliases table) and are reported once, under the canonical id with
+`also:`. A planted violation counts as caught when the audit reports its expected id, the
+canonical id, or any alias in the same group (for example `GOTCHA-025` is caught by `RENDER-009`).
+
 ---
 
 ## Template Overview
@@ -50,7 +55,7 @@ Each violation is tagged with one or more type labels:
 |------|-----------|------|
 | RENDER-001 | No `<!DOCTYPE>` declaration | `HTML` |
 | ACCESS-004 | No `lang` attribute on `<html>` | `HTML` `ACCESS` |
-| RENDER-009 / GOTCHA-025 | Relative `src="/images/logo.png"` — no base URL in email clients | `HTML` |
+| RENDER-009 / GOTCHA-025 | Relative `src="/images/logo.png"` and `src="images/footer-logo.png"` (no leading slash) — no base URL in email clients | `HTML` |
 | RENDER-009 / GOTCHA-025 | Relative `href="/dashboard"` on CTA — same problem | `HTML` |
 | ACCESS-001 | `<img>` has no `alt` attribute | `ACCESS` |
 | GOTCHA-024 | `var(--bg-color)` and `var(--link-color)` — CSS custom properties unsupported in Outlook and Gmail | `CSS` |

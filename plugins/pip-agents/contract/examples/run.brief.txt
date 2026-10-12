@@ -1,0 +1,7 @@
+brief: pip-agents/1
+kind: run
+ref: collect
+run: python3 /abs/plugins/review-clone/scripts/collect.py --handle 'octocat' --alias 'oc' --since '2026-09-01'
+timeout_ms: 600000
+out: /Users/me/.claude/review-clone/oc/snapshot.json
+counts: comments,prs

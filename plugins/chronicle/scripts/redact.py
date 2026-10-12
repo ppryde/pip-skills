@@ -15,7 +15,12 @@ Fidelity levels (each is a strict superset of the one before):
 
 ``minimal``      exactly what cost accounting needs — ids, timestamps, cwd,
                  branch, model, the API ``usage`` block, stop_reason, tool NAMES
-                 (no inputs), account bridge records, turn durations.
+                 (no inputs), account bridge records, turn durations, and for
+                 each tool result its OUTCOME as a fixed category (``_outcome``/
+                 ``_reason`` from ``scripts.permits``: ok / error:* / denied:* /
+                 prompted:*, classified here before the text is dropped) and
+                 the ``permissionDecision`` reduced to closed-vocabulary
+                 decision/source/reasonType.
                  LOST: effort, skill/plugin/mcp/agent_type attribution, skill
                  and agent-type qualifiers, tool result sizes, titles, file
                  edits and line churn, artifacts, limit hits, subagent tasks.
@@ -27,14 +32,22 @@ Fidelity levels (each is a strict superset of the one before):
                  Edit/Write (``toolUseResult._lines``), Artifact publish
                  facts (action, file path, favicon, the published URL),
                  usage-limit banners (Anthropic-authored text, recognised by
-                 prefix), ``isCompactSummary``. Still NEVER kept: prompts,
+                 prefix), ``isCompactSummary``, and per subagent the agent
+                 TYPE (a built-in or ``<plugin>:<name>``; any other name is
+                 folded to ``(ad-hoc)``), whether it ran non-interactive, and
+                 its model. Still NEVER kept: prompts,
                  assistant text, thinking, tool inputs, tool result text,
                  titles, agent tasks and descriptions.
 ``titles``       ALSO keeps session titles (``ai-title``/``custom-title``/
                  ``summary``), Artifact title/description, subagent task lines
                  and agent descriptions — each truncated to 80 characters.
                  These are model- or user-written prose and CAN CONTAIN
-                 CUSTOMER OR PRODUCTION DETAIL. Opt in knowingly.
+                 CUSTOMER OR PRODUCTION DETAIL. Opt in knowingly. Also the
+                 SHAPE of each Bash command (``_shape``: a program from a
+                 fixed allowlist plus an allowlisted subcommand, never an
+                 argument, path or value) and the raw agent-type name. Shape
+                 is deliberately here and not lower: on a production-access
+                 box even a command's program is a fact about what ran there.
 """
 # Annotations are never evaluated at runtime (this import), so the modern
 # spellings below cost the remote's 3.8 nothing; it is why ruff's pyupgrade
@@ -45,6 +58,13 @@ import json
 import re
 from collections.abc import Iterator
 from typing import Any
+
+# Inside chronicle these come from permits.py. Bundled on a remote box this file
+# IS `__main__` and permits.py's source follows it, so the names are already
+# global by the time anything runs; importing there would also let a `scripts/`
+# directory in the remote's working directory shadow the bundle.
+if __name__ != "__main__":
+    from scripts.permits import classify, clean_decision, fold_agent_type, tool_shape
 
 FIDELITIES = ("minimal", "attribution", "titles")
 _LEVEL = {name: index for index, name in enumerate(FIDELITIES)}
@@ -190,12 +210,17 @@ def _line_counts(tool_use_result: Any) -> dict[str, Any] | None:
 
 def _tool_input(name: str, raw: Any, level: int) -> dict[str, Any]:
     """A tool call's input, cut down to what attribution needs (nothing at all
-    at ``minimal``)."""
+    at ``minimal``; a Bash call's closed-vocabulary shape only at ``titles``)."""
     if level < 1 or not isinstance(raw, dict):
         return {}
     out: dict[str, Any] = {}
     key = QUALIFIER_KEYS.get(name)
-    if key is not None:
+    if name == "Bash":
+        if level >= 2:
+            shape = tool_shape(name, raw)
+            if shape is not None:
+                out["_shape"] = shape
+    elif key is not None:
         value = _ident(raw.get(key))
         if value is not None:
             out[key] = value
@@ -299,10 +324,19 @@ def _task_line(content: Any) -> str | None:
     return _short(text)
 
 
-def _tool_result_block(block: dict[str, Any], level: int) -> dict[str, Any]:
+def _tool_result_block(block: dict[str, Any], level: int,
+                       permission_decision: Any = None) -> dict[str, Any]:
     tool_use_id = block.get("tool_use_id")
     out = {"type": "tool_result", "tool_use_id": tool_use_id if _scalar(tool_use_id) else None,
            "content": ""}
+    # The outcome is classified HERE, before the text is dropped, at every
+    # level: it is one of a fixed list of categories (scripts.permits), so it
+    # carries no user content and a remote keeps the verdict while the words go.
+    outcome, reason = classify(block.get("content"), block.get("is_error") is True,
+                               permission_decision)
+    out["_outcome"] = outcome
+    if reason is not None:
+        out["_reason"] = reason
     if level < 1:
         return out
     text = result_text(block.get("content"))
@@ -321,8 +355,12 @@ def _user(record: dict[str, Any], out: dict[str, Any], level: int) -> None:
     content = raw_msg.get("content") if isinstance(raw_msg, dict) else None
     if (isinstance(content, list) and len(content) > 0
             and all(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)):
-        out["message"] = {"role": "user",
-                          "content": [_tool_result_block(b, level) for b in content]}
+        decision = record.get("permissionDecision")
+        out["message"] = {"role": "user", "content": [
+            _tool_result_block(b, level, decision) for b in content]}
+        cleaned = clean_decision(decision)
+        if cleaned is not None:
+            out["permissionDecision"] = cleaned
         if level >= 1:
             counts = _line_counts(record.get("toolUseResult"))
             if counts is not None:
@@ -366,27 +404,49 @@ def slim(record: Any, fidelity: str = "minimal") -> dict[str, Any] | None:
     elif kind in ("bridge-session", "history-suppression"):
         out.update(_copy_scalars(record, ACCOUNT_KEYS))
     elif kind == "cost-state":
-        for key in ("totalCostUSD", "startTime", "modelUsage"):
-            if key in record:
-                out[key] = record[key]
+        for key in ("totalCostUSD", "startTime"):
+            value = record.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                out[key] = value
+        if "modelUsage" in record:
+            out["modelUsage"] = _usage(record["modelUsage"])
     else:
         return None
     return out
 
 
 def slim_meta(text: str, fidelity: str) -> str | None:
-    """An ``agent-<id>.meta.json``'s text cut down: only the ``titles`` level
-    keeps anything (the short ``description`` label). None means: send nothing."""
-    if _LEVEL.get(fidelity, 0) < 2:
+    """An ``agent-<id>.meta.json``'s text cut down. ``minimal`` sends nothing.
+    ``attribution`` keeps the agent TYPE (a built-in or ``<plugin>:<name>``;
+    any other name folds to ``(ad-hoc)``), ``requestNonInteractive`` and the
+    model id; ``titles`` also keeps the raw agent-type name and the short
+    ``description`` label. None means: send nothing."""
+    level = _LEVEL.get(fidelity, 0)
+    if level < 1:
         return None
     try:
         data = json.loads(text or "{}")
     except ValueError:
         return None
-    description = _short(data.get("description")) if isinstance(data, dict) else None
-    if description is None:
+    if not isinstance(data, dict):
         return None
-    return json.dumps({"description": description}, separators=(",", ":"))
+    out: dict[str, Any] = {}
+    agent_type = data.get("agentType")
+    kept_type = fold_agent_type(agent_type) if level < 2 else _ident(agent_type)
+    if kept_type is not None:
+        out["agentType"] = kept_type
+    if isinstance(data.get("requestNonInteractive"), bool):
+        out["requestNonInteractive"] = data["requestNonInteractive"]
+    model = _ident(data.get("model"))
+    if model is not None:
+        out["model"] = model
+    if level >= 2:
+        description = _short(data.get("description"))
+        if description is not None:
+            out["description"] = description
+    if not out:
+        return None
+    return json.dumps(out, separators=(",", ":"))
 
 
 def slim_line(raw: bytes, fidelity: str) -> str | None:

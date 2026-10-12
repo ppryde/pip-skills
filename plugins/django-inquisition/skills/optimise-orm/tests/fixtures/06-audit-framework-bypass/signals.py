@@ -12,5 +12,5 @@ def log_invoice_change(sender, instance, created, **kwargs):
 
 @receiver(pre_delete, sender=Invoice)
 def log_invoice_delete(sender, instance, **kwargs):
-    """Audit listener — logs every Invoice delete. Bypassed by qs.delete()."""
+    """Audit listener — logs every Invoice delete. Also sent by qs.delete()."""
     pass  # in real code: AuditLog.objects.create(...)

@@ -1,3 +1,11 @@
+---
+doctrine: mjml
+prefix: MJML
+kind: language
+templating: mjml
+scribe: constraints
+---
+
 # MJML — Email Doctrine
 
 ## Purpose
@@ -10,7 +18,7 @@ Rules and gotchas for engineers building HTML email templates with MJML. MJML v4
 
 **[MJML-001]** `transactional: mortal | marketing: mortal` — Use `<mj-preview>` for the preheader text — do not manually code the hidden preheader div.
 > `<mj-preview>Your order has shipped.</mj-preview>` generates the correct multi-property hidden div: `display:none; max-height:0; overflow:hidden; mso-hide:all`. Hand-coded preheaders routinely omit `mso-hide:all` or use `display:none` alone, which is insufficient (see GOTCHA-028). Source: MJML Documentation.
-> `detect: regex` — (1) absence check: flag if file contains `<mjml` but not `<mj-preview`; (2) contextual — flag if a hand-coded hidden div is present in source instead of `<mj-preview>`
+> `detect: hybrid` — absence: trigger=`<mjml` require=`<mj-preview` + check: flag if a hand-coded hidden div is present in source instead of `<mj-preview>`
 
 **[MJML-002]** `transactional: mortal | marketing: mortal` — Set global defaults in `<mj-attributes>` — do not repeat attributes on every component. Be aware that `<mj-attributes>` defaults and per-component overrides stack, not replace.
 > Repeating `font-family="Arial, sans-serif" color="#333333"` on every `<mj-text>` inflates source and causes drift when values change. Use `<mj-attributes>` in `<mj-head>` to set component-level defaults. Source: MJML Documentation — mj-attributes.
@@ -19,7 +27,7 @@ Rules and gotchas for engineers building HTML email templates with MJML. MJML v4
 
 **[MJML-003]** `transactional: mortal | marketing: mortal` — All `src` and `href` values must be absolute HTTPS URLs.
 > MJML does not resolve relative URLs. `<mj-image src="/logo.png">` compiles to `<img src="/logo.png">` — which fails in every email client (see GOTCHA-025). Source: caniemail.com (no `<base>` support).
-> `detect: regex` — pattern: `(?:src|href)=["'](?!https?://)[^"']+["']` in MJML source files
+> `detect: regex` — pattern: `(?:src|href)=["'](?!https?://)[^"']+["']` — in MJML source files
 
 **[MJML-004]** `transactional: mortal | marketing: mortal` — Never hand-edit the compiled HTML output in `dist/`. All source changes must be made in `.mjml` files.
 > MJML compilation overwrites the output file entirely. Manual edits to compiled HTML create invisible drift between source and deployed template — the next CI build reverts them silently.
@@ -27,15 +35,15 @@ Rules and gotchas for engineers building HTML email templates with MJML. MJML v4
 
 **[MJML-005]** `transactional: mortal | marketing: mortal` — Pin the MJML version exactly in `package.json`.
 > Use `"mjml": "4.18.0"` not `"^4.18.0"`. MJML patch releases have changed spacing, table attributes, and conditional comment syntax. Floating semver causes undetected visual regressions on `npm install`.
-> `detect: regex` — in `package.json`: pattern `"mjml"\s*:\s*"[\^~]`
+> `detect: regex` — pattern: `"mjml"\s*:\s*"[\^~]` — in package.json
 
 **[MJML-006]** `transactional: mortal | marketing: mortal` — Do not use MJML v5 in production. It is beta as of March 2025.
 > MJML v5 breaking changes: file includes (`<mj-include>`) disabled by default as a security measure; minification backend replaced (htmlnano/cssnano); `mj-body` HTML structure changed; Node.js 16/18 dropped (requires 20, 22, or 24); migration helper tool removed. Source: MJML v5.0.0-beta.1 release notes.
-> `detect: regex` — in `package.json`: pattern `"mjml"\s*:\s*"[^"]*(?:5\.\d|beta|alpha|rc\d|canary)`
+> `detect: regex` — pattern: `"mjml"\s*:\s*"[^"]*(?:5\.\d|beta|alpha|rc\d|canary)` — in package.json
 
 **[MJML-007]** `transactional: venial | marketing: venial` — Declare `<mj-breakpoint>` explicitly in every template's `<mj-head>`.
 > The default breakpoint is 480px. Not declaring it makes the responsive behaviour implicit and surprising when MJML versions change. Explicit declaration makes the intent clear in code review.
-> `detect: regex` — absence check: flag if file contains `<mjml` but not `<mj-breakpoint`
+> `detect: regex` — absence: trigger=`<mjml` require=`<mj-breakpoint`
 
 **[MJML-008]** `transactional: venial | marketing: venial` — Use `<mj-font>` in `<mj-head>` to load web fonts.
 > `<mj-font name="Lato" href="https://fonts.googleapis.com/css?family=Lato:400,700">` generates a `<link>` in the compiled `<head>` and makes the font name available in `font-family` attributes. Do not write `<link>` tags inside `<mj-raw>`. Web fonts fail silently in Gmail and Outlook — always include a complete fallback stack in the `font-family` attribute (see HTML-005).
@@ -55,7 +63,7 @@ Rules and gotchas for engineers building HTML email templates with MJML. MJML v4
 
 **[MJML-012]** `transactional: venial | marketing: venial` — Declare `<mj-title>` in `<mj-head>` for accessibility.
 > `<mj-title>Order #12345 Confirmed — Acme</mj-title>` generates the HTML `<title>` element. Screen readers announce this on open. A missing or generic title fails ACCESS-008. Source: WCAG 2.1 SC 2.4.2.
-> `detect: regex` — absence check: flag if file contains `<mjml` but not `<mj-title`
+> `detect: regex` — absence: trigger=`<mjml` require=`<mj-title`
 
 **[MJML-013]** `transactional: venial | marketing: venial` — Use `<mj-button>` for CTA buttons, but understand that it does NOT generate VML rounded corners for Outlook.
 > `<mj-button>` compiles to a `<table>` + `<td>` structure with `mso-padding-alt` and `bgcolor` applied to the `<td>`, giving Outlook a solid rectangular button. It does NOT emit `<v:roundrect>` VML — Outlook 2007–2019 renders a flat rectangle regardless of the `border-radius` attribute (which is CSS-only and ignored by the Word rendering engine). For a true bulletproof VML button with rounded corners in Outlook, the `<v:roundrect>` pattern must be hand-coded in `<mj-raw>`. `<mj-button>` is still the correct default for rectangular CTA buttons; use `<mj-raw>` only when rounded corners in Outlook are a hard design requirement. Source: MJML Documentation; Stig Morten Myre "Bulletproof Buttons" (Campaign Monitor).
@@ -91,7 +99,8 @@ Rules and gotchas for engineers building HTML email templates with MJML. MJML v4
 
 **[MJML-021]** `transactional: venial | marketing: venial` — `background-size` on `<mj-section background-url>` is ignored in Outlook 2007–2019.
 > `<mj-section background-url="..." background-size="cover">` compiles to two parallel rendering paths: (1) a `<!--[if mso]>` VML block using `<v:rect>` + `<v:fill type="frame">` for Outlook, and (2) a CSS `background-image` + `background-size` inline style for all other clients. The VML `<v:fill>` element does not accept a `size` attribute equivalent to CSS `background-size: cover` — the VML path always stretches to fill the container without respecting the CSS sizing instruction. In Outlook 2007–2019 the background image is displayed but `background-size: cover` or `contain` has no effect. Design backgrounds with this constraint in mind: use images cropped to the correct aspect ratio, or accept that Outlook will not clip/fit the image to cover.
-> `detect: regex` — pattern: `<mj-section[^>]*background-url[^>]*background-size|<mj-section[^>]*background-size[^>]*background-url` (both attributes on same element = flag)
+> `applies: targets=outlook-2019`
+> `detect: regex` — pattern: `<mj-section[^>]*background-url[^>]*background-size|<mj-section[^>]*background-size[^>]*background-url` — both attributes on same element = flag
 
 ---
 

@@ -28,7 +28,6 @@ test('waiting explains every guard reason by name', () => {
     'draft': /draft in your prompt box/,
     'latched': /usage limit is in force/,
     'classic': /classic context-vigil is active/,
-    'rc-unanswered': /auto-clear in Remote Control is not switched on.*\/vigil-setup rc/,
     'rc-declined': /auto-clear is off for Remote Control/,
     'rc-holdback': /active on the phone a moment ago/,
     'countdown': /countdown running — send anything to cancel/,

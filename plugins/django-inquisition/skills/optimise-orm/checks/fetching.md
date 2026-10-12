@@ -5,39 +5,63 @@ checks:
   - id: FETCH-001
     title: Missing select_related for FK access in loop
     severity_base: high
+    kind: perf
+    trigger: '\bfor\s+\w+\s+in\b'
   - id: FETCH-002
     title: select_related() with no args fetches every FK
     severity_base: medium
+    kind: perf
+    trigger: '\.select_related\(\s*\)'
   - id: FETCH-003
     title: select_related chain > 3 deep across nullable FKs
     severity_base: low
+    kind: perf
+    trigger: 'select_related\(.*__.*__.*__'
   - id: FETCH-010
     title: Missing prefetch_related for reverse/M2M access in loop
     severity_base: high
+    kind: perf
+    trigger: '\bfor\s+\w+\s+in\b'
   - id: FETCH-011
     title: Prefetch() with custom QS would reduce work
     severity_base: medium
+    kind: perf
+    trigger: '\.prefetch_related\('
   - id: FETCH-012
-    title: Nested prefetch missing to_attr causes silent re-fetch
-    severity_base: medium
+    title: Filtered Prefetch without to_attr replaces the unfiltered relation (clarity)
+    severity_base: low
+    kind: perf
+    trigger: '\bPrefetch\('
   - id: FETCH-020
     title: Wide column over-fetched and unread by callers
     severity_base: high
+    kind: perf
+    trigger: '\.objects\b|\b(Text|JSON|Binary)Field\b'
   - id: FETCH-021
     title: values()/values_list() opportunity on single-field iteration
     severity_base: medium
+    kind: perf
+    trigger: '[\[(]\s*\w+\.\w+\s+for\s+\w+\s+in\b'
   - id: FETCH-022
     title: only() viable — callers read subset of fields
     severity_base: medium
+    kind: perf
+    trigger: '\.objects\b|\.(filter|all|get)\('
   - id: FETCH-030
     title: N+1 in template for loop
     severity_base: critical
+    kind: perf
+    trigger: '\{%\s*for\s+\w+\s+in\b'
   - id: FETCH-031
     title: N+1 in DRF SerializerMethodField / nested serializer
     severity_base: critical
+    kind: perf
+    trigger: 'SerializerMethodField|to_representation|\bdef\s+get_\w+\(self,\s*obj\)'
   - id: FETCH-032
     title: N+1 hidden in __str__ / __repr__
     severity_base: high
+    kind: perf
+    trigger: '\bdef\s+__(str|repr)__\('
 ---
 
 # Fetching
@@ -80,7 +104,7 @@ for order in orders:
 
 ### FETCH-002
 
-**Signature:** `.select_related()` called with no arguments, causing Django to eagerly join every FK relationship on the model regardless of which are actually used.
+**Signature:** `.select_related()` called with no arguments, causing Django to eagerly join every FK relationship it can follow (a bare `select_related()` follows only non-null FKs, and recurses through them up to `Query.max_depth`, which is 5 levels) regardless of which are actually used.
 
 **Grep / AST hints:**
 ```regex
@@ -217,7 +241,7 @@ for author in authors:
 
 ### FETCH-012
 
-**Signature:** A `Prefetch()` object is used without `to_attr`, and the same relation is then accessed via `obj.<relation>.all()` in template or calling code — causing Django to silently re-evaluate the relation instead of serving from the prefetch cache.
+**Signature:** A `Prefetch()` with a custom `queryset=` (a filtered subset) is used without `to_attr`, and the same relation is then accessed via `obj.<relation>.all()` in calling code. This does **not** re-query — `obj.<relation>.all()` is served from the prefetch cache. The gotcha is semantic: the relation now holds **only the filtered subset** everywhere that instance is used, and any further `obj.<relation>.filter(...)` / `.exclude(...)` call cannot use the cache and issues a new query against the unfiltered table (`.all()` and `.count()` on the prefetched relation are served from the cache). Using `to_attr` keeps the unfiltered relation intact and makes the filtered list's name explicit. This is a clarity/correctness note, not a performance finding.
 
 **Grep / AST hints:**
 ```regex
@@ -231,24 +255,24 @@ Follow-up: confirm `to_attr=` is absent from the `Prefetch(...)` call. Then look
 - Low: Pattern found but downstream access not traceable.
 
 **Savings formula:**
-- Prevents silent re-query; savings = `N × per_query_overhead`.
-- Constants: PG = 2ms, MySQL = 4ms, SQLite = 1ms
+- N/A — no query is saved by `to_attr` (`.all()` is already served from the cache). Mark `savings_basis: unknown`.
 
 **Suggested fix template:**
 ```python
-# Before — re-fetch risk
+# Before — author.books now silently means "recent books only"
 qs = Author.objects.prefetch_related(
     Prefetch("books", queryset=Book.objects.filter(published_year__gte=2020))
 )
 for author in qs:
-    books = author.books.all()  # may re-query
+    books = author.books.all()  # served from the filtered prefetch cache (no re-query)
+    n = author.books.filter(is_published=True).count()  # filter() DOES re-query
 
 # After — explicit to_attr
 qs = Author.objects.prefetch_related(
     Prefetch("books", queryset=Book.objects.filter(published_year__gte=2020), to_attr="recent_books")
 )
 for author in qs:
-    books = author.recent_books  # list, served from cache
+    books = author.recent_books  # list, served from cache; author.books stays unfiltered
 ```
 
 ---

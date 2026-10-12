@@ -26,7 +26,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from scripts import replay, store
 from scripts.transcript import MAIN_AGENT, Facts, Turn, fold
@@ -89,16 +89,36 @@ def resolve_on_host(cwd: str | None) -> str | None:
     return None
 
 
+# `repo_root_of` results for this process, keyed by the cwd AFTER it was resolved
+# onto this filesystem. A first backfill of N sessions in a handful of repos
+# would otherwise spawn N git processes, and a poll every minute respawns one per
+# live session. Cleared at the start of every `sync`, so a long-lived caller
+# (the dashboard) re-asks git at least once a sync and never trusts a stale
+# "not a repo" for long.
+_REPO_ROOTS: dict[str, str | None] = {}
+
+
+def clear_repo_root_cache() -> None:
+    _REPO_ROOTS.clear()
+
+
 def repo_root_of(cwd: str | None) -> str | None:
     """The MAIN repo root ``cwd`` belongs to (worktrees resolve to their
     primary checkout via the shared git common dir), or None outside git /
     on any failure. Bounded so a stalled git never stalls a hook.
 
     ``cwd`` is first resolved onto this filesystem (see ``resolve_on_host``):
-    it may name a container path, or a worktree that no longer exists."""
+    it may name a container path, or a worktree that no longer exists. The
+    answer is remembered per resolved path until `clear_repo_root_cache`."""
     cwd = resolve_on_host(cwd)
     if not cwd:
         return None
+    if cwd not in _REPO_ROOTS:
+        _REPO_ROOTS[cwd] = _git_repo_root(cwd)
+    return _REPO_ROOTS[cwd]
+
+
+def _git_repo_root(cwd: str) -> str | None:
     try:
         result = subprocess.run(
             ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -154,7 +174,10 @@ def _complete_lines(chunk: bytes, offset: int) -> tuple[list[str], int]:
     if last_nl < 0:
         return [], offset
     complete = chunk[: last_nl + 1]
-    return complete.decode("utf-8", errors="replace").splitlines(), offset + len(complete)
+    # Split on b"\n" only: str.splitlines() also cuts on U+0085/2028/2029, which
+    # JSON.stringify leaves raw inside a record, fragmenting it into bad JSON.
+    pieces = complete.split(b"\n")[:-1]
+    return [p.decode("utf-8", errors="replace") for p in pieces], offset + len(complete)
 
 
 def _cursor(conn: sqlite3.Connection, path: Path | str) -> int:
@@ -170,16 +193,30 @@ def _stat(path: Path) -> tuple[float, int] | None:
     return (st.st_mtime, st.st_size)
 
 
-def file_changed(conn: sqlite3.Connection, path: Path) -> bool:
+def load_cursor_stats(conn: sqlite3.Connection) -> dict[str, tuple[float, int]]:
+    """Every cursor's last-seen ``(mtime, size)`` in one query, for a sync that
+    would otherwise ask once per transcript file."""
+    return {str(path): (float(mtime), int(size))
+            for path, mtime, size in conn.execute("SELECT path, mtime, size FROM cursors")}
+
+
+def file_changed(conn: sqlite3.Connection, path: Path,
+                 seen: dict[str, tuple[float, int]] | None = None) -> bool:
     """Whether ``path``'s mtime or size differs from what the cursor last saw
-    (a never-seen file counts as changed; a vanished one does not)."""
+    (a never-seen file counts as changed; a vanished one does not). ``seen``
+    is a `load_cursor_stats` snapshot; without one the cursor is queried."""
     current = _stat(path)
     if current is None:
         return False
-    row = conn.execute("SELECT mtime, size FROM cursors WHERE path = ?", (str(path),)).fetchone()
-    if row is None:
+    if seen is not None:
+        last = seen.get(str(path))
+    else:
+        row = conn.execute("SELECT mtime, size FROM cursors WHERE path = ?",
+                           (str(path),)).fetchone()
+        last = (float(row[0]), int(row[1])) if row is not None else None
+    if last is None:
         return True
-    return (float(row[0]), int(row[1])) != current
+    return last != current
 
 
 def _owned_elsewhere(conn: sqlite3.Connection, table: str, column: str,
@@ -277,11 +314,13 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts,
         # what is missing, and touches nothing else — `result_chars`/`result_ts`
         # are owned by the separate UPDATE below and must survive a re-sync.
         """INSERT INTO tool_calls(session_id, tool_use_id, agent_id, message_id,
-               tool_name, qualifier, ts) VALUES (?,?,?,?,?,?,?)
+               tool_name, qualifier, ts, shape) VALUES (?,?,?,?,?,?,?,?)
            ON CONFLICT(session_id, tool_use_id) DO UPDATE SET
-               qualifier = COALESCE(tool_calls.qualifier, excluded.qualifier)""",
+               qualifier = COALESCE(tool_calls.qualifier, excluded.qualifier),
+               shape = COALESCE(tool_calls.shape, excluded.shape)""",
         [
-            (session_id, tool_id, t.agent_id, t.message_id, name, qualifier, t.ts)
+            (session_id, tool_id, t.agent_id, t.message_id, name, qualifier, t.ts,
+             t.tool_shapes.get(tool_id))
             for t in tool_turns
             for tool_id, name, qualifier in t.tool_uses
             if tool_id not in copied_tools
@@ -339,9 +378,10 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts,
     # Results may land in a later ingest than their call (a Stop hook fires
     # between the two), so this is an UPDATE against whatever row exists.
     conn.executemany(
-        "UPDATE tool_calls SET result_chars = ?, result_ts = ? "
-        "WHERE session_id = ? AND tool_use_id = ?",
-        [(r.chars, r.ts, session_id, r.tool_use_id) for r in results],
+        "UPDATE tool_calls SET result_chars = ?, result_ts = ?, outcome = ?, reason = ?, "
+        "decision = ?, prompted = ? WHERE session_id = ? AND tool_use_id = ?",
+        [(r.chars, r.ts, r.outcome, r.reason, r.decision, r.prompted, session_id, r.tool_use_id)
+         for r in results],
     )
     # Keyed by tool_use_id like every other fact table, so a re-read of the
     # same transcript converges rather than double-counting the churn.
@@ -507,13 +547,13 @@ class _Origin:
     key: str                      # the cursor key, and `sessions.transcript_path`
     slug: str
     config_dir: str | None
-    description: str | None = None    # a subagent's short label, from its meta file
+    meta: AgentMeta | None = None     # a subagent's label, type, mode and model, from its meta file
 
 
 def _local_origin(path: Path, agent_id: str) -> _Origin:
     return _Origin(
         key=str(path), slug=project_slug_of(path), config_dir=config_dir_of(path),
-        description=agent_description(path) if agent_id != MAIN_AGENT else None,
+        meta=agent_meta(path) if agent_id != MAIN_AGENT else None,
     )
 
 
@@ -539,12 +579,12 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
         "entrypoint": facts.entrypoint,
         "title": facts.title,
     }
-    for column, value in updates.items():
-        if value is None:
-            continue
-        conn.execute(
-            f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
-        )
+    known = {column: value for column, value in updates.items() if value is not None}
+    if known:
+        # Column names come from the fixed dict above, never from a transcript.
+        assignments = ", ".join(f"{column} = ?" for column in known)
+        conn.execute(f"UPDATE sessions SET {assignments} WHERE session_id = ?",
+                     (*known.values(), session_id))
     # Write-once, unlike every column above. The plan columns, account_uuid,
     # AND owner_account_uuid record what was true WHEN THE SESSION WAS FIRST
     # SEEN; re-stamping them on a later ingest would let `sync --full` quietly
@@ -693,12 +733,21 @@ def _ingest_lines(conn: sqlite3.Connection, origin: _Origin, session_id: str, ag
         # where the opening prompt is not, so overwriting with the NULL it
         # just saw would erase the label on every subsequent sync. Same trap
         # that once shipped 3 qualifiers out of 1,265.
+        meta = origin.meta or AgentMeta()
+        # The skill in scope: the first one the agent's own turns were stamped with.
+        skill = next((t.skill for t in facts.turns.values() if t.skill), None)
         conn.execute(
-            """INSERT INTO agents(session_id, agent_id, task, description) VALUES (?,?,?,?)
+            """INSERT INTO agents(session_id, agent_id, task, description, agent_type, skill,
+                                  non_interactive, model) VALUES (?,?,?,?,?,?,?,?)
                ON CONFLICT(session_id, agent_id) DO UPDATE SET
                    task = COALESCE(excluded.task, agents.task),
-                   description = COALESCE(excluded.description, agents.description)""",
-            (session_id, agent_id, facts.task, origin.description),
+                   description = COALESCE(excluded.description, agents.description),
+                   agent_type = COALESCE(excluded.agent_type, agents.agent_type),
+                   skill = COALESCE(excluded.skill, agents.skill),
+                   non_interactive = COALESCE(excluded.non_interactive, agents.non_interactive),
+                   model = COALESCE(excluded.model, agents.model)""",
+            (session_id, agent_id, facts.task, meta.description, meta.agent_type, skill,
+             None if meta.non_interactive is None else int(meta.non_interactive), meta.model),
         )
     _write_facts(conn, session_id, facts, new_offset)
     conn.execute(
@@ -714,8 +763,18 @@ def _ingest_lines(conn: sqlite3.Connection, origin: _Origin, session_id: str, ag
     return len(lines)
 
 
-def agent_description(transcript_path: Path) -> str | None:
-    """The agent's short label, from `agent-<id>.meta.json` beside its transcript.
+class AgentMeta(NamedTuple):
+    """The fields of an ``agent-<id>.meta.json`` chronicle reads. The file also
+    names the team, the colour, the permission mode and a tool-use id, none of
+    which is stored."""
+    description: str | None = None
+    agent_type: str | None = None
+    non_interactive: bool | None = None
+    model: str | None = None
+
+
+def agent_meta(transcript_path: Path) -> AgentMeta | None:
+    """The agent's meta fields, from `agent-<id>.meta.json` beside its transcript.
 
     Claude Code writes that file for all but a handful of agents (979 of 980 on
     the machine this was built for), and its `description` is a purpose-built
@@ -725,27 +784,51 @@ def agent_description(transcript_path: Path) -> str | None:
     mangled paragraph.
 
     None on any failure, and None for a main transcript, which has no meta file.
-    Only `description` is read: the file also names the team, the colour and the
-    permission mode, none of which is a label.
     """
     meta = transcript_path.with_suffix(".meta.json")
     if not meta.is_file():
         return None
     try:
-        return description_from_meta(meta.read_text())
+        return parse_agent_meta(meta.read_text())
     except OSError:
         return None
 
 
-def description_from_meta(text: str) -> str | None:
-    """The ``description`` in an ``agent-<id>.meta.json``'s TEXT — the seam a
-    docker volume's meta file goes through — or None on anything unusable."""
+def agent_description(transcript_path: Path) -> str | None:
+    meta = agent_meta(transcript_path)
+    return meta.description if meta else None
+
+
+def parse_agent_meta(text: str) -> AgentMeta | None:
+    """An ``agent-<id>.meta.json``'s TEXT as ``AgentMeta`` — the seam a docker
+    volume's (and a remote mirror's) meta file goes through — or None on
+    anything unusable. Only fixed-shape values survive: the type is stored as
+    ``permits.fold_agent_type`` would show it only if the file already carries
+    it folded (a redacted mirror); a local file keeps its raw name, which is
+    the user's own."""
     try:
         data = json.loads(text or "{}")
     except json.JSONDecodeError:
         return None
-    value = data.get("description") if isinstance(data, dict) else None
-    return value.strip() if isinstance(value, str) and value.strip() else None
+    if not isinstance(data, dict):
+        return None
+    description = data.get("description")
+    agent_type = data.get("agentType")
+    model = data.get("model")
+    non_interactive = data.get("requestNonInteractive")
+    parsed = AgentMeta(
+        description=description.strip() if isinstance(description, str) and description.strip() else None,
+        agent_type=agent_type.strip()[:100] if isinstance(agent_type, str) and agent_type.strip() else None,
+        non_interactive=non_interactive if isinstance(non_interactive, bool) else None,
+        model=model[:100] if isinstance(model, str) and model else None,
+    )
+    return parsed if any(parsed) else None
+
+
+def description_from_meta(text: str) -> str | None:
+    """The ``description`` in an ``agent-<id>.meta.json``'s TEXT, or None."""
+    meta = parse_agent_meta(text)
+    return meta.description if meta else None
 
 
 def subagent_files(transcript_path: Path, session_id: str) -> list[tuple[Path, str]]:
@@ -990,12 +1073,11 @@ def _ingest_volume_session(conn: sqlite3.Connection, source: VolumeSource, sessi
         if not lines:
             _touch_cursor(conn, key, session.session_id, agent_id, offset, stat, now)
             continue
-        description = None
+        meta_fields = None
         if agent_id != MAIN_AGENT:
             meta = chunks.get(file.meta_relpath)
-            description = description_from_meta(meta.decode(errors="replace")) if meta else None
-        origin = _Origin(key=key, slug=session.slug, config_dir=source.label,
-                         description=description)
+            meta_fields = parse_agent_meta(meta.decode(errors="replace")) if meta else None
+        origin = _Origin(key=key, slug=session.slug, config_dir=source.label, meta=meta_fields)
         total += _ingest_lines(conn, origin, session.session_id, agent_id, lines, new_offset,
                                offset, stat, now, profile_of)
     if conn.execute("SELECT 1 FROM sessions WHERE session_id = ?",
@@ -1104,11 +1186,13 @@ def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | 
     scanned = 0
     lines = 0
     changed: list[str] = []
+    clear_repo_root_cache()
+    seen = load_cursor_stats(conn)
     for transcript in (t for root in roots for t in scan_transcripts(root)):
         sid = transcript.stem
         files = [transcript, *(path for path, _ in subagent_files(transcript, sid))]
         scanned += len(files)
-        if not any(file_changed(conn, path) for path in files):
+        if not any(file_changed(conn, path, seen) for path in files):
             continue
         result = ingest_session(conn, transcript, sid, now=now)
         lines += result["lines"]

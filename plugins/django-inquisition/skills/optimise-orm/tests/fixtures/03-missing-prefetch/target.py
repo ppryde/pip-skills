@@ -4,7 +4,7 @@ Author/book listing — missing prefetch_related patterns.
 list_authors_with_books: accesses book_set in loop without prefetch (FETCH-010).
 list_books_with_tags: accesses M2M tags in loop without prefetch (FETCH-010).
 filter_books_per_author: uses string prefetch but then filters per-row (FETCH-011).
-nested_prefetch_reeval: Prefetch without to_attr causes silent re-fetch (FETCH-012).
+nested_prefetch_reeval: filtered Prefetch without to_attr replaces the unfiltered relation (FETCH-012, clarity note).
 """
 
 from django.db.models import Prefetch
@@ -41,10 +41,10 @@ def filter_books_per_author():
 
 
 def nested_prefetch_reeval():
-    """FETCH-012: Prefetch without to_attr — silent re-fetch risk."""
+    """FETCH-012: filtered Prefetch without to_attr — relation now holds only the subset."""
     authors = Author.objects.prefetch_related(
         Prefetch("books", queryset=Book.objects.filter(is_published=True))
     )
     for author in authors:
-        books = author.books.all()  # may re-query — no to_attr set
+        books = author.books.all()  # served from the filtered cache — no to_attr set
         yield author.name, [b.title for b in books]

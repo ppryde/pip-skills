@@ -383,6 +383,26 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     # distinct from the write-once `owner_account_uuid` (the FIRST owner),
     # which must stay untouched.
     ("sessions", "bridge_owner_uuid", "TEXT"),
+    # What became of each tool call (scripts.permits): a fixed outcome category
+    # (ok / error:* / denied:* / prompted:*), a fixed reason, the closed-
+    # vocabulary permissionDecision ("accept:user_temporary/-"), whether a person
+    # was prompted, and the command SHAPE (a program + subcommand from an
+    # allowlist, never an argument). NULL = not stated: a transcript from before
+    # CLI 2.1.295 has no decision, a pruned one was never re-read, and a redacted
+    # remote keeps `shape` only at `titles`. Backfilled by `chronicle sync --full`.
+    ("tool_calls", "outcome", "TEXT"),
+    ("tool_calls", "reason", "TEXT"),
+    ("tool_calls", "decision", "TEXT"),
+    ("tool_calls", "prompted", "INTEGER"),
+    ("tool_calls", "shape", "TEXT"),
+    # A subagent's identity from its meta sidecar and stamps: the agent type (an
+    # ad-hoc name is stored folded to "(ad-hoc)" below `titles` fidelity), the
+    # skill in scope, whether it ran non-interactive (no one to prompt) and its
+    # model. Backfilled by `chronicle sync --full`.
+    ("agents", "agent_type", "TEXT"),
+    ("agents", "skill", "TEXT"),
+    ("agents", "non_interactive", "INTEGER"),
+    ("agents", "model", "TEXT"),
 )
 
 
@@ -423,15 +443,9 @@ def claude_dirs() -> list[Path]:
     candidates: list[Path] = [primary]
     env = os.environ.get(CLAUDE_DIRS_ENV, "")
     candidates.extend(Path(p).expanduser() for p in env.split(os.pathsep) if p.strip())
-    machine = primary.joinpath(*MACHINE_CONFIG_RELPATH)
-    if machine.exists():
-        try:
-            data = json.loads(machine.read_text() or "{}")
-        except json.JSONDecodeError:
-            data = {}
-        listed = data.get("claude_dirs") if isinstance(data, dict) else None
-        if isinstance(listed, list):
-            candidates.extend(Path(str(p)).expanduser() for p in listed if p)
+    listed = _read_machine_config().get("claude_dirs")
+    if isinstance(listed, list):
+        candidates.extend(Path(str(p)).expanduser() for p in listed if p)
     out: list[Path] = []
     seen: set[Path] = set()
     for c in candidates:
@@ -486,15 +500,31 @@ def normalise_volume(name: object, claude_dir: object = DEFAULT_VOLUME_CLAUDE_DI
     return Volume(name, clean)
 
 
+# Parsed machine configs by (path, mtime_ns, size): a sync asks for the config
+# once per transcript file (remote labels, path rewrites, claude dirs), and the
+# file changes only when a person or `volumes`/`remotes` edits it.
+_MACHINE_CONFIG_CACHE: dict[Path, tuple[tuple[int, int], dict]] = {}
+
+
 def _read_machine_config() -> dict:
     """The machine config as a dict; ``{}`` if absent, unreadable or not an
-    object. Never raises: a broken file must degrade, not stop an ingest."""
+    object. Never raises: a broken file must degrade, not stop an ingest.
+    Re-parsed only when the file's mtime or size moves."""
     machine = config_dir().joinpath(*MACHINE_CONFIG_RELPATH)
     try:
+        st = machine.stat()
+        stamp = (st.st_mtime_ns, st.st_size)
+        cached = _MACHINE_CONFIG_CACHE.get(machine)
+        if cached is not None and cached[0] == stamp:
+            return dict(cached[1])
         data = json.loads(machine.read_text() or "{}")
     except (OSError, json.JSONDecodeError):
+        _MACHINE_CONFIG_CACHE.pop(machine, None)
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    _MACHINE_CONFIG_CACHE[machine] = (stamp, data)
+    return dict(data)
 
 
 def load_volumes() -> tuple[list[Volume], list[str]]:
@@ -536,10 +566,10 @@ def volumes() -> list[Volume]:
     return load_volumes()[0]
 
 
-def save_volumes(vols: list[Volume]) -> Path:
-    """Write ``vols`` into the machine config, PRESERVING every other key
-    (``claude_dirs``, ``path_map``, anything overseer keeps there). A file that
-    exists but is not valid JSON raises ``ValueError`` rather than being
+def _update_machine_config(key: str, value: object) -> Path:
+    """Set one top-level ``key`` in the machine config, PRESERVING every other
+    key (``claude_dirs``, ``path_map``, anything overseer keeps there). A file
+    that exists but is not valid JSON raises ``ValueError`` rather than being
     overwritten — a typo is the user's to fix, not ours to erase."""
     path = config_dir().joinpath(*MACHINE_CONFIG_RELPATH)
     data: dict = {}
@@ -551,12 +581,18 @@ def save_volumes(vols: list[Volume]) -> Path:
         if not isinstance(loaded, dict):
             raise ValueError(f"{path}: config is not a JSON object")
         data = loaded
-    data["volumes"] = [{"name": v.name, "claude_dir": v.claude_dir} for v in vols]
+    data[key] = value
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, indent=2) + "\n")
     os.replace(tmp, path)
     return path
+
+
+def save_volumes(vols: list[Volume]) -> Path:
+    """Write ``vols`` into the machine config (see ``_update_machine_config``)."""
+    return _update_machine_config(
+        "volumes", [{"name": v.name, "claude_dir": v.claude_dir} for v in vols])
 
 
 # ---------------------------------------------------------------------------
@@ -712,28 +748,12 @@ def remote_label_for(config_dir: Path) -> str | None:
 
 
 def save_remotes(rems: list[Remote]) -> Path:
-    """Write ``rems`` into the machine config, PRESERVING every other key —
-    same contract as `save_volumes`."""
-    path = config_dir().joinpath(*MACHINE_CONFIG_RELPATH)
-    data: dict = {}
-    if path.exists():
-        try:
-            loaded = json.loads(path.read_text() or "{}")
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"{path}: malformed config JSON: {exc}") from exc
-        if not isinstance(loaded, dict):
-            raise ValueError(f"{path}: config is not a JSON object")
-        data = loaded
-    data["remotes"] = [
+    """Write ``rems`` into the machine config — same contract as `save_volumes`."""
+    return _update_machine_config("remotes", [
         {"name": r.name, "host": r.host, "claude_dir": r.claude_dir, "fidelity": r.fidelity,
          "mirror_dir": r.mirror_dir, "interval_s": r.interval_s, "enabled": r.enabled}
         for r in rems
-    ]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n")
-    os.replace(tmp, path)
-    return path
+    ])
 
 
 # The ONLY fields ever read out of `.claude.json`. A whitelist, not a
@@ -753,7 +773,8 @@ ACCOUNT_PLAN_FIELDS = {
 def account_profile(config_dir: Path) -> dict[str, str] | None:
     """The non-personal account facts a config dir currently holds, or None.
 
-    Source is `<config_dir>/.claude.json`'s `oauthAccount`, which describes the
+    Source is `<config_dir>/.claude.json`'s `oauthAccount` (for the default
+    `~/.claude` also `~/.claude.json`, when the first is absent), which describes the
     account LOGGED IN THERE NOW — it carries no history, so what it says is
     only ever true of the present. Callers stamp it onto sessions as they are
     ingested, with the time of observation, rather than treating it as a
@@ -763,11 +784,19 @@ def account_profile(config_dir: Path) -> dict[str, str] | None:
     signal that distinguishes key auth from a subscription; that case returns
     an empty dict, distinct from None (no file / unreadable / malformed).
     """
-    try:
-        text = (config_dir / ".claude.json").read_text()
-    except OSError:
-        return None
-    return parse_account_profile(text)
+    candidates = [config_dir / ".claude.json"]
+    # Claude Code keeps the global config BESIDE a default ~/.claude, not inside
+    # it. Fall back to that file for the default dir ONLY, and only when its own
+    # is absent: a custom dir must never read another account's file.
+    if os.path.abspath(config_dir) == os.path.abspath(Path.home() / ".claude"):
+        candidates.append(config_dir.parent / ".claude.json")
+    for candidate in candidates:
+        try:
+            text = candidate.read_text()
+        except OSError:
+            continue
+        return parse_account_profile(text)
+    return None
 
 
 def parse_account_profile(text: str) -> dict[str, str] | None:
@@ -809,14 +838,7 @@ def path_map() -> list[tuple[str, str]]:
     rather than raising: a bad rewrite must degrade attribution, never stop
     the ingest.
     """
-    machine = config_dir().joinpath(*MACHINE_CONFIG_RELPATH)
-    if not machine.exists():
-        return []
-    try:
-        data = json.loads(machine.read_text() or "{}")
-    except json.JSONDecodeError:
-        return []
-    raw = data.get("path_map") if isinstance(data, dict) else None
+    raw = _read_machine_config().get("path_map")
     if not isinstance(raw, dict):
         return []
     pairs = [

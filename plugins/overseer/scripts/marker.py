@@ -1,0 +1,340 @@
+"""Orchestrator markers: the cheap "is this session guarded?" signal (WF-265).
+
+``pretool.sh`` runs on almost every tool call in every session. To keep that
+free for sessions that orchestrate nothing, ``stamp_orchestrator`` also writes
+one small JSON file per orchestrating session::
+
+    <config dir>/overseer/.orchestrating/<session_id>
+    {"db": "<abs board.db>", "repo": "<abs canonical repo root>", "state": "<abs central folder>"}
+
+The shell hook only tests whether that file exists; ``hookfast.py`` reads it to
+find the board without any git call. The marker is a HINT, never the source of
+truth: ``board.db``'s ``orchestrators`` table decides. A stale marker (no live
+card for its session) is deleted by the next ``hookfast`` run, and ``stamp``
+sweeps week-old markers whose session no longer has a live card.
+
+Stdlib only: this module is imported by ``hookfast.py`` on the hot path.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import sqlite3
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+from scripts.guard import GuardCard
+
+MARKER_DIRNAME = ".orchestrating"
+STALE_AFTER_SECONDS = 7 * 24 * 3600
+_SAFE_SESSION = re.compile(r"[A-Za-z0-9_-]+\Z")
+
+
+@dataclass(frozen=True)
+class Board:
+    db: Path
+    repo: Path
+    state: Path
+
+
+def config_dir() -> Path:
+    override = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(override) if override else Path.home() / ".claude"
+
+
+def marker_dir() -> Path:
+    return config_dir() / "overseer" / MARKER_DIRNAME
+
+
+def marker_path(session_id: str) -> Path | None:
+    """None for an id that is not a plain token (it would be a path)."""
+    return marker_dir() / session_id if _SAFE_SESSION.match(session_id) else None
+
+
+def _read_raw(session_id: str) -> list[Board]:
+    path = marker_path(session_id)
+    if path is None:
+        return []
+    try:
+        data = json.loads(path.read_text())
+        entries = data["boards"] if "boards" in data else [data]  # legacy: one board
+        return [Board(Path(e["db"]), Path(e["repo"]), Path(e["state"])) for e in entries]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
+def _store(session_id: str, boards: list[Board]) -> None:
+    path = marker_path(session_id)
+    if path is None:
+        return
+    if not boards:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"boards": [
+        {"db": str(b.db), "repo": str(b.repo), "state": str(b.state)} for b in boards
+    ]}
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(payload))
+    os.replace(tmp, path)
+
+
+def write_marker(session_id: str, board: Board) -> None:
+    """Add ``board`` to the session's marker (one session may orchestrate on
+    several boards; the marker lists them all, keyed by board file)."""
+    boards = [b for b in _read_raw(session_id) if b.db != board.db]
+    _store(session_id, [*boards, board])
+
+
+CHECKED_PREFIX = ".checked-"
+
+
+def checked_path(session_id: str) -> Path | None:
+    """The per-session "already looked for a board" sentinel (a dotfile in
+    the marker dir, so ``pretool.sh`` can test it without an interpreter)."""
+    return marker_dir() / (CHECKED_PREFIX + session_id) if _SAFE_SESSION.match(session_id) else None
+
+
+def is_checked(session_id: str) -> bool:
+    path = checked_path(session_id)
+    return path is not None and path.exists()
+
+
+def mark_checked(session_id: str) -> None:
+    path = checked_path(session_id)
+    if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
+
+def read_boards(session_id: str) -> list[Board]:
+    return _read_raw(session_id)
+
+
+def read_marker(session_id: str) -> Board | None:
+    boards = _read_raw(session_id)
+    return boards[0] if boards else None
+
+
+def remove_marker(session_id: str, db: Path | None = None) -> None:
+    """Drop the marker, or only ``db``'s entry when given (the file goes when
+    its last board does)."""
+    if db is None:
+        _store(session_id, [])
+    else:
+        _store(session_id, [b for b in _read_raw(session_id) if b.db != db])
+
+
+def load_repo_config(repo: Path | None) -> dict[str, object]:
+    """``<repo>/.overseer/config.json`` then ``config.local.json`` (local
+    wins) — the same precedence as ``config.load_config`` without its git
+    lookup: the caller already holds the canonical root."""
+    merged: dict[str, object] = {}
+    if repo is None:
+        return merged
+    for name in ("config.json", "config.local.json"):
+        try:
+            data = json.loads((repo / ".overseer" / name).read_text() or "{}")
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            merged.update(data)
+    return merged
+
+
+def _config_root(cwd: Path | None) -> Path | None:
+    """The repo root whose ``.overseer/config*.json`` ``config.load_config``
+    would read for a session standing in ``cwd``, found WITHOUT a git
+    subprocess: walk up to the first directory holding ``.overseer`` or
+    ``.git``. A linked worktree's ``.git`` is a file naming
+    ``<main>/.git/worktrees/<name>``; the canonical root is ``<main>``."""
+    if cwd is None:
+        return None
+    try:
+        start = cwd.resolve()
+    except OSError:
+        return None
+    for directory in (start, *start.parents):
+        git = directory / ".git"
+        if git.is_file():
+            try:
+                text = git.read_text().strip()
+            except OSError:
+                return directory
+            if text.startswith("gitdir:"):
+                gitdir = Path(text[len("gitdir:"):].strip())
+                if not gitdir.is_absolute():
+                    gitdir = directory / gitdir
+                for ancestor in (gitdir, *gitdir.parents):
+                    if ancestor.name == ".git":
+                        return ancestor.parent  # the canonical (main) root
+            return directory
+        if git.exists() or (directory / ".overseer").is_dir():
+            return directory
+    return None
+
+
+def _candidate_dbs(cwd: Path | None) -> list[Path]:
+    """Every board file this session could be orchestrating on, in the order
+    ``db.board_db_path`` would resolve them: ``OVERSEER_DB`` (an override that
+    excludes the rest), else ``$OVERSEER_CENTRAL/board.db``, the payload
+    cwd's repo's ``central_dir`` from ``.overseer/config*.json``, and every
+    ``<config dir>/overseer/*/board.db``."""
+    override = os.environ.get("OVERSEER_DB")
+    if override:
+        return [Path(override)]
+    candidates: list[Path] = []
+    central = os.environ.get("OVERSEER_CENTRAL")
+    if central:
+        candidates.append(Path(central) / "board.db")
+    cfg_central = load_repo_config(_config_root(cwd)).get("central_dir")
+    if isinstance(cfg_central, str) and cfg_central:
+        candidates.append(Path(cfg_central) / "board.db")
+    base = config_dir() / "overseer"
+    if base.is_dir():
+        candidates.extend(sorted(base.glob("*/board.db")))
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for db in candidates:
+        key = db.resolve()
+        if key not in seen:
+            seen.add(key)
+            unique.append(db)
+    return unique
+
+
+def lookup_boards(session_id: str, cwd: Path | None = None) -> tuple[list[Board], bool]:
+    """Boards on which ``session_id`` has a live orchestrated card, found with
+    read-only opens and no git, plus whether the lookup was COMPLETE: False
+    when some candidate board was transiently unavailable (locked or busy), so
+    the caller must not record the session as checked. A corrupt, foreign or
+    schema-less board file is permanent: it counts as complete and yields no
+    marker."""
+    found: list[Board] = []
+    complete = True
+    for db in _candidate_dbs(cwd):
+        cards, transient = _live_cards(db, session_id)
+        if cards is None:
+            if transient:
+                complete = False
+            continue
+        if not cards:
+            continue
+        repo = db.parent
+        try:
+            conn = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=1.0)
+            try:
+                row = conn.execute("SELECT value FROM meta WHERE key = 'repo_root'").fetchone()
+            finally:
+                conn.close()
+            if row and row[0]:
+                repo = Path(row[0])
+        except sqlite3.Error:
+            pass
+        state = Path(os.environ["OVERSEER_CENTRAL"]) if os.environ.get("OVERSEER_CENTRAL") else db.parent
+        found.append(Board(db, repo, state))
+    return found, complete
+
+
+def find_boards_for_session(session_id: str, cwd: Path | None = None) -> list[Board]:
+    """``lookup_boards`` without the completeness flag. Used once PER SESSION
+    (the ``.checked-<id>`` sentinel), so sessions already orchestrating at
+    upgrade time are each picked up, and whenever the marker dir cannot be
+    written."""
+    return lookup_boards(session_id, cwd)[0]
+
+
+def _is_transient(exc: sqlite3.Error) -> bool:
+    text = str(exc).lower()
+    return isinstance(exc, sqlite3.OperationalError) and ("locked" in text or "busy" in text)
+
+
+def live_cards(db: Path, session_id: str) -> list[GuardCard] | None:
+    return _live_cards(db, session_id)[0]
+
+
+def _live_cards(db: Path, session_id: str) -> tuple[list[GuardCard] | None, bool]:
+    """``(cards, transient)``: ``cards`` is None when the board could not be
+    read, and ``transient`` says that was a lock/busy error worth retrying.
+    Live cards ``session_id`` orchestrates, via a READ-ONLY connection: no
+    schema pass, no pragma writes, no git. Parked cards are shelved, so the
+    guard lets go of them; blocked cards keep it. ``None`` = could not tell
+    (no board file, locked, unreadable) — callers fail open."""
+    if not db.is_file():
+        return None, False
+    try:
+        conn = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=1.0)
+    except sqlite3.Error as exc:
+        return None, _is_transient(exc)
+    try:
+        rows = conn.execute(
+            "SELECT c.id, c.worktree, c.budget_estimate, c.budget_actual "
+            "FROM cards c JOIN orchestrators o ON o.card_id = c.id "
+            "WHERE o.session_id = ? AND c.archived = 0 AND c.status != 'parked' "
+            "ORDER BY c.id",
+            (session_id,),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        return None, _is_transient(exc)
+    finally:
+        conn.close()
+    return [GuardCard(r[0], r[1], r[2], r[3] or 0) for r in rows], False
+
+
+SWEEP_STAMP = ".last-sweep"
+SWEEP_EVERY_SECONDS = 3600
+STALE_TMP_SECONDS = 3600
+
+
+def sweep_if_due(now: float | None = None) -> int:
+    """``sweep`` at most once an hour, rate-limited by a timestamp file in
+    the marker dir (cheap enough for the first-call path)."""
+    current = time.time() if now is None else now
+    stamp = marker_dir() / SWEEP_STAMP
+    try:
+        if current - stamp.stat().st_mtime < SWEEP_EVERY_SECONDS:
+            return 0
+    except OSError:
+        pass
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.touch()
+        os.utime(stamp, (current, current))
+    except OSError:
+        return 0
+    return sweep(current)
+
+
+def sweep(now: float | None = None) -> int:
+    """Delete markers older than a week whose session has no live card.
+    Best effort; returns how many were removed."""
+    directory = marker_dir()
+    if not directory.is_dir():
+        return 0
+    cutoff = (time.time() if now is None else now) - STALE_AFTER_SECONDS
+    removed = 0
+    for path in directory.iterdir():
+        try:
+            mtime = path.stat().st_mtime
+            if path.name.startswith(".") and path.name.endswith(".tmp"):
+                if mtime <= (time.time() if now is None else now) - STALE_TMP_SECONDS:
+                    path.unlink(missing_ok=True)  # a crashed _store's leftover
+                continue
+            if mtime > cutoff:
+                continue
+            if path.name.startswith(CHECKED_PREFIX):
+                path.unlink(missing_ok=True)  # the session simply looks again
+                continue
+            if path.name.startswith("."):
+                continue
+        except OSError:
+            continue
+        boards = [b for b in read_boards(path.name) if b.db.is_file()]
+        results = [live_cards(b.db, path.name) for b in boards]
+        if any(r is None or r for r in results):
+            continue
+        path.unlink(missing_ok=True)
+        removed += 1
+    return removed

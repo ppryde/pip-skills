@@ -194,7 +194,10 @@ def assemble(notes: str, cwd: Path, inline: List[Path], include_snapshot: bool,
         except OSError as exc:
             raise HandoverError(f"--inline unreadable: {path} "
                                 f"({exc.strerror or type(exc).__name__})") from exc
-        parts.append(f"## Inlined: `{path}`\n\n```\n{_cap_inline(body, path)}\n```")
+        capped = _cap_inline(body, path)
+        longest = max((len(m) for m in re.findall(r"`+", capped)), default=0)
+        fence = "`" * max(3, longest + 1)   # longer than any backtick run inside the body
+        parts.append(f"## Inlined: `{path}`\n\n{fence}\n{capped}\n{fence}")
     document = "\n\n".join(parts) + "\n"
     if max_tokens is not None:
         size = estimate_tokens(document)

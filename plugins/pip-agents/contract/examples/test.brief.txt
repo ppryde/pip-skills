@@ -1,0 +1,4 @@
+brief: pip-agents/1
+kind: test
+ref: WF-140-verify
+bundle: /Users/me/.claude/overseer/pip-skills/dispatch/WF-140/verification/verifier-bundle.md

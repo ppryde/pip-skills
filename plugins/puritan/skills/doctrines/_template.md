@@ -31,7 +31,7 @@ Use bullet points for concrete benefits:]
 
 ## Applicable Directories
 
-Primary targets (mapped via `.architecture/config.yml`).
+Primary targets (the doctrine's `targets:` in `.architecture/config.yml`).
 Use relative paths without `src/` prefix (e.g. `domain/` not `src/domain/`):
 - `path/to/scan/` — what lives here and why it matters
 - `another/path/` — scoped explanation
@@ -48,7 +48,7 @@ Use relative paths without `src/` prefix (e.g. `domain/` not `src/domain/`):
 [Add a brief "Scanning approach" note after each category table if the
 detection method isn't obvious from the "What to scan for" column.]
 
-[You MUST have 5-8 categories, 3-8 violations per category, 20-50 total.
+[You SHOULD have 5-9 categories, 3-8 violations per category, 20-50 total.
 Count your rules before finishing. Fewer than 20 = too shallow.]
 
 ### [Category Name] Violations
@@ -68,32 +68,12 @@ Count your rules before finishing. Fewer than 20 = too shallow.]
 Reference doctrines that pair with this one — even if they don't exist yet.
 Use the filename they would have. Inquisition handles missing doctrines
 gracefully. When the doctrine is eventually written, the cross-references
-are already wired up.
+are already wired up. Doctrines that do not exist yet must be listed under
+"Planned" in `README.md`.
 
 This doctrine pairs well with:
 - **[other-doctrine].md** — brief explanation of relationship
 - **[other-doctrine].md** — brief explanation of relationship
-
-## Detection Signatures
-
-Quick-scan heuristics for Covenant discover mode. These are recognition
-signals only — not violations. Covenant reads this section to fingerprint
-the codebase without running a full audit.
-
-### Directory signals
-Strong indicators (any 2+ suggest this pattern is in use):
-- `[directory/]` — what its presence implies
-- `[directory/]` — what its presence implies
-
-### File signals
-Strong indicators (any 1 is significant):
-- Files named `*[Pattern].*` in [layer] directories
-- Configuration files: `[config-file]`
-
-### Anti-signals
-Suggest this pattern is NOT in use:
-- [Structural absence that rules this pattern out]
-- [Alternative structure that indicates a different pattern]
 
 ## Sources and Authority
 
@@ -108,3 +88,24 @@ Suggest this pattern is NOT in use:
 - [Author - Title](url) — What goes wrong without this pattern
 
 [Minimum: 1 primary source, 2 practitioners, 1 failure case study.]
+
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Directory signals (counted by Covenant):
+- `[directory/]` — what its presence implies
+- `[directory/]` — what its presence implies
+
+### File signals
+File signals (counted by Covenant):
+- Files named `*[Pattern].*` in [layer] directories
+- Configuration files: `[config-file]`
+
+### Anti-signals
+Suggest this pattern is NOT in use:
+- [Structural absence that rules this pattern out]
+- [Alternative structure that indicates a different pattern]

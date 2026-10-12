@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts import db
-from scripts.dispatch import role_of
+from scripts import db, views
+from scripts.dispatch import dispatch_dir, role_of
 from scripts.models import Card
 from scripts.pending import add_pending
 from scripts.schemas import (
@@ -80,9 +80,24 @@ def _implementer_line(r: ImplementerReport) -> str:
     return f"{r.status} tests {r.tests_passed}/{r.tests_total} {sha} → {r.detail}"
 
 
-def _detail_text(report: Report) -> tuple[str, str | None]:
+MAX_DETAIL_BYTES = 1_000_000
+
+
+def _detail_text(report: Report, repo_root: Path) -> tuple[str, str | None]:
+    """Read the report's detail file, only from inside its own dispatch
+    directory: no symlinks, no escape via resolution, bounded size."""
+    detail = report.detail
     try:
-        return report.detail.read_text(), None
+        if detail.is_symlink():
+            return "", "detail path is a symlink"
+        allowed = dispatch_dir(repo_root, report.card, report.stage).resolve()
+        if not detail.resolve().is_relative_to(allowed):
+            return "", "detail path is outside the dispatch directory"
+        with detail.open("rb") as fh:
+            data = fh.read(MAX_DETAIL_BYTES + 1)
+        if len(data) > MAX_DETAIL_BYTES:
+            return "", "detail file too large"
+        return data.decode("utf-8", errors="replace"), None
     except OSError:
         return "", "detail file missing"
 
@@ -102,6 +117,30 @@ def _record(card: Card, role: str, report: Report, detail: str, spend: int, now:
             card.set_section("## Plan", detail, now)
     elif isinstance(report, VerifierReport) and detail.strip():
         card.set_section("## Verification", detail, now)
+
+
+def _evidence(conn, card: Card, report: Report, now: str) -> None:
+    """The stage-gate evidence for this report (WF-265 D2), written in the same
+    transaction as the card text so the two cannot disagree. Idempotent: a hook
+    that fires twice for one report adds nothing (``record_evidence_once``).
+    Implementer reports are progress, not gate evidence."""
+    detail = str(report.detail)
+    if isinstance(report, ReviewerReport):
+        db.record_evidence_once(
+            conn, card.id, report.stage, "review", round_no=report.round, slot=report.slot,
+            status=report.status, critical=report.critical, important=report.important,
+            minor=report.minor, detail=detail, ts=now)
+    elif isinstance(report, FixerReport):
+        db.record_evidence_once(
+            conn, card.id, report.stage, "fix", round_no=report.round,
+            status=report.status, detail=detail, ts=now)
+    elif isinstance(report, VerifierReport):
+        db.record_evidence_once(
+            conn, card.id, "verification", "verify", status=report.status.strip().upper(),
+            detail=detail, ts=now)
+    elif isinstance(report, PlannerReport) and report.status == "DONE":
+        db.record_evidence_once(conn, card.id, "planning", "plan", status="DONE",
+                                detail=detail, ts=now)
 
 
 def handle(payload: dict[str, object], repo_root: Path, now: str) -> dict[str, object] | None:
@@ -136,21 +175,28 @@ def handle(payload: dict[str, object], repo_root: Path, now: str) -> dict[str, o
         append_usage(root, entry)
         return None
     entry.update(card=report.card, stage=report.stage, round=getattr(report, "round", None))
-    detail, detail_error = _detail_text(report)
+    detail, detail_error = _detail_text(report, repo_root)
     if detail_error:
         entry["error"] = detail_error
     spend = budget_tokens(totals)
     conn = db.connect(repo_root)
     try:
-        card = db.mutate_card(conn, report.card, lambda c: _record(c, role, report, detail, spend, now))
+        def apply(c: Card) -> None:
+            _record(c, role, report, detail, spend, now)
+            _evidence(conn, c, report, now)
+
+        card = db.mutate_card(conn, report.card, apply)
+        if card is None:
+            entry["error"] = f"no card {report.card}"
+        else:
+            if report.learned:
+                with db.txn(conn):
+                    for fact in report.learned:
+                        add_pending(conn, report.card, fact.statement, list(fact.tags), str(report.detail))
+                views.export(conn, root)
+            if card.tripwire_breached:
+                entry["tripwire"] = True
     finally:
         conn.close()
-    if card is None:
-        entry["error"] = f"no card {report.card}"
-    else:
-        for fact in report.learned:
-            add_pending(repo_root, report.card, fact.statement, list(fact.tags), str(report.detail))
-        if card.tripwire_breached:
-            entry["tripwire"] = True
     append_usage(root, entry)
     return None

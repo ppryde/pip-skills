@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { COUNTDOWN_MS, HOLDBACK_MS, RECHECK_MS, clearGate, needsRcQuestion } from '../plugin/core/surfaces'
+import { COUNTDOWN_MS, HOLDBACK_MS, RECHECK_MS, clearGate, needsRcHint } from '../plugin/core/surfaces'
 
 const base = { now: 1_000_000, draft: '', onPhone: false, lastBridgeAt: null, rcAutoClear: 'unanswered' as const, latched: false, countdownEndsAt: null, classicActive: false, unattended: true }
 
@@ -17,8 +17,8 @@ describe('clearGate', () => {
   })
   describe('on the phone, unattended', () => {
     const phone = { ...base, onPhone: true, lastBridgeAt: 0 }
-    test('unanswered or declined never clears', () => {
-      expect(clearGate(phone)).toEqual({ go: false, reason: 'rc-unanswered', recheckMs: null })
+    test('declined never clears; unanswered follows auto mode (the countdown path)', () => {
+      expect(clearGate(phone)).toEqual({ go: false, reason: 'countdown-start', recheckMs: COUNTDOWN_MS })
       expect(clearGate({ ...phone, rcAutoClear: 'no' })).toEqual({ go: false, reason: 'rc-declined', recheckMs: null })
     })
     test('allowed: holdback within 2 min of the last bridge prompt', () => {
@@ -37,9 +37,9 @@ describe('clearGate', () => {
   })
 })
 
-test('needsRcQuestion only when auto mode would arm on the phone with no answer yet', () => {
-  expect(needsRcQuestion(true, 'unanswered', true)).toBe(true)
-  expect(needsRcQuestion(true, 'no', true)).toBe(false)
-  expect(needsRcQuestion(false, 'unanswered', true)).toBe(false)
-  expect(needsRcQuestion(true, 'unanswered', false)).toBe(false)
+test('needsRcHint only when auto mode would arm on the phone with no answer yet', () => {
+  expect(needsRcHint(true, 'unanswered', true)).toBe(true)
+  expect(needsRcHint(true, 'no', true)).toBe(false)
+  expect(needsRcHint(false, 'unanswered', true)).toBe(false)
+  expect(needsRcHint(true, 'unanswered', false)).toBe(false)
 })

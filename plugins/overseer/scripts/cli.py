@@ -4,8 +4,13 @@ Single-writer by convention: only the orchestrating session calls this.
 Cards live in ``board.db`` (see ``scripts/db.py``), the source of truth read
 directly by the CLI, dashboard and ``resume``; every mutation writes the card
 row, then reconciles (surfaces quarantined cards; ``ledger.md`` itself is
-retired, WF-072). Sprints, usage, and knowledge remain file-based under the
-``.workflow/`` state root.
+retired, WF-072). Sprints, knowledge facts and pending facts live in the same
+board.db (schema v2, WF-265); their file trees are regenerated views. Usage
+stays an append-only ``usage.jsonl`` under the state root.
+
+Every card write is a ``db.mutate_card`` transaction (``_edit``): the load, the
+change and the save share one ``BEGIN IMMEDIATE``, so a CLI verb, the checklist
+hook and the report hook can no longer drop one another's edits (OL-9).
 """
 from __future__ import annotations
 
@@ -18,12 +23,27 @@ import sys
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
 from typing import cast
 
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import bundle, config, db, gitops, guard, liveness, report_hook
+from scripts import (
+    bundle,
+    config,
+    db,
+    gates,
+    gitops,
+    guard,
+    hookfast,
+    liveness,
+    marker,
+    migrate,
+    report_hook,
+    store,
+    views,
+)
 from scripts.calibration import BANDS, calibrate
 from scripts.conflicts import find_conflicts
 from scripts.dispatch import ROLES
@@ -31,14 +51,11 @@ from scripts.index import rebuild_index
 from scripts.knowledge import (
     Fact,
     FactParseError,
-    ensure_kb,
-    find_fact_path,
-    knowledge_root,
     load_fact,
     load_facts,
     mint_fact_id,
-    rebuild_knowledge_index,
-    retire_fact_file,
+    refresh_stale,
+    retire_fact,
     save_fact,
 )
 from scripts.models import (
@@ -62,9 +79,10 @@ from scripts.sprints import (
     retro_rollup,
     rollup,
     save_sprint,
-    sprint_path,
+    sprint_exists,
 )
 from scripts.store import (
+    check_id,
     derive_repo_label,
     derive_repo_root,
     init_workflow,
@@ -80,7 +98,7 @@ _CONN_CACHE: dict[str, sqlite3.Connection] = {}
 
 def _conn(repo_root: Path) -> sqlite3.Connection:
     """One cached ``board.db`` connection per resolved repo root, per process,
-    for this module's own card operations (every ``_load``/``_sync`` call
+    for this module's own card operations (every ``_load``/``_edit`` call
     site, plus the direct ``db.*`` calls verbs make against a loaded card).
 
     ``main()`` closes every cached connection in its ``finally``. This cache
@@ -149,10 +167,10 @@ def _report_quarantined(quarantined: list[Path]) -> None:
 
 
 def _vigil_cli() -> Path | None:
-    """Best-effort locate the sibling vigil plugin's CLI (soft dependency)."""
-    here = Path(__file__).resolve()  # plugins/overseer/scripts/cli.py
-    candidate = here.parent.parent.parent / "vigil" / "scripts" / "cli.py"
-    return candidate if candidate.exists() else None
+    """Locate the sibling vigil plugin's CLI (soft dependency): the newest
+    manifest-verified install under the plugin dirs the guard trusts (a repo
+    ``plugins/`` folder or the marketplace cache — WF-265)."""
+    return guard.find_sibling_cli("vigil")
 
 
 def _vigil_context(repo_root: Path) -> str | None:
@@ -210,26 +228,142 @@ def _census_session_live(session_id: str) -> bool:
     return not data.get("stale", True)
 
 
-def _sync(repo_root: Path, card: Card) -> None:
-    """Persist the card, then reconcile: surface any quarantined cards. No
-    ledger is written (WF-072 retired ``ledger.md``; board.db is the sole
-    source of truth).
-
-    Known multi-session limitation (spec-accepted YAGNI, no locking):
-    ``save_card`` upserts the whole card row, so a hook racing another
-    session's CLI verb against the same card is last-write-wins for the
-    *entire* card, not just checklist rows.
-    """
-    db.save_card(_conn(repo_root), card)
-    quarantined = rebuild_index(repo_root, repo_root.resolve().name, _now())
-    _report_quarantined(quarantined)
-
-
 def _load(repo_root: Path, card_id: str) -> Card:
+    """Read one card (live or archived). READ-ONLY: never save what this returns
+    -- change a card with ``_edit`` so the load and the save share one
+    transaction (OL-9)."""
     card = db.load_card(_conn(repo_root), card_id)
     if card is None:
         raise FileNotFoundError(f"no card with id {card_id}")
     return card
+
+
+def _edit(
+    repo_root: Path,
+    card_id: str,
+    mutate: "Callable[[Card], None]",
+    *,
+    ack: bool = False,
+    archive: "bool | None" = None,
+) -> Card:
+    """The one way a verb changes an existing card: load -> ``mutate`` -> save
+    in a single ``BEGIN IMMEDIATE`` transaction (``db.mutate_card``). ``ack``
+    also acknowledges the session's claim (the design spec's "work verb" ack).
+    ``mutate`` may raise ``db.EditAbort`` to roll back and have the verb report
+    why. Git and other side effects belong OUTSIDE this call."""
+    def apply(card: Card) -> None:
+        mutate(card)
+        if ack:
+            card.ack_claim()
+
+    card = db.mutate_card(_conn(repo_root), card_id, apply, archive=archive)
+    if card is None:
+        raise FileNotFoundError(f"no card with id {card_id}")
+    return card
+
+
+# --- stage gates (WF-265 D2) ------------------------------------------------
+
+GATES_ENV = "OVERSEER_GATES"
+
+
+def _gate_mode(repo_root: Path) -> str:
+    """``hard`` (default) | ``warn`` | ``off``: ``OVERSEER_GATES`` wins over
+    the repo config's ``"gates"``; anything unrecognised is ``hard`` (a typo
+    must never switch the gates off)."""
+    env = os.environ.get(GATES_ENV, "").strip().lower()
+    if env in gates.MODES:
+        return env
+    value = config.load_config(repo_root).get("gates", "hard")
+    if value is False:
+        return "off"
+    return value if value in gates.MODES else "hard"
+
+
+def _force_reason(args: argparse.Namespace) -> "str | None":
+    """The ``--force-gate`` reason, or None. An empty reason is refused: a
+    forced gate is recorded with its reason, so it must have one."""
+    reason = getattr(args, "force_gate", None)
+    if reason is None:
+        return None
+    reason = " ".join(reason.split())
+    if not reason:
+        raise ValueError("--force-gate needs a non-empty reason, e.g. "
+                         "--force-gate \"user: plan approved verbally\"")
+    return reason
+
+
+def _card_gated(conn: sqlite3.Connection, card: Card) -> bool:
+    """Gates bind only cards created at or after the board's ``gates_from``
+    (their evidence is recorded from then on); older cards get warnings. A
+    board that has never been gated is stamped on its first check."""
+    since = db.get_meta(conn, "gates_from")
+    if since is None:  # a D1-era board: nothing before tomorrow has evidence
+        since = migrate.gates_floor(populated=True)
+        db.set_meta(conn, "gates_from", since)
+    return bool(card.created) and card.created[:10] >= since
+
+
+def _settle_gates(
+    repo_root: Path, card: Card, stage: str, label: str, problems: "list[str]",
+    force: "str | None", notes: "list[str]",
+) -> None:
+    """Inside the card's transaction. No problems: nothing. Problems and
+    ``force``: record the override (a ``## Decisions`` line plus a ``force``
+    evidence row, so the card history and the dashboard show it). Problems on
+    a card the gates bind in ``hard`` mode: refuse (the transaction rolls
+    back). Otherwise (warn mode, or a card from before the gates): print."""
+    if not problems:
+        return
+    conn = _conn(repo_root)
+    now = _now()
+    if force is not None:
+        unmet = "; ".join(p.removeprefix("GATE: ").split(" - ")[0] for p in problems)
+        card.append_section("Decisions", f"- {now} — GATE FORCED ({label}): {force} [unmet: {unmet}]", now)
+        db.record_evidence(conn, card.id, stage, "force", status="forced",
+                           detail=f"{label}: {force} [unmet: {unmet}]", ts=now)
+        notes.append(f"GATE FORCED ({label}): {force}")
+        return
+    mode = _gate_mode(repo_root)
+    if mode == "hard":
+        if _card_gated(conn, card):
+            raise gates.GateRefused(problems)
+        # Created before the gates bind (gates_from): warn only, but leave an
+        # audit line so the window is never silent.
+        unmet = "; ".join(p.removeprefix("GATE: ").split(" - ")[0] for p in problems)
+        card.append_section(
+            "Decisions", f"- {now} — GATE UNBOUND ({label}, card pre-dates gates_from): [unmet: {unmet}]", now)
+    if mode != "hard":
+        # An environment/config escape leaves a trace too (a `force` evidence
+        # row), so a gate is never passed silently.
+        unmet = "; ".join(p.removeprefix("GATE: ").split(" - ")[0] for p in problems)
+        db.record_evidence(conn, card.id, stage, "force", status="bypassed",
+                           detail=f"{label}: gates={mode} [unmet: {unmet}]", ts=now)
+        card.append_section(
+            "Decisions", f"- {now} — GATE BYPASSED ({label}, gates={mode}): [unmet: {unmet}]", now)
+        if mode == "off":
+            return
+    notes.extend(f"WARNING {p}" for p in problems)
+
+
+def _gated_move(
+    repo_root: Path, card: Card, target: str, force: "str | None", notes: "list[str]",
+) -> None:
+    """``card.set_stage`` behind the transition gates. Inside the transaction."""
+    previous = card.stage or "new"
+    problems = gates.check_transition(card, target, db.evidence_for(_conn(repo_root), card.id))
+    _settle_gates(repo_root, card, target, f"{previous} -> {target}", problems, force, notes)
+    card.set_stage(target, _now())
+
+
+def _flush_notes(notes: "list[str]") -> None:
+    for line in notes:
+        print(line, file=sys.stderr)
+
+
+def _views(repo_root: Path) -> None:
+    """Refresh the sprint/knowledge file views after a write (best effort)."""
+    views.export(_conn(repo_root), state_root(repo_root))
 
 
 SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
@@ -243,10 +377,32 @@ def _stamp_orchestrator(repo_root: Path, card_id: str) -> None:
     session_id = os.environ.get(SESSION_ENV)
     if session_id:
         db.stamp_orchestrator(_conn(repo_root), card_id, session_id, _now())
+        try:  # the marker is only the hook's cheap "guarded?" hint: never fail a verb on it
+            marker.write_marker(session_id, _board_of(repo_root))
+            marker.sweep()
+        except OSError as exc:
+            print(
+                f"WARNING: could not write the guard marker ({exc}); the PreToolUse hook "
+                "falls back to its slower full guard until the marker dir is writable",
+                file=sys.stderr,
+            )
+
+
+def _board_of(repo_root: Path) -> marker.Board:
+    return marker.Board(
+        db=db.board_db_path(repo_root),
+        repo=derive_repo_root(repo_root) or repo_root,
+        state=state_root(repo_root),
+    )
 
 
 def _release_orchestrator(repo_root: Path, card_id: str) -> None:
-    db.clear_orchestrator(_conn(repo_root), card_id)
+    ended = db.clear_orchestrator(_conn(repo_root), card_id)
+    if ended:  # that session orchestrates nothing else on THIS board: drop its entry
+        try:
+            marker.remove_marker(ended, db.board_db_path(repo_root))
+        except OSError:
+            pass
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -300,6 +456,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     local_config = {"central_dir": central_explicit} if central_explicit else {}
     (base / "config.local.json").write_text(
         json.dumps(local_config, indent=2))
+    store.memo_reset()  # these files change what central_root resolves to
 
     # `base.parent` is the same canonical root `base` itself was resolved
     # against — never a linked worktree's own root — so the gitignore line
@@ -336,6 +493,19 @@ def cmd_backup(args: argparse.Namespace) -> int:
 
 def cmd_restore(args: argparse.Namespace) -> int:
     from scripts import backup
+    if args.from_bak:
+        if args.dir:
+            print("error: pass --dir or --from-bak, not both", file=sys.stderr)
+            return 1
+        _close_conns()  # nothing may hold the board while it is replaced
+        result = backup.restore_from_bak(args.root, Path(args.from_bak))
+        saved = result["previous_board_saved_as"]
+        print(f"restored the pre-v2 board from {result['restored_from']} "
+              f"({result['cards']} cards)"
+              + (f"; the board it replaced is saved as {saved}" if saved else ""))
+        print("this board is schema v1 again: install the previous overseer version, "
+              "or this version will upgrade it again (with a fresh backup) on next use")
+        return 0
     src = Path(args.dir) if args.dir else None
     stats = backup.restore_board(args.root, src)
     print(f"restored: {stats['inserted']} inserted, {stats['updated']} updated, "
@@ -417,10 +587,20 @@ def cmd_clear(args: argparse.Namespace) -> int:
 
 def _create_card(args: argparse.Namespace) -> Card:
     """Mint and insert a card from new-card-style args. Raises
-    ``sqlite3.IntegrityError`` on an id collision (insert-only, see below)."""
+    ``sqlite3.IntegrityError`` on an id collision (insert-only: ``create_card`` raises on a PK collision, never upserts)."""
     conn = _conn(args.root)
-    card_id = args.jira or args.linear or db.mint_id(conn)
-    card = Card(
+    for what, ref in (("--jira", args.jira), ("--linear", args.linear)):
+        if ref:
+            check_id(ref, what)
+    with db.txn(conn):  # mint and insert under one writer lock: no duplicate WF-nnn
+        card_id = args.jira or args.linear or db.mint_id(conn)
+        card = _build_card(args, card_id)
+        db.create_card(conn, card)
+    return card
+
+
+def _build_card(args: argparse.Namespace, card_id: str) -> Card:
+    return Card(
         id=card_id,
         title=args.title.strip(),
         status="planned",
@@ -435,13 +615,6 @@ def _create_card(args: argparse.Namespace) -> Card:
         labels=[lb.strip() for lb in args.labels.split(",") if lb.strip()] if args.labels else [],
         body=CARD_BODY_TEMPLATE.format(goal=args.goal or "_(to be written)_"),
     )
-    # Insert-only (not `_sync`'s upsert path): a plain existence check here
-    # would leave a TOCTOU window where two concurrent `new-card` calls that
-    # mint/target the same id both pass the check and one silently
-    # overwrites the other. `create_card` raises on the PK collision instead.
-    db.create_card(conn, card)
-    _report_quarantined(rebuild_index(args.root, args.root.resolve().name, _now()))
-    return card
 
 
 def cmd_new_card(args: argparse.Namespace) -> int:
@@ -460,6 +633,28 @@ def worktree_path(main_root: Path, card_id: str, cfg: dict) -> Path:
     return parent / f"{main_root.name}-{card_id.lower()}"
 
 
+def _brief_gate_problems(args: argparse.Namespace) -> "list[str]":
+    """Dry run of ``bootstrap --brief``'s move to `implementation`, so a refusal
+    happens before the card, worktree and branch are created. Only the refusing
+    case returns problems (hard mode, a card the gates bind)."""
+    if _gate_mode(args.root) != "hard":
+        return []
+    conn = _conn(args.root)
+    if args.card:
+        card = db.load_card(conn, args.card)
+        if card is None:
+            return []  # _load reports it
+        probe = Card(id=card.id, title=card.title, status=card.status, stage="bootstrap",
+                     complexity=card.complexity, body=card.body, created=card.created)
+    else:
+        probe = Card(id="NEW", title=args.title or "", status="planned", stage="bootstrap",
+                     complexity=args.complexity, created=_today())
+    probe.set_section("## Plan", args.brief, _now())
+    brief = gates.Evidence(0, "planning", "brief", None, "", "brief", None, None, None, "")
+    problems = gates.check_transition(probe, "implementation", [brief])
+    return problems if problems and _card_gated(conn, probe) else []
+
+
 def cmd_bootstrap(args: argparse.Namespace) -> int:
     """new-card + base-branch detection + worktree + branch + set-field +
     set-stage planning, in one orchestrator turn instead of seven.
@@ -472,6 +667,20 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     if not args.card and not args.title:
         print("error: bootstrap needs --title (new card) or --card (existing)", file=sys.stderr)
         return 1
+    if args.brief_file and args.brief is not None:
+        print("error: pass --brief or --brief-file, not both", file=sys.stderr)
+        return 1
+    force = _force_reason(args)  # a bad --force-gate also fails before anything is created
+    # Read the brief up front: a bad path or stdin must fail BEFORE the card
+    # and worktree are created.
+    if args.brief_file:
+        args.brief = Path(args.brief_file).read_text().rstrip("\n")
+    elif args.brief == "-":
+        args.brief = sys.stdin.read().rstrip("\n")
+    if args.brief and force is None:
+        refused = _brief_gate_problems(args)
+        if refused:
+            raise gates.GateRefused(refused)  # before any card, worktree or branch exists
     try:
         card = _load(args.root, args.card) if args.card else _create_card(args)
     except sqlite3.IntegrityError:
@@ -481,61 +690,69 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     branch = f"{args.type}/{card.id}-{args.slug or slugify(card.title)}"
     path = worktree_path(main_root, card.id, config.load_config(args.root))
     base = gitops.base_ref(main_root)
-    card.set_stage("bootstrap", _now())
-    card.ack_claim()
+    # Three short steps: record "bootstrap" (a transaction), run git (OUTSIDE
+    # any transaction), record the outcome (a second transaction).
+    _edit(args.root, card.id, lambda c: c.set_stage("bootstrap", _now()), ack=True)
     try:
         gitops.worktree_add(main_root, path, branch, base)
     except gitops.GitError as exc:
-        _sync(args.root, card)
         _stamp_orchestrator(args.root, card.id)
         print(f"error: {card.id} left at bootstrap — {exc}", file=sys.stderr)
         return 1
-    card.branch = branch
-    card.worktree = str(path)
-    if args.brief:
-        card.set_section("## Plan", args.brief, _now())
-        card.set_stage("implementation", _now())
-    else:
-        card.set_stage("planning", _now())
-    _sync(args.root, card)
+
+    notes: list[str] = []
+
+    def record(c: Card) -> None:
+        c.branch = branch
+        c.worktree = str(path)
+        if args.brief:
+            c.set_section("## Plan", args.brief, _now())
+            # The S shortcut's evidence goes in BEFORE the move, in the same
+            # transaction, so the plan-review gate knows the review was skipped
+            # by design (and a refused move rolls the evidence back too).
+            db.record_evidence_once(_conn(args.root), c.id, "planning", "brief",
+                                    status="brief", detail="bootstrap --brief", ts=_now())
+            _gated_move(args.root, c, "implementation", force, notes)
+        else:
+            _gated_move(args.root, c, "planning", force, notes)
+
+    card = _edit(args.root, card.id, record)
+    _flush_notes(notes)
     _stamp_orchestrator(args.root, card.id)
     print(f"{card.id} {card.stage} · {branch} · {path} (base {base})")
     return 0
 
 
 def cmd_set_stage(args: argparse.Namespace) -> int:
-    card = _load(args.root, args.card_id)
-    card.set_stage(args.stage, _now())
-    card.ack_claim()  # work verb — design spec §3 ack list
-    _sync(args.root, card)
+    force = _force_reason(args)
+    notes: list[str] = []
+    card = _edit(args.root, args.card_id,
+                 lambda c: _gated_move(args.root, c, args.stage, force, notes), ack=True)
+    _flush_notes(notes)
     _stamp_orchestrator(args.root, card.id)
     print(f"{card.id} → {args.stage}")
     return 0
 
 
 def cmd_block(args: argparse.Namespace) -> int:
-    card = _load(args.root, args.card_id)
-    card.block(args.reason, _now())
-    card.ack_claim()  # work verb — design spec §3 ack list
-    _sync(args.root, card)
+    card = _edit(args.root, args.card_id, lambda c: c.block(args.reason, _now()), ack=True)
     print(f"{card.id} blocked: {args.reason}")
     return 0
 
 
 def cmd_unblock(args: argparse.Namespace) -> int:
-    card = _load(args.root, args.card_id)
-    card.unblock(_now())
-    _sync(args.root, card)
+    card = _edit(args.root, args.card_id, lambda c: c.unblock(_now()))
     print(f"{card.id} → {card.status}")
     return 0
 
 
 def _close(args: argparse.Namespace, verb: str) -> int:
-    card = _load(args.root, args.card_id)
-    card.complete(_now()) if verb == "done" else card.abandon(_now())
-    db.archive_card(_conn(args.root), card)
+    card = _edit(
+        args.root, args.card_id,
+        lambda c: c.complete(_now()) if verb == "done" else c.abandon(_now()),
+        archive=True,
+    )
     _release_orchestrator(args.root, card.id)
-    rebuild_index(args.root, args.root.resolve().name, _now())
     print(f"{card.id} {card.status}, archived")
     return 0
 
@@ -549,72 +766,70 @@ def cmd_abandon(args: argparse.Namespace) -> int:
 
 
 def cmd_set_field(args: argparse.Namespace) -> int:
-    card = _load(args.root, args.card_id)
-    if args.branch:
-        card.branch = args.branch
-    if args.worktree:
-        card.worktree = args.worktree
-    if args.pr:
-        card.pr = args.pr
-    if args.touches is not None:
-        card.touches = [t.strip() for t in args.touches.split(",") if t.strip()]
-    if args.labels is not None:
-        card.labels = [lb.strip() for lb in args.labels.split(",") if lb.strip()]
-    if args.repo is not None:
-        card.repo = args.repo if args.repo else None
-    if args.order is not None:
-        card.order = args.order
-    if args.priority is not None:
-        if args.priority == "":
-            card.priority = None
-        else:
-            if args.priority not in PRIORITIES:
-                print(f"error: unknown priority: {args.priority!r}", file=sys.stderr)
-                return 1
-            card.priority = args.priority
-    if args.parent is not None:
-        if args.parent == "":
-            card.parent = None
-        else:
-            cards, _ = db.load_live_cards(_conn(args.root))
-            if args.parent not in {c.id for c in cards}:
-                print(f"error: no live card {args.parent}", file=sys.stderr)
-                return 1
-            if would_cycle_parent(cards, args.card_id, args.parent):
-                print(f"error: parent {args.parent} would create a cycle",
-                      file=sys.stderr)
-                return 1
-            card.parent = args.parent
-    if args.title is not None:
-        if not args.title.strip():
-            print("error: title cannot be empty", file=sys.stderr)
-            return 1
-        card.title = args.title.strip()
-    if args.body is not None:
-        card.body = args.body
-    # WF-070: the create-time attributes, editable after the fact. Empty
-    # string clears each, as for --priority / --parent above.
-    if args.complexity is not None:
-        if args.complexity == "":
-            card.complexity = None
-        elif args.complexity not in COMPLEXITIES:
-            print(f"error: unknown complexity: {args.complexity!r}", file=sys.stderr)
-            return 1
-        else:
-            card.complexity = args.complexity
-    if args.sprint is not None:
-        card.sprint = args.sprint.strip() or None
-    if args.estimate is not None:
-        if args.estimate.strip() == "":
-            card.budget_estimate = None
-        else:
-            try:
-                card.budget_estimate = parse_tokens(args.estimate)
-            except CardParseError as exc:
-                print(f"error: {exc}", file=sys.stderr)
-                return 1
-    card.updated = _now()
-    _sync(args.root, card)
+    def apply(card: Card) -> None:
+        if args.branch:
+            card.branch = args.branch
+        if args.worktree:
+            card.worktree = args.worktree
+        if args.pr:
+            card.pr = args.pr
+        if args.touches is not None:
+            card.touches = [t.strip() for t in args.touches.split(",") if t.strip()]
+        if args.labels is not None:
+            card.labels = [lb.strip() for lb in args.labels.split(",") if lb.strip()]
+        if args.repo is not None:
+            card.repo = args.repo if args.repo else None
+        if args.order is not None:
+            card.order = args.order
+        if args.priority is not None:
+            if args.priority == "":
+                card.priority = None
+            else:
+                if args.priority not in PRIORITIES:
+                    raise db.EditAbort(f"unknown priority: {args.priority!r}")
+                card.priority = args.priority
+        if args.parent is not None:
+            if args.parent == "":
+                card.parent = None
+            else:
+                cards, _ = db.load_live_cards(_conn(args.root))
+                if args.parent not in {c.id for c in cards}:
+                    raise db.EditAbort(f"no live card {args.parent}")
+                if would_cycle_parent(cards, args.card_id, args.parent):
+                    raise db.EditAbort(f"parent {args.parent} would create a cycle")
+                card.parent = args.parent
+        if args.title is not None:
+            if not args.title.strip():
+                raise db.EditAbort("title cannot be empty")
+            card.title = args.title.strip()
+        if args.body is not None:
+            card.body = args.body
+        # WF-070: the create-time attributes, editable after the fact. Empty
+        # string clears each, as for --priority / --parent above.
+        if args.complexity is not None:
+            if args.complexity == "":
+                card.complexity = None
+            elif args.complexity not in COMPLEXITIES:
+                raise db.EditAbort(f"unknown complexity: {args.complexity!r}")
+            else:
+                card.complexity = args.complexity
+        if args.sprint is not None:
+            card.sprint = args.sprint.strip() or None
+        if args.estimate is not None:
+            if args.estimate.strip() == "":
+                card.budget_estimate = None
+            else:
+                try:
+                    card.budget_estimate = parse_tokens(args.estimate)
+                except CardParseError as exc:
+                    raise db.EditAbort(str(exc)) from exc
+        card.updated = _now()
+
+    try:
+        card = _edit(args.root, args.card_id, apply)
+    except db.EditAbort as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     print(f"{card.id} updated")
     return 0
 
@@ -655,21 +870,17 @@ def cmd_reorder(args: argparse.Namespace) -> int:
         print("error: --ids contains a duplicate card id", file=sys.stderr)
         return 1
 
-    cards = []
-    for card_id in ids:
-        try:
-            cards.append(_load(args.root, card_id))
-        except FileNotFoundError:
-            print(f"error: no card {card_id}", file=sys.stderr)
-            return 1
-
     conn = _conn(args.root)
-    for position, card in enumerate(cards):
-        card.order = (position + 1) * 10
-        db.save_card(conn, card)
-    # One index rebuild for the whole lane, not one per card — `_sync` is
-    # per-card by design and would re-walk the tree len(ids) times here.
-    _report_quarantined(rebuild_index(args.root, args.root.resolve().name, _now()))
+    with db.txn(conn):
+        for card_id in ids:
+            if db.load_card(conn, card_id) is None:
+                print(f"error: no card {card_id}", file=sys.stderr)
+                return 1
+        # `order` only: an UPDATE of that column cannot clobber a concurrent edit
+        # of any other field (a whole-row save here could).
+        for position, card_id in enumerate(ids):
+            conn.execute('UPDATE cards SET "order" = ? WHERE id = ?', ((position + 1) * 10, card_id))
+    cards = ids
     print(f"reordered {len(cards)} cards")
     return 0
 
@@ -692,35 +903,34 @@ def _apply_checklist(
     ``CardParseError`` from an unknown or corrupt card — the CLI surfaces
     those via ``main``; the hook catches and swallows them.
     """
-    card = _load(repo_root, card_id)
-    checklist: list[dict] = card.checklist
-    existing_index = next(
-        (i for i, entry in enumerate(checklist) if entry["task"] == task_id), None
-    )
+    outcome = {"result": 0}
 
-    if status == "deleted":
-        if existing_index is not None:
-            card.checklist = [e for i, e in enumerate(checklist) if i != existing_index]
+    def apply(card: Card) -> None:
+        checklist: list[dict] = card.checklist
+        existing_index = next(
+            (i for i, entry in enumerate(checklist) if entry["task"] == task_id), None
+        )
+        if status == "deleted":
+            if existing_index is not None:
+                card.checklist = [e for i, e in enumerate(checklist) if i != existing_index]
+                card.updated = _now()
+            return
+        if existing_index is None:
+            if not subject:
+                outcome["result"] = 1
+                return
+            checklist.append({"task": task_id, "subject": subject, "status": status})
             card.updated = _now()
-            _sync(repo_root, card)
-        return 0
-
-    if existing_index is None:
-        if not subject:
-            return 1
-        checklist.append({"task": task_id, "subject": subject, "status": status})
+            return
+        entry = checklist[existing_index]
+        new_subject = subject if subject else entry["subject"]
+        if entry["subject"] == new_subject and entry["status"] == status:
+            return
+        checklist[existing_index] = {"task": task_id, "subject": new_subject, "status": status}
         card.updated = _now()
-        _sync(repo_root, card)
-        return 0
 
-    entry = checklist[existing_index]
-    new_subject = subject if subject else entry["subject"]
-    if entry["subject"] == new_subject and entry["status"] == status:
-        return 0
-    checklist[existing_index] = {"task": task_id, "subject": new_subject, "status": status}
-    card.updated = _now()
-    _sync(repo_root, card)
-    return 0
+    _edit(repo_root, card_id, apply)
+    return outcome["result"]
 
 
 def cmd_checklist(args: argparse.Namespace) -> int:
@@ -936,34 +1146,33 @@ def cmd_checklist_sync_hook(args: argparse.Namespace) -> int:
 
 
 def cmd_depends(args: argparse.Namespace) -> int:
-    card = _load(args.root, args.card_id)
-    cards, _ = db.load_live_cards(_conn(args.root))
-    ids = {c.id for c in cards}
-    if args.on:
-        if args.on == args.card_id:
-            print("error: a card cannot depend on itself", file=sys.stderr)
-            return 1
-        if args.on not in ids:
-            print(f"error: no live card {args.on}", file=sys.stderr)
-            return 1
-        if would_cycle_depends(cards, args.card_id, args.on):
-            print(f"error: depending on {args.on} would create a cycle",
-                  file=sys.stderr)
-            return 1
-        if args.on not in card.depends_on:
-            card.depends_on.append(args.on)
-    if args.off and args.off in card.depends_on:
-        card.depends_on.remove(args.off)
-    card.updated = _now()
-    _sync(args.root, card)
+    def apply(card: Card) -> None:
+        cards, _ = db.load_live_cards(_conn(args.root))
+        ids = {c.id for c in cards}
+        if args.on:
+            if args.on == args.card_id:
+                raise db.EditAbort("a card cannot depend on itself")
+            if args.on not in ids:
+                raise db.EditAbort(f"no live card {args.on}")
+            if would_cycle_depends(cards, args.card_id, args.on):
+                raise db.EditAbort(f"depending on {args.on} would create a cycle")
+            if args.on not in card.depends_on:
+                card.depends_on.append(args.on)
+        if args.off and args.off in card.depends_on:
+            card.depends_on.remove(args.off)
+        card.updated = _now()
+
+    try:
+        card = _edit(args.root, args.card_id, apply)
+    except db.EditAbort as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     print(f"{card.id} depends_on: {', '.join(card.depends_on) or '(none)'}")
     return 0
 
 
 def cmd_park(args: argparse.Namespace) -> int:
-    card = _load(args.root, args.card_id)
-    card.park(_now())
-    _sync(args.root, card)
+    card = _edit(args.root, args.card_id, lambda c: c.park(_now()))
     _release_orchestrator(args.root, card.id)
     print(f"{card.id} parked")
     return 0
@@ -979,9 +1188,7 @@ def cmd_release(args: argparse.Namespace) -> int:
 
 
 def cmd_unpark(args: argparse.Namespace) -> int:
-    card = _load(args.root, args.card_id)
-    card.unpark(_now())
-    _sync(args.root, card)
+    card = _edit(args.root, args.card_id, lambda c: c.unpark(_now()))
     print(f"{card.id} → {card.status}")
     return 0
 
@@ -1011,31 +1218,45 @@ def cmd_pull_children(args: argparse.Namespace) -> int:
 
     Archived cards (done/abandoned) never appear in `load_live_cards`, so
     they're skipped without any special-casing. Batches the writes (one
-    `db.save_card` per child) and runs a single `rebuild_index` at the end
-    rather than looping `_sync`, since a naive per-child `_sync` would
-    rebuild the index N times for one logical move.
+    `db.put_card` per child, all in ONE transaction with the parent read).
     """
-    parent = _load(args.root, args.card_id)
-    cards, _ = db.load_live_cards(_conn(args.root))
-    children = [c for c in cards if c.parent == args.card_id]
-    if not children:
-        print(f"no live children of {parent.id}")
-        return 0
-    now = _now()
-    for child in children:
-        if parent.stage:
-            child.set_stage(parent.stage, now)
-        else:
-            child.stage = None
-            child.status = (
-                parent.status if parent.status not in ("done", "abandoned")
-                else "planned"
-            )
-            child.blocked_on = parent.blocked_on if child.status == "blocked" else None
-            child.updated = now
-        db.save_card(_conn(args.root), child)
-    quarantined = rebuild_index(args.root, args.root.resolve().name, now)
-    _report_quarantined(quarantined)
+    conn = _conn(args.root)
+    with db.txn(conn):
+        parent = _load(args.root, args.card_id)
+        cards, _ = db.load_live_cards(conn)
+        children = [c for c in cards if c.parent == args.card_id]
+        if not children:
+            print(f"no live children of {parent.id}")
+            return 0
+        now = _now()
+        skipped: list[str] = []
+        for child in children:
+            if parent.stage:
+                # A board-level move, not a card's own progress: it is never
+                # refused, but a child carried past an unmet gate is recorded
+                # (a force row on the child, one Decisions line on the parent).
+                unmet = gates.check_transition(
+                    child, parent.stage, db.evidence_for(conn, child.id))
+                if unmet:
+                    skipped.append(child.id)
+                    db.record_evidence(conn, child.id, parent.stage, "force", status="forced",
+                                       detail=f"pull-children from {parent.id}", ts=now)
+                child.set_stage(parent.stage, now)
+            else:
+                child.stage = None
+                child.status = (
+                    parent.status if parent.status not in ("done", "abandoned")
+                    else "planned"
+                )
+                child.blocked_on = parent.blocked_on if child.status == "blocked" else None
+                child.updated = now
+            db.put_card(conn, child)
+        if skipped:
+            parent.append_section(
+                "Decisions",
+                f"- {now} — pull-children moved {', '.join(skipped)} into {parent.stage} "
+                "without meeting its stage gates", now)
+            db.put_card(conn, parent)
     print(f"pulled {len(children)} children into {parent.id}")
     return 0
 
@@ -1113,7 +1334,6 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-    _report_quarantined(rebuild_index(args.root, args.root.resolve().name, now))
     if note:
         print(note)
     print(f"{card.id} claimed by {args.session}")
@@ -1123,9 +1343,7 @@ def cmd_claim(args: argparse.Namespace) -> int:
 def cmd_unclaim(args: argparse.Namespace) -> int:
     """`overseer unclaim <id>` — clears all claim fields, idempotent (exit 0
     even when already unclaimed)."""
-    card = _load(args.root, args.card_id)
-    card.unclaim(_now())
-    _sync(args.root, card)
+    card = _edit(args.root, args.card_id, lambda c: c.unclaim(_now()))
     _release_orchestrator(args.root, card.id)
     print(f"{card.id} unclaimed")
     return 0
@@ -1138,15 +1356,16 @@ def _mark_claim_nudged(repo_root: Path, card_id: str) -> bool:
     or no longer claimed (a race with `unclaim`/a fresh `claim`) — never
     raises, so a hook calling this directly stays quarantine-safe.
     """
+    def apply(card: Card) -> None:
+        if not card.claimed_by:
+            raise db.EditAbort("no longer claimed")
+        card.claim_nudged = True
+        card.updated = _now()
+
     try:
-        card = _load(repo_root, card_id)
-    except (FileNotFoundError, CardParseError):
+        _edit(repo_root, card_id, apply)
+    except (FileNotFoundError, CardParseError, db.EditAbort):
         return False
-    if not card.claimed_by:
-        return False
-    card.claim_nudged = True
-    card.updated = _now()
-    _sync(repo_root, card)
     return True
 
 
@@ -1281,32 +1500,21 @@ GUARD_ENV = "OVERSEER_GUARD"
 
 
 def cmd_pretool_hook(args: argparse.Namespace) -> int:
-    """PreToolUse backend — scripts/guard.py. Fails open: any error means no
-    output, which Claude Code treats as "no opinion"."""
+    """PreToolUse backend, kept as a thin wrapper over ``scripts/hookfast.py``
+    (the hook's real entry point since WF-265): it resolves the board the old
+    way (``--root`` / payload ``cwd`` -> central folder) and asks the same
+    ``hookfast.evaluate``. This is also the path ``pretool.sh`` takes under
+    ``OVERSEER_REMOTE``, where the call is forwarded to the host. Fails open:
+    any error means no output, which Claude Code treats as "no opinion"."""
     try:
         payload = _read_hook_payload()
         repo_root = _hook_root(payload, args)
         state = state_root(repo_root)
         if not state.is_dir():
             return 0
-        cfg = config.load_config(repo_root)
-        cards: list[Card] = []
-        session_id = payload.get("session_id")
-        guard_on = (
-            os.environ.get(GUARD_ENV, "").lower() != "off" and cfg.get("guard", True) is not False
+        output = hookfast.evaluate(
+            payload, _board_of(repo_root), config_repo=derive_repo_root(repo_root) or repo_root
         )
-        if guard_on and isinstance(session_id, str) and session_id:
-            cards = db.orchestrated_cards(_conn(repo_root), session_id)
-        roots = guard.allowed_roots(
-            state, Path(__file__).resolve().parent.parent, config._config_dir()
-        )
-        limit = cfg.get("read_limit", guard.READ_LIMIT_DEFAULT)
-        verdict = guard.decide(
-            payload, cards, roots,
-            read_limit=limit if isinstance(limit, int) else guard.READ_LIMIT_DEFAULT,
-            repo_root=repo_root,
-        )
-        output = guard.hook_output(verdict)
         if output:
             print(json.dumps(output))
     except Exception:  # noqa: BLE001 — a failing PreToolUse hook must never block a tool call
@@ -1344,7 +1552,7 @@ def cmd_append_body(args: argparse.Namespace) -> int:
     """Append text to a card body section server-side (WF-115). The caller never holds the whole body: unlike
     ``set-field --body``, there is no read-whole-body/write-whole-body round
     trip for the caller to silently lose content in — the load, append and
-    save all happen inside this one process/one `_sync` call.
+    save all happen inside this one process/one transaction.
 
     Text comes from ``--text``, or from stdin when ``--text`` is ``-``
     (multi-line content). ``--text`` is required so a forgotten flag fails
@@ -1352,23 +1560,20 @@ def cmd_append_body(args: argparse.Namespace) -> int:
     shell-quoted ``--text`` is stripped so it doesn't open an extra blank
     line before the next section.
     """
-    card = _load(args.root, args.card_id)
     text = args.text
-    if text == "-":
+    if args.text_file:
+        text = Path(args.text_file).read_text()
+    elif text == "-":
         text = sys.stdin.read()
     text = text.rstrip("\n")
-    card.append_section(args.section, text, _now())
-    _sync(args.root, card)
+    card = _edit(args.root, args.card_id, lambda c: c.append_section(args.section, text, _now()))
     print(f"{card.id} {args.section} appended")
     return 0
 
 
 def cmd_log_progress(args: argparse.Namespace) -> int:
-    card = _load(args.root, args.card_id)
     tokens = parse_tokens(args.tokens) or 0
-    card.log_progress(args.note, tokens, _now())
-    card.ack_claim()  # work verb — design spec §3 ack list
-    _sync(args.root, card)
+    card = _edit(args.root, args.card_id, lambda c: c.log_progress(args.note, tokens, _now()), ack=True)
     _stamp_orchestrator(args.root, card.id)
     if card.tripwire_breached:
         actual = format_tokens(card.budget_actual)
@@ -1383,10 +1588,10 @@ def cmd_log_progress(args: argparse.Namespace) -> int:
 
 
 def cmd_log_review(args: argparse.Namespace) -> int:
-    card = _load(args.root, args.card_id)
-    card.log_review(args.stage, args.reviewers, args.verdict, _now())
-    card.ack_claim()  # work verb — design spec §3 ack list
-    _sync(args.root, card)
+    card = _edit(
+        args.root, args.card_id,
+        lambda c: c.log_review(args.stage, args.reviewers, args.verdict, _now()), ack=True,
+    )
     _stamp_orchestrator(args.root, card.id)
     print(f"{card.id} {args.stage} round {card.review_rounds(args.stage)} logged")
     return 0
@@ -1398,14 +1603,35 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
     ``choices=STAGES`` already rules that out here) so each stage playbook
     entry is one Bash call instead of set-stage-then-dispatch-prep. Prints
     only the bundle path either way."""
-    card = _load(args.root, args.card_id)
-    if args.advance:
-        card.set_stage(args.stage, _now())
-        card.ack_claim()
-        _sync(args.root, card)
+    force = _force_reason(args)
     chunk = args.chunk
     if chunk is None and args.role == "implementer":
         chunk = 1
+    try:  # bad --slot/--chunk/--role fails BEFORE a forced gate or dispatch row is written
+        bundle.reply_name(args.role, round_no=args.round, slot=args.slot, chunk=chunk)
+    except bundle.BundleError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    notes: list[str] = []
+    dispatched: list[int] = []
+
+    def prep(c: Card) -> None:
+        if args.advance:
+            _gated_move(args.root, c, args.stage, force, notes)
+        problems = gates.check_dispatch(
+            c, args.stage, args.role, args.round, db.evidence_for(_conn(args.root), c.id))
+        _settle_gates(args.root, c, args.stage, f"{args.role} round {args.round}", problems, force, notes)
+        if args.role in ("reviewer", "verifier"):
+            # Completeness (OR-2): a dispatched slot that never reports blocks
+            # its gate, so a crashed reviewer is not an approval.
+            rid = db.record_evidence_once(
+                _conn(args.root), c.id, args.stage, "dispatch", round_no=args.round,
+                slot=args.slot or "", status="dispatched", detail=args.role, ts=_now())
+            if rid is not None:
+                dispatched.append(rid)
+
+    card = _edit(args.root, args.card_id, prep, ack=args.advance)
+    _flush_notes(notes)
     try:
         path = bundle.prepare(
             args.root,
@@ -1422,6 +1648,9 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
             today=_today(),
         )
     except bundle.BundleError as exc:
+        for rid in dispatched:  # nothing was dispatched: do not leave a phantom slot
+            with db.txn(_conn(args.root)):
+                db.delete_evidence(_conn(args.root), rid)
         print(f"error: {exc}", file=sys.stderr)
         return 1
     _stamp_orchestrator(args.root, card.id)
@@ -1430,13 +1659,7 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
 
 
 def cmd_new_sprint(args: argparse.Namespace) -> int:
-    # Ensure the one-time `.workflow/` -> central migration guard has run
-    # before this verb creates/touches central state directly (bypassing
-    # `_load`/`_sync`'s usual `_conn` call). On an upgraded repo, this verb
-    # running FIRST would otherwise write straight into an unmigrated
-    # central folder and collide with legacy `.workflow/sprints/` data that
-    # `db.connect`'s migration would have imported.
-    _conn(args.root)
+    conn = _conn(args.root)
     sprint = Sprint(
         id=args.sprint_id,
         status="planned",
@@ -1444,30 +1667,39 @@ def cmd_new_sprint(args: argparse.Namespace) -> int:
         started=_today(),
         body=SPRINT_BODY_TEMPLATE.format(goal=args.goal or "_(to be written)_"),
     )
-    save_sprint(state_root(args.root), sprint)
+    with db.txn(conn):  # existence check and insert under one writer lock
+        if sprint_exists(conn, args.sprint_id):
+            print(f"error: sprint {args.sprint_id} already exists", file=sys.stderr)
+            return 1
+        save_sprint(conn, sprint, _now())
+    _views(args.root)
     print(sprint.id)
     return 0
 
 
 def cmd_rollup_sprint(args: argparse.Namespace) -> int:
-    root = state_root(args.root)
-    sprint = load_sprint(sprint_path(root, args.sprint_id))
-    cards, quarantined = db.load_live_cards(_conn(args.root))
-    _report_quarantined(quarantined)
-    save_sprint(root, rollup(sprint, cards))
+    conn = _conn(args.root)
+    with db.txn(conn):
+        sprint = load_sprint(conn, args.sprint_id)
+        cards, quarantined = db.load_live_cards(conn)
+        _report_quarantined(quarantined)
+        save_sprint(conn, rollup(sprint, cards), _now())
+    _views(args.root)
     print(f"{args.sprint_id} rolled up")
     return 0
 
 
 def cmd_set_sprint_status(args: argparse.Namespace) -> int:
-    root = state_root(args.root)
-    sprint = load_sprint(sprint_path(root, args.sprint_id))
-    sprint.status = args.status
-    if args.status == "closed":
-        live, quarantined = db.load_live_cards(_conn(args.root))
-        _report_quarantined(quarantined)
-        sprint = retro_rollup(sprint, live + db.load_archived_cards(_conn(args.root)))
-    save_sprint(root, sprint)
+    conn = _conn(args.root)
+    with db.txn(conn):
+        sprint = load_sprint(conn, args.sprint_id)
+        sprint.status = args.status
+        if args.status == "closed":
+            live, quarantined = db.load_live_cards(conn)
+            _report_quarantined(quarantined)
+            sprint = retro_rollup(sprint, live + db.load_archived_cards(conn))
+        save_sprint(conn, sprint, _now())
+    _views(args.root)
     print(f"{sprint.id} → {args.status}")
     return 0
 
@@ -1476,9 +1708,12 @@ def cmd_rebuild_index(args: argparse.Namespace) -> int:
     """``ledger.md`` is retired (WF-072) — board.db is the source of truth
     and the CLI/dashboard/resume all read it directly. This verb now just
     reconciles: it surfaces quarantined (corrupt) cards and removes any
-    stale ``ledger.md`` left over from before the retirement."""
+    stale ``ledger.md`` left over from before the retirement. Deprecated
+    (WF-265): no write verb needs it any more, so it is only kept for one
+    release for scripts that still call it."""
     quarantined = rebuild_index(args.root, args.root.resolve().name, _now())
     _report_quarantined(quarantined)
+    print("rebuild-index is deprecated: no verb calls it any more", file=sys.stderr)
     print("reconciled — quarantined cards (if any) reported above")
     return 0
 
@@ -1509,6 +1744,49 @@ def cmd_conflicts(args: argparse.Namespace) -> int:
     for a, b, paths in conflicts:
         print(f"{a} ~ {b}: {', '.join(paths)}")
     return 0
+
+
+VIGIL_ABSENT = (
+    "vigil is not installed — tell the user once that installing the vigil plugin "
+    "enables in-session /clear handover; carrying on without it"
+)
+
+
+def _run_vigil(repo_root: Path, vigil_args: list[str], stdin: str | None = None) -> int:
+    """Run the sibling vigil CLI (stdout/stderr pass straight through). Absent
+    vigil is not an error: say so once and exit 0 so the pipeline carries on."""
+    cli = _vigil_cli()
+    if cli is None:
+        print(VIGIL_ABSENT)
+        return 0
+    result = subprocess.run(
+        [sys.executable, str(cli), "--root", str(repo_root), *vigil_args],
+        input=stdin, text=True, check=False,
+    )
+    return result.returncode
+
+
+def cmd_vigil(args: argparse.Namespace) -> int:
+    """``vigil <begin|context|pause|resume>`` — passthrough to the vigil CLI,
+    located by ``_vigil_cli`` rather than by a repo-relative path, so the one
+    ledger-CLI form the guard allows is enough to drive the watch."""
+    return _run_vigil(args.root, [args.vigil_verb])
+
+
+def cmd_handover(args: argparse.Namespace) -> int:
+    """``handover`` = ``handoff | vigil handover --no-snapshot --content-file -``
+    without a shell pipe, so the guard sees one ledger-CLI call."""
+    data = handoff_data(args.root)
+    for path in data["quarantined"]:
+        print(f"QUARANTINED: {path}", file=sys.stderr)
+    if _vigil_cli() is None:
+        print(VIGIL_ABSENT)
+        return 0
+    text = handoff_report(args.root, data) + _context_footer(args.root)
+    extra = ["--notes", args.notes] if args.notes else []
+    return _run_vigil(
+        args.root, ["handover", "--no-snapshot", "--content-file", "-", *extra], stdin=text
+    )
 
 
 def cmd_handoff(args: argparse.Namespace) -> int:
@@ -1806,55 +2084,56 @@ def cmd_calibration(args: argparse.Namespace) -> int:
 
 
 def cmd_add_fact(args: argparse.Namespace) -> int:
-    # Same migration-ordering guard as `cmd_new_sprint`/`cmd_log_usage` —
-    # `ensure_kb` creates central's `knowledge/` tree directly, so it must
-    # not run ahead of the one-time `.workflow/` import on an upgraded repo.
-    _conn(args.root)
-    kb = knowledge_root(args.root)
-    ensure_kb(kb)
+    conn = _conn(args.root)
     tags = [t.strip() for t in (args.tags or "").split(",") if t.strip()]
-    fact = Fact(
-        id=mint_fact_id(kb),
-        statement=args.statement,
-        tags=tags,
-        source=args.source,
-        created=_today(),
-        verified=_today(),
-        status="active",
-        body=args.body or "",
-    )
-    save_fact(kb, fact)
-    _report_quarantined(rebuild_knowledge_index(args.root, _today()))
+    with db.txn(conn):  # mint + insert under one lock: ids cannot collide
+        fact = Fact(
+            id=mint_fact_id(conn),
+            statement=args.statement,
+            tags=tags,
+            source=args.source,
+            created=_today(),
+            verified=_today(),
+            status="active",
+            body=args.body or "",
+        )
+        save_fact(conn, fact)
+        refresh_stale(conn, _today())
+    _views(args.root)
     print(fact.id)
     return 0
 
 
 def cmd_verify_fact(args: argparse.Namespace) -> int:
-    kb = knowledge_root(args.root)
-    fact = load_fact(find_fact_path(kb, args.fact_id))
-    fact.verified = _today()
-    fact.status = "active"
-    save_fact(kb, fact)
-    _report_quarantined(rebuild_knowledge_index(args.root, _today()))
+    conn = _conn(args.root)
+    with db.txn(conn):
+        fact = load_fact(conn, args.fact_id)
+        fact.verified = _today()
+        fact.status = "active"
+        save_fact(conn, fact)
+        refresh_stale(conn, _today())
+    _views(args.root)
     print(f"{fact.id} verified {fact.verified}")
     return 0
 
 
 def cmd_retire_fact(args: argparse.Namespace) -> int:
-    kb = knowledge_root(args.root)
-    fact = load_fact(find_fact_path(kb, args.fact_id))
-    fact.status = "retired"
-    fact.superseded_by = args.superseded_by
-    retire_fact_file(kb, fact)
-    _report_quarantined(rebuild_knowledge_index(args.root, _today()))
+    conn = _conn(args.root)
+    with db.txn(conn):
+        fact = load_fact(conn, args.fact_id)
+        fact.superseded_by = args.superseded_by
+        retire_fact(conn, fact)
+        refresh_stale(conn, _today())
+    _views(args.root)
     print(f"{fact.id} retired")
     return 0
 
 
 def cmd_facts(args: argparse.Namespace) -> int:
+    conn = _conn(args.root)
     if args.pending:
         pending_rows = [
-            p for p in load_pending(args.root)
+            p for p in load_pending(conn)
             if p.status == "pending" and (not args.card or p.card == args.card)
         ]
         if args.json:
@@ -1866,8 +2145,7 @@ def cmd_facts(args: argparse.Namespace) -> int:
         for p in pending_rows:
             print(f"{p.id} {p.card} ({', '.join(p.tags) or 'no tags'}): {p.statement}")
         return 0
-    kb = knowledge_root(args.root)
-    facts, quarantined = load_facts(kb)
+    facts, quarantined = load_facts(conn)
     _report_quarantined(quarantined)
     today = _today()
     rows = []
@@ -1905,42 +2183,50 @@ def cmd_set_section(args: argparse.Namespace) -> int:
     plan and verification text never transits the orchestrator that way) or
     from ``--text`` directly (the orchestrator's own S-card/--brief path,
     short enough not to need a temp file)."""
-    content = args.text if args.text is not None else Path(args.file).read_text()
-    card = _load(args.root, args.card_id)
-    card.set_section(f"## {args.section}", content, _now())
-    card.ack_claim()  # work verb — design spec §3 ack list
-    _sync(args.root, card)
+    if args.text == "-":
+        content = sys.stdin.read()
+    elif args.text is not None:
+        content = args.text
+    else:
+        content = Path(args.file).read_text()
+    card = _edit(
+        args.root, args.card_id,
+        lambda c: c.set_section(f"## {args.section}", content, _now()), ack=True,
+    )
     print(f"{card.id} ## {args.section} set")
     return 0
 
 
 def cmd_accept_fact(args: argparse.Namespace) -> int:
-    _conn(args.root)  # migration-ordering guard, as cmd_add_fact
-    pending = next((f for f in load_pending(args.root) if f.id == args.fact_id), None)
-    if pending is None:
-        raise FileNotFoundError(f"no pending fact with id {args.fact_id}")
-    if pending.status != "pending":
-        raise ValueError(f"{pending.id} is already {pending.status}")
-    kb = knowledge_root(args.root)
-    ensure_kb(kb)
-    fact = Fact(
-        id=mint_fact_id(kb),
-        statement=pending.statement,
-        tags=pending.tags,
-        source=f"{pending.card} {pending.source}".strip(),
-        created=_today(),
-        verified=_today(),
-        status="active",
-    )
-    save_fact(kb, fact)
-    set_pending_status(args.root, pending.id, "accepted")
-    _report_quarantined(rebuild_knowledge_index(args.root, _today()))
+    conn = _conn(args.root)
+    with db.txn(conn):  # adjudicate and mint in one transaction: no duplicate on a race
+        pending = next((f for f in load_pending(conn) if f.id == args.fact_id), None)
+        if pending is None:
+            raise FileNotFoundError(f"no pending fact with id {args.fact_id}")
+        if pending.status != "pending":
+            raise ValueError(f"{pending.id} is already {pending.status}")
+        fact = Fact(
+            id=mint_fact_id(conn),
+            statement=pending.statement,
+            tags=pending.tags,
+            source=f"{pending.card} {pending.source}".strip(),
+            created=_today(),
+            verified=_today(),
+            status="active",
+        )
+        save_fact(conn, fact)
+        set_pending_status(conn, pending.id, "accepted")
+        refresh_stale(conn, _today())
+    _views(args.root)
     print(fact.id)
     return 0
 
 
 def cmd_reject_fact(args: argparse.Namespace) -> int:
-    set_pending_status(args.root, args.fact_id, "rejected", args.reason)
+    conn = _conn(args.root)
+    with db.txn(conn):
+        set_pending_status(conn, args.fact_id, "rejected", args.reason)
+    _views(args.root)
     print(f"{args.fact_id} rejected")
     return 0
 
@@ -2036,12 +2322,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--type", default="feat")
     p.add_argument("--slug")
     p.add_argument("--brief", help="S-card shortcut: writes ## Plan directly and "
-                                    "lands at implementation, skipping the planner dispatch")
+                                    "lands at implementation, skipping the planner dispatch; "
+                                    "'-' reads the brief from stdin")
+    p.add_argument("--brief-file", dest="brief_file",
+                   help="like --brief, reading the brief from this file")
+    p.add_argument("--force-gate", dest="force_gate", metavar="REASON",
+                   help="override a refused stage gate (see set-stage)")
     p.set_defaults(func=cmd_bootstrap)
 
     p = sub.add_parser("set-stage")
     p.add_argument("card_id")
     p.add_argument("stage")
+    p.add_argument("--force-gate", dest="force_gate", metavar="REASON",
+                   help="override a refused stage gate; the reason is recorded in "
+                        "## Decisions (convention: \"user: <why>\")")
     p.set_defaults(func=cmd_set_stage)
 
     p = sub.add_parser("block")
@@ -2079,7 +2373,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("append-body")
     p.add_argument("card_id")
     p.add_argument("section", help="heading text, e.g. Decisions or '## Decisions'")
-    p.add_argument("--text", required=True, help="text to append; '-' reads it from stdin")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--text", help="text to append; '-' reads it from stdin")
+    src.add_argument("--text-file", dest="text_file", help="read the text to append from this file")
     p.set_defaults(func=cmd_append_body)
 
     p = sub.add_parser("reorder")
@@ -2171,6 +2467,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--var", action="append", help=f"key=value, value ≤ {bundle.VAR_CAP} chars")
     p.add_argument("--advance", action="store_true",
                     help="set-stage to --stage first, then prep the bundle, in one call")
+    p.add_argument("--force-gate", dest="force_gate", metavar="REASON",
+                   help="override a refused stage or round-cap gate (see set-stage)")
     p.set_defaults(func=cmd_dispatch_prep)
 
     p = sub.add_parser("new-sprint")
@@ -2202,6 +2500,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("handoff")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_handoff)
+
+    p = sub.add_parser("vigil", help="passthrough to the vigil plugin's CLI")
+    p.add_argument("vigil_verb", choices=["begin", "context", "pause", "resume"])
+    p.set_defaults(func=cmd_vigil)
+
+    p = sub.add_parser(
+        "handover", help="hand the ledger rollup to vigil (handoff | vigil handover), no pipe"
+    )
+    p.add_argument("--notes", help="extra prose for the handover")
+    p.set_defaults(func=cmd_handover)
 
     p = sub.add_parser("board")
     p.add_argument("--json", action="store_true")
@@ -2281,8 +2589,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("card_id")
     p.add_argument("--section", required=True, choices=SECTION_NAMES)
     src = p.add_mutually_exclusive_group(required=True)
-    src.add_argument("--file")
-    src.add_argument("--text")
+    src.add_argument("--file", "--text-file", dest="file", help="read the text from this file")
+    src.add_argument("--text", help="the text; '-' reads it from stdin")
     p.set_defaults(func=cmd_set_section)
 
     p = sub.add_parser("accept-fact")
@@ -2302,6 +2610,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("restore")
     p.add_argument("--dir", help="override the computed backup source")
+    p.add_argument("--from-bak", dest="from_bak", metavar="FILE",
+                   help="put back a board.db.pre-v2.*.bak the schema upgrade took (the "
+                        "exact pre-upgrade board); the replaced board is saved beside it")
     p.set_defaults(func=cmd_restore)
 
     p = sub.add_parser("clear")
@@ -2380,10 +2691,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if not exc.code else 1
     if getattr(args, "remote", None):
         return _run_remote(args.remote, raw, args.root)
+    store.memo_begin()
     try:
         result: int = args.func(args)
         return result
-    except (CardParseError, FactParseError, FileNotFoundError, ValueError) as exc:
+    except gates.GateRefused as exc:
+        for line in exc.problems:
+            print(line, file=sys.stderr)
+        print("(override, recorded in the card's Decisions: --force-gate \"user: <why>\"; "
+              "or gates: warn|off in .overseer/config.json, OVERSEER_GATES=warn|off)",
+              file=sys.stderr)
+        return 3
+    except (CardParseError, FactParseError, FileNotFoundError, ValueError, db.MigrationError) as exc:
         # ValueError covers backup.restore_board's designed refusals (no
         # backup found, schema mismatch, corrupt manifest/cards/meta JSON,
         # unknown card column) and config.load_config's malformed-JSON
@@ -2393,6 +2712,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     finally:
         _close_conns()
+        store.memo_end()
 
 
 if __name__ == "__main__":

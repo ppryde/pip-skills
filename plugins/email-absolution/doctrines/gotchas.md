@@ -1,3 +1,10 @@
+---
+doctrine: gotchas
+prefix: GOTCHA
+kind: core
+scribe: constraints
+---
+
 # Gotchas & Edge Cases — Email Doctrine
 
 ## Purpose
@@ -8,21 +15,18 @@ Documents the non-obvious traps, client-specific regressions, and silent failure
 
 ---
 
-**[GOTCHA-001]** `transactional: mortal | marketing: mortal` — Do not use `url()` in inline `style` attributes.
+**[GOTCHA-001]** `alias of RENDER-001` — Do not use `url()` in inline `style` attributes.
 > Gmail desktop webmail strips the **entire** `style` attribute from any element that contains a `url()` function — including all other properties on that element. `background-image: url(hero.jpg)` causes every inline style on that `<td>` (padding, colour, font-size) to vanish. Apply background images via `<style>` block classes only. Source: caniemail.com/features/css-background-image/ (verified 2026-03-17).
-> `detect: regex` — pattern: `style="[^"]*url\(`
 
-**[GOTCHA-002]** `transactional: mortal | marketing: mortal` — Total compiled HTML must stay under 80 KB as a safe margin against the 102 KB Gmail clip.
-> Gmail clips the HTML body at exactly 102,400 bytes and replaces the remainder with a "View entire message" link. The clip occurs mid-document — transactional CTAs and order details placed after the clip boundary are effectively invisible. Inline CSS is the primary cause of size inflation. Source: Litmus "Gmail Clipping"; caniemail.com.
-> `detect: contextual` — estimate compiled HTML byte count; flag at 80KB warning, error at 102KB
+**[GOTCHA-002]** `transactional: venial | marketing: venial` — Keep total compiled HTML under 80 KB — a margin below the 102,400-byte Gmail clip (RENDER-010).
+> Gmail clips at 102,400 bytes of the HTML *as delivered*, not as authored: ESP link rewriting (every tracked `href` becomes a 200+ character redirect URL), the tracking pixel, merge-tag expansion and quoted-printable inflation all add bytes after your build. A 90 KB source template routinely arrives over 102 KB. 80 KB at source is therefore a real margin, so the finding is venial (should fix) rather than counsel; the hard limit stays RENDER-010 (mortal). Inline CSS is the primary cause of size inflation. Source: Litmus "Gmail Clipping"; caniemail.com.
+> `detect: contextual` — estimate compiled HTML byte count; flag from 80 KB (the clip itself, 102,400 B, is RENDER-010)
 
-**[GOTCHA-003]** `transactional: mortal | marketing: mortal` — Gmail strips `<style>` block content above approximately 16 KB.
+**[GOTCHA-003]** `alias of RENDER-016` — Gmail strips `<style>` block content above approximately 16 KB.
 > This is distinct from the 102 KB HTML clip. Gmail silently strips the `<style>` tag content when it exceeds ~16 KB, causing catastrophic layout failure without any visible error. Keep `<style>` blocks lean; inline critical layout properties if the block grows large. Source: caniemail.com/features/html-style/; hteumeuleu/email-bugs.
-> `detect: contextual` — estimate `<style>` block byte count; flag if approaching 16KB
 
-**[GOTCHA-004]** `transactional: mortal | marketing: mortal` — Do not use CSS Color Level 4 whitespace-separated colour syntax.
+**[GOTCHA-004]** `alias of RENDER-004` — Do not use CSS Color Level 4 whitespace-separated colour syntax.
 > Gmail strips entire style rules containing `rgb(51 51 51)` or `rgba(0 0 0 / 0.5)` — the comma-free whitespace syntax introduced in CSS Color Level 4. Only the legacy comma-separated syntax (`rgb(51, 51, 51)`, `rgba(0, 0, 0, 0.5)`) is safe. Source: hteumeuleu/email-bugs #160 (2025).
-> `detect: regex` — pattern: `(?:rgb|rgba)\([^)]*\s[^),]*(?:/[^)]*)?(?:[^,)])\)`
 
 **[GOTCHA-005]** `transactional: venial | marketing: venial` — Always version image URLs — Gmail caches images permanently by URL.
 > Gmail proxies images via `googleusercontent.com` and caches them indefinitely. The cache key is the original URL. Updating an image file at the same URL has no effect on already-delivered emails; Gmail continues serving the original version. Source: Litmus "Gmail Image Caching".
@@ -40,20 +44,20 @@ Documents the non-obvious traps, client-specific regressions, and silent failure
 > Gmail's mobile webmail (responsive web view) does not honour `max-width: 100%` on `<img>` elements. Images wider than their container overflow. Use `max-width: 100%` only as progressive enhancement layered on top of an explicit `width` attribute. Source: hteumeuleu/email-bugs #152.
 > `detect: contextual` — check that images have explicit `width` attribute in addition to `max-width` CSS
 
-**[GOTCHA-009]** `transactional: mortal | marketing: mortal` — Outlook 2007–2019 ignores `min-height`.
+**[GOTCHA-009]** `alias of RENDER-008` — Outlook 2007–2019 ignores `min-height`.
 > Outlook Windows renders HTML using the Word engine, which has no concept of `min-height`. Containers collapse to their content height. Use transparent spacer images or VML to enforce minimum heights in Outlook. Source: Campaign Monitor CSS guide; Litmus Outlook notes.
-> `detect: regex` — pattern: `min-height\s*:`
 
 **[GOTCHA-010]** `transactional: venial | marketing: venial` — Set `mso-line-height-rule: exactly` when precise line heights are required in Outlook 2007–2019.
 > Outlook Windows uses "at least" semantics for `line-height` by default — it adds extra spacing above the specified value. Without `mso-line-height-rule: exactly`, Outlook inflates line heights inconsistently. `line-height` set on `<td>` is not inherited by child text elements in Outlook. Source: Litmus "Outlook Line Height Bug".
+> `applies: targets=outlook-2019`
 > `detect: contextual` — check if `line-height` declarations include `mso-line-height-rule: exactly` on text-containing elements
 
 **[GOTCHA-011]** `transactional: mortal | marketing: mortal` — Ghost table column dividers must have no whitespace between the closing `</div>` and the MSO conditional comment.
 > Inline-block elements have a 4px whitespace gap between them in all modern clients when there is any whitespace (newline, space, indent) between the elements. In ghost table multi-column layouts, the whitespace between column divs creates this gap in Gmail and Apple Mail. Source: Campaign Monitor "Responsive Email"; Litmus Boilerplate.
 > `detect: contextual` — check multi-column layouts for whitespace between inline-block div columns and MSO conditional comments
 
-**[GOTCHA-012]** `transactional: mortal | marketing: mortal` — Do not use `float` in Outlook 2007–2019 content — it crops text.
-> In Outlook Windows, placing a table with `float` inside a `<td>` with a background colour causes text content following the floated table to be cropped and not displayed. Use MSO conditional table columns for all multi-column layouts. Source: hteumeuleu/email-bugs #158.
+**[GOTCHA-012]** `transactional: mortal | marketing: mortal` — Do not use `float` for layout: Outlook 2007–2019 crops the following text; other clients collapse it.
+> In Outlook Windows, placing a table with `float` inside a `<td>` with a background colour causes text content following the floated table to be cropped and not displayed; elsewhere `float` is partially supported and collapses unpredictably in webmail. Use MSO conditional table columns for all multi-column layouts. Source: hteumeuleu/email-bugs #158.
 > `detect: regex` — pattern: `float\s*:\s*(?:left|right)`
 
 **[GOTCHA-013]** `transactional: venial | marketing: venial` — Account for auto-linking of phone numbers, dates, and addresses in Outlook and Apple Mail.
@@ -86,7 +90,8 @@ Documents the non-obvious traps, client-specific regressions, and silent failure
 
 **[GOTCHA-020]** `transactional: mortal | marketing: mortal` — Do not use CSS comments in `<style>` blocks — Yahoo Mail desktop silently drops the rule after a comment.
 > In Yahoo Mail desktop webmail, a CSS rule immediately following a CSS comment in a `<style>` block is silently dropped. Commenting out one rule inadvertently removes the next rule too. Source: caniemail.com/features/html-style/ (partial support caveats, last tested July 2023).
-> `detect: regex` — pattern: `/\*[^*]*\*+(?:[^/*][^*]*\*+)*/\s*\n\s*[a-zA-Z#.\[{]` (CSS comment followed by rule)
+> `detect: regex` — pattern: `/\*[^*]*\*+(?:[^/*][^*]*\*+)*/\s*\n\s*[a-zA-Z#.\[{]` — CSS comment followed by rule
+> `flags: multiline`
 
 **[GOTCHA-021]** `transactional: venial | marketing: venial` — Do not apply CSS classes directly to `<img>` elements — Yahoo/AOL strips them.
 > Yahoo Mail and AOL strip `class` attributes from `<img>` tags. CSS rules targeting `img.my-class` silently fail. Apply classes to a wrapper `<td>` or `<div>` instead. Source: hteumeuleu/email-bugs #157.
@@ -104,9 +109,8 @@ Documents the non-obvious traps, client-specific regressions, and silent failure
 > CSS Custom Properties (`--colour: #333; color: var(--colour);`) are unsupported in Outlook 2007–2019, all Gmail platforms, and Yahoo Mail. Styles using `var()` silently fall through to no value. Pre-process variables at build time using a CSS preprocessor or build step — email templates must always receive computed flat values. Source: caniemail.com (CSS custom properties feature data).
 > `detect: regex` — pattern: `var\(--[^)]+\)`
 
-**[GOTCHA-025]** `transactional: mortal | marketing: mortal` — All `src` and `href` values must be absolute HTTPS URLs — relative URLs and `<base>` tags do not work.
+**[GOTCHA-025]** `alias of RENDER-009` — All `src` and `href` values must be absolute HTTPS URLs — relative URLs and `<base>` tags do not work.
 > Email clients strip or ignore `<base href="...">` tags. `<img src="/images/logo.png">` fails to load. `<a href="/login">` points nowhere or to the client's own domain. Protocol-relative URLs (`//example.com/image.jpg`) behave unpredictably. Every asset reference must be an absolute `https://` URL. Source: caniemail.com (no `<base>` support); Litmus "Email Image Best Practices".
-> `detect: regex` — pattern: `(?:src|href)=["'](?!https?://|mailto:|tel:|#)[^"']+["']`
 
 **[GOTCHA-026]** `transactional: venial | marketing: venial` — Web fonts must have a complete, well-ordered fallback stack — `@font-face` fails silently in Gmail and Outlook.
 > `@font-face` is unsupported in Gmail (all platforms), Outlook 2007–2019, and Yahoo Mail. When the custom font fails, the browser uses the next entry in `font-family`. A minimal fallback (`sans-serif`) resolves inconsistently across platforms — `sans-serif` maps to Times New Roman on some Windows configurations. Always provide explicit named fallbacks: `'Your Font', -apple-system, 'Segoe UI', Arial, Helvetica, sans-serif`. Source: caniemail.com/features/css-at-font-face/; Litmus "Web Fonts in Email".
@@ -118,7 +122,7 @@ Documents the non-obvious traps, client-specific regressions, and silent failure
 
 **[GOTCHA-028]** `transactional: venial | marketing: venial` — Use the correct multi-property preheader hiding technique — `display: none` alone is unreliable.
 > `display: none` does not reliably hide preheader text in all Outlook configurations (some preview panes show it) and some accessibility tools announce it. The correct technique combines `display: none`, `visibility: hidden`, `opacity: 0`, `max-height: 0`, `overflow: hidden`, and `mso-hide: all`. Source: Litmus "Preheader Text"; Email on Acid.
-> `detect: regex` — pattern: `display\s*:\s*none(?![^}]*mso-hide)` (display:none without mso-hide companion)
+> `detect: contextual` — check the preheader: the first hidden `<div>` inside `<body>` must carry all six properties (display:none, visibility:hidden, opacity:0, max-height:0, overflow:hidden, mso-hide:all); the bare display:none/mso-hide pair is HTML-003
 
 **[GOTCHA-029]** `transactional: venial | marketing: venial` — Serve images at 2× resolution with `width`/`height` attributes set to display dimensions.
 > High-density (Retina/HiDPI) displays render images blurry if served at 1× resolution. Serve at 2× file resolution but set HTML `width`/`height` attributes to the intended display size. If `width` is set to the file width (1200) instead of the display width (600), the image overflows its container in all clients. Outlook 2007–2019 ignores `max-width: 100%` — the `width` attribute is the only size control in Outlook. Source: Campaign Monitor "Retina Images in Email"; email_rendering_compatibility.md.

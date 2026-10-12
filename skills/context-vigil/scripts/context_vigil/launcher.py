@@ -67,7 +67,7 @@ def rc_path() -> Optional[Path]:
 
 
 def alias_line(choice: str) -> Optional[str]:
-    target = paths.skill_dir() / "scripts" / "claude-tmux"
+    target = str(paths.skill_dir() / "scripts" / "claude-tmux").replace("'", "'\\''")
     if choice == "on-demand":
         return f"alias claude-tmux='{target}'"
     if choice == "always":

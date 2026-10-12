@@ -22,6 +22,7 @@ from context_vigil import (
     last_light,
     launcher,
     messages,
+    pane,
     paths,
     session,
     state,
@@ -77,6 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
         func=_cmd_pause)
     sub.add_parser("resume", help="re-enable nudges/auto-clear for this session").set_defaults(
         func=_cmd_resume)
+    psp = sub.add_parser("_pane-safe", help=argparse.SUPPRESS)
+    psp.add_argument("target")
+    psp.set_defaults(func=_cmd_pane_safe)
     sub.add_parser("status", help="show install, mode and settings").set_defaults(
         func=_cmd_status)
     ip = sub.add_parser("install", help="wire hooks + status line (dry run without --yes)")
@@ -421,8 +425,8 @@ def _summaries(plan: install.Plan) -> List[str]:
 
 def _cmd_install(args: argparse.Namespace) -> int:
     if args.questions_json:
-        print(json.dumps(cards.install_cards(install.claude_supports_mods()),
-                         ensure_ascii=False, indent=2))
+        mods = install.claude_supports_mods() and install.mod_dir().is_dir()
+        print(json.dumps(cards.install_cards(mods), ensure_ascii=False, indent=2))
         return 0
     flag = {"on": True, "off": False, None: None}
     try:
@@ -466,7 +470,12 @@ def _cmd_install(args: argparse.Namespace) -> int:
     try:
         install.apply(plan)
     except OSError as exc:
-        raise CliError(f"install failed part-way ({exc}); re-run, or `uninstall --yes`") from exc
+        failed = getattr(exc, "rollback_failed", None)
+        if failed:
+            raise CliError(f"install failed part-way ({exc}); could not restore "
+                           f"{', '.join(failed)} — re-run, or `uninstall --yes`") from exc
+        raise CliError(f"install failed part-way ({exc}); every file it had written was "
+                       "rolled back (directories it created may remain, empty) — fix the cause and re-run") from exc
     print("\n".join(_installed_lines(plan)))
     return 0
 
@@ -591,6 +600,16 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
         raise CliError(f"uninstall failed ({exc}); nothing more was changed") from exc
     print(f"\ncontext-vigil uninstalled. Data left at {paths.data_root()} (delete it by hand).")
     return 0
+
+
+def _cmd_pane_safe(args: argparse.Namespace) -> int:
+    """The detached sender's re-check, after the hook has returned: exit 0 when the
+    pane is safe to type into; 2 when a running turn is the ONLY reason (the sender
+    retries: other Stop hooks may still be finishing); 1 otherwise."""
+    reason = pane.pane_hold_reason(args.target, busy=True)
+    if reason is None:
+        return 0
+    return 2 if reason == pane.BUSY_REASON else 1
 
 
 def _cmd_hook(args: argparse.Namespace) -> int:

@@ -1,3 +1,10 @@
+---
+doctrine: tooling
+prefix: TOOL
+kind: core
+scribe: skip
+---
+
 # Tooling Overview — Email Doctrine
 
 ## Purpose
@@ -40,6 +47,7 @@ Selection guidance and cross-tool rules for email templating pipelines. This doc
 
 **[TOOL-008]** `transactional: venial | marketing: venial` — ESP-native templates (SendGrid Dynamic Templates, Postmark Templates, Mailchimp) create vendor lock-in. Document this trade-off explicitly.
 > Template source lives inside the ESP. Migrating ESPs requires rewriting all templates. Logic capabilities are limited to what the ESP exposes (SendGrid's Handlebars subset lacks custom helpers; Postmark is Mustache with no block helpers). Source: SendGrid and Postmark documentation.
+> `applies: esp=sendgrid,postmark,mailchimp`
 > `detect: contextual` — if stack.esp is "sendgrid" or "postmark", flag that templates live in the ESP
 
 **[TOOL-009]** `transactional: venial | marketing: venial` — Maintain a plain-text version for every email template.

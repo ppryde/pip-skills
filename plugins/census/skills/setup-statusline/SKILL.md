@@ -48,8 +48,9 @@ which account it touches.
      and `census@wf-claude-market`. If `enabled_census` shows both enabled, tell
      the person to disable the one this skill is not part of (the other
      marketplace's, not the copy you are running): both write the same
-     launcher, `~/.local/bin/census`, and install refuses a launcher it does
-     not own. Do not continue until they have.
+     launcher, `~/.local/bin/census`, and the last installer wins, so the launcher
+     can end up pointing at the copy that is later disabled or upgraded away. Do
+     not continue until they have.
 
 2. **Preview.** Run `CENSUS statusline --preview` (for another account the person
    named: `CENSUS statusline --preview --config-dir <dir>`) and show the output. It draws
@@ -90,10 +91,10 @@ Set in `settings.json` under `env`, all optional:
 
 ## Undo
 
-`CENSUS uninstall --yes` restores the `statusLine` that was replaced (or removes
-the one census added), and removes `CENSUS_STATUSLINE_SEGMENTS` if census wrote it.
-If they have changed `statusLine` since, it leaves it alone and says so. Add
-`--purge` to also delete this account's census data; when several accounts share
+`CENSUS uninstall` (add `--purge` to also delete census data) prints what it would
+do; show that plan, then re-run with `--yes` once they approve. `--yes` restores the
+`statusLine` that was replaced (or removes the one census added), and removes `CENSUS_STATUSLINE_SEGMENTS` if census wrote it.
+If they have changed `statusLine` since, it leaves it alone and says so. `--purge` (irreversible) also deletes this account's census data; when several accounts share
 one `CENSUS_STORE`, only this account's limits and sessions are deleted and the
 rest is kept. If the status line cannot be restored (an unreadable backup or
 settings file) it stops and removes nothing.

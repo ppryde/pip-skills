@@ -3,7 +3,7 @@
     "id": "FETCH-030",
     "severity_internal": "critical",
     "tier_displayed": "critical",
-    "location_pattern": "templates/orders.html:2",
+    "location_pattern": "templates/orders.html:4",
     "savings_basis": "static",
     "signals_caveat": false
   },

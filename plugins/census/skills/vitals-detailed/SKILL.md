@@ -1,6 +1,6 @@
 ---
 name: vitals-detailed
-description: Show this session's vital signs in full — context headroom and cache warmth, cost and token totals, git sync and lines changed, tool breakdown, and each rate-limit window with its reset time and a pace forecast. Use when the user runs /census:vitals-detailed or wants the full session analytics.
+description: Show this session's vital signs in full — context headroom and cache warmth, cost and token totals, git sync and lines changed, tool breakdown, and each rate-limit window with its reset time and a pace forecast. Use when the user runs /census:vitals-detailed.
 disable-model-invocation: true
 allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*)
 ---
@@ -26,7 +26,7 @@ substituted), run it yourself from this skill's base directory and print the
 result the same way:
 
 ```bash
-python3 <skill base directory>/../../scripts/vitals.py --style detailed
+python3 <skill base directory>/../../scripts/vitals.py --style detailed --session "${CLAUDE_SESSION_ID}"
 ```
 
 The script is read-only and never fails loudly: a missing source (no census

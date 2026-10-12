@@ -149,7 +149,11 @@ def nudge(payload: Dict[str, object]) -> Optional[str]:
         record = session.load(session_id) if session_id else None
         if state.gate_active(scope):
             last = record["last_nudged_pct"] if record is not None else None
-            if not isinstance(last, int) or pct < last + config.repeat_step(cwd):
+            # pct below the last nudge means the context shrank (compaction, /clear):
+            # a new cycle, so nudge again instead of waiting to climb back past it
+            shrank = isinstance(last, int) and pct < last
+            if not shrank and (not isinstance(last, int)
+                               or pct < last + config.repeat_step(cwd)):
                 return None
         state.set_gate(scope)
         if session_id and record is not None:

@@ -1,6 +1,6 @@
 ---
 name: vitals-lean
-description: Show this session's vital signs in three lean lines — context gauge, model and cost; branch, PR and uncommitted work; rate-limit windows (a fourth line only when the reading may not be live). Phone-sized. Use when the user runs /census:vitals-lean or asks for a quick status check.
+description: Show this session's vital signs in three lean lines — context gauge, model and cost; branch, PR and uncommitted work; rate-limit windows (a fourth line only when the reading may not be live). Phone-sized. Use when the user runs /census:vitals-lean.
 disable-model-invocation: true
 allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*)
 ---
@@ -26,7 +26,7 @@ substituted), run it yourself from this skill's base directory and print the
 result the same way:
 
 ```bash
-python3 <skill base directory>/../../scripts/vitals.py --style compact
+python3 <skill base directory>/../../scripts/vitals.py --style compact --session "${CLAUDE_SESSION_ID}"
 ```
 
 The script is read-only and never fails loudly: a missing source (no census

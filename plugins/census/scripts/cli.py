@@ -82,6 +82,9 @@ def _statusline(args: argparse.Namespace) -> int:
     Ingest first, draw second; a failure in either never stops the other and
     nothing here raises."""
     if args.preview:
+        if args.segments and (bad := ins.validate_segments(args.segments)):
+            _emit(f"unknown segment(s) {bad} - known: {', '.join(rd.SEGMENTS)}")
+            return 1
         try:
             env = {**os.environ, rd.SEGMENTS_ENV: args.segments} if args.segments else None
             _emit(rd.statusline(rd.preview_payload(), env=env))

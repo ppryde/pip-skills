@@ -27,7 +27,7 @@ from functools import cached_property
 
 from scripts import store
 
-DEFAULT_IMAGE = "alpine"
+DEFAULT_IMAGE = "alpine:3.20.3"  # exact tag, not floating `latest`
 # The dashboard gives the whole `chronicle sync` 120s; these keep any single
 # helper well inside that, so a wedged docker daemon costs one volume one sync.
 LIST_TIMEOUT_SECONDS = 30

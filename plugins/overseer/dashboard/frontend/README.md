@@ -17,7 +17,7 @@ export PATH="$HOME/.nvm/versions/node/v22.22.1/bin:$PATH"
 Then, from this directory (`plugins/overseer/dashboard/frontend/`):
 
 ```bash
-npm install
+npm ci
 npm run dev       # Vite dev server with HMR — proxies /api/* to a running
                    # FastAPI backend on http://127.0.0.1:8770 (serve.py's
                    # default). Backend on another port? Set OVERSEER_API:

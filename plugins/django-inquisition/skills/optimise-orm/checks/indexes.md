@@ -5,36 +5,58 @@ checks:
   - id: IDX-001
     title: Filter column without db_index / Meta.indexes
     severity_base: high
+    kind: perf
+    trigger: '\.(filter|exclude|get)\('
   - id: IDX-002
     title: order_by column without index — sort cost
     severity_base: medium
+    kind: perf
+    trigger: '\.order_by\('
   - id: IDX-010
     title: Multi-column filter → composite index, leading-column matters
     severity_base: high
+    kind: perf
+    trigger: '\.(filter|exclude)\(\w+(__\w+)*=.*,\s*\w+(__\w+)*='
   - id: IDX-011
     title: Composite index column order doesn't match common queries
     severity_base: low
+    kind: perf
+    trigger: '\bindexes\s*=|\bIndex\('
   - id: IDX-020
     title: Soft-delete / status filter → partial index opportunity
     severity_base: medium
+    kind: perf
+    trigger: '(deleted_at|is_deleted|archived_at|is_active)\w*=(True|False)|\bdef\s+get_queryset\('
   - id: IDX-030
     title: Lower/Upper filtered → expression index
     severity_base: medium
+    kind: perf
+    trigger: '__iexact=|\bLower\('
   - id: IDX-040
     title: JSONField / ArrayField filtered without GIN (Postgres)
     severity_base: high
+    kind: perf
+    trigger: '__(contains|has_key|has_keys|has_any_keys|overlap|contained_by)='
   - id: IDX-041
     title: Append-only timestamps without BrinIndex (Postgres, large tables)
     severity_base: low
+    kind: perf
+    trigger: '__(gte|lte|gt|lt|range)='
   - id: IDX-050
     title: Duplicate / prefix-covered indexes
     severity_base: low
+    kind: perf
+    trigger: '\bindexes\s*=|\bIndex\('
   - id: IDX-060
     title: Meta.ordering triggers sort without index
     severity_base: medium
+    kind: perf
+    trigger: '\bordering\s*='
   - id: IDX-061
     title: order_by('?') is full-table sort
     severity_base: high
+    kind: perf
+    trigger: 'order_by\(\s*.\?'
 ---
 
 # Indexes
@@ -176,15 +198,19 @@ indexes = [
 
 ### IDX-020
 
-**Signature:** `.filter(deleted_at__isnull=True)` or `.filter(is_active=True)` appears repeatedly, indicating a soft-delete or active-record pattern. A partial index that covers only the "live" subset of rows is far smaller and faster than a full-column index.
+**Signature:** `.filter(deleted_at__isnull=True)` or `.filter(is_active=True)` appears repeatedly, indicating a soft-delete or active-record pattern. A partial index that covers only the "live" subset of rows is far smaller and faster than a full-column index — but it must index the column that is actually looked up or ordered by (e.g. `created_at`, `customer_id`), with the soft-delete predicate as its `condition`. A partial index on `deleted_at` `WHERE deleted_at IS NULL` stores only NULLs and accelerates nothing. MySQL ignores `Index.condition` (Django system check `models.W037`); suggest this only on PostgreSQL/SQLite.
 
 **Grep / AST hints:**
 ```regex
-\.filter\(\w+__isnull=True\)
+\.filter\((deleted_at|is_deleted|archived_at)(__isnull)?=(True|False)\)
 ```
 Also:
 ```regex
 \.filter\(is_active=True\)
+```
+Also (formerly PAT-020, now an alias of this check): a default manager whose `get_queryset()` applies that filter, which counts as repeated use on its own:
+```regex
+def\s+get_queryset\(self\):
 ```
 Follow-up: count occurrences. If 2+ in file or across caller-grep, flag.
 
@@ -199,22 +225,26 @@ Follow-up: count occurrences. If 2+ in file or across caller-grep, flag.
 
 **Suggested fix template:**
 ```python
-# Before — full column index or no index
+# Before — full index on the lookup column, covering soft-deleted rows too
+# (queries: Order.objects.filter(deleted_at__isnull=True).order_by("created_at"))
 class Order(models.Model):
+    created_at = models.DateTimeField()
     deleted_at = models.DateTimeField(null=True)
     class Meta:
-        indexes = [models.Index(fields=["deleted_at"])]
+        indexes = [models.Index(fields=["created_at"])]
 
-# After — partial index (Postgres / SQLite)
+# After — partial index on the lookup column, restricted to live rows
+# (PostgreSQL / SQLite; MySQL ignores `condition`)
 from django.db.models import Q
 class Order(models.Model):
+    created_at = models.DateTimeField()
     deleted_at = models.DateTimeField(null=True)
     class Meta:
         indexes = [
             models.Index(
-                fields=["deleted_at"],
+                fields=["created_at"],
                 condition=Q(deleted_at__isnull=True),
-                name="order_active_idx",
+                name="order_live_created_idx",
             )
         ]
 ```
@@ -223,7 +253,7 @@ class Order(models.Model):
 
 ### IDX-030
 
-**Signature:** `.filter(<field>__iexact=...)` or a `Lower('<field>')` annotation used in a filter, without a corresponding expression index on `Lower(<column>)`. Case-insensitive lookups force a function call per row unless a functional index is defined.
+**Signature:** `.filter(<field>__iexact=...)` or a `Lower('<field>')` annotation used in a filter, without a matching expression index. On PostgreSQL, `<field>__iexact=x` compiles to `UPPER(col::text) = UPPER(%s)` (not `LOWER`), so the index must be on `Upper(<column>)`; a `Lower(...)` index only serves queries that filter on `Lower(...)` explicitly (annotation or `Lower` expression). `icontains`/`istartswith` are likewise `UPPER`-based. Without a matching functional index the function is evaluated per row.
 
 **Grep / AST hints:**
 ```regex
@@ -248,19 +278,25 @@ Lower\(['"]\w+['"]\)
 # Before
 User.objects.filter(email__iexact=email)
 
-# After — add expression index (Postgres)
-from django.db.models.functions import Lower
+# After, option A — keep `__iexact`; index Upper(), which is what PostgreSQL's iexact compiles to
+# (expression indexes need Django 3.2+)
+from django.db.models.functions import Upper
 from django.db.models import Index
 
 class User(models.Model):
     email = models.EmailField()
     class Meta:
         indexes = [
-            Index(Lower("email"), name="user_email_lower_idx")
+            Index(Upper("email"), name="user_email_upper_idx")
         ]
 
-# Then query using annotation for portability
+# After, option B — index Lower() AND rewrite the query to filter on Lower() explicitly;
+# `email__iexact` will NOT use a Lower() index
+from django.db.models.functions import Lower
 User.objects.annotate(email_lower=Lower("email")).filter(email_lower=email.lower())
+# (with Meta.indexes = [Index(Lower("email"), name="user_email_lower_idx")])
+
+# Verify the planner uses it with EXPLAIN.
 ```
 
 ---

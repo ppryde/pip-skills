@@ -181,7 +181,9 @@ export interface AttributesBody {
   estimate?: number | null;
 }
 
-export type MoveBody = { stage: Stage } | { status: Status; reason?: string };
+export type MoveBody =
+  | { stage: Stage; force_gate?: string }
+  | { status: Status; reason?: string };
 
 export interface ThresholdBody {
   value: number;

@@ -6,8 +6,8 @@ description: >
   a piece of tracked work, when the user asks "what's in flight", "resume where
   we left off", "start a new card/task", "log progress", to record or recall a
   durable fact, or at the start of any session in a repo already tracked by
-  overseer (a `board.db` entry for cards, sprints, usage and knowledge, all
-  under the central per-repo folder). The state layer beneath the orchestrate
+  overseer (a `board.db` entry for cards, with sprints, usage and knowledge
+  as files, all under the central per-repo folder). The state layer beneath the orchestrate
   skill; drive it through the overseer CLI, never by editing files.
 effort: medium
 ---
@@ -21,8 +21,9 @@ knowledge base, in one central per-repo folder
 `overseer init`/`OVERSEER_CENTRAL`), shared across every worktree of this
 repo so claims are atomic; `board.db` is the source of truth, read directly
 by the CLI, dashboard and `resume` (the generated `ledger.md` view is
-retired, WF-072). Sprints, usage and the knowledge base remain file-based
-under this **state root**. A legacy `.workflow/` tree is
+retired, WF-072). Sprints and knowledge facts live in `board.db` too; the
+`sprints/` and `knowledge/` files under the **state root** are generated views.
+A legacy `.workflow/` tree is
 imported into the central folder once, on first connect after upgrade, then
 left in place unused. **Never edit `board.db` or state-root files
 directly**; drive everything through the CLI:
@@ -32,7 +33,9 @@ python plugins/overseer/scripts/cli.py --root <repo-root> <command> ...
 ```
 
 (When overseer is installed as a plugin, the scripts live under the plugin
-root instead — locate `cli.py` relative to this SKILL.md.)
+root instead — locate `cli.py` relative to this SKILL.md.) The CLI needs
+Python 3.11+ with the packages in `requirements.txt` (PyYAML, httpx); hooks use
+`OVERSEER_PYTHON` or a repo `.venv` when set.
 
 ## On invocation — always check for in-flight work first
 
@@ -42,8 +45,10 @@ python .../cli.py --root . resume
 
 - If cards are in flight, report them to the user and offer per card:
   **resume / park / block / abandon**. Never silently start fresh.
-- Resuming a card: read it back via the CLI (`show <id>`), re-enter at the
-  recorded stage — never earlier, never assume later. If the report shows
+- `resume` lists only in-flight and blocked cards.
+- Resuming a card: read it back via the CLI (`show <id> --json` for the plan
+  and decisions; plain `show <id>` prints only the title and section
+  headings), re-enter at the recorded stage — never earlier, never assume later. If the report shows
   `(MISSING)` next to the worktree, recreate it from the recorded branch
   before continuing.
 - If no state root exists yet and the user wants tracked work: run `init`.
@@ -91,13 +96,15 @@ python .../cli.py --root . resume
   `append-body <id> Decisions --text "- chose X over Y"` (heading given
   bare or as `## Decisions`, both work). Appends server-side, so you never
   read-modify-write the whole body: pass `--text -` to
-  pipe multi-line content from stdin instead. A missing section is created
+  pipe stdin (or `--text-file`) instead. A missing section is created
   at the end of the body.
 - **Amending a goal:** never silently rewrite a card's goal — confirm the new
   wording with the user first. The goal is one of the by-hand fields under the
   prose exception, so it gets extra care.
-- **Corrupt cards suspected:** run `rebuild-index` — reconciles against
-  `board.db` (cards are the truth) and reports any quarantined cards.
+- **Corrupt cards suspected:** `rebuild-index` only removes the retired
+  `ledger.md` and repairs nothing. A malformed card row raises a parse error
+  naming the card; fix that card with `set-field`/`set-section` or inspect it
+  with `show <id> --json`.
 
 ## Relationships (epics, dependencies, parking)
 - **Epics are emergent.** Set a card's `parent` with `set-field <id> --parent
@@ -119,9 +126,13 @@ python .../cli.py --root . resume
 ## Finishing
 
 - `done <id>` when merged (archives the card); `abandon <id>` otherwise.
-- The verification stage requires evidence in the card's `## Verification`
-  section: test output, mypy/ruff results, end-to-end observation. A card
-  with an empty Verification section does not pass `awaiting-merge`.
+- The verification stage expects evidence in the card's `## Verification`
+  section: test output, mypy/ruff results, end-to-end observation. This is a
+  convention the orchestrator checks before moving a card to `awaiting-merge`;
+  the CLI does not enforce it.
+- Token accounting: `log-usage <id> --role <role>` records usage, `usage
+  [--card <id>] [--json]` summarises it and `calibration [--json]` compares
+  estimates with actuals.
 
 ## Sprints
 
@@ -131,9 +142,7 @@ python .../cli.py --root . resume
 
 ## Knowledge base
 
-A living store of durable, falsifiable facts under the state root
-(`knowledge/`). The CLI is the only writer; the index (`knowledge.md`) is a
-view.
+Durable, falsifiable facts in `board.db`; `knowledge/` is a generated view.
 
 - `add-fact --statement "<falsifiable sentence>" --tags "testing,auth" --source <card-id> [--body "..."]`
   mints the next `KB-nnn`. Only mint facts that are falsifiable — "the auth
@@ -141,7 +150,7 @@ view.
 - `verify-fact <id>` when a fact is relied on and still holds — bumps its
   verified date and clears any stale mark.
 - `retire-fact <id> [--superseded-by <id>]` when a fact is refuted or
-  superseded — moves it to `retired/`, never deletes it.
+  superseded — retires it, never deletes it.
 - `facts [--tag <t>] [--stale] [--json]` lists live facts; facts older than
   90 days show `[STALE]` and must be re-verified before they are trusted.
 
@@ -150,14 +159,14 @@ view.
 The live `board.db` and state root are never committed. `backup`/`restore`
 are the bridge to git — a diffable, mergeable snapshot in the repo.
 
-- `backup [--dir PATH]` dumps cards + meta to `cards.json`/`meta.json` and
-  copies sprints/usage/knowledge into `.overseer/backups/` (or `--dir`),
-  atomically. Run it before a merge or a push you want a safety net for.
+- `backup [--dir PATH]` dumps every table to JSON into
+  `.overseer/backups/` (or `--dir`), atomically. Run it before a merge or a push you want a safety net for.
 - `restore [--dir PATH]` rebuilds the central state root from a backup:
   cards upsert by id with last-modified-wins, board-identity meta
-  (`repo_root`, `schema_version`) is never overwritten, and sprint/usage/
-  knowledge files are restored only where absent locally (fill-gaps, never
-  clobbers). Refuses loudly on a schema-version mismatch or corrupt JSON.
+  (`repo_root`, `schema_version`) is never overwritten, and sprints, facts and
+  `usage.jsonl` are restored only where absent (fill-gaps, never clobbers).
+  Refuses loudly on an unknown schema or bad JSON.
+- `restore --from-bak FILE` puts back the pre-0.27.0 `board.db.pre-v2.*.bak`.
 - A repo that has run `init` gets an opt-in `PreToolUse` hook that runs
   `backup` and commits `.overseer/backups/` before a Claude-issued `git push`
   proceeds, so the push carries the snapshot.

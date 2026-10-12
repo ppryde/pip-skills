@@ -53,6 +53,7 @@ case "${1:-}" in
 esac
 for a in "$@"; do
   case "$a" in
+    --) break ;;   # everything after is a positional (a prompt), never one of our flags
     -p|--print|--output-format|--output-format=*|--input-format|--input-format=*) noninteractive=1 ;;
     --version|-v|--help|-h) noninteractive=1 ;;
   esac
@@ -89,8 +90,7 @@ fwd='PATH|HOME|CLAUDE_[A-Z0-9_]+|ANTHROPIC_[A-Z0-9_]+|AWS_[A-Z0-9_]+|CONTEXT_VIG
 # `bash -x claude-tmux` (or SHELLOPTS=xtrace) would trace every `printf … "${!var}"`
 # below, secret values included, to stderr: tracing is off while the file is written
 # (`set +x` here is enough for this shell; the env file turns it off for the pane's).
-case "$-" in *x*) cv_xtrace=1; set +x ;; *) cv_xtrace=0 ;; esac
-{
+write_envfile() {
   # First line: tracing off. The pane's bash may start traced (a server environment or
   # BASH_ENV carrying SHELLOPTS=xtrace) and would otherwise print every export below.
   echo 'set +o xtrace +o verbose'
@@ -116,17 +116,33 @@ case "$-" in *x*) cv_xtrace=1; set +x ;; *) cv_xtrace=0 ;; esac
   printf 'exec %q' "$bin"
   for a in "$@"; do printf ' %q' "$a"; done
   echo
-} > "$envfile"
-[ "$cv_xtrace" = 1 ] && set -x
+}
+rewrite_envfile() {
+  case "$-" in
+    *x*) set +x; write_envfile "$@" > "$envfile"; set -x ;;
+    *) write_envfile "$@" > "$envfile" ;;
+  esac
+}
+rewrite_envfile "$@"
 
 # The session command is separate argv words (tmux >= 3.0 execs them directly), so the
 # server's default-shell (fish, csh, ...) never parses a quoted string. The client runs
 # without the shell-tracing variables: a server it starts inherits its environment, and
 # a pane bash importing SHELLOPTS=xtrace would trace the env file into the pane.
-if ! env -u SHELLOPTS -u BASHOPTS -u BASH_ENV -u ENV -u BASH_XTRACEFD tmux -L "$sock" new-session -s "$name" -c "$PWD" -e "CONTEXT_VIGIL_SESSION=$name" \
-    "$(type -P bash)" "$envfile"; then
+# Two launches racing can pick the same free name: tmux then refuses the second as a
+# duplicate. When the name now exists, take the next free one and retry (bounded).
+attempt=0
+until env -u SHELLOPTS -u BASHOPTS -u BASH_ENV -u ENV -u BASH_XTRACEFD tmux -L "$sock" new-session -s "$name" -c "$PWD" -e "CONTEXT_VIGIL_SESSION=$name" \
+    "$(type -P bash)" "$envfile"; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -lt 5 ] && tmux -L "$sock" has-session -t "=$name" 2>/dev/null; then
+    while tmux -L "$sock" has-session -t "=${base}-${n}" 2>/dev/null; do n=$((n + 1)); done
+    name="${base}-${n}"
+    rewrite_envfile "$@"
+    continue
+  fi
   rm -f -- "$envfile"
   echo "claude-tmux: tmux could not start a session — launching plain claude (manual mode)" >&2
   exec "$bin" "$@"
-fi
+done
 rm -f -- "$envfile"

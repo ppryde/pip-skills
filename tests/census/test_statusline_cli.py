@@ -276,3 +276,9 @@ def test_install_statusline_alias_keeps_crlf_and_odd_bytes(tmp_path, monkeypatch
     assert b"# caf\xe9\r\n" in script.read_bytes() and b"census ingest" in script.read_bytes()
     assert cli.main(["install-statusline", "--path", str(script), "--uninstall"]) == 0
     assert script.read_bytes() == original
+
+
+def test_preview_refuses_an_unknown_segment(capsysbinary):
+    assert cli.main(["statusline", "--preview", "--segments", "model,bogus"]) == 1
+    out = capsysbinary.readouterr().out.decode()
+    assert "unknown segment(s) bogus" in out and "known:" in out

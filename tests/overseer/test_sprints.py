@@ -1,8 +1,7 @@
 import pytest
 
 from scripts.models import CardParseError
-from scripts.sprints import Sprint, replace_section, rollup, save_sprint
-from scripts.store import init_workflow
+from scripts.sprints import Sprint, load_sprint, load_sprints, replace_section, rollup, save_sprint
 from factories import make_card
 
 SAMPLE_SPRINT = """---
@@ -77,11 +76,22 @@ class TestRollup:
         assert rolled.budget_actual == 390_000
         assert rolled.budget_estimate == 1_300_000
 
-    def test_save(self, tmp_path):
-        root = init_workflow(tmp_path)
-        path = save_sprint(root, Sprint.from_text(SAMPLE_SPRINT))
-        assert path == root / "sprints" / "2026-07-S1.md"
-        assert path.exists()
+    def test_save_round_trips_through_the_board(self, board_conn):
+        save_sprint(board_conn, Sprint.from_text(SAMPLE_SPRINT))
+        assert load_sprint(board_conn, "2026-07-S1") == Sprint.from_text(SAMPLE_SPRINT)
+
+    def test_save_updates_in_place(self, board_conn):
+        s = Sprint.from_text(SAMPLE_SPRINT)
+        save_sprint(board_conn, s)
+        s.status = "closed"
+        save_sprint(board_conn, s)
+        assert len(load_sprints(board_conn)[0]) == 1
+        assert load_sprint(board_conn, s.id).status == "closed"
+
+    def test_unknown_sprint_is_file_not_found(self, board_conn):
+        import pytest
+        with pytest.raises(FileNotFoundError):
+            load_sprint(board_conn, "nope")
 
 
 class TestRetroRollup:
@@ -100,32 +110,16 @@ class TestRetroRollup:
 
 
 class TestLoadSprints:
-    def test_empty(self, tmp_path):
-        from scripts.sprints import load_sprints
-        root = init_workflow(tmp_path)
-        sprints, quarantined = load_sprints(root)
+    def test_empty(self, board_conn):
+        sprints, quarantined = load_sprints(board_conn)
         assert sprints == []
         assert quarantined == []
 
-    def test_multiple_sorted(self, tmp_path):
-        from scripts.sprints import load_sprints, save_sprint
-        root = init_workflow(tmp_path)
+    def test_multiple_sorted(self, board_conn):
         s1 = Sprint.from_text(SAMPLE_SPRINT)
         s2 = Sprint.from_text(SAMPLE_SPRINT.replace("2026-07-S1", "2026-07-S2"))
-        save_sprint(root, s2)
-        save_sprint(root, s1)
-        sprints, quarantined = load_sprints(root)
-        assert len(sprints) == 2
+        save_sprint(board_conn, s2)
+        save_sprint(board_conn, s1)
+        sprints, quarantined = load_sprints(board_conn)
+        assert [s.id for s in sprints] == ["2026-07-S1", "2026-07-S2"]
         assert quarantined == []
-        assert sprints[0].id == "2026-07-S1"
-        assert sprints[1].id == "2026-07-S2"
-
-    def test_corrupt_quarantined(self, tmp_path):
-        from scripts.sprints import load_sprints
-        root = init_workflow(tmp_path)
-        (root / "sprints" / "WF-777-bad.md").write_text("garbage")
-        sprints, quarantined = load_sprints(root)
-        assert sprints == []
-        assert len(quarantined) == 1
-        assert quarantined[0].name == "WF-777-bad.md"
-        assert (root / "archive" / "corrupt" / "WF-777-bad.md").exists()

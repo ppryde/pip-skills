@@ -1,6 +1,20 @@
-"""SQLite persistence for overseer cards. One board.db per repo, shared by all
-its worktrees. Owns schema, card CRUD, atomic claiming, and the one-time
-.workflow/ import. Sprints/usage/knowledge remain file-based this phase."""
+"""SQLite persistence for overseer. One board.db per repo, shared by all its
+worktrees. Owns schema, card CRUD, atomic claiming, the transaction helper and
+the one-time .workflow/ import.
+
+Schema v2 (WF-265 PR D1) also holds sprints, knowledge facts, pending facts
+and stage evidence; the old ``sprints/`` and ``knowledge/`` file trees are
+regenerated read-only views (``scripts/views.py``). ``usage.jsonl`` stays a
+file: an append-only log that nothing else reads.
+
+WRITE RULE (OL-9): every card write goes through ``txn`` -- ``mutate_card`` for
+a read-modify-write of one card, ``put_card`` / ``create_card`` inside an open
+``txn``. No code path may ``save_card`` a ``Card`` it loaded in a different
+transaction: ``save_card`` upserts the WHOLE row, so two writers that each
+load, change and save drop one another's edits. ``save_card`` / ``archive_card``
+remain here only as single-statement conveniences for tests and one-off
+tooling; a test greps the scripts for them.
+"""
 from __future__ import annotations
 
 import json
@@ -8,14 +22,15 @@ import os
 import re as _re
 import sqlite3
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from scripts.models import Card, CardParseError
 from scripts.store import derive_repo_root
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DB_ENV = "OVERSEER_DB"
 _ID_RE = _re.compile(r"\AWF-(\d+)\Z")
 
@@ -70,6 +85,69 @@ CREATE TABLE IF NOT EXISTS orchestrators (
 );
 """
 
+# Schema v2: additive tables only. Older plugin versions ignore them.
+_SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS sprints (
+    id              TEXT PRIMARY KEY,
+    status          TEXT NOT NULL DEFAULT 'planned',
+    budget_estimate INTEGER,
+    budget_actual   INTEGER NOT NULL DEFAULT 0,
+    started         TEXT NOT NULL DEFAULT '',
+    body            TEXT NOT NULL DEFAULT '',
+    updated         TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS facts (
+    id            TEXT PRIMARY KEY,
+    statement     TEXT NOT NULL,
+    tags          TEXT NOT NULL DEFAULT '[]',
+    source        TEXT,
+    status        TEXT NOT NULL DEFAULT 'active',
+    verified      TEXT NOT NULL DEFAULT '',
+    created       TEXT NOT NULL DEFAULT '',
+    body          TEXT NOT NULL DEFAULT '',
+    retired       INTEGER NOT NULL DEFAULT 0,
+    superseded_by TEXT
+);
+CREATE TABLE IF NOT EXISTS pending_facts (
+    id        TEXT PRIMARY KEY,
+    card      TEXT NOT NULL DEFAULT '',
+    statement TEXT NOT NULL,
+    tags      TEXT NOT NULL DEFAULT '[]',
+    source    TEXT NOT NULL DEFAULT '',
+    status    TEXT NOT NULL DEFAULT 'pending',
+    reason    TEXT NOT NULL DEFAULT '',
+    created   TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS stage_evidence (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    card_id   TEXT NOT NULL,
+    stage     TEXT NOT NULL,
+    kind      TEXT NOT NULL,
+    round     INTEGER,
+    slot      TEXT NOT NULL DEFAULT '',
+    status    TEXT NOT NULL DEFAULT '',
+    critical  INTEGER,
+    important INTEGER,
+    minor     INTEGER,
+    detail    TEXT NOT NULL DEFAULT '',
+    ts        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_evidence ON stage_evidence(card_id, stage, kind, round);
+"""
+
+# Every table a v2 backup carries (orchestrators are per-session, excluded by design).
+V2_TABLES = ("sprints", "facts", "pending_facts", "stage_evidence")
+
+
+class MigrationError(RuntimeError):
+    """The v1 -> v2 board upgrade could not be made safely; the board is
+    untouched (the .bak failed to verify, or the import refused)."""
+
+
+class EditAbort(Exception):
+    """Raised inside a ``mutate_card`` callback to roll the edit back and
+    report a user-facing reason (the verb prints it and exits 1)."""
+
 
 def board_db_path(repo_root: Path) -> Path:
     override = os.environ.get(DB_ENV)
@@ -79,12 +157,77 @@ def board_db_path(repo_root: Path) -> Path:
     return central_root(repo_root) / "board.db"
 
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(_SCHEMA)
-    _migrate_columns(conn)
-    if get_meta(conn, "schema_version") is None:
-        set_meta(conn, "schema_version", str(SCHEMA_VERSION))
+def _exec_script(conn: sqlite3.Connection, script: str) -> None:
+    """Run a DDL script statement by statement. ``executescript`` would COMMIT
+    first, which would break the migration's single transaction."""
+    for stmt in script.split(";"):
+        if stmt.strip():
+            conn.execute(stmt)
+
+
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
+
+
+def ensure_schema(
+    conn: sqlite3.Connection, *, path: "Path | None" = None, state: "Path | None" = None
+) -> None:
+    """Create/upgrade the schema. Fast path (WF-265 OL-7): once a board has
+    been through a full pass it carries ``PRAGMA user_version`` ==
+    ``SCHEMA_VERSION``, and every later connect skips the DDL, the column
+    probe and the meta reads.
+
+    A board still at v1 (or v0) is upgraded to v2 here. When ``path`` names a
+    real board file that already holds cards, the upgrade first takes an online
+    ``.bak`` (verified) BEFORE any DDL, outside any transaction, then creates
+    the v2 tables and imports the legacy sprint/fact/pending files from
+    ``state`` in ONE ``BEGIN IMMEDIATE`` transaction (see ``migrate.py``). Two
+    processes racing the first upgrade serialise on that lock; the loser sees
+    ``user_version`` already 2 and skips.
+
+    A plugin of an older version that opens a v2 board re-stamps
+    ``user_version`` to its own number (its fast path is ``== 1``); the marker
+    ``meta.state_imported_v2`` lets this code tell that apart from a real v1
+    board and just restore the stamp, with no second backup or import."""
+    if conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION:
+        return
+    from scripts import migrate  # local import: migrate imports this module
+
+    populated = (
+        _has_table(conn, "cards")
+        and conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0] > 0
+    )
+    if _has_table(conn, "meta") and get_meta(conn, "state_imported_v2") is not None:
+        # Downgraded stamp from an older plugin: the v2 tables exist already.
+        conn.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
+        conn.commit()
+        return
+    if populated and path is not None:
+        migrate.backup_before_v2(conn, path)  # raises MigrationError; board untouched
     conn.commit()
+    # The one-time upgrade may hold the lock for a while on a big board: wait
+    # for it rather than fail "database is locked", then see user_version 2.
+    conn.execute("PRAGMA busy_timeout=60000")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    finally:
+        conn.execute("PRAGMA busy_timeout=5000")
+    try:
+        if conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION:
+            conn.rollback()  # lost the race: another process finished the upgrade
+            return
+        _exec_script(conn, _SCHEMA)
+        _migrate_columns(conn)
+        _exec_script(conn, _SCHEMA_V2)
+        set_meta(conn, "schema_version", str(SCHEMA_VERSION))
+        migrate.finish_v2(conn, state, imported=populated)
+        conn.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
 
 
 def _migrate_columns(conn: sqlite3.Connection) -> None:
@@ -167,7 +310,18 @@ def connect_at(path: Path, repo_root: Path, *, migrate: bool = True) -> sqlite3.
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys=ON")
-    ensure_schema(conn)
+    from scripts.store import state_root
+    state = state_root(repo_root)
+    try:
+        ensure_schema(conn, path=path, state=state)
+    except BaseException:
+        conn.close()
+        raise
+    if migrate:
+        from scripts import migrate as _migrate
+        _migrate.post_upgrade(conn, state)
+        _migrate.stamp_gates_from(conn)
+        _migrate.reimport_newer_files(conn, state)
     # Set-if-absent: record the repo's main root so the dashboard's `repos`
     # verb can enumerate one board per repo. Never overwrites an existing
     # value (stable identity even if this repo_root is ever unreachable on a
@@ -195,7 +349,12 @@ def connect_at(path: Path, repo_root: Path, *, migrate: bool = True) -> sqlite3.
         _maybe_import(conn, repo_root)  # defined in Task 6; no-op stub until then
     if migrate and get_meta(conn, "workflow_fs_imported") is None:
         from scripts.store import migrate_workflow_to_central
-        migrate_workflow_to_central(repo_root)
+        from scripts import migrate as _migrate
+        if migrate_workflow_to_central(repo_root):
+            # Legacy sprint/knowledge files just landed in central (with their
+            # old mtimes): pull them into the v2 tables, never overwriting.
+            _migrate.import_state(conn, state)
+            _migrate.export_views(conn, state)
         set_meta(conn, "workflow_fs_imported", "1")
         conn.commit()
     return conn
@@ -412,7 +571,10 @@ def _upsert(conn: sqlite3.Connection, card: Card, archived: int, *, commit: bool
 
 
 def save_card(conn: sqlite3.Connection, card: Card) -> None:
-    _upsert(conn, card, archived=0)
+    """Insert or update a card. ``archived`` follows status: 1 only for done
+    and abandoned, so editing a finished card's fields keeps it archived while
+    moving it back to a live stage revives it."""
+    _upsert(conn, card, archived=1 if card.status in ("done", "abandoned") else 0)
 
 
 def create_card(conn: sqlite3.Connection, card: Card) -> None:
@@ -430,7 +592,7 @@ def create_card(conn: sqlite3.Connection, card: Card) -> None:
     cols = ", ".join(f'"{c}"' for c in params)
     ph = ", ".join(f":{c}" for c in params)
     conn.execute(f"INSERT INTO cards ({cols}) VALUES ({ph})", params)
-    conn.commit()
+    commit_unless_txn(conn)
 
 
 def archive_card(conn: sqlite3.Connection, card: Card) -> None:
@@ -490,9 +652,20 @@ def stamp_orchestrator(conn: sqlite3.Connection, card_id: str, session_id: str, 
     conn.commit()
 
 
-def clear_orchestrator(conn: sqlite3.Connection, card_id: str) -> None:
+def clear_orchestrator(conn: sqlite3.Connection, card_id: str) -> str | None:
+    """Forget ``card_id``'s orchestrator. Returns that session's id when it no
+    longer orchestrates ANY card (so its guard marker can go), else None."""
+    row = conn.execute(
+        "SELECT session_id FROM orchestrators WHERE card_id = ?", (card_id,)
+    ).fetchone()
     conn.execute("DELETE FROM orchestrators WHERE card_id = ?", (card_id,))
     conn.commit()
+    if row is None:
+        return None
+    left = conn.execute(
+        "SELECT 1 FROM orchestrators WHERE session_id = ? LIMIT 1", (row[0],)
+    ).fetchone()
+    return None if left else str(row[0])
 
 
 def orchestrated_cards(conn: sqlite3.Connection, session_id: str) -> list[Card]:
@@ -507,27 +680,144 @@ def orchestrated_cards(conn: sqlite3.Connection, session_id: str) -> list[Card]:
     return [row_to_card(r) for r in rows]
 
 
-def mutate_card(
-    conn: sqlite3.Connection, card_id: str, mutate: Callable[[Card], None]
-) -> Card | None:
-    """Load → change → save one card inside a single ``BEGIN IMMEDIATE``
-    transaction. Parallel reviewers' report hooks finish together; the CLI's
-    ``_sync`` whole-row upsert is last-write-wins and would drop verdicts."""
+_TXN_DEPTH: dict[int, int] = {}
+
+
+@contextmanager
+def txn(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """One ``BEGIN IMMEDIATE`` write transaction: take the board's single
+    writer lock up front, commit on success, roll back on ANY exception.
+    Re-entrant -- a nested ``txn`` on the same connection joins the outer one
+    (the outermost block commits). Reads made inside it see a stable board,
+    which is what makes load -> change -> save safe against a second writer."""
+    key = id(conn)
+    depth = _TXN_DEPTH.get(key, 0)
+    if depth:
+        _TXN_DEPTH[key] = depth + 1
+        try:
+            yield conn
+        finally:
+            _TXN_DEPTH[key] -= 1
+        return
     conn.commit()  # close any implicit transaction before taking the write lock
     conn.execute("BEGIN IMMEDIATE")
+    _TXN_DEPTH[key] = 1
     try:
-        row = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
-        if row is None:
-            conn.rollback()
-            return None
-        card = row_to_card(row)
-        mutate(card)
-        _upsert(conn, card, archived=row["archived"], commit=False)
-        conn.commit()
-        return card
+        yield conn
     except BaseException:
         conn.rollback()
         raise
+    else:
+        conn.commit()
+    finally:
+        _TXN_DEPTH.pop(key, None)
+
+
+def in_txn(conn: sqlite3.Connection) -> bool:
+    """Is ``conn`` inside a ``txn`` block? (``conn.in_transaction`` is also true
+    after any bare DML under the legacy isolation mode, so it cannot tell.)"""
+    return bool(_TXN_DEPTH.get(id(conn)))
+
+
+def commit_unless_txn(conn: sqlite3.Connection) -> None:
+    """Commit a single-statement write made outside a ``txn``; inside one, the
+    enclosing block commits."""
+    if not in_txn(conn):
+        conn.commit()
+
+
+def put_card(conn: sqlite3.Connection, card: Card, *, archived: "int | None" = None) -> None:
+    """Whole-row upsert of ``card`` -- ONLY inside an open ``txn`` whose
+    transaction also loaded it (the write rule in the module docstring)."""
+    if not in_txn(conn):
+        raise RuntimeError("put_card outside db.txn: load and save must share one transaction")
+    if archived is None:
+        archived = 1 if card.status in ("done", "abandoned") else 0
+    _upsert(conn, card, archived=archived, commit=False)
+
+
+def mutate_card(
+    conn: sqlite3.Connection,
+    card_id: str,
+    mutate: Callable[[Card], None],
+    *,
+    archive: "bool | None" = None,
+) -> Card | None:
+    """Load -> change -> save one card inside a single ``BEGIN IMMEDIATE``
+    transaction (OL-9: every card write uses this). Parallel reviewers' report
+    hooks, a checklist hook and a CLI verb finish together; a whole-row upsert
+    after a separate load is last-write-wins and would drop verdicts.
+
+    ``archive`` None keeps the row's archived flag, True/False sets it.
+    ``mutate`` may raise ``EditAbort`` (or anything) to roll back untouched."""
+    with txn(conn):
+        row = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
+        if row is None:
+            return None
+        card = row_to_card(row)
+        mutate(card)
+        put_card(conn, card, archived=row["archived"] if archive is None else int(archive))
+        return card
+
+
+def record_evidence(
+    conn: sqlite3.Connection, card_id: str, stage: str, kind: str, *,
+    round_no: "int | None" = None, slot: str = "", status: str = "",
+    critical: "int | None" = None, important: "int | None" = None,
+    minor: "int | None" = None, detail: str = "", ts: str = "",
+) -> None:
+    """Append one ``stage_evidence`` row. Call it inside the same ``txn`` that
+    changes the card so the two can never disagree."""
+    conn.execute(
+        "INSERT INTO stage_evidence(card_id, stage, kind, round, slot, status, "
+        "critical, important, minor, detail, ts) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (card_id, stage, kind, round_no, slot, status, critical, important, minor, detail, ts),
+    )
+
+
+def evidence_for(conn: sqlite3.Connection, card_id: str) -> "list[Evidence]":
+    """Every ``stage_evidence`` row of one card, oldest first (by id)."""
+    from scripts.gates import Evidence
+
+    rows = conn.execute(
+        "SELECT id, stage, kind, round, slot, status, critical, important, minor, detail "
+        "FROM stage_evidence WHERE card_id = ? ORDER BY id", (card_id,)).fetchall()
+    return [Evidence(*tuple(r)) for r in rows]
+
+
+def record_evidence_once(
+    conn: sqlite3.Connection, card_id: str, stage: str, kind: str, *,
+    round_no: "int | None" = None, slot: str = "", status: str = "",
+    critical: "int | None" = None, important: "int | None" = None,
+    minor: "int | None" = None, detail: str = "", ts: str = "",
+) -> "int | None":
+    """Idempotent ``record_evidence``: one row per (card, stage, kind, round,
+    slot). The same row again is a no-op (a hook that fires twice); a changed
+    row (a re-run slot, a second verifier) replaces the old one with a NEWER id,
+    so "latest" and "dispatched after reported" stay ordered by id. Returns the
+    new row id, or None when nothing was written."""
+    same = conn.execute(
+        "SELECT id, status, critical, important, minor, detail FROM stage_evidence "
+        "WHERE card_id = ? AND stage = ? AND kind = ? AND round IS ? AND slot = ?",
+        (card_id, stage, kind, round_no, slot)).fetchall()
+    if (kind != "dispatch" and len(same) == 1
+            and tuple(same[0])[1:] == (status, critical, important, minor, detail)):
+        redispatched = conn.execute(
+            "SELECT 1 FROM stage_evidence WHERE card_id = ? AND stage = ? AND kind = 'dispatch' "
+            "AND slot = ? AND id > ? LIMIT 1", (card_id, stage, slot, same[0][0])).fetchone()
+        if redispatched is None:
+            return None  # a hook that fired twice: nothing to add
+    for row in same:
+        conn.execute("DELETE FROM stage_evidence WHERE id = ?", (row[0],))
+    cur = conn.execute(
+        "INSERT INTO stage_evidence(card_id, stage, kind, round, slot, status, "
+        "critical, important, minor, detail, ts) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (card_id, stage, kind, round_no, slot, status, critical, important, minor, detail, ts))
+    return cur.lastrowid
+
+
+def delete_evidence(conn: sqlite3.Connection, row_id: int) -> None:
+    conn.execute("DELETE FROM stage_evidence WHERE id = ?", (row_id,))
 
 
 def _parse_iso(value: "str | None") -> "datetime | None":

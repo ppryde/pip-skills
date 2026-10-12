@@ -17,7 +17,8 @@ from pathlib import Path
 from scripts import gitops
 from scripts.calibration import BANDS, calibrate
 from scripts.dispatch import dispatch_dir
-from scripts.knowledge import knowledge_root, load_facts
+from scripts import db
+from scripts.knowledge import load_facts
 from scripts.models import Card
 
 VAR_CAP = 300
@@ -102,7 +103,11 @@ def _files_for_rounds(directory: Path, rounds: set[int], *, include_fix: bool) -
 def _knowledge(repo_root: Path, card: Card, today: str) -> str:
     if not card.labels:
         return "_(none)_"
-    facts, _ = load_facts(knowledge_root(repo_root))
+    conn = db.connect(repo_root, migrate=False)
+    try:
+        facts, _ = load_facts(conn)
+    finally:
+        conn.close()
     lines = []
     for fact in facts:
         if not set(fact.tags) & set(card.labels):
@@ -174,6 +179,9 @@ def prepare(
             except gitops.GitError as exc:
                 raise BundleError(f"could not write the diff: {exc}") from exc
         values["target_path"] = str(target)
+    clash = sorted(set(variables) & set(values))
+    if clash:
+        raise BundleError(f"--var cannot override built-in placeholder(s): {', '.join(clash)}")
     values.update(variables)
     template = (TEMPLATES_DIR / f"{role}.md").read_text()
     text = _PLACEHOLDER.sub(lambda m: values.get(m.group(1), "_(none)_"), template)

@@ -10,5 +10,3 @@ named **profile**:
 Reviewers come from `skills/reviewers/*.md` or a review-clone persona
 (`clone:<alias>`). Configure via `.review-panel/config.yml`. Run with
 `/review-panel [profile]`.
-
-See `docs/superpowers/specs/2026-08-14-review-panel-design.md`.

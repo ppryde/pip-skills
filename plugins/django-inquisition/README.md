@@ -42,11 +42,21 @@ Or reference the plugin directory directly in your Claude Code settings.
 | Flag | Default | Effect |
 |---|---|---|
 | `--parallel` | off | Fan out 8 subagents (one per check-group); merge and rank results |
+| `--thorough` | off | Read every active group file whole and evaluate every check, instead of opening only the checks the index triggers nominate |
 | `--no-explain` | off | Skip EXPLAIN even when DB is reachable |
 | `--report` | off | Write full markdown report to `reports/optimise-orm/<slug>-<timestamp>.md` |
 | `--engine=<pg\|mysql\|sqlite\|oracle>` | auto-detect | Override DB engine detection |
 | `--only=<group,group>` | all groups | Run only the named check-groups |
 | `--skip=<group,group>` | none | Skip the named check-groups (`--only` and `--skip` cannot be combined) |
+
+### What the default run evaluates
+
+The default run is trigger-gated. `scripts/triggers.py` runs every check's trigger over the target and the files it references, and only checks with a hit (plus every `critical` check, always) are opened and evaluated. **Non-critical checks with no trigger hit are not evaluated by default; use `--thorough` to evaluate everything.** Other defaults:
+
+- Findings with unknown savings (`?`) sort last within their tier.
+- The PAT-070 (audit framework) and WRITE-005 (signal listener) banners only appear when the settings file and every file containing a `@receiver` or a `save()`/`delete()` override are passed to the scanner; the banner line starts with its code, e.g. `[INFO] PAT-070 Audit/history framework detected: pghistory`.
+- The scanner truncates lines over 2000 characters (minified assets, data blobs) and says so; it lists every skipped file (over 2 MB, binary) and does not count it as scanned. For a skipped target, use `--thorough`.
+- Directory scans prune `.venv`, `venv`, `node_modules`, `migrations`, `.git` and `__pycache__`; a file passed explicitly is never pruned (it is still skipped if over 2 MB or binary).
 
 ---
 
@@ -75,7 +85,7 @@ Estimated savings if all addressed: ~620–1450 ms
 
 **Full report (`--report`):**
 
-Written to `reports/optimise-orm/apps-orders-views-20260430-143200.md`. Includes current code excerpts, suggested fix templates, EXPLAIN evidence (when available), and signal-bypass caveats for write findings.
+Written to `reports/optimise-orm/apps-orders-views-20260430-143200.md` (the skill no longer edits `.gitignore`; it prints a one-line reminder to ignore `reports/optimise-orm/`). Includes current code excerpts, suggested fix templates, EXPLAIN evidence (when available), and signal-bypass caveats for write findings.
 
 ---
 
@@ -99,7 +109,7 @@ Written to `reports/optimise-orm/apps-orders-views-20260430-143200.md`. Includes
 optimise-orm detects Django signal listeners (`pre_save`, `post_save`, `pre_delete`, `post_delete`) and audit history packages (`easyaudit` (django-easy-audit), `auditlog`, `simple_history`, `reversion`, `pghistory`) before running checks.
 
 - **Signal listeners present:** Write findings (WRITE-001/002/003/020) append a structured caveat listing each bypassed listener, what it does, and 2–3 mitigations. Finding severity stays unchanged — the performance issue is still real.
-- **Audit framework detected:** WRITE-006/007/009 escalate from `medium` → `critical`.
+- **Audit framework detected:** WRITE-006/007 escalate from `medium` → `critical`.
 - **pghistory:** Uses Postgres triggers, not Django signals — marked `signals_safe` and does not trigger escalation.
 
 ---
@@ -116,7 +126,7 @@ qs = Order.objects.all()  # noqa: optimise-orm FETCH-002
 qs = Order.objects.select_related()  # noqa: optimise-orm
 ```
 
-Suppressed findings are counted in the report frontmatter (`suppressed: N`) but not shown in the report body.
+Suppressed findings are counted in the report frontmatter (`suppressed: N`) but not shown in the report body. The retired codes PAT-010 and PAT-020 are aliases of IDX-040 and IDX-020 and suppress those.
 
 ---
 
@@ -129,6 +139,8 @@ Suppressed findings are counted in the report frontmatter (`suppressed: N`) but 
 | 🔵 Low | < 10ms savings; code smells; manual-review escape hatches | FETCH-002, PAT-040 |
 
 Info-level findings (PAT-070, WRITE-005) appear as a header banner before the tiered list.
+
+Checks marked `kind: correctness` (WRITE-030, WRITE-031) are not performance findings: they are listed after the tiers under a "Correctness (outside the perf scope)" banner and are not counted in the tiers or the savings total.
 
 ---
 

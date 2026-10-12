@@ -5,27 +5,43 @@ checks:
   - id: AGG-001
     title: Python sum/max/min over queryset — push to DB
     severity_base: high
+    kind: perf
+    trigger: '\b(sum|max|min)\(\s*\w+\.\w+\s+for\s+\w+\s+in\b'
   - id: AGG-002
     title: Counter()/groupby on queryset rows — push to DB
     severity_base: medium
+    kind: perf
+    trigger: '\bCounter\(|\bgroupby\('
   - id: AGG-010
     title: Python if/else over rows — use Case/When
     severity_base: medium
+    kind: perf
+    trigger: '\bfor\s+\w+\s+in\b'
   - id: AGG-011
     title: Coalesce/Greatest/Least opportunities
     severity_base: low
+    kind: perf
+    trigger: '(?<!\w)\w+\.\w+\s+or\s+\w+\.\w+|\b(max|min)\(\w+\.\w+,\s*\w+\.\w+\)'
   - id: AGG-020
     title: Python date/string ops should be DB-side
     severity_base: low
+    kind: perf
+    trigger: '\.(year|month|day|hour|weekday|lower|upper|strip|casefold)\b'
   - id: AGG-030
     title: filter(pk__in=other.values('pk')) → Exists()
     severity_base: medium
+    kind: perf
+    trigger: '__in=.*\.values\('
   - id: AGG-031
     title: Per-row filter().first() in loop → Subquery annotation
     severity_base: high
+    kind: perf
+    trigger: '\.first\(\)|\.last\(\)'
   - id: AGG-040
     title: Python rank/running-sum loop — use window function
     severity_base: medium
+    kind: perf
+    trigger: '\+=\s*1\b|\b(rank|position|running\w*|cumulative\w*)\s*='
 ---
 
 # Aggregation
@@ -135,7 +151,7 @@ orders = Order.objects.annotate(
 
 ### AGG-011
 
-**Signature:** Post-fetch pattern `obj.field_a or obj.field_b` (Python null-coalescing on fetched objects) where `Coalesce('field_a', 'field_b')` would compute the same result in SQL. Similarly `max(obj.a, obj.b)` → `Greatest`, `min(...)` → `Least`.
+**Signature:** Post-fetch pattern `obj.field_a or obj.field_b` (Python null-coalescing on fetched objects) where `Coalesce('field_a', 'field_b')` would compute the same result in SQL — but only for NULL: Python `or` also falls through on `0` and `''`, while `Coalesce` only skips NULL. Confirm the fields are nullable and the falsy values do not matter (otherwise use `Case/When`). Similarly `max(obj.a, obj.b)` → `Greatest`, `min(...)` → `Least`.
 
 **Grep / AST hints:**
 ```regex
@@ -219,7 +235,7 @@ pk__in=.*\.values\(['"](pk|id)['"]\)
 - Low: `__in=` with a variable argument (subquery status unclear).
 
 **Savings formula:**
-- Depends on subquery cardinality. `Exists` short-circuits; `IN` scans full set.
+- Depends on subquery cardinality. `Exists` can short-circuit; modern planners often plan `IN (subquery)` as a semi-join too, so the gain may be small — verify with EXPLAIN.
 - Mark `savings_basis: unknown`.
 
 **Suggested fix template:**
@@ -272,7 +288,7 @@ orders = Order.objects.annotate(latest_note=Subquery(latest_note_qs))
 
 ### AGG-040
 
-**Signature:** A Python loop manually assigns rank, running sum, or running average values: `rank = 1; for x in qs: x.rank = rank; rank += 1`. Django's `Window` functions (`Rank()`, `Sum(..., over=...)`) compute these in a single SQL pass.
+**Signature:** A Python loop manually assigns rank, running sum, or running average values: `rank = 1; for x in qs: x.rank = rank; rank += 1`. Django's `Window` functions (`RowNumber()`, `Rank()`, `Window(Sum(...), ...)` for running totals) compute these in a single SQL pass. A manual counter (1, 2, 3, ...) equals `RowNumber()`; `Rank()` gives tied rows the same rank, so it is only equivalent when the ordering has no ties.
 
 **Grep / AST hints:**
 ```regex
@@ -299,8 +315,10 @@ for sale in Sale.objects.order_by("-amount"):
 
 # After
 from django.db.models import F, Window
-from django.db.models.functions import Rank
+from django.db.models.functions import RowNumber
 sales = Sale.objects.annotate(
-    rank=Window(expression=Rank(), order_by=F("amount").desc())
+    rank=Window(expression=RowNumber(), order_by=F("amount").desc())
 ).order_by("rank")
+# Use Rank() instead if tied amounts should share a rank.
+# Running total: Window(Sum("amount"), order_by=F("created_at").asc())
 ```

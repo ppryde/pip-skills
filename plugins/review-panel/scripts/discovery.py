@@ -29,14 +29,11 @@ def discover_builtin_reviewers(reviewers_dir: Path) -> list[str]:
 
 def review_clone_root() -> Path:
     """Resolve the review-clone persona root, matching review-clone's own
-    resolution: REVIEW_CLONE_ROOT, else $CLAUDE_CONFIG_DIR/review-clone,
-    else ~/.claude/review-clone."""
+    resolution: REVIEW_CLONE_ROOT, else ~/.claude/review-clone
+    (review-clone does not consult CLAUDE_CONFIG_DIR)."""
     env = os.environ.get("REVIEW_CLONE_ROOT")
     if env:
         return Path(env)
-    cfg = os.environ.get("CLAUDE_CONFIG_DIR")
-    if cfg:
-        return Path(cfg) / "review-clone"
     return Path.home() / ".claude" / "review-clone"
 
 

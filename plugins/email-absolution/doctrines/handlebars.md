@@ -1,3 +1,11 @@
+---
+doctrine: handlebars
+prefix: HBS
+kind: language
+templating: handlebars
+scribe: constraints
+---
+
 # Handlebars — Email Doctrine
 
 ## Purpose
@@ -14,14 +22,16 @@ Rules and gotchas for engineers building transactional email templates with Hand
 
 **[HBS-002]** `transactional: mortal | marketing: mortal` — Use `{{variable}}` (double-stache) for all user-provided content. Triple-stache `{{{rawHtml}}}` must only be used for pre-rendered, trusted HTML from your own system.
 > Triple-stache bypasses HTML escaping. If the value contains user-generated content, this is an XSS vector in email webview rendering and in-app browser contexts (opening links, CSP-exempted webviews). Source: OWASP XSS Prevention Cheat Sheet.
-> `detect: regex` — pattern: `\{\{\{[^}]+\}\}\}`
+> `detect: regex` — pattern: `\{\{\{[^}{]+\}\}\}` — a triple-stache tag
 
 **[HBS-003]** `transactional: mortal | marketing: mortal` — Do not rely on `@index`, `@first`, or `@last` loop metadata in `{{#each}}` when templates run through SendGrid Dynamic Templates.
 > SendGrid's Handlebars subset does not document `@index`/`@first`/`@last` as supported. Templates that use these work in local Handlebars.js but silently fail in SendGrid — the metadata variables render as empty or cause unexpected output. Source: SendGrid Dynamic Templates documentation.
+> `applies: esp=sendgrid`
 > `detect: regex` — pattern: `@(?:index|first|last)\b`
 
 **[HBS-004]** `transactional: mortal | marketing: mortal` — Postmark uses Mustache, not Handlebars. Do not use `{{#each}}`, `{{#if condition}}`, or custom helpers in Postmark templates.
 > Postmark's template engine is standard Mustache (RFC). Mustache uses `{{#section}}` for both conditionals (renders if truthy) and loops (renders once per array element). `{{^section}}` renders when the value is falsy or the array is empty. No block helpers, no custom helpers, no `@index` metadata. Source: Postmark developer documentation.
+> `applies: esp=postmark`
 > `detect: contextual` — if `stack.esp` is "postmark", flag `{{#each}}`, `{{#if}}` comparisons, and `@`-variables
 
 **[HBS-005]** `transactional: mortal | marketing: mortal` — Partials must be registered with `Handlebars.registerPartial()` before `Handlebars.compile()` is called. Unregistered partials throw at compile time — not at send time.
@@ -38,7 +48,7 @@ Rules and gotchas for engineers building transactional email templates with Hand
 
 **[HBS-008]** `transactional: venial | marketing: venial` — Register a `formatDate` helper for date values. Never render raw ISO 8601 strings into email copy.
 > `2026-03-18T14:00:00.000Z` in email copy is unacceptable. A `formatDate` helper converts to locale-appropriate display: "Wednesday 18 March 2026". Source: Handlebars.js guide.
-> `detect: regex` — pattern: `\{\{[^}]*[Dd]ate[^}]*\}\}(?![^{]*formatDate)` (date variable without format helper)
+> `detect: regex` — pattern: `\{\{[^}{]*[Dd]ate[^}{]*\}\}(?![^{]*formatDate)` — date variable without format helper
 
 **[HBS-009]** `transactional: venial | marketing: venial` — Pre-compile templates at build/deploy time using `Handlebars.precompile()`. Do not call `Handlebars.compile()` per send in a high-volume pipeline.
 > `Handlebars.compile()` parses and compiles the template source on every invocation. Pre-compiled templates are JavaScript functions — send-time rendering is orders of magnitude faster. Source: Handlebars.js API documentation.
@@ -46,7 +56,7 @@ Rules and gotchas for engineers building transactional email templates with Hand
 
 **[HBS-010]** `transactional: venial | marketing: venial` — Handlebars `{{#if}}` tests truthiness only — no comparison operators. Comparisons must be expressed as registered helpers.
 > `{{#if user.tier === "vip"}}` is not valid Handlebars — the `===` is syntax Handlebars does not parse. It silently evaluates to falsy. Register a helper: `{{#ifEquals user.tier "vip"}}...{{/ifEquals}}`. Source: Handlebars.js guide — built-in helpers.
-> `detect: regex` — pattern: `\{\{#if[^}]*(?:===|!==|>=|<=|>|<)[^}]*\}\}`
+> `detect: regex` — pattern: `\{\{#if(?=[^}]*\}\})[^}]*(?:===|!==|>=|<=|>|<)` — a comparison operator inside an {{#if}} tag
 
 **[HBS-011]** `transactional: venial | marketing: venial` — Use partials for shared email components (header, footer, CTA button, order row).
 > Duplicating boilerplate across templates creates divergence — the footer in `order-confirmation.hbs` and `shipping-notification.hbs` slowly drift. Partials enforce a single source of truth for shared components.
@@ -74,6 +84,7 @@ Rules and gotchas for engineers building transactional email templates with Hand
 
 **[HBS-017]** `transactional: counsel | marketing: counsel` — For SendGrid Dynamic Templates, prefer the Template API for version management over inlining template HTML in API calls.
 > Templates stored in the SendGrid dashboard can be versioned and rolled back without a code deployment. A/B testing, scheduling, and suppression lists are also manageable at the template level.
+> `applies: esp=sendgrid`
 > `detect: contextual` — advisory; check if SendGrid calls use `template_id` vs inline `content`
 
 ---

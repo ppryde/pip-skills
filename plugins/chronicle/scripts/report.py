@@ -922,6 +922,32 @@ def _costs_by(conn: sqlite3.Connection, key_sql: str, where: str, params: list[A
     return out
 
 
+def cost_by_day(conn: sqlite3.Connection, *, account: str | None = None,
+                since: float | None = None, utc: bool = True) -> dict[str, dict[str, Any]]:
+    """API-equivalent cost per day, ``{day: {"cost_usd", "unpriced_turns"}}``,
+    priced and de-duplicated exactly as `summary` does it, but WITHOUT the rest
+    of `summary`'s scans. ``utc=True`` buckets by UTC day (what the console
+    uses); ``False`` by local day (what `summary`'s ``by_day`` uses). ``since``
+    is an epoch; ``account`` narrows to that account's own turns."""
+    where, params = " WHERE t.ts >= ?" if since else "", [since] if since else []
+    where, params = _with_turn_account(where, params, account, conn)
+    key = "date(t.ts, 'unixepoch')" if utc else "date(t.ts, 'unixepoch', 'localtime')"
+    return _costs_by(conn, key, where, params, extra="t.ts IS NOT NULL")
+
+
+def cost_by_session(conn: sqlite3.Connection, *, account: str | None = None,
+                    since: float | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+    """Sessions ranked by API-equivalent cost, most expensive first:
+    ``[{"session_id", "cost_usd", "unpriced_turns"}]``. One grouped query per
+    rate period, not a Python pass over every turn."""
+    where, params = " WHERE t.ts >= ?" if since else "", [since] if since else []
+    where, params = _with_turn_account(where, params, account, conn)
+    costs = _costs_by(conn, "t.session_id", where, params)
+    ranked = sorted(({"session_id": sid, **entry} for sid, entry in costs.items()),
+                    key=lambda e: -e["cost_usd"])
+    return ranked[:limit] if limit else ranked
+
+
 def _attach_cost(row: dict[str, Any], costs: dict[Any, dict[str, Any]], key: Any) -> None:
     entry = costs.get(key, {"cost_usd": 0.0, "unpriced_turns": 0})
     row["cost_usd"] = round(entry["cost_usd"], 6)

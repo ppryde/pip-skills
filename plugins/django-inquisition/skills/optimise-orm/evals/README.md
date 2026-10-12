@@ -29,7 +29,7 @@ Prerequisites:
 
 ```bash
 # Install anthropic for python3.11 if not already
-python3.11 -m pip install anthropic
+python3.11 -m pip install anthropic==1.13.0
 
 # Export the API key (or use direnv)
 export ANTHROPIC_API_KEY=sk-ant-…

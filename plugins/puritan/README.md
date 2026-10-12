@@ -25,6 +25,7 @@ Covenant helps you choose architectural patterns before you build, or assess wha
 | Invocation | What it does |
 |---|---|
 | `/puritan:covenant` | Full analysis — pattern recommendations + phased implementation roadmap |
+| `/puritan:covenant patterns` | Pattern selection only — recommended patterns with rationale |
 | `/puritan:covenant discover` | Lightweight codebase scan → detects patterns from directory structure → generates `.architecture/config.yml` |
 | `/puritan:covenant assess` | Gap analysis of your current architecture against your stated patterns |
 | `/puritan:covenant roadmap` | Phased implementation plan (assumes patterns already chosen) |
@@ -32,7 +33,7 @@ Covenant helps you choose architectural patterns before you build, or assess wha
 
 **Discover mode** is the fastest way to get started on an existing codebase. It reads directory structure only (no file contents), infers likely patterns from folder names and signal files, confirms with you, then writes `.architecture/config.yml` ready for Inquisition.
 
-Covenant is also invoked automatically by Inquisition if no config file is found — it offers to run discovery before giving up.
+If Inquisition finds no config file, it points you to `/puritan:covenant discover`; it does not invoke Covenant automatically.
 
 ---
 
@@ -47,9 +48,13 @@ Inquisition audits your codebase against the doctrines configured in `.architect
 | `/puritan:inquisition` | Changed files only (git diff against base branch) |
 | `/puritan:inquisition full` | Entire codebase |
 | `/puritan:inquisition interactive` | Full codebase, interactive — fix violations one by one |
-| `/puritan:inquisition <doctrine>` | Changed files, single doctrine only |
+| `/puritan:inquisition <doctrine> [<doctrine>...]` | Changed files, only the named doctrine(s) |
+| `/puritan:inquisition full <doctrine> [<doctrine>...]` | Entire codebase, only the named doctrine(s) |
+| `/puritan:inquisition interactive <doctrine> [<doctrine>...]` | Full codebase, interactive, only the named doctrine(s) |
 
 **Large codebase guard:** If the configured targets exceed 100 files, Inquisition pauses and tells you how many files across how many directories it found. You can proceed, narrow the scope, switch to changed-files mode, or focus on a single doctrine.
+
+**Headless use:** `claude -p "/puritan:inquisition"` runs the audit non-interactively. It is advisory, not a hard gate: no `puritan` CLI, hook or exit codes ship with the plugin.
 
 **Violations are classified by severity:**
 - `error` — correctness violation; blocks commit
@@ -86,11 +91,15 @@ Each doctrine is a markdown file with a structured violation catalog — typical
 | **Hexagonal** | `HEX` | Ports and adapters — core isolation, dependency direction |
 | **Saga** | `SAG` | Distributed transactions — orchestration, compensation, idempotency |
 | **Messaging** | `MSG` | Async communication — delivery guarantees, idempotency, dead letters |
-| **Microservices** | `MIC` | Service boundaries — independence, contracts, blast radius |
-| **Modular Monolith** | `MON` | Module isolation — public API enforcement, cross-module access |
+| **Microservices** | `MCR` | Service boundaries — independence, contracts, blast radius |
+| **Modular Monolith** | `MOM` | Module isolation — public API enforcement, cross-module access |
 | **Backend for Frontend** | `BFF` | Client-specific backends — aggregation, response shaping |
 | **Resilience** | `RES` | Fault tolerance — circuit breakers, retries, bulkheads, timeouts |
 | **Layered N-Tier** | `LNT` | Classic layering — presentation, business, persistence separation |
+| **Repository** | `REP` | Persistence abstraction — aggregate-scoped repositories, no leaking of storage details |
+| **Strategy** | `STG` | Interchangeable algorithms — interface-based selection, registration, no type-switching |
+
+`skills/doctrines/INDEX.md` is generated (`python3 tools/build_index.py doctrines` in the pip-skills repo) and is what Covenant reads instead of the doctrine files; Inquisition passes each subagent only a doctrine's audit line range. Doctrines referenced but not yet written are listed in `skills/doctrines/README.md`.
 
 Each doctrine also includes **Detection Signatures** — a lightweight set of directory and file signals that Covenant's discover mode uses to fingerprint which patterns your codebase is using, without running a full audit.
 
@@ -116,21 +125,13 @@ doctrines:
       - domain/commands/
       - infrastructure/projections/
 
-layers:
-  domain:
-    - domain/
-  application:
-    - application/
-  infrastructure:
-    - infrastructure/
-
 exclude:
   - "**/migrations/**"
   - "**/vendor/**"
   - "**/*.generated.*"
 ```
 
-Generate this automatically with `/puritan:covenant discover`.
+Generate this automatically with `/puritan:covenant discover`. Unknown keys (for example an old `layers:`) are ignored. The canonical schema is `skills/_shared/config.md`; folders without a `SKILL.md` (`_shared/`, `doctrines/`) are not skills and Claude Code ignores them.
 
 ### `.architecture/decisions.yml` (optional)
 

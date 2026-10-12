@@ -338,6 +338,36 @@ describe("api/client", () => {
     expect(JSON.parse(init.body)).toEqual({ stage: "implementation" });
   });
 
+  it("move(id, {stage}) retries with force_gate after a 409 GATE refusal and a reason", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: "GATE: ## Plan is empty - x" }), { status: 409 })
+    );
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue("  user: agreed  ");
+
+    await client.move("WF-1", { stage: "implementation" });
+
+    expect(prompt).toHaveBeenCalledOnce();
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      stage: "implementation",
+      force_gate: "user: agreed",
+    });
+    prompt.mockRestore();
+  });
+
+  it("move(id, {stage}) rethrows the 409 when the reason prompt is cancelled", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: "GATE: ## Plan is empty - x" }), { status: 409 })
+    );
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue(null);
+
+    await expect(client.move("WF-1", { stage: "implementation" })).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    prompt.mockRestore();
+  });
+
   it("move(id, {status, reason}) POSTs {status, reason} to /api/card/{id}/move", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
 

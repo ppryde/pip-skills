@@ -24,7 +24,7 @@ export function clearGate(f: GateFacts): Gate {
   if (f.latched) return { go: false, reason: 'latched', recheckMs: null }
   if (f.draft.trim()) return { go: false, reason: 'draft', recheckMs: RECHECK_MS }
   if (f.onPhone && f.unattended) {
-    if (f.rcAutoClear === 'unanswered') return { go: false, reason: 'rc-unanswered', recheckMs: null }
+    // Unanswered follows the terminal (auto is on, so allowed), safeguards included: the question is asked in setup, never mid-run.
     if (f.rcAutoClear === 'no') return { go: false, reason: 'rc-declined', recheckMs: null }
     if (f.lastBridgeAt !== null && f.now - f.lastBridgeAt < HOLDBACK_MS) {
       return { go: false, reason: 'rc-holdback', recheckMs: HOLDBACK_MS - (f.now - f.lastBridgeAt) }
@@ -35,7 +35,7 @@ export function clearGate(f: GateFacts): Gate {
   return { go: true }
 }
 
-// Asked when auto mode would first arm in a bridge session (spec §2), not at the first clear.
-export function needsRcQuestion(onPhone: boolean, rc: RcAnswer, wouldArm: boolean): boolean {
+// The one-per-session hint (never a question) when auto mode arms on the phone with no answer yet.
+export function needsRcHint(onPhone: boolean, rc: RcAnswer, wouldArm: boolean): boolean {
   return onPhone && wouldArm && rc === 'unanswered'
 }

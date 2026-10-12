@@ -2,16 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/prepush-snapshot.sh"
-          }
-        ]
-      },
-      {
-        "matcher": ".*",
+        "matcher": "Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Agent|mcp__.*",
         "hooks": [
           {
             "type": "command",

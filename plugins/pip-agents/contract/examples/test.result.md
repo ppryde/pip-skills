@@ -1,0 +1,3 @@
+```pip-agents-result
+{"result":"pip-agents/1","kind":"test","persona":"overseer-verifier","ref":"WF-140-verify","status":"ok","summary":"FAIL: 1 test, ruff clean","checked":[],"unchecked":[],"out_of_lens":[],"injection_attempts":[],"detail":"/Users/me/.claude/overseer/pip-skills/dispatch/WF-140/verification/verify.md","payload":{"outcome":"fail","gates":[{"command":".venv/bin/pytest -q tests/census","exit_code":1,"passed":211,"failed":1,"skipped":2},{"command":".venv/bin/ruff check plugins/census","exit_code":0}],"failures":[{"test":"tests/census/test_store.py::test_pending_kept","file":"tests/census/test_store.py","line":88,"message":"AssertionError: 2 != 3"}]}}
+```

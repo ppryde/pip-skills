@@ -369,7 +369,10 @@ def install_statusline(
                 _atomic_json(census / STATE_FILE, state)
         if os.name == "nt" if windows is None else windows:
             _write_text(census / LAUNCHER_FILE, launcher_py_text(cli))
-        _install_shim(shim, cli, True)
+        undo.append((shim, shim.read_bytes() if shim.is_file() else None))
+        shim_code, shim_lines = _install_shim(shim, cli, True)
+        if shim_code:
+            raise RuntimeError(shim_lines[0])
     except Exception as exc:  # noqa: BLE001 - roll back, then say so
         for path, before in reversed(undo):
             try:

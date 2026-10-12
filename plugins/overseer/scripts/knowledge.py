@@ -1,7 +1,9 @@
 """Knowledge base: Fact parse/serialise, staleness, store ops, index."""
 from __future__ import annotations
 
+import json
 import re
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +11,8 @@ from pathlib import Path
 import yaml
 
 from scripts.models import CardParseError, split_frontmatter
-from scripts.store import _uniquify, slugify, state_root
+from scripts.db import commit_unless_txn
+from scripts.store import check_id, slugify, state_root
 
 FACT_STATUSES = {"active", "stale", "retired"}
 STALE_DAYS = 90
@@ -97,6 +100,7 @@ class Fact:
 
 
 def knowledge_root(repo_root: Path) -> Path:
+    """Where the generated ``knowledge/`` view tree lives (not the source of truth)."""
     return state_root(repo_root) / "knowledge"
 
 
@@ -105,78 +109,69 @@ def ensure_kb(kb: Path) -> None:
         (kb / sub).mkdir(parents=True, exist_ok=True)
 
 
-def mint_fact_id(kb: Path) -> str:
+def fact_filename(fact: Fact) -> str:
+    return f"{fact.id}-{slugify(fact.statement)}.md"
+
+
+def _row_to_fact(row: sqlite3.Row) -> Fact:
+    return Fact(
+        id=row["id"], statement=row["statement"], tags=json.loads(row["tags"] or "[]"),
+        source=row["source"], created=row["created"] or "", verified=row["verified"] or "",
+        status=row["status"], superseded_by=row["superseded_by"], body=row["body"] or "",
+    )
+
+
+def mint_fact_id(conn: sqlite3.Connection) -> str:
+    """Next ``KB-nnn``. Call inside the ``db.txn`` that inserts the fact so two
+    concurrent adds cannot mint the same id."""
     highest = 0
-    for directory in (kb / "facts", kb / "retired"):
-        for path in directory.glob("KB-*.md"):
-            match = _MINTED_FACT_RE.match(path.name)
-            if match:
-                highest = max(highest, int(match.group(1)))
+    for (fid,) in conn.execute("SELECT id FROM facts"):
+        match = _MINTED_FACT_RE.match(f"{fid}-")
+        if match:
+            highest = max(highest, int(match.group(1)))
     return f"KB-{highest + 1:03d}"
 
 
-def fact_path(kb: Path, fact: Fact) -> Path:
-    return kb / "facts" / f"{fact.id}-{slugify(fact.statement)}.md"
+def save_fact(conn: sqlite3.Connection, fact: Fact) -> None:
+    """Upsert one fact (``retired`` follows ``status``)."""
+    check_id(fact.id, "fact id")
+    conn.execute(
+        "INSERT INTO facts(id, statement, tags, source, status, verified, created, body, "
+        "retired, superseded_by) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+        "statement=excluded.statement, tags=excluded.tags, source=excluded.source, "
+        "status=excluded.status, verified=excluded.verified, created=excluded.created, "
+        "body=excluded.body, retired=excluded.retired, superseded_by=excluded.superseded_by",
+        (fact.id, fact.statement, json.dumps(fact.tags), fact.source, fact.status,
+         fact.verified, fact.created, fact.body, int(fact.status == "retired"),
+         fact.superseded_by),
+    )
+    commit_unless_txn(conn)
 
 
-def find_fact_path(kb: Path, fact_id: str) -> Path:
-    matches = sorted((kb / "facts").glob(f"{fact_id}-*.md"))
-    if not matches:
+def load_fact(conn: sqlite3.Connection, fact_id: str) -> Fact:
+    """One LIVE fact; ``FileNotFoundError`` if absent or retired."""
+    check_id(fact_id, "fact id")
+    row = conn.execute("SELECT * FROM facts WHERE id = ? AND retired = 0", (fact_id,)).fetchone()
+    if row is None:
         raise FileNotFoundError(f"no live fact with id {fact_id}")
-    return matches[0]
+    return _row_to_fact(row)
 
 
-def load_fact(path: Path) -> Fact:
-    try:
-        return Fact.from_text(path.read_text())
-    except FactParseError as exc:
-        raise FactParseError(f"{path.name}: {exc}") from exc
+def load_facts(conn: sqlite3.Connection) -> tuple[list[Fact], list[Path]]:
+    """Live facts by id. Reads never mutate (OL-10); the second element is
+    always empty (kept for the callers' tuple shape)."""
+    rows = conn.execute("SELECT * FROM facts WHERE retired = 0 ORDER BY id").fetchall()
+    return [_row_to_fact(r) for r in rows], []
 
 
-def save_fact(kb: Path, fact: Fact) -> Path:
-    path = fact_path(kb, fact)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(fact.to_text())
-    return path
+def load_retired(conn: sqlite3.Connection) -> list[Fact]:
+    rows = conn.execute("SELECT * FROM facts WHERE retired = 1 ORDER BY id").fetchall()
+    return [_row_to_fact(r) for r in rows]
 
 
-def quarantine_fact(kb: Path, path: Path) -> Path:
-    target = _uniquify(kb / "corrupt" / path.name)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    path.rename(target)
-    return target
-
-
-def load_facts(kb: Path) -> tuple[list[Fact], list[Path]]:
-    facts: list[Fact] = []
-    quarantined: list[Path] = []
-    for path in sorted((kb / "facts").glob("*.md")):
-        try:
-            facts.append(load_fact(path))
-        except FactParseError:
-            quarantined.append(quarantine_fact(kb, path))
-    facts.sort(key=lambda f: f.id)
-    return facts, quarantined
-
-
-def load_retired(kb: Path) -> list[Fact]:
-    facts = []
-    for path in (kb / "retired").glob("*.md"):
-        try:
-            facts.append(Fact.from_text(path.read_text()))
-        except FactParseError:
-            continue
-    return sorted(facts, key=lambda f: f.id)
-
-
-def retire_fact_file(kb: Path, fact: Fact) -> Path:
-    target = _uniquify(kb / "retired" / f"{fact.id}-{slugify(fact.statement)}.md")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(fact.to_text())
-    live = fact_path(kb, fact)
-    if live.exists():
-        live.unlink()
-    return target
+def retire_fact(conn: sqlite3.Connection, fact: Fact) -> None:
+    fact.status = "retired"
+    save_fact(conn, fact)
 
 
 def generate_knowledge_index(
@@ -208,15 +203,15 @@ def generate_knowledge_index(
     return "\n".join(lines) + "\n"
 
 
-def rebuild_knowledge_index(repo_root: Path, today: str) -> list[Path]:
-    kb = knowledge_root(repo_root)
-    ensure_kb(kb)
-    facts, quarantined = load_facts(kb)
+def refresh_stale(conn: sqlite3.Connection, today: str) -> int:
+    """Persist the active -> stale flip for facts past ``STALE_DAYS``. Returns
+    how many changed. Call inside the writer's ``db.txn``."""
+    changed = 0
+    facts, _ = load_facts(conn)
     for fact in facts:
         effective = fact.effective_status(today)
         if effective != fact.status:
             fact.status = effective
-            save_fact(kb, fact)
-    retired = load_retired(kb)
-    (kb / "knowledge.md").write_text(generate_knowledge_index(facts, retired, today))
-    return quarantined
+            save_fact(conn, fact)
+            changed += 1
+    return changed

@@ -1,3 +1,10 @@
+---
+doctrine: content-ux
+prefix: UX
+kind: core
+scribe: constraints
+---
+
 # Content & UX — Email Doctrine
 
 ## Purpose
@@ -22,7 +29,7 @@ Guards against content, copy, and structural UX patterns that undermine the effe
 
 **[UX-004]** `transactional: mortal | marketing: mortal` — All template variables must have fallback values. A naked `{{ first_name }}` or `{{firstName}}` with no fallback sends "Hi , your order..." to thousands of recipients when data is incomplete.
 > Merge tag failures are silent — the variable renders as an empty string without errors. Always define fallbacks: `{{ first_name | default: "Valued Customer" }}` (Liquid), `{{#if firstName}}{{firstName}}{{else}}Valued Customer{{/if}}` (Handlebars). Source: Mailchimp Email Marketing Benchmarks 2023.
-> `detect: regex` — pattern: `\{\{[\s]*[a-zA-Z_][a-zA-Z0-9_.]*[\s]*\}\}(?!\s*\|)` (output without filter/fallback — check per-engine syntax)
+> `detect: regex` — pattern: `\{\{[\s]*[a-zA-Z_][a-zA-Z0-9_.]*[\s]*\}\}(?!\s*\|)` — output without filter/fallback — check per-engine syntax
 
 **[UX-005]** `transactional: mortal | marketing: mortal` — CTA button copy must not use generic phrases: "Click here", "Read more", "Learn more", "Submit", "Go now", "Find out more".
 > Generic CTA copy is accessibility-hostile (screen readers announce it without context) and performs poorly vs. descriptive alternatives. "Click here" announces as meaningless in link-list navigation. Source: WebAIM "Links and Hypertext" 2023; Campaign Monitor CTA Guide 2022.
@@ -78,7 +85,7 @@ Guards against content, copy, and structural UX patterns that undermine the effe
 
 **[UX-018]** `transactional: mortal | marketing: mortal` — Never include full card numbers, bank account numbers, or passwords in email body content.
 > Full card numbers are PCI DSS prohibited in email. Passwords must never be sent in plaintext. Show only partial identifiers: last 4 digits of card, masked account numbers. Source: PCI DSS v4.0; OWASP.
-> `detect: regex` — pattern: `\b[3-9]\d{13,15}\b` (16-digit sequences suggesting unmasked card numbers)
+> `detect: regex` — pattern: `\b[3-9]\d{13,15}\b` — 16-digit sequences suggesting unmasked card numbers
 
 **[UX-019]** `transactional: counsel | marketing: counsel` — Emoji in subject lines must not be the sole carrier of meaning, and must not exceed one per subject line.
 > Enterprise mail gateways strip non-ASCII characters. "🚀 Your shipment" becomes " Your shipment" after stripping. Multiple emoji read as spam to both algorithms and humans. Source: Campaign Monitor 2022.

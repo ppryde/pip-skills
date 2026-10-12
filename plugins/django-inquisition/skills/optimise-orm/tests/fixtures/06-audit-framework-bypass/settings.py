@@ -8,7 +8,7 @@ DATABASES = {
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
-    # easyaudit (django-easy-audit) present — triggers WRITE-006/007/009 escalation to critical
+    # easyaudit (django-easy-audit) present — triggers WRITE-006/007 escalation to critical
     "easyaudit",
 ]
 

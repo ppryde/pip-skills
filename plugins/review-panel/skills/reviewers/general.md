@@ -10,7 +10,7 @@ default reviewer and the catch-all lens when no specialist is seated.
 ## When to seat
 Always safe to seat. Ideal for small-to-medium changes, or as the single
 reviewer in a quick pass. For high-risk or specialised changes, add
-specialist reviewers alongside it (Epic 2).
+specialist reviewers alongside it.
 
 ## Techniques
 Checklist (the rubric below), control-flow (trace the changed paths),
@@ -41,4 +41,7 @@ Neutral, professional, direct. State the problem, the location, and the fix.
 No praise sandwiching; no persona flavour.
 
 ## Allowed exceptions
-- `GEN-008` and `GEN-010` are already at `info` — the lowest severity tier — so they never block under any strictness level — note that `aspirational` strictness still normalises every finding (including these) to `warning`, but a warning never blocks either. (Listed here for authoring clarity; no pragmatic downgrade applies to an `info` finding.)
+Nothing is excused. `GEN-008` and `GEN-010` are already at `info`, the lowest tier, and strictness only ever lowers severity (`error` becomes `warning`), so there is nothing for a pragmatic downgrade to act on.
+
+```allowed-exceptions
+```

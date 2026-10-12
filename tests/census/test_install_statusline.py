@@ -488,3 +488,18 @@ class TestPurge:
 def test_settings_flag_needs_statusline(env):
     write_settings(env, {})
     assert run(env, "--settings", str(env["settings"])) == 1
+
+
+def test_a_shim_that_turns_foreign_at_apply_time_rolls_everything_back(env, monkeypatch):
+    write_settings(env, {"model": "opus"})
+    before = env["settings"].read_text()
+    real = ins._install_shim
+
+    def late_foreign(shim, cli_path, apply):
+        if apply:
+            return 1, [f"refused: {shim} exists and is not a census launcher"]
+        return real(shim, cli_path, apply)
+
+    monkeypatch.setattr(ins, "_install_shim", late_foreign)
+    assert run(env, "--statusline") == 1
+    assert env["settings"].read_text() == before and not env["shim"].exists()

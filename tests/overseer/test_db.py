@@ -2,7 +2,8 @@ from __future__ import annotations
 import pytest
 from scripts import db
 from scripts.models import Card
-from scripts.store import save_card as file_save_card, workflow_root
+from factories import write_legacy_card as file_save_card
+from scripts.store import workflow_root
 from factories import git_init
 
 
