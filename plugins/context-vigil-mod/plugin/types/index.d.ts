@@ -81,6 +81,13 @@ export type Pending = {
 // `turnId` is the main-loop turn whose turn.start carried the instruction: only ITS turn.complete
 // is an attempt (R1-02). `unattended` says the clear that follows is the mod's own (auto mode, or a deferred handover
 // drained while the person was away): it takes the attended re-check and the RC gate.
+// The person started a handover (the bar, its phone dialog, /vho, plain words, "Update it, then
+// clear"): every handover the model saves under it counts as asked for until the clear is issued,
+// the person presses Esc on the instruction turn, or it is CONSENT_MS old. Not spent by one call:
+// a second save the same request produced (a queued instruction landing after the model already
+// answered) is still theirs.
+export type Consent = { at: number }
+
 export type Awaiting = { reason: PendingReason; resume: boolean; attempts: number; started: boolean; unattended: boolean; since: number; turnId?: string }
 
 export type StepId =
@@ -91,7 +98,7 @@ export type EventKind =
   | 'arm' | 'disarm' | 'threshold' | 'bar' | 'handover.requested' | 'handover.written'
   | 'guard.wait' | 'guard.baseline' | 'clear.skipped' | 'clear' | 'resume' | 'resume.sent' | 'last_light.fired' | 'last_light.choice'
   | 'limit.latched' | 'limit.cleared' | 'limit.early_stop' | 'rc.answer' | 'setup'
-  | 'standdown' | 'rename' | 'archive' | 'last_light.skip' | 'last_light.off' | 'last_light.on' | 'last_light.dropped'
+  | 'standdown' | 'rename' | 'archive' | 'last_light.skip' | 'last_light.off' | 'last_light.on' | 'last_light.dropped' | 'unrequested.choice'
 
 export type EventRecord = { ts: string; session: string; kind: EventKind } & Record<string, unknown>
 
@@ -117,6 +124,7 @@ declare module 'claude-code' {
       ttlRead: boolean
       ttlInfoDismissed: boolean
       handoverMentioned: boolean
+      consent: Consent | null
       countdownEndsAt: number | null
       lastApiAt: number | null
       returnHeld: string[] | null
