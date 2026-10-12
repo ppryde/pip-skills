@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 from dataclasses import dataclass
 
 from scripts.render import est_tokens
@@ -32,10 +33,35 @@ class Estimate:
 NOT_COVERED = Estimate(False, 0, 0, 0, "unknown")
 
 
+def _repo_root(cwd: str) -> str | None:
+    try:
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd,
+                             capture_output=True, text=True, timeout=10, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return os.path.realpath(out.strip()) if out.strip() else None
+
+
+def _whole_repo(call: ToolCall) -> bool:
+    """A callers query answers a plain whole-repo search, not a filtered or scoped one."""
+    inp = call.input
+    if any(inp.get(k) for k in ("glob", "type", "multiline", "-i")):
+        return False
+    path = inp.get("path")
+    if path is None:
+        return True
+    if not isinstance(path, str):
+        return False
+    here = os.path.realpath(os.path.join(call.cwd, path))
+    if here == os.path.realpath(call.cwd):
+        return True
+    return here == _repo_root(call.cwd)
+
+
 def match(call: ToolCall) -> Query | None:
     if call.name == "Grep":
         pattern = call.input.get("pattern")
-        if isinstance(pattern, str) and _IDENT.match(pattern):
+        if isinstance(pattern, str) and _IDENT.match(pattern) and _whole_repo(call):
             return Query("callers", "grep", ["callers", pattern])
     if call.name == "Bash":
         command = call.input.get("command")
@@ -51,13 +77,13 @@ def _rel(path: str, root: str) -> str:
         return path
 
 
-def _grep_files(text: str, root: str) -> set[str]:
+def _grep_files(text: str, base: str, root: str) -> set[str]:
     files: set[str] = set()
     for line in text.splitlines():
         candidate = line.split(":", 1)[0].strip()
         if not candidate:
             continue
-        full = candidate if os.path.isabs(candidate) else os.path.join(root, candidate)
+        full = candidate if os.path.isabs(candidate) else os.path.join(base, candidate)
         if os.path.isfile(full):
             files.add(_rel(full, root))
     return files
@@ -70,9 +96,10 @@ def _callers_answerable(doc: dict[str, object], call: ToolCall, later: list[Tool
         if isinstance(hits, list) else set()
     if isinstance(doc.get("definition"), str):
         known.add(str(doc["definition"]))
-    read_after = {_rel(str(c.input["file_path"]), root) for c in later
+    read_after = {_rel(os.path.join(c.cwd, str(c.input["file_path"])), root) for c in later
                   if c.name == "Read" and isinstance(c.input.get("file_path"), str)}
-    opened = _grep_files(call.result_text, root) & read_after
+    base = os.path.join(call.cwd, str(call.input.get("path") or "."))
+    opened = _grep_files(call.result_text, base, root) & read_after
     if not opened:
         return "unknown"
     return "yes" if opened <= known else "no"
@@ -85,5 +112,7 @@ def estimate(query: Query, call: ToolCall, later: list[ToolCall]) -> Estimate:
     if not ans.ok or ans.exit_code == 2 or ans.doc.get("found") is False:
         return Estimate(False, 0, ans.latency_ms, ans.exit_code, "unknown")
     tokens = ans.doc.get("est_tokens")
-    return Estimate(True, int(tokens) if isinstance(tokens, int) else 0, ans.latency_ms,
-                    ans.exit_code, _callers_answerable(ans.doc, call, later))
+    if not isinstance(tokens, int) or isinstance(tokens, bool):
+        return Estimate(False, 0, ans.latency_ms, ans.exit_code, "unknown")
+    return Estimate(True, tokens, ans.latency_ms, ans.exit_code,
+                    _callers_answerable(ans.doc, call, later))
