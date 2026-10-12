@@ -26,6 +26,7 @@ export type World = {
   submitFails: { count: number }       // makes the next N $.prompt.submit calls reject (a session still starting)
   eventsWriteRefused: { value: boolean }   // makes fs.write under /events/ deny
   renameRefused: { value: boolean }    // makes $.command.run({ command: 'rename' }) reject
+  renameRefusedAt: Set<number>         // makes only these renames reject, counted from 1 across the test
   renames: string[]                    // args of every rename command run
   shell: { value: boolean }            // whether `sh` runs (it does not on Windows)
   titles: Map<string, string>          // transcript path → its last custom title; a rename sets the current one's
@@ -53,7 +54,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     registered: { tools: [], commands: [] },
     draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined }, model: { value: 'claude-opus-5-5[1m]' },
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '', dir: '/repo/.git' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
-    toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, submitFails: { count: 0 }, eventsWriteRefused: { value: false }, renames: [],
+    toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, renameRefusedAt: new Set(), submitRefused: { value: false }, submitFails: { count: 0 }, eventsWriteRefused: { value: false }, renames: [],
     shell: { value: true }, titles: new Map(), transcript: { value: null }, grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
     handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, askHold: { held: false, waiting: [] }, asks: [], askReply: { value: null }, promptReadFails: { count: 0 }, onStoreSet: { value: null }, fsRead: { gate: null, error: null },
   }
@@ -124,9 +125,11 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('prompt.read', () => { if (w.promptReadFails.count > 0) { w.promptReadFails.count--; throw new Error('prompt.read failed') } return { value: { text: w.draft.value, cursor: w.draft.value.length } } })
   on('prompt.submit', (_$, e) => { if (w.submitRefused.value) throw new Error('submit refused'); if (w.submitFails.count > 0) { w.submitFails.count--; throw new Error('session not ready') } w.submits.push({ text: e.text, origin: e.origin.kind }); return { text: e.text, origin: e.origin } })
   on('prompt.edit', (_$, e) => ({ text: e.text, cursor: e.cursor }))
+  let renameCalls = 0
   on('command.run', async (_$, e) => {
     if (e.command === 'clear' && w.clearRefused.value) throw new Error('clear refused')
-    if (e.command === 'rename' && w.renameRefused.value) throw new Error('rename refused')
+    if (e.command === 'rename') renameCalls++
+    if (e.command === 'rename' && (w.renameRefused.value || w.renameRefusedAt.has(renameCalls))) throw new Error('rename refused')
     w.commands.push(e.command)
     if (e.command === 'rename') {
       const name = String((e as { args?: string }).args ?? '')

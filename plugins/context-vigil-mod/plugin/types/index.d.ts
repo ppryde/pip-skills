@@ -72,6 +72,7 @@ export type Pending = {
   followUp: string | null
   createdAt: number
   unattended?: boolean   // R3-06: the clear that follows is the mod's own; a reload offers it, never runs it
+  archived?: string      // PROBES §15: the name the mod renamed `Archive: <it>` just before its clear
 }
 
 // A handover the model has been asked to write and has not written yet. `started` turns
@@ -118,6 +119,7 @@ declare module 'claude-code' {
       handoverMentioned: boolean
       countdownEndsAt: number | null
       lastApiAt: number | null
+      stranded: string | null   // PROBES §15: this session carries `Archive: <it>` because the rename back failed
       returnHeld: string[] | null
       phoneFacts: PhoneFacts | null
     }

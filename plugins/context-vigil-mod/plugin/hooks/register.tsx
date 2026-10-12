@@ -11,7 +11,7 @@ import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, GIT_DIR_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
 import { INPUT_SCHEMA, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 import { HOME_VARS_CHECKED } from '../core/home'
-import { TITLE_CMD, archiveName, isArchived, lastTitle, unarchived } from '../core/title'
+import { TITLE_CMD, archiveName, isArchived, lastTitle } from '../core/title'
 import { TAIL_CMD, type CacheTtl, cacheLinesFromText, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
 import { clearGate, needsRcHint } from '../core/surfaces'
@@ -36,6 +36,7 @@ const barDismissedA = atom({ plugin: 'context-vigil-mod', key: 'barDismissed' } 
 const pendingA = atom({ plugin: 'context-vigil-mod', key: 'pending' } as const, null)
 const countdownA = atom({ plugin: 'context-vigil-mod', key: 'countdownEndsAt' } as const, null)
 const transcriptA = atom({ plugin: 'context-vigil-mod', key: 'transcriptPath' } as const, null as string | null)
+const strandedA = atom({ plugin: 'context-vigil-mod', key: 'stranded' } as const, null as string | null)
 // Information only (PROBES §11): what the session's cache is. The fire-time check stays the gate.
 const cacheTtlA = atom({ plugin: 'context-vigil-mod', key: 'cacheTtl' } as const, 'unknown' as CacheTtl)
 const ttlReadA = atom({ plugin: 'context-vigil-mod', key: 'ttlRead' } as const, false)
@@ -545,6 +546,7 @@ async function resetSessionState($: EngineInterface) {
   await update($, barDismissedA, () => false)
   await update($, countdownA, () => null)
   await update($, handoverCountA, () => 0)
+  await update($, strandedA, () => null)
   await update($, cacheTtlA, () => 'unknown')
   await update($, ttlReadA, () => false)
   await update($, ttlInfoDismissedA, () => false)
@@ -693,8 +695,7 @@ async function tryClearInner($: EngineInterface) {
     try {
       await $.command.run({ command: 'clear' })
     } catch {
-      // Still this session: its own name back.
-      if (archived !== null) await $.command.run({ command: 'rename', args: archived }).catch(() => log($, 'guard.wait', { reason: 'archive-unrestored' }))
+      if (archived !== null) await unarchive($, archived)
       clearParked = true
       await notify($, V.clearRejected)
       await log($, 'guard.wait', { reason: 'clear-rejected' })
@@ -886,8 +887,10 @@ async function transcriptTitle($: EngineInterface, transcriptPath: string): Prom
 }
 
 // PROBES §15: just before the handover's /clear, a named session is renamed `Archive: <name>` so
-// /resume tells it from its successor. An unnamed one is left as it is: nothing duplicates it,
-// and a name once given cannot be taken back if the clear is then refused. Never blocks the clear.
+// /resume tells it from its successor, and the pending handover records `<name>` for the
+// successor. An unnamed one is left as it is: nothing duplicates it, and a name once given cannot
+// be taken back if the clear is then refused. A name that already starts with the prefix is the
+// person's (or an old archive's) and is left alone. Never blocks the clear.
 // Returns the name it replaced, to put back if the clear fails; null when it renamed nothing.
 async function archiveOutgoing($: EngineInterface): Promise<string | null> {
   try {
@@ -899,11 +902,17 @@ async function archiveOutgoing($: EngineInterface): Promise<string | null> {
     }
     if (title === null) return null
     if (isArchived(title)) {
-      await log($, 'archive', { kept: true })
+      // Ours only when the last handover's rename back failed (`stranded`): already archived, so
+      // just recorded, and the successor gets the name back. Otherwise the person's: left alone.
+      const stranded = await read($, strandedA)
+      const ours = stranded !== null && title === archiveName(stranded)
+      if (ours) await recordArchived($, stranded)
+      await log($, 'archive', { kept: true, ours })
       return null
     }
     await $.command.run({ command: 'rename', args: archiveName(title) })
     await log($, 'archive', { name: archiveName(title) })
+    await recordArchived($, title)
     return title
   } catch {
     await notify($, V.archiveFailed)
@@ -912,20 +921,46 @@ async function archiveOutgoing($: EngineInterface): Promise<string | null> {
   }
 }
 
-// /clear carries the outgoing session's name into the new one (PROBES §8) — after an archive, the
-// archive name. The new session takes that name without its prefix; an unnamed one, the handover's
-// session_name. `carried` is the engine's session_title on the clear, when it gives one (§15).
+// The pending handover carries the archived name across the clear, for the successor.
+async function recordArchived($: EngineInterface, name: string) {
+  const pending = await read($, pendingA)
+  if (pending) await savePending($, { ...pending, archived: name }).catch(() => log($, 'guard.wait', { reason: 'archive-unrecorded' }))
+}
+
+// The clear was refused, so this is still the archived session: its own name back, and no record
+// left for a later clear to act on. A failed restore keeps the record (the name is still the archive's).
+async function unarchive($: EngineInterface, name: string) {
+  try {
+    await $.command.run({ command: 'rename', args: name })
+  } catch {
+    await log($, 'guard.wait', { reason: 'archive-unrestored' })
+    return
+  }
+  const pending = await read($, pendingA)
+  if (pending?.archived !== undefined) {
+    const { archived: _, ...rest } = pending
+    await savePending($, rest).catch(() => {})
+  }
+}
+
+// /clear carries the outgoing session's name into the new one (PROBES §8). After the mod's own
+// archive that is `Archive: <archived>`, and the new session gets `<archived>` back; any other
+// carried name (the person's, even one starting `Archive: `) is kept; an unnamed one takes the
+// handover's session_name. `carried` is the engine's session_title on the clear when it gives one
+// (§15: null = unnamed); absent, the old transcript is read.
 // Never blocks the resume: a failed rename is a notice, not an error.
-async function renameSession($: EngineInterface, handoverName: string | undefined, oldTranscript: string | undefined, carried: string | undefined) {
+async function renameSession($: EngineInterface, handoverName: string | undefined, archived: string | undefined, oldTranscript: string | undefined, carried: string | null | undefined) {
   const title = carried !== undefined ? carried : oldTranscript === undefined ? undefined : await transcriptTitle($, oldTranscript)
   if (title === undefined) return void (await log($, 'guard.wait', { reason: 'rename-unknown' }))
-  const name = (title === null ? '' : unarchived(title)) || handoverName?.trim()
+  if (title !== null && (archived === undefined || title !== archiveName(archived))) return void (await log($, 'rename', { kept: true }))
+  const name = title === null ? handoverName?.trim() : archived
   if (!name) return   // an older stored handover may carry no name
-  if (name === title) return void (await log($, 'rename', { kept: true }))
   await log($, 'rename', { name })
   try {
     await $.command.run({ command: 'rename', args: name })
   } catch {
+    // Left as `Archive: <name>` by us: the next handover knows it and gives its successor the name back.
+    if (title !== null) await update($, strandedA, () => name)
     await notify($, V.renameFailed)
     await log($, 'guard.wait', { reason: 'rename-rejected' })
   }
@@ -1154,8 +1189,8 @@ export const register: Register = on => {
     // /rename starts from its own timer, before the resume submit, and never blocks it.
     const tp = e.transcript_path
     const oldTranscript = tp === undefined ? undefined : `${tp.slice(0, tp.lastIndexOf('/') + 1)}${pending.session}.jsonl`
-    const carried = typeof e.session_title === 'string' ? e.session_title : undefined
-    $.clock.after(0, () => { void renameSession($, pending.name, oldTranscript, carried) })
+    const carried = typeof e.session_title === 'string' || e.session_title === null ? e.session_title : undefined
+    $.clock.after(0, () => { void renameSession($, pending.name, pending.archived, oldTranscript, carried) })
     // The person's own held text is always sent. The mod's resume prompt needs a fresh handover
     // (no turn since it was written) and no latch (R1-10); otherwise a notice says why not.
     let stale = false
