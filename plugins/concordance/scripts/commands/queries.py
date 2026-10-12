@@ -32,6 +32,7 @@ def diff_command(args: argparse.Namespace, cwd: Path, stats: dict[str, object],
                  facts: dict[str, object]) -> tuple[str, int, str]:
     ctx = build(cwd, args.base, args.deadline)
     view_id = ctx.head.view_id
+    facts.update(root=str(ctx.root), view_id=view_id, verdicts=len(verdicts(ctx)), sections=[])
     stats.update(touched=len(ctx.diff.touched), files=ctx.head_cov.total,
                  verdicts=len(verdicts(ctx)), repo_name=ctx.root.name)
     by_command: dict[str, Callable[[], list[Section]]] = {
@@ -41,9 +42,13 @@ def diff_command(args: argparse.Namespace, cwd: Path, stats: dict[str, object],
         "touched": lambda: [touched_section(ctx), callers_section(ctx), tests_section(ctx)],
     }
     if args.command == "review-context":
-        return render_context(ctx, args.budget, stats), 0, view_id
+        rendered: list[Section] = []
+        text = render_context(ctx, args.budget, stats, rendered)
+        facts["sections"] = section_facts(rendered)
+        return text, 0, view_id
     if args.command in by_command:
         sections = by_command[args.command]()
+        facts["sections"] = section_facts(sections)
         return render(header(ctx), sections, footer(ctx), args.budget, stats), 0, view_id
     if args.command == "check":
         return check_text(ctx), (1 if verdicts(ctx) else 0), view_id
@@ -53,6 +58,10 @@ def diff_command(args: argparse.Namespace, cwd: Path, stats: dict[str, object],
                f"{len(report.skipped)} skipped")
     lines = [summary, *footer(ctx)]
     return "\n".join(lines), 0, view_id
+
+
+def section_facts(sections: list[Section]) -> list[dict[str, object]]:
+    return [{"title": s.title, "count": s.count} for s in sections]
 
 
 def check_text(ctx: Context) -> str:
@@ -67,6 +76,8 @@ def name_command(args: argparse.Namespace, cwd: Path, stats: dict[str, object],
     view = worktree_view(cwd)
     ensure_view(store, view, args.deadline)
     vi = ViewIndex(store, view)
+    facts.update(root=str(view.root), view_id=view.view_id, found=False, target=None,
+                 definition=None, hits=[])
     if args.command == "coverage":
         cov = store.coverage(view.view_id)
         lines = [f"coverage: {cov.total - len(cov.not_indexed)}/{cov.total} files indexed",
@@ -78,13 +89,16 @@ def name_command(args: argparse.Namespace, cwd: Path, stats: dict[str, object],
     if found.target is None:
         return miss_text(args.name, found), 0, view.view_id
     q = found.target
+    facts.update(found=True, target=q, definition=vi.path_of(q))
     note = "" if found.confidence == "exact" else f" ({found.confidence} match for {args.name})"
     if args.command == "callers":
         hits = callers(vi, q, Snippets(view))
+        facts["hits"] = [{"path": h.path, "line": h.line} for h in hits]
         rows = [f"{h.path}:{h.line} in {h.symbol} ({h.confidence})\n{h.snippet}" for h in hits]
         section = Section(f"Callers of {q}{note}", rows)
     else:
         tests = guarding_tests(vi, q, args.hops)
+        facts["hits"] = [{"path": t.path, "line": t.line} for t in tests]
         rows = [f"{t.qualname} {t.path}:{t.line} ({t.hops} hop{'s' if t.hops > 1 else ''})"
                 for t in tests]
         section = Section(f"Tests reaching {q}{note}", rows)

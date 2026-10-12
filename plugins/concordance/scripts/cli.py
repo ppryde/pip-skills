@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -12,6 +13,7 @@ if __package__ in (None, ""):  # direct invocation: put the plugin root on sys.p
 from scripts import extract_ts, gitio
 from scripts.commands import common, queries, records
 from scripts.index import LockTimeout
+from scripts.render import est_tokens
 
 DEFAULT_BUDGET = 1500
 REVIEW_BUDGET = 4000  # provisional: tune from the usage log (render stats + diff size)
@@ -32,6 +34,7 @@ def _parser() -> argparse.ArgumentParser:
         sp.add_argument("--budget", type=int,
                         default=REVIEW_BUDGET if name == "review-context" else DEFAULT_BUDGET)
         sp.add_argument("--deadline", type=float, default=DEFAULT_DEADLINE)
+        sp.add_argument("--json", action="store_true", help="one JSON object instead of text")
 
     add("index", "build or refresh this worktree's view (and the base view)")
     add("review-context", "everything a reviewer needs for this diff, within a budget")
@@ -82,7 +85,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"concordance: internal error: {exc!r}", file=sys.stderr)
         common.log_event(args.command, cwd, None, started, "", 2, {"error": type(exc).__name__})
         return 2
-    common.say(text)
+    if args.json:
+        facts.update(command=args.command, exit_code=code, est_tokens=est_tokens(text))
+        common.say(json.dumps(facts, sort_keys=True))
+    else:
+        common.say(text)
     common.log_event(args.command, cwd, view_id, started, text, code, stats)
     return code
 

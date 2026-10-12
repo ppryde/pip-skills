@@ -248,8 +248,11 @@ def blindspot_sections(ctx: Context) -> list[Section]:
             Section("Removed comments", comment_rows)]
 
 
-def render_context(ctx: Context, budget: int, stats: dict[str, object] | None = None) -> str:
+def render_context(ctx: Context, budget: int, stats: dict[str, object] | None = None,
+                   sections_out: list[Section] | None = None) -> str:
     sections = [verdict_section(ctx), contract_section(ctx), drift_section(ctx),
                 touched_section(ctx), callers_section(ctx), tests_section(ctx),
                 *blindspot_sections(ctx)]
+    if sections_out is not None:
+        sections_out.extend(sections)
     return render(header(ctx), sections, footer(ctx), budget, stats)
