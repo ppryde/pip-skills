@@ -262,5 +262,29 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
         last = json.loads(_meta(conn, _META_LAST) or "null")
     except ValueError:
         last = None
-    return {"pricing_as_of": ratebook.RateBook(rows).pricing_as_of(), "rows": len(rows),
-            "models": models, "last_refresh": last, "using_builtin_only": not rows}
+    book = ratebook.RateBook(rows)
+    return {"pricing_as_of": book.pricing_as_of(), "rows": len(rows),
+            "models": models, "last_refresh": last, "using_builtin_only": not rows,
+            **models_in_use(conn, book)}
+
+
+def models_in_use(conn: sqlite3.Connection, book: ratebook.RateBook) -> dict[str, Any]:
+    """Which models the store's turns actually used that are NOT priced by an
+    exact rate row: ``prefix_priced`` (priced at a parent model's rate, e.g. a
+    dated snapshot or a model first seen after the last refresh — a quietly
+    inherited price) and ``unpriced_models`` (no rate at all). A store without
+    turns, or an in-memory stand-in, reports both empty."""
+    try:
+        rows = conn.execute(
+            "SELECT model, COUNT(*) FROM turns WHERE model IS NOT NULL GROUP BY model"
+        ).fetchall()
+    except sqlite3.Error:
+        rows = []
+    prefix, unpriced = [], []
+    for model, turns in sorted(rows, key=lambda r: -r[1]):
+        key = book.resolved_key(model)
+        if key is None:
+            unpriced.append({"model": model, "turns": turns})
+        elif key != model:
+            prefix.append({"model": model, "priced_as": key, "turns": turns})
+    return {"prefix_priced": prefix, "unpriced_models": unpriced}

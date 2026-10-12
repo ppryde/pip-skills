@@ -123,6 +123,13 @@ class RateBook:
         self._resolved[model] = best
         return best
 
+    def resolved_key(self, model: str | None) -> str | None:
+        """The rate-table key ``model`` is priced under: the model itself when
+        the table carries it, else its longest dash-boundary prefix
+        (``claude-opus-5-6`` -> ``claude-opus-5``), else None (unpriced). A key
+        that differs from the model means the price is an inherited guess."""
+        return self._key_for(model) if model else None
+
     def rates_for(self, model: str | None, ts: float | None = None) -> dict[str, float] | None:
         """The rates for ``model`` in force at ``ts`` (None/0: the newest), or
         None when the model is unknown."""

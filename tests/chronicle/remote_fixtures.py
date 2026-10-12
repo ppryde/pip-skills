@@ -20,14 +20,13 @@ from scripts.remote import SSHResult
 
 
 def local_transport(argv: list[str], stdin: bytes, timeout: float) -> SSHResult:
-    """Runs the request the client built for `ssh ... -- <host> python3 -
-    <b64arg>` as an ordinary local subprocess: ``python3 - <b64arg>``. This
-    is the one thing every test in this file/`test_remote.py` uses in place
+    """Runs what the client built for `ssh ... -- <host> python3 -` as an
+    ordinary local subprocess, ``python3 -`` (the request is a literal inside
+    the script on stdin, exactly as over ssh). This is the one thing every test in this file/`test_remote.py` uses in place
     of a real remote box."""
-    b64arg = argv[-1]
     try:
         completed = subprocess.run(
-            [sys.executable, "-", b64arg], input=stdin, capture_output=True,
+            [sys.executable, "-"], input=stdin, capture_output=True,
             timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:

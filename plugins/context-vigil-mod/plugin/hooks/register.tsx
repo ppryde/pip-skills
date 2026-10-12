@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Activity, Awaiting, EventKind, EventRecord, Git, Latch, Mode, Pending, PhoneFacts, PendingReason, RateLimit, Override, Settings, StepId } from '../types'
+import type { Activity, Awaiting, Consent, EventKind, EventRecord, Git, Latch, Mode, Pending, PhoneFacts, PendingReason, RateLimit, Override, Settings, StepId } from '../types'
 import { ASK, DEFAULT_OVERRIDES, checkOverrides, fromModelThresholds, formatKey, formatOverride, formatWindow, overridesJson, ordered, parseKey, parseOverridesArgs, patternFor, removeOverride, resolve, sameKey, setOverride } from '../core/overrides'
 import type { Resolved } from '../core/overrides'
 import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath, overridesPath } from '../core/name'
@@ -43,6 +43,8 @@ const ttlReadA = atom({ plugin: 'context-vigil-mod', key: 'ttlRead' } as const, 
 const ttlInfoDismissedA = atom({ plugin: 'context-vigil-mod', key: 'ttlInfoDismissed' } as const, false)
 // Did the person's latest message mention a handover at all? Lets the model's tool call count as asked for.
 const handoverMentionedA = atom({ plugin: 'context-vigil-mod', key: 'handoverMentioned' } as const, false)
+// The person started a handover (types: Consent). In $.state, so the clear that ends it also wipes it.
+const consentA = atom({ plugin: 'context-vigil-mod', key: 'consent' } as const, null as Consent | null)
 const lastApiA = atom({ plugin: 'context-vigil-mod', key: 'lastApiAt' } as const, null)
 const awaitingA = atom({ plugin: 'context-vigil-mod', key: 'awaiting' } as const, null as Awaiting | null)
 const deferredA = atom({ plugin: 'context-vigil-mod', key: 'deferred' } as const, null as Awaiting | null)
@@ -208,6 +210,7 @@ function submitInstruction($: EngineInterface, reason: PendingReason) {
     // A rejected submit must not leave the handover waiting for a turn that never comes.
     void (async () => {
       await update($, awaitingA, () => null)
+      await withdrawConsent($)   // told it failed: a later save is asked about, never cleared silently
       await notify($, V.handoverFailed)
       await log($, 'guard.wait', { reason: 'submit-rejected' })
     })()
@@ -550,6 +553,7 @@ async function resetSessionState($: EngineInterface) {
   await update($, ttlReadA, () => false)
   await update($, ttlInfoDismissedA, () => false)
   await update($, returnHeldA, () => null)
+  await update($, consentA, () => null)
   // A resume or fork may be a different model and window: never keep the last session's until the
   // next measure, or /vigil-overrides would list or add for the wrong session.
   const model = await $.session.model().catch(() => null)
@@ -582,10 +586,30 @@ async function savePending($: EngineInterface, p: Pending | null) {
 // An instruction nobody answered for this long, with the agent idle, is lost (R2-03).
 const AWAITING_LOST_MS = 10 * 60_000
 
+// How long a handover the person started keeps counting as asked for, with no clear issued yet:
+// long enough for an instruction queued behind a long turn, short of a later volunteer.
+const CONSENT_MS = 30 * 60_000
+
+// Called by every explicit control that starts a handover, before it starts.
+async function giveConsent($: EngineInterface) {
+  const at = await nowMs($)
+  await update($, consentA, () => ({ at }))
+}
+
+async function hasConsent($: EngineInterface, now: number): Promise<boolean> {
+  const c = await read($, consentA)
+  return c !== null && now - c.at < CONSENT_MS
+}
+
+async function withdrawConsent($: EngineInterface) {
+  await update($, consentA, () => null)
+}
+
 // What startHandover did, so a caller can say it truthfully (R2-14).
 type Started = 'started' | 'reused' | 'covered' | 'standdown' | 'latched' | 'in-flight'
 
-async function startHandover($: EngineInterface, reason: PendingReason, resume: boolean, unattended: boolean = reason === 'threshold'): Promise<Started> {
+// `rewrite`: never reuse the pending handover, ask for a fresh one (the dialog's "Update it, then clear").
+async function startHandover($: EngineInterface, reason: PendingReason, resume: boolean, unattended: boolean = reason === 'threshold', rewrite = false): Promise<Started> {
   if (standDown) return 'standdown'
   const now = await nowMs($)
   // R2-12: a fresh handover is already on disk (one asked for, waiting to clear): an early stop needs
@@ -617,7 +641,7 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
     await log($, 'guard.wait', { reason: 'awaiting-expired', asked: reason })
   }
   const pending = await read($, pendingA)
-  if ((reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA), now)) {
+  if (!rewrite && (reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA), now)) {
     // R3-01: the person's /vho wants the resume; a volunteered pending saved resume:false.
     if (pending && (pending.resume !== resume || (unattended && !pending.unattended))) await savePending($, { ...pending, resume, unattended: pending.unattended || unattended })
     if (!clearInFlight) scheduleClear($, unattended)
@@ -694,6 +718,8 @@ async function tryClearInner($: EngineInterface) {
     lastWait = null
     await setCountdown($, null)
     await log($, 'clear', { unattended: unattendedClear })
+    // The person's request ends with its clear: a save after this one is volunteered again.
+    await withdrawConsent($)
     clearInFlight = true
     const archived = await archiveOutgoing($)
     try {
@@ -865,7 +891,10 @@ async function barChoice($: EngineInterface, action: 'handover' | 'later' | 'dis
   await update($, barShownA, () => false)
   if (action === 'dismiss') await update($, barDismissedA, () => true)
   await log($, 'bar', { action })
-  if (action === 'handover') await startHandover($, 'request', true)
+  if (action === 'handover') {
+    await giveConsent($)
+    await startHandover($, 'request', true)
+  }
 }
 
 // Whether `sh` runs here (it does not on Windows); asked once per process.
@@ -1079,6 +1108,51 @@ async function maybeFireLastLight($: EngineInterface) {
   await log($, 'last_light.fired', { contextPct })
 }
 
+// A handover the model saved on its own: ask the person what to do with it, in a dialog that reaches
+// the phone as the threshold one does (PROBES §6). Never awaited by the tool call, so the session
+// never waits on it. The toast stays where no dialog can be had: under the stand-down, the limit
+// latch or an early stop's resume (the clear would spend what the stop saved), and as the answer
+// to a dismissed or failed dialog. One dialog at a time: a later save while it is open moves it on.
+let unrequestedAsk: { path: string; session: string } | null = null
+
+async function offerUnrequested($: EngineInterface, path: string) {
+  if (standDown || limitResume !== null || (await readLatch($))) { await notify($, V.handoverUnrequested(path)); return }
+  if (unrequestedAsk !== null) {
+    // A dialog still open from before a clear or /resume is about that session: this one gets the notice.
+    if (unrequestedAsk.session === session) unrequestedAsk = { ...unrequestedAsk, path }
+    else await notify($, V.handoverUnrequested(path))
+    return
+  }
+  unrequestedAsk = { path, session }
+  $.clock.after(0, () => { void askUnrequested($).catch(err => timerFailed($, 'unrequested', err)) })
+}
+
+async function askUnrequested($: EngineInterface) {
+  const first = unrequestedAsk
+  if (!first) return
+  const options = [V.unrequestedUpdate, V.unrequestedClear, V.unrequestedLeave]
+  const answer = await $.ui.ask(V.unrequestedAsk(first.path), { header: V.unrequestedHeader, options }).then(a => String(a), () => null)
+  const asked = unrequestedAsk ?? first
+  unrequestedAsk = null
+  // Free text under "Other" is never a clear (when in doubt, don't): it reads as Leave it.
+  const choice = answer === V.unrequestedUpdate ? 'update' : answer === V.unrequestedClear ? 'clear' : 'leave'
+  await log($, 'unrequested.choice', { choice, path: asked.path, ...(answer === null ? { dismissed: true } : {}) })
+  if (answer !== null) await observe($, { kind: 'human-command', at: await nowMs($) })
+  if (choice === 'leave') { await notify($, V.handoverUnrequested(asked.path)); return }
+  // A clear, a /resume or a newer handover since the save: the answer is about one that is gone.
+  const pending = await read($, pendingA)
+  if (session !== asked.session || pending?.path !== asked.path) { await notify($, V.unrequestedGone); return }
+  if (choice === 'update') {
+    // A fresh handover the person asked for: its save clears and resumes as /vho's does.
+    await giveConsent($)
+    await startHandover($, 'request', true, false, true)
+    return
+  }
+  await giveConsent($)
+  await savePending($, { ...pending, reason: 'request', resume: true, unattended: false })
+  if (!clearInFlight) scheduleClear($, false)
+}
+
 // One ask at a time: a message typed meanwhile joins the first instead of opening a second ask whose
 // answer would undo the first. Whichever answer acts first consumes the held texts, atomically, so a
 // dialog that outlives a reload can never send them twice (R2-11).
@@ -1126,7 +1200,7 @@ export const register: Register = on => {
       // reload also forgot the phone, so only a clear the person asked for is picked back up;
       // an unattended one is offered, never run past an RC answer or a countdown it can't see.
       await setCountdown($, null)
-      if (live.reason === 'request' && !live.unattended && reusable(live, await read($, lastApiA), await nowMs($))) scheduleClear($, false)
+      if (live.reason === 'request' && live.resume && !live.unattended && reusable(live, await read($, lastApiA), await nowMs($))) scheduleClear($, false)
       else await notify($, V.pendingOffer(live.path))
     }
     // A reload counts as the person being here (bindSession), so this period's last light is skipped
@@ -1297,7 +1371,7 @@ export const register: Register = on => {
       const request = !standDown && isHandoverRequest(e.text)
       await update($, handoverMentionedA, () => !request && mentionsHandover(e.text))
       if (request) {
-        $.clock.after(0, () => { void startHandover($, 'request', true).catch(err => timerFailed($, 'handover-request', err)) })
+        $.clock.after(0, () => { void giveConsent($).then(() => startHandover($, 'request', true)).catch(err => timerFailed($, 'handover-request', err)) })
         return { drop: V.handoverRequested }
       }
     }
@@ -1348,8 +1422,9 @@ export const register: Register = on => {
     // A subagent's turn, or a main turn that began before the instruction, is not the attempt.
     if (awaitingNow?.started && e.agentId === undefined && awaitingNow.turnId !== undefined && e.turnId === awaitingNow.turnId) {
       if (e.isAborted) {
-        // The person pressed Esc: that is presence, and no retry (R1-02).
+        // The person pressed Esc: that is presence, and no retry (R1-02). It takes back their request too.
         await update($, awaitingA, () => null)
+        await withdrawConsent($)
         await observe($, { kind: 'human-command', at: now })
         await notify($, V.handoverInterrupted)
         await log($, 'guard.wait', { reason: 'instruction-interrupted' })
@@ -1368,7 +1443,9 @@ export const register: Register = on => {
         await update($, awaitingA, () => ({ ...awaitingNow, attempts: awaitingNow.attempts + 1, started: false, turnId: undefined }))
         submitInstruction($, awaitingNow.reason)
       } else {
+        // Told it failed: a later save is the model's own, asked about, never cleared silently.
         await update($, awaitingA, () => null)
+        await withdrawConsent($)
         await notify($, V.handoverFailed)
         await log($, 'guard.wait', { reason: 'tool-not-called' })
       }
@@ -1462,6 +1539,7 @@ export const register: Register = on => {
   for (const command of [COMMANDS.handover, COMMANDS.handoverShort]) {
     on('command.run', { command }, async $ => {
       // R2-14: the reply says what actually happened (a notice also went out for latch and in-flight).
+      await giveConsent($)
       const outcome = await startHandover($, 'request', true)
       const text = outcome === 'standdown' ? V.classicActive
         : outcome === 'latched' ? V.waiting('latched')
@@ -1476,11 +1554,14 @@ export const register: Register = on => {
     const parsed = parseFields(input)
     if (!parsed.ok) return { deny: `${parsed.error} — call ${TOOL_FULL} again with every required field` }
     const awaiting = await read($, awaitingA)
-    // Only a handover the mod asked for may end in a clear; a call with no `awaiting` is the
-    // model volunteering (or repeating itself): save it, offer it, never clear (R1-01).
-    // A call after the person mentioned a handover is theirs to have asked for: it runs as /vho does.
+    // Only a handover the mod or the person asked for may end in a clear; anything else is the
+    // model volunteering: save it and ask what to do with it, never clear by itself (R1-01).
+    // A handover the person started stays asked for until its clear is issued, so a second save
+    // the same request produced is still theirs; a call after the person mentioned a handover is
+    // theirs too: either runs as /vho does.
+    const consented = awaiting === null && !standDown && (await hasConsent($, await nowMs($)))
     const mentioned = awaiting === null && !standDown && (await read($, handoverMentionedA))
-    const asked = awaiting ?? (mentioned ? { reason: 'request' as const, resume: true, unattended: false } : null)
+    const asked = awaiting ?? (consented || mentioned ? { reason: 'request' as const, resume: true, unattended: false } : null)
     const requested = asked !== null
     const reason = asked?.reason ?? 'request'
     const resume = asked?.resume ?? false
@@ -1523,8 +1604,9 @@ export const register: Register = on => {
     if (reason === 'limit' && limitResume) limitResume.path = path
     await log($, 'handover.written', { reason, bytes: markdown.length, path })
     if (!requested) {
-      await notify($, V.handoverUnrequested(path))
-      await log($, 'guard.wait', { reason: 'unrequested', path })
+      await log($, 'guard.wait', { reason: 'unrequested', path, ...(shield ? { shielded: true } : {}) })
+      if (shield) await notify($, V.handoverRepeat(path))
+      else await offerUnrequested($, path)
       return { result: `Saved handover to ${path} (not requested by context-vigil-mod; nothing was cleared)` } as never
     }
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
