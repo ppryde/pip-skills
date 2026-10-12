@@ -103,3 +103,26 @@ python3 tools/derive_agent_tools.py --evidence permits.json --check      # diff 
   or listed `unobserved` with a one-line reason. **Day one every grant is `unobserved`**: no `pip-agents:*` run can exist
   before the consumer PRs move dispatches onto the personas, so that is the starting state, not a defect. The scan of the
   work account (aggregates only) is the owner's own act and is not part of any PR.
+
+## sync_contract.py (pip-agents vendoring, WF-270 PR E)
+
+Stdlib only. A consumer skill cannot reach a dependency plugin's files (`${CLAUDE_PLUGIN_ROOT}` is the consumer's own
+root; probe recorded in PR A), so each consumer carries a byte-identical copy of what it needs, the census-mod bundle
+precedent.
+
+```
+python3 tools/sync_contract.py              # write plugins/<consumer>/vendor/pip-agents/ for every consumer
+python3 tools/sync_contract.py --check      # write nothing; list drift, exit 1
+python3 tools/sync_contract.py review-clone # one consumer
+```
+
+- Bundle: `scripts/validate_result.py` and `contract/{result,brief}.schema.json`, `personas.json`, `REVISION` from
+  `plugins/pip-agents/`, `scripts/batching.py` from `tools/batching.py` (so `BATCH_CAP` has one definition), and
+  `VENDORED.json` (the contract revision and a sha256 per file, regenerated each sync). Consumers: `CONSUMERS` in the
+  tool (review-panel, review-clone); a consumer also declares `"dependencies": ["pip-agents"]`.
+- `tests/agents/test_sync_contract.py` fails on any drift, a missing or extra file, a consumer without the dependency,
+  and checks the vendored validator runs standalone under `python3 -I`.
+- When `contract/` changes (a revision bump) or `validate_result.py` changes, re-run the tool in the same PR and bump
+  every consumer's version. Sync to wf-claude-market: copy `tools/sync_contract.py`, `tests/agents/` and each
+  consumer's `vendor/`; wf runs the same `--check`, and a consumer is synced only after `pip-agents` is in wf's
+  marketplace at the same or higher version.
