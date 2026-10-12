@@ -50,7 +50,7 @@ def drifted(calls: list[ToolCall], path: str, cwd: str) -> str:
     if seen is None:
         return "unknown"
     try:
-        now = subprocess.run(["git", "hash-object", "--", want], cwd=cwd, capture_output=True,
+        now = subprocess.run(["git", "hash-object", "--no-filters", "--", want], cwd=cwd, capture_output=True,
                              text=True, timeout=10, check=True).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return "unknown"

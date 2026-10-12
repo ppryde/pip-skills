@@ -174,3 +174,24 @@ def test_drift_matches_relative_read_path_via_cwd(make_repo) -> None:
     repo = make_repo(BASE)
     read = _call("Read", {"file_path": "app/api.py"}, _read_text(BASE["app/api.py"]), repo.root)
     assert drift.drifted([read], str(repo.root / "app/api.py"), str(repo.root)) == "no"
+
+
+def test_passthrough_needs_an_invocation_shape(tmp_path: Path) -> None:
+    for cmd in ("pytest tests/concordance/test_cli.py", "cat plugins/concordance/scripts/cli.py",
+                "grep -n concordance plugins/concordance/scripts/cli.py",
+                "python plugins/concordance/scripts/cli.py"):
+        assert estimators.match(_call("Bash", {"command": cmd}, "", tmp_path)) is None, cmd
+    for cmd in ("python plugins/concordance/scripts/cli.py callers foo",
+                "cd x && python3 /a/concordance/scripts/cli.py review-context --base main",
+                "concordance check"):
+        q = estimators.match(_call("Bash", {"command": cmd}, "", tmp_path))
+        assert q is not None and q.estimator == "passthrough", cmd
+
+
+def test_drift_survives_autocrlf(make_repo) -> None:
+    content = "a = 1\r\nb = 2\r\n"
+    repo = make_repo({"f.py": "x\n"})
+    repo.git("config", "core.autocrlf", "input")
+    (repo.root / "f.py").write_bytes(content.encode())
+    read = _call("Read", {"file_path": str(repo.root / "f.py")}, _read_text(content), repo.root)
+    assert drift.drifted([read], str(repo.root / "f.py"), str(repo.root)) == "no"

@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -130,3 +131,48 @@ def test_one_failing_estimate_does_not_abort_the_replay(make_repo, tmp_path: Pat
     assert [r["kind"] for r in rows] == ["read", "grep", "read"]
     grep = rows[1]
     assert grep["covered"] is False and grep["drifted"] == "unknown"
+
+
+MANY = {**BASE, **{f"app/c{i:03d}.py": f"from app.svc import refund\n\n\ndef h{i}(loan):\n"
+                                       "    return refund(loan, 5)\n" for i in range(120)}}
+
+
+def test_callers_facts_list_only_the_rendered_hits(make_repo) -> None:
+    repo = make_repo(MANY)
+    doc = json.loads(cli(repo.root, "callers", "refund", "--json", "--budget", "300").stdout)
+    text = cli(repo.root, "callers", "refund", "--budget", "300").stdout
+    rendered = [ln for ln in text.splitlines() if re.match(r"app/\S+:\d+ in ", ln)]
+    full = json.loads(cli(repo.root, "callers", "refund", "--json", "--budget", "100000").stdout)
+    assert len(full["hits"]) == 121
+    assert 0 < len(rendered) < 121
+    assert len(doc["hits"]) == len(rendered) and doc["hits"] == full["hits"][:len(rendered)]
+
+
+def test_replay_logs_no_strings_even_when_callers_are_cut(make_repo, tmp_path: Path) -> None:
+    repo = make_repo(MANY)
+    t = Transcript(tmp_path / "config" / "projects", "s1", repo.root)
+    t.call("Grep", {"pattern": "refund"}, f"{repo.root}/app/c001.py:5:    return refund(")
+    t.write()
+    assert cli(repo.root, "replay", "--session", "s1").returncode == 0
+    db = sqlite3.connect(tmp_path / "config" / "concordance" / "usage.db")
+    payloads = [json.loads(p) for (p,) in db.execute("SELECT payload FROM events")]
+    assert payloads
+    for payload in payloads:
+        assert payload.pop("origin") == "replay"
+        assert all(isinstance(v, (int, float, bool)) for v in payload.values()), payload
+    raw = json.dumps(db.execute("SELECT * FROM events").fetchall())
+    for leak in ("refund", "app/", str(repo.root)):
+        assert leak not in raw
+
+
+def test_a_caller_hidden_behind_the_cut_is_not_credited(make_repo) -> None:
+    from scripts.replay import estimators
+    from scripts.replay.transcript import ToolCall
+    repo = make_repo(MANY)
+    root = str(repo.root)
+    grep = ToolCall("t0", "", "Grep", {"pattern": "refund"}, f"{root}/app/c119.py:5:x", root, 0)
+    later = [ToolCall("t1", "", "Read", {"file_path": f"{root}/app/c119.py"}, "x", root, 1)]
+    q = estimators.match(grep)
+    assert q is not None
+    est = estimators.estimate(q, grep, later)
+    assert est.covered and est.answerable == "no"

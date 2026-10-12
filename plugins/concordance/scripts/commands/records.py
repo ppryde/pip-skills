@@ -56,13 +56,21 @@ def _replay_stats(args: argparse.Namespace) -> int:
     by_kind = rep["by_kind"]
     assert isinstance(by_kind, dict)
     head = (f"replay, last {rep['days']} days: {rep['sessions']} sessions, "
-            f"{rep['rows']} calls, {rep['covered']} covered")
+            f"{rep['rows']} calls, {rep['covered']} covered, {rep['uncovered']} uncovered "
+            f"(session failures and pending replays: `chronicle concordance`)")
     lines = [head]
     for kind, k in sorted(by_kind.items()):
         a = k["answerable"]
-        lines.append(f"{kind}: {k['calls']} calls, {k['covered']} covered, actual "
-                     f"{k['actual_tokens']} vs concordance {k['concordance_tokens']} tokens, "
-                     f"answerable {a['yes']}/{a['no']}/{a['unknown']}, drifted {k['drifted']}")
+        lines.append(f"{kind}: {k['calls']} calls, {k['covered']} covered, answerable "
+                     f"{a['yes']}/{a['no']}/{a['unknown']}, drifted {k['drifted']}; "
+                     f"all calls {k['actual_tokens']} tokens, with concordance "
+                     f"{k['counterfactual_tokens']} (uncovered calls unchanged)")
+        for ans in ("yes", "no", "unknown"):
+            part = k["by_answerable"].get(ans)
+            if part:
+                lines.append(f"  answerable {ans}: {part['calls']} calls, actual "
+                             f"{part['actual_tokens']} vs with concordance "
+                             f"{part['counterfactual_tokens']}")
     common.say("\n".join(lines))
     return 0
 

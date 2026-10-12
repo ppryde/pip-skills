@@ -47,7 +47,7 @@ def summary(days: int = 30, path: Path | None = None,
     path = path or usage_path()
     since = (time.time() if now is None else now) - days * DAY_S
     out: dict[str, object] = {"days": days, "sessions": 0, "rows": 0, "covered": 0,
-                              "by_kind": {}}
+                              "uncovered": 0, "by_kind": {}}
     if not path.exists():
         return out
     conn = _connect(path)
@@ -57,23 +57,32 @@ def summary(days: int = 30, path: Path | None = None,
             "drifted FROM replay_rows WHERE replayed_at >= ?", (since,)).fetchall()
     finally:
         conn.close()
-    calls: dict[str, int] = {}
-    covered: dict[str, int] = {}
-    actual: dict[str, int] = {}
-    conc: dict[str, int] = {}
-    drifted_n: dict[str, int] = {}
+    # An uncovered call is one concordance would not have touched: its counterfactual is its
+    # own actual tokens, so it contributes calls and size but never a saving.
+    totals: dict[str, dict[str, int]] = {}
     answerable: dict[str, dict[str, int]] = {}
+    split: dict[str, dict[str, dict[str, int]]] = {}
     for _sid, kind, cov, act, con, ans, drf in rows:
-        calls[kind] = calls.get(kind, 0) + 1
-        covered[kind] = covered.get(kind, 0) + int(cov)
-        actual[kind] = actual.get(kind, 0) + int(act)
-        conc[kind] = conc.get(kind, 0) + int(con)
-        drifted_n[kind] = drifted_n.get(kind, 0) + (drf == "yes")
+        counterfactual = int(con) if cov else int(act)
+        t = totals.setdefault(kind, dict.fromkeys(
+            ("calls", "covered", "uncovered", "actual_tokens", "concordance_tokens",
+             "counterfactual_tokens", "drifted"), 0))
+        t["calls"] += 1
+        t["covered"] += int(cov)
+        t["uncovered"] += int(not cov)
+        t["actual_tokens"] += int(act)
+        t["concordance_tokens"] += int(con) if cov else 0
+        t["counterfactual_tokens"] += counterfactual
+        t["drifted"] += drf == "yes"
         tally = answerable.setdefault(kind, {"yes": 0, "no": 0, "unknown": 0})
         tally[ans] = tally.get(ans, 0) + 1
-    by_kind = {k: {"calls": calls[k], "covered": covered[k], "actual_tokens": actual[k],
-                   "concordance_tokens": conc[k], "answerable": answerable[k],
-                   "drifted": drifted_n[k]} for k in calls}
-    out.update(sessions=len({r[0] for r in rows}), rows=len(rows),
-               covered=sum(int(r[2]) for r in rows), by_kind=by_kind)
+        part = split.setdefault(kind, {}).setdefault(
+            ans, {"calls": 0, "actual_tokens": 0, "counterfactual_tokens": 0})
+        part["calls"] += 1
+        part["actual_tokens"] += int(act)
+        part["counterfactual_tokens"] += counterfactual
+    by_kind = {k: {**t, "answerable": answerable[k], "by_answerable": split[k]}
+               for k, t in totals.items()}
+    out.update(sessions=len({r[0] for r in rows}), rows=len(rows), by_kind=by_kind,
+               covered=sum(int(r[2]) for r in rows), uncovered=sum(int(not r[2]) for r in rows))
     return out

@@ -93,19 +93,26 @@ def name_command(args: argparse.Namespace, cwd: Path, stats: dict[str, object],
     facts.update(found=True, target=q, definition=vi.path_of(q))
     note = "" if found.confidence == "exact" else f" ({found.confidence} match for {args.name})"
     if args.command == "callers":
-        hits = callers(vi, q, Snippets(view))
-        facts["hits"] = [{"path": h.path, "line": h.line} for h in hits]
-        rows = [f"{h.path}:{h.line} in {h.symbol} ({h.confidence})\n{h.snippet}" for h in hits]
+        found_callers = callers(vi, q, Snippets(view))
+        places = [(h.path, h.line) for h in found_callers]
+        rows = [f"{h.path}:{h.line} in {h.symbol} ({h.confidence})\n{h.snippet}"
+                for h in found_callers]
         section = Section(f"Callers of {q}{note}", rows)
     else:
-        tests = guarding_tests(vi, q, args.hops)
-        facts["hits"] = [{"path": t.path, "line": t.line} for t in tests]
+        found_tests = guarding_tests(vi, q, args.hops)
+        places = [(t.path, t.line) for t in found_tests]
         rows = [f"{t.qualname} {t.path}:{t.line} ({t.hops} hop{'s' if t.hops > 1 else ''})"
-                for t in tests]
+                for t in found_tests]
         section = Section(f"Tests reaching {q}{note}", rows)
     if not section.rows:
         return f"{section.title}: none found", 0, view.view_id
-    return render([], [section], [], args.budget, stats), 0, view.view_id
+    text = render([], [section], [], args.budget, stats)
+    # hits are what the text shows: an agent cannot open what sits behind "+N more"
+    cut, omitted = stats.get("cut"), stats.get("omitted")
+    hidden = cut.get(section.title, 0) if isinstance(cut, dict) else 0
+    shown = 0 if isinstance(omitted, list) and section.title in omitted else len(rows) - hidden
+    facts["hits"] = [{"path": path, "line": line} for path, line in places[:shown]]
+    return text, 0, view.view_id
 
 
 def miss_text(name: str, found: Resolved) -> str:

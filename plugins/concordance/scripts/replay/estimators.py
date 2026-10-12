@@ -12,6 +12,12 @@ from scripts.replay import runner
 from scripts.replay.transcript import ToolCall
 
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# the CLI's query commands: an agent's own concordance call is `<...>/concordance/scripts/cli.py
+# <command>` or `concordance <command>`, never merely a command that mentions the files
+_QUERIES = ("index", "review-context", "removed", "sig-drift", "literals", "touched", "check",
+            "callers", "tests", "coverage")
+_INVOCATION = re.compile(
+    rf"(?:(?:^|[\s;&|(])concordance|concordance/scripts/cli\.py)\s+(?:{'|'.join(_QUERIES)})\b")
 
 
 @dataclass(frozen=True)
@@ -65,7 +71,7 @@ def match(call: ToolCall) -> Query | None:
             return Query("callers", "grep", ["callers", pattern])
     if call.name == "Bash":
         command = call.input.get("command")
-        if isinstance(command, str) and "concordance" in command and "cli.py" in command:
+        if isinstance(command, str) and _INVOCATION.search(command):
             return Query("passthrough", "concordance", [])
     return None
 
