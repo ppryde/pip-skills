@@ -39,7 +39,7 @@ If Inquisition finds no config file, it points you to `/puritan:covenant discove
 
 ### Inquisition — Code Audit (`/puritan:inquisition`)
 
-Inquisition audits your codebase against the doctrines configured in `.architecture/config.yml`. It dispatches parallel subagents per doctrine and collates a structured violation report.
+Inquisition audits your codebase against the doctrines configured in `.architecture/config.yml`. It dispatches `pip-agents:reviewer-rules` agents in parallel, one per batch of at most 30 rules (`skills/doctrines/BATCHES.md`), and collates a structured violation report. The plugin depends on `pip-agents`, which Claude Code installs with it.
 
 **Modes:**
 
@@ -62,7 +62,7 @@ Inquisition audits your codebase against the doctrines configured in `.architect
 
 **Strictness levels** (per doctrine in `.architecture/decisions.yml`):
 - `strict` — all violations kept at original severity
-- `pragmatic` — allowed exceptions become warnings
+- `pragmatic` — violations covered by the doctrine's Allowed Exceptions become warnings (since 1.3.0 the audit agents flag them, so this now takes effect)
 - `aspirational` — all violations become warnings
 
 ---

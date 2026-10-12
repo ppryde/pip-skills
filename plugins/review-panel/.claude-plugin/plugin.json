@@ -1,6 +1,6 @@
 {
   "name": "review-panel",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "dependencies": ["pip-agents"],
   "description": "Composable code review: swappable reviewer lenses × orchestration strategies, composed into named profiles.",
   "author": "Pip"

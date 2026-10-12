@@ -28,7 +28,9 @@
         "run",
         "plan",
         "change",
-        "test"
+        "test",
+        "summary",
+        "research"
       ]
     },
     "persona": {
@@ -234,6 +236,38 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "summary"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/summary"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "research"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/research"
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -323,6 +357,13 @@
           "type": "string",
           "description": "lens rules: where the rule comes from (clone personas: the source comment URL)",
           "x-lens": "rules"
+        },
+        "exception": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "lens rules, brief exceptions report: the Allowed Exceptions bullet this finding falls under",
+          "x-lens": "rules",
+          "x-hint": "exceptions bullet, verbatim"
         }
       }
     },
@@ -603,6 +644,39 @@
             "type": "string"
           },
           "description": "needs_context only"
+        },
+        "steps": {
+          "type": "array",
+          "description": "planner persona: ordered steps, each small enough for one implementer brief",
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "files",
+              "check"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "files the step touches",
+                "x-hint": "file the step touches"
+              },
+              "check": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "the command or observation that shows the step is done",
+                "x-hint": "how to tell it is done"
+              }
+            }
+          }
         }
       }
     },
@@ -727,6 +801,100 @@
               }
             }
           }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "points",
+        "omitted"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "text",
+              "source"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "type": "string",
+                "maxLength": 240,
+                "x-hint": "one fact, one line"
+              },
+              "source": {
+                "type": "string",
+                "description": "file:line it came from",
+                "x-hint": "file:line"
+              }
+            }
+          },
+          "description": "the facts the brief's question needs, most important first"
+        },
+        "omitted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "material left out: <what>: <why>",
+          "x-hint": "what: why"
+        }
+      }
+    },
+    "research": {
+      "type": "object",
+      "required": [
+        "answer",
+        "sources",
+        "gaps"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "type": "string",
+          "maxLength": 1200,
+          "description": "the answer to the brief's question, in your own words",
+          "x-hint": "the answer"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "note"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "note": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "what this source shows",
+                "x-hint": "what it shows"
+              }
+            }
+          },
+          "description": "what the answer rests on; each opened"
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "what you could not establish: <what>: <why>",
+          "x-hint": "what: why"
         }
       }
     }

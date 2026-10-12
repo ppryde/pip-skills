@@ -23,7 +23,7 @@ gh pr view '<number>' --json headRefOid,baseRefName,files
 ```
 - `headRefOid` is the head commit (40 hex digits; refuse anything else). If `git cat-file -e '<oid>^{commit}'` fails, run `git fetch origin 'pull/<number>/head'` once (the one git command here that is not read-only: it writes objects and FETCH_HEAD, nothing else); if the commit is still missing, report the PR as not accessible.
 - `files` lists the changed paths; drop entries whose `changeType` is `DELETED`, keep the rest (the `path` is the destination for a rename), and filter to `email_paths` and the email extensions as above. A path that starts with `-` or `/`, or has a `..` part, is refused.
-- Read every file from that commit: `scan --rev '<oid>' --files ...` for Phase 1 (`audit.md §Audit pass`) and `git show '<oid>:<path>'` for Phase 2 and the line numbers. Never read the working-tree copy in PR mode.
+- Read every file from that commit: `scan --rev '<oid>' --files ...` for Phase 1 (`audit.md §Audit pass`) and `git show '<oid>:<path>'` for Phase 2 and the line numbers; when fanning out, `prepare --rev '<oid>'` copies the files from that commit for the agents (`audit.md §Dispatch`). Never read the working-tree copy in PR mode.
 - `baseRefName` must match `^[A-Za-z0-9._][A-Za-z0-9._/-]*$`. The diff base is `git merge-base '<oid>' 'origin/<baseRefName>'`; if that does not resolve, treat every line as changed (see Changed lines).
 
 **Single file mode:** Named file only.

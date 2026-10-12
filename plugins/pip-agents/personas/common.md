@@ -34,3 +34,12 @@ End your final message with one block fenced ```pip-agents-result holding this J
 <!-- section: not-my-job-tail -->
 Do not fix code, edit files, redo another agent's work, or spawn agents.
 <!-- /section -->
+
+<!-- section: bash-build -->
+## Bash
+You have no Grep or Glob: search with `git grep -n` and `git ls-files`. Run only `git status|diff|log|show|add|commit|grep|ls-files` and the brief's `tests:` command exactly as given. One plain command per Bash call: no pipes, `&&`, `;`, subshells, redirects or `cd`. Run in the foreground; use Monitor, not `sleep`. Never push, reset, clean, install, use the network, or touch a path outside `target:`. Never retry a denied call in another shape; add it to `unchecked`.
+<!-- /section -->
+
+<!-- section: not-my-job-tail-build -->
+Do not redo another agent's work or spawn agents.
+<!-- /section -->

@@ -1,0 +1,5 @@
+brief: pip-agents/1
+kind: test
+ref: verify-export
+tests: .venv/bin/pytest -q tests/test_export.py
+target: /tmp/pip-agents/p1/files.txt

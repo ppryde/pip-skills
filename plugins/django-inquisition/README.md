@@ -41,9 +41,10 @@ Or reference the plugin directory directly in your Claude Code settings.
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--parallel` | off | Fan out 8 subagents (one per check-group); merge and rank results |
-| `--thorough` | off | Read every active group file whole and evaluate every check, instead of opening only the checks the index triggers nominate |
+| `--parallel` | off | Fan out one `pip-agents:reviewer-rules` agent per batch of nominated checks; merge and rank results. Runs with more than 30 nominated checks fan out on their own |
+| `--thorough` | off | Evaluate every active check, instead of only the checks the index triggers nominate (implies fan-out) |
 | `--no-explain` | off | Skip EXPLAIN even when DB is reachable |
+| `--explain-analyze` | off | Allow `EXPLAIN ANALYZE` instead of plain `EXPLAIN`: only on a local or test database and only for SELECT-shaped findings, inside `BEGIN ... ROLLBACK`; otherwise it is refused and plain `EXPLAIN` is used |
 | `--report` | off | Write full markdown report to `reports/optimise-orm/<slug>-<timestamp>.md` |
 | `--engine=<pg\|mysql\|sqlite\|oracle>` | auto-detect | Override DB engine detection |
 | `--only=<group,group>` | all groups | Run only the named check-groups |
@@ -59,6 +60,8 @@ The default run is trigger-gated. `scripts/triggers.py` runs every check's trigg
 - Directory scans prune `.venv`, `venv`, `node_modules`, `migrations`, `.git` and `__pycache__`; a file passed explicitly is never pruned (it is still skipped if over 2 MB or binary).
 
 ---
+
+The plugin depends on `pip-agents` (Claude Code installs it with this plugin): the caller-discovery greps of large targets go to `pip-agents:explorer`, fan-out batches to `pip-agents:reviewer-rules`. EXPLAIN is plain `EXPLAIN` by default (since 0.5.0; it used to run `EXPLAIN (ANALYZE, BUFFERS)` on SELECT-shaped findings).
 
 ## Example output
 

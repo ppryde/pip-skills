@@ -11,7 +11,8 @@ import pytest
 from conftest import CONTRACT, PLUGIN, ROOT
 
 AGENTS = PLUGIN / "agents"
-NAMES = ["explorer", "gatekeeper", "reviewer-correctness", "reviewer-rules", "reviewer-scope", "reviewer-security", "validator"]
+SPECIALISTS = ["explorer", "implementer", "planner", "researcher", "summariser", "verifier"]
+NAMES = sorted(["gatekeeper", "reviewer-correctness", "reviewer-rules", "reviewer-scope", "reviewer-security", "validator", *SPECIALISTS])
 LENSES = {"reviewer-correctness": "correctness", "reviewer-security": "security", "reviewer-scope": "scope", "reviewer-rules": "rules"}
 BANNED_TOOLS = {"Agent", "Skill", "Edit", "Write", "WebFetch", "WebSearch"}
 
@@ -56,7 +57,10 @@ def test_frontmatter(ba):
         assert keys == order, n
         assert fm["name"] == n
         assert fm["tools"] == rows[n]["tools"], n
-        assert not BANNED_TOOLS & set(fm["tools"].split(", ")) and "mcp__" not in fm["tools"], n
+        allowed_writes = {"Edit", "Write"} if n == "implementer" else set()  # kind change only
+        assert not (BANNED_TOOLS - allowed_writes) & set(fm["tools"].split(", ")) and "mcp__" not in fm["tools"], n
+        if n != "implementer":
+            assert not {"Edit", "Write"} & set(fm["tools"].split(", ")), n
         assert fm["omitClaudeMd"] == "true" and fm["model"] in {"sonnet", "haiku"}, n
         assert "disallowedTools" not in fm, n
         assert fm["generated"] == f"build_agents.py contract {rev}", n
@@ -70,7 +74,7 @@ def test_descriptions(ba):
         assert d.endswith(".") and ". " not in d and "dispatched only by pip-skills skills" in d, n
         assert not any(b.lower() in d.lower() for b in ba.BANNED_DESC), n
         total += len(f"pip-agents:{n}: {d}\n".encode())
-    assert total <= 1_200, total
+    assert total <= 2_000, total  # 12 entries since the five specialists (owner decision)
 
 
 def _skeleton_of(body):
@@ -93,11 +97,11 @@ def test_skeletons(ba):
             if pmap[n]["kind"] == "review":
                 assert banned not in pay, (n, banned)
         if pmap[n]["kind"] == "review":
-            others = {"trigger", "commands_run", "old", "new", "intent", "affected", "rules_checked", "n_a", "rule", "citation"}
+            others = {"trigger", "commands_run", "old", "new", "intent", "affected", "rules_checked", "n_a", "rule", "citation", "exception"}
             own = {
                 "correctness": {"trigger", "commands_run"},
                 "scope": {"old", "new", "intent", "affected"},
-                "rules": {"rules_checked", "n_a", "rule", "citation"},
+                "rules": {"rules_checked", "n_a", "rule", "citation", "exception"},
                 "security": set(),
             }[pmap[n]["lens"]]
             seen = set(pay) | set(pay["findings"][0])
