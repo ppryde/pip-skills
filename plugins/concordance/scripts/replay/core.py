@@ -19,12 +19,16 @@ def replay_session(session: Session, mode: str) -> list[dict[str, object]]:
         mine = by_agent[call.agent_id]
         query = estimators.match(call)
         kind = query.kind if query else call.name.lower()
-        est = estimators.estimate(query, call, [c for c in mine if c.seq > call.seq]) \
-            if query else estimators.NOT_COVERED
+        est = estimators.NOT_COVERED
         drifted = "unknown"
-        if call.name == "Read" and isinstance(call.input.get("file_path"), str):
-            drifted = drift.drifted([c for c in mine if c.seq <= call.seq],
-                                    str(call.input["file_path"]), call.cwd)
+        try:  # one odd call must not abort the whole replay: it becomes an uncovered row
+            if query:
+                est = estimators.estimate(query, call, [c for c in mine if c.seq > call.seq])
+            if call.name == "Read" and isinstance(call.input.get("file_path"), str):
+                drifted = drift.drifted([c for c in mine if c.seq <= call.seq],
+                                        str(call.input["file_path"]), call.cwd)
+        except Exception:  # noqa: BLE001
+            est, drifted = estimators.NOT_COVERED, "unknown"
         rows.append({
             "session_id": session.session_id, "tool_use_id": call.tool_use_id,
             "agent_id": call.agent_id, "kind": kind,

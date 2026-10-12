@@ -32,7 +32,12 @@ def test_replay_emits_numbers_only(make_repo, tmp_path: Path) -> None:
     db = sqlite3.connect(tmp_path / "config" / "concordance" / "usage.db")
     stored = db.execute("SELECT * FROM replay_rows").fetchall()
     assert len(stored) == 3
-    assert not any(leak in json.dumps(stored) for leak in (str(repo.root), "app/api.py", "refund"))
+    assert not any(leak in json.dumps(stored)
+                   for leak in (str(repo.root), "app/api.py", "refund", "return"))
+    assert out.stderr == ""
+    summary = cli(repo.root, "stats", "--replay")
+    for leak in (str(repo.root), "app/api.py", "refund", "return"):
+        assert leak not in summary.stdout + summary.stderr
 
 
 def test_replay_twice_replaces_rows(make_repo, tmp_path: Path) -> None:
@@ -64,6 +69,11 @@ def test_replay_calls_do_not_count_as_usage(make_repo, tmp_path: Path) -> None:
     cli(repo.root, "replay", "--session", "s1")
     stats = json.loads(cli(repo.root, "stats", "--json").stdout)
     assert "callers" not in stats["commands"]
+    # positive control: the covered grep really ran the CLI, and its event is tagged replay
+    db = sqlite3.connect(tmp_path / "config" / "concordance" / "usage.db")
+    assert db.execute("SELECT covered FROM replay_rows WHERE kind='grep'").fetchone() == (1,)
+    tagged = db.execute("SELECT payload FROM events WHERE command='callers'").fetchall()
+    assert tagged and all(json.loads(p)["origin"] == "replay" for (p,) in tagged)
 
 
 def test_stats_replay_summarises(make_repo, tmp_path: Path) -> None:
@@ -81,3 +91,42 @@ def test_mode_command_records_preference(make_repo) -> None:
     out = cli(repo.root, "mode", "inject", "--session", "abc")
     assert out.returncode == 0 and out.stdout.strip() == "mode: inject (session abc)"
     assert "repo default" in cli(repo.root, "mode", "shadow").stdout
+
+
+def test_shrunk_transcript_replaces_session_wholesale(make_repo, tmp_path: Path) -> None:
+    repo = make_repo(BASE)
+    _session(tmp_path, repo.root)
+    cli(repo.root, "replay", "--session", "s1")
+    t = Transcript(tmp_path / "config" / "projects", "s1", repo.root)
+    t.call("Read", {"file_path": f"{repo.root}/app/api.py"}, "x")
+    t.write(age_s=3600)
+    assert cli(repo.root, "replay", "--session", "s1", "--force").returncode == 0
+    db = sqlite3.connect(tmp_path / "config" / "concordance" / "usage.db")
+    assert db.execute("SELECT COUNT(*) FROM replay_rows").fetchone()[0] == 1
+
+
+def test_repo_default_mode_comes_from_the_sessions_repo(make_repo, tmp_path: Path) -> None:
+    repo = make_repo(BASE)
+    _session(tmp_path, repo.root)
+    cli(repo.root, "mode", "inject")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    rows = json.loads(cli(elsewhere, "replay", "--session", "s1").stdout)
+    assert {r["mode"] for r in rows} == {"inject"}
+
+
+def test_one_failing_estimate_does_not_abort_the_replay(make_repo, tmp_path: Path,
+                                                        monkeypatch) -> None:
+    from scripts.replay import core, estimators, transcript
+    repo = make_repo(BASE)
+    _session(tmp_path, repo.root)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("estimator exploded")
+
+    monkeypatch.setattr(estimators, "estimate", boom)
+    files = transcript.session_files("s1")
+    rows = core.replay_session(transcript.load("s1", files), "shadow")
+    assert [r["kind"] for r in rows] == ["read", "grep", "read"]
+    grep = rows[1]
+    assert grep["covered"] is False and grep["drifted"] == "unknown"

@@ -96,7 +96,8 @@ def replay(args: argparse.Namespace, cwd: Path) -> int:
         print("concordance: session not finished (idle < 15 min); use --force", file=sys.stderr)
         return 2
     session = transcript.load(args.session, files)
-    rows = core.replay_session(session, modes.get_mode(args.session, common.repo_key_of(cwd)))
+    home = next((Path(c.cwd) for c in session.calls if c.cwd and Path(c.cwd).is_dir()), cwd)
+    rows = core.replay_session(session, modes.get_mode(args.session, common.repo_key_of(home)))
     try:
         replay_store.save(rows)
     except Exception as exc:  # noqa: BLE001 - unusable usage log: exit 2, never a traceback

@@ -31,6 +31,8 @@ def save(rows: list[dict[str, object]], path: Path | None = None) -> None:
     now = time.time()
     try:
         with conn:
+            for sid in {str(r["session_id"]) for r in rows}:
+                conn.execute("DELETE FROM replay_rows WHERE session_id = ?", (sid,))
             conn.executemany(
                 f"INSERT OR REPLACE INTO replay_rows({', '.join(ROW_FIELDS)}, replayed_at) "
                 f"VALUES ({', '.join('?' for _ in ROW_FIELDS)}, ?)",
