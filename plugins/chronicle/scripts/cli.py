@@ -31,6 +31,7 @@ import sqlite3
 
 from scripts import (
     chrome_profile,
+    concordance,
     dedupe,
     ingest,
     pricehistory,
@@ -95,6 +96,13 @@ def cmd_sync(args: argparse.Namespace) -> int:
         # result (`pricing: {status, changed, ...}`) and a failure changes
         # nothing else about the sync. Off with CHRONICLE_NO_PRICING_REFRESH=1.
         pricing = pricerefresh.maybe_refresh(conn)
+        # Concordance replay of finished sessions: optional, never fatal, off with
+        # CHRONICLE_NO_CONCORDANCE=1.
+        try:
+            replay = concordance.sync_step(conn)
+        except Exception as exc:  # noqa: BLE001 - optional reader: never fails sync
+            print(f"chronicle: concordance replay skipped: {exc!r}", file=sys.stderr)
+            replay = None
     finally:
         conn.close()
     # Config entries that were skipped as invalid are volume/remote errors
@@ -107,6 +115,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     out: dict[str, Any] = {
         **result,
         "pricing": pricing,
+        **({"concordance": replay} if replay is not None else {}),
         "remotes": remote_result["remotes"],
         "projects_dirs": [str(p) for p in projects],
         "db": str(store.db_path()),

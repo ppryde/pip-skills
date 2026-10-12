@@ -1,4 +1,7 @@
 import json
+import subprocess
+import time
+from pathlib import Path
 
 from scripts import cli, concordance, ingest, report, store
 
@@ -155,3 +158,78 @@ def test_store_rows_returns_rows_actually_stored_when_ids_repeat() -> None:
     conn = store.connect()
     assert concordance.store_rows(conn, "s", [_row("a"), _row("a", kind="read")]) == 1
     assert conn.execute("SELECT COUNT(*) FROM concordance_rows").fetchone()[0] == 1
+
+
+def _finished_session(builder) -> tuple:
+    path = (builder.turn("m1", T0, tools=["Grep"])
+            .tool_result("r1", T1, tool_use_id="m1-tool0", content="x").write())
+    conn = store.connect()
+    ingest.ingest_session(conn, path)
+    sid = conn.execute("SELECT session_id FROM sessions").fetchone()[0]
+    return conn, sid
+
+
+def _fake_cli(tmp_path: Path) -> dict[str, str]:
+    cli = tmp_path / "cli.py"
+    cli.write_text("# fake\n")
+    return {"CONCORDANCE_CLI": str(cli)}
+
+
+def test_sync_step_replays_and_marks(builder, tmp_path, monkeypatch) -> None:
+    conn, sid = _finished_session(builder)
+    calls = []
+
+    def fake(cmd, timeout):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, json.dumps([_row("m1-tool0")]), "")
+
+    monkeypatch.setattr(concordance, "_exec", fake)
+    env = _fake_cli(tmp_path)
+    assert concordance.sync_step(conn, now=time.time() + 10**7, env=env)["replayed"] == 1
+    assert "--session" in calls[0] and sid in calls[0]
+    assert concordance.sync_step(conn, now=time.time() + 10**7, env=env)["replayed"] == 0
+
+
+def test_sync_survives_replay_failure(builder, tmp_path, monkeypatch) -> None:
+    conn, _ = _finished_session(builder)
+
+    def boom(cmd, timeout):
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    monkeypatch.setattr(concordance, "_exec", boom)
+    out = concordance.sync_step(conn, now=time.time() + 10**7, env=_fake_cli(tmp_path))
+    assert out == {"replayed": 0, "failed": 1, "skipped": 0}
+
+
+def test_failed_session_is_retried(builder, tmp_path, monkeypatch) -> None:
+    conn, _ = _finished_session(builder)
+    results = iter([subprocess.CompletedProcess([], 2, "", "err"),
+                    subprocess.CompletedProcess([], 0, json.dumps([_row("m1-tool0")]), "")])
+    monkeypatch.setattr(concordance, "_exec", lambda cmd, timeout: next(results))
+    env = _fake_cli(tmp_path)
+    assert concordance.sync_step(conn, now=time.time() + 10**7, env=env)["failed"] == 1
+    assert concordance.sync_step(conn, now=time.time() + 10**7, env=env)["replayed"] == 1
+
+
+def test_live_session_is_not_replayed(builder, tmp_path, monkeypatch) -> None:
+    conn, _ = _finished_session(builder)
+    monkeypatch.setattr(concordance, "_exec", lambda cmd, timeout: 1 / 0)
+    last = conn.execute("SELECT last_activity_at FROM sessions").fetchone()[0]
+    out = concordance.sync_step(conn, now=last + 60, env=_fake_cli(tmp_path))
+    assert out["replayed"] == 0 and out["failed"] == 0
+
+
+def test_kill_switch_and_missing_cli(builder, monkeypatch) -> None:
+    conn, _ = _finished_session(builder)
+    monkeypatch.setattr(concordance, "_exec", lambda cmd, timeout: 1 / 0)
+    assert concordance.sync_step(conn, env={"CHRONICLE_NO_CONCORDANCE": "1"})["replayed"] == 0
+    assert concordance.find_cli(env={}) is None
+
+
+def test_cmd_sync_survives_concordance_blowup(builder, monkeypatch, capsys) -> None:
+    def boom(conn):
+        raise RuntimeError("nope")
+
+    monkeypatch.setattr(concordance, "sync_step", boom)
+    assert cli.main(["sync"]) == 0
+    assert "concordance replay skipped" in capsys.readouterr().err
