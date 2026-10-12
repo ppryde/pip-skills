@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.discovery import review_clone_root
+from scripts.discovery import review_clone_roots
 
 _ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
@@ -23,7 +23,12 @@ class Persona:
 
 
 def persona_path(alias: str) -> Path:
-    return review_clone_root() / alias / "PERSONA.md"
+    """The PERSONA.md to read: the first root that has it (current, then the legacy read-only one), else the current path."""
+    roots = review_clone_roots()
+    for root in roots:
+        if (root / alias / "PERSONA.md").exists():
+            return root / alias / "PERSONA.md"
+    return roots[0] / alias / "PERSONA.md"
 
 
 def read_persona(alias: str) -> Persona | None:
