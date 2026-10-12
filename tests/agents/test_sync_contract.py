@@ -27,6 +27,8 @@ def tree(tmp_path, sc):
     """A throwaway repo layout: the real pip-agents plugin plus empty consumer plugin folders."""
     root = tmp_path / "repo"
     shutil.copytree(PLUGIN, root / "plugins" / "pip-agents", ignore=shutil.ignore_patterns("__pycache__"))
+    (root / "tools").mkdir()
+    shutil.copy(ROOT / "tools" / "batching.py", root / "tools" / "batching.py")
     for c in sc.CONSUMERS:
         (root / "plugins" / c).mkdir(parents=True)
     return root
@@ -67,7 +69,8 @@ def test_manifest_records_revision_and_hashes(tree, sc):
     sc.sync(tree, "review-panel")
     dest = tree / "plugins" / "review-panel" / "vendor" / "pip-agents"
     m = json.loads((dest / "VENDORED.json").read_text())
-    assert m["source"] == "plugins/pip-agents"
+    assert m["sources"]["scripts/batching.py"] == "tools/batching.py"
+    assert m["sources"]["scripts/validate_result.py"] == "plugins/pip-agents/scripts/validate_result.py"
     assert m["revision"] == (PLUGIN / "contract" / "REVISION").read_text().strip()
     assert set(m["files"]) == set(sc.FILES)
     for rel, digest in m["files"].items():
@@ -103,6 +106,12 @@ def test_check_cli_reports_drift_and_writes_nothing(tree):
     assert not (tree / "plugins" / "review-panel" / "vendor").exists()
     assert run("--root", str(tree)).returncode == 0
     assert run("--root", str(tree), "--check").returncode == 0
+
+
+def test_batching_copy_follows_tools_batching(tree, sc):
+    sc.sync(tree, "review-clone")
+    (tree / "tools" / "batching.py").write_text("BATCH_CAP = 20\n")
+    assert any("batching.py differs" in p for p in sc.drift(tree, "review-clone"))
 
 
 def test_missing_source_and_unknown_consumer_exit_2(tree):

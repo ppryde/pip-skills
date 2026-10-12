@@ -36,8 +36,8 @@ def test_lint_doc_flags_missing_section(tmp_path):
     assert any("Stages" in p for p in problems)
 
 
-def test_general_reviewer_present():
-    assert discover_builtin_reviewers(REVIEWERS) == ["general"]
+def test_catalogue_reviewers_present():
+    assert discover_builtin_reviewers(REVIEWERS) == ["general", "security"]
 
 
 def test_general_reviewer_has_required_sections():

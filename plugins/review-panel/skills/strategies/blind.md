@@ -15,8 +15,8 @@ criteria (PR body or `context: [criteria]`). Do NOT pass whole files at HEAD,
 spec, or architecture notes.
 
 ## Stages
-1. **Reviewers (parallel).** One subagent per seated reviewer, `model: sonnet`,
-   prompted with diff + acceptance criteria only. Output: the finding contract.
+1. **Reviewers (parallel).** One `pip-agents` seat per seated reviewer, briefed with the diff as `target` and the
+   acceptance criteria as `--intent`, and no `--context`. Output: the result envelope, ingested into one payloads file.
 
 ## Reconciliation
 Run `reconcile` (SKILL Step 5). No verdict stage, so every finding is kept.

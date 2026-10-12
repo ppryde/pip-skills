@@ -9,6 +9,7 @@ from pathlib import Path
 
 from scripts.contract import rule_id_of
 from scripts.exceptions import ExceptionsError, parse_allowed_exceptions
+from scripts.lens import LensError, lens_of
 
 _SECTIONS = {
     "strategy": ["Summary", "When to use", "Context handling", "Stages",
@@ -50,6 +51,10 @@ def lint_doc(path: Path | str, kind: str) -> list[str]:
         if want not in headings:
             problems.append(f"{path.name}: missing '## {want}' section")
     if kind == "reviewer":
+        try:
+            lens_of(text)
+        except LensError as exc:
+            problems.append(f"{path.name}: {exc}")
         try:
             listed = parse_allowed_exceptions(text)
         except ExceptionsError as exc:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vendor the pip-agents validator and contract into the plugins that consume it (WF-270 PR E).
+"""Vendor the pip-agents validator, contract and batch planner into the plugins that consume them (WF-270 PR E).
 
 Stdlib only, deterministic. A consumer skill cannot reach a dependency plugin's files (its `${CLAUDE_PLUGIN_ROOT}` is
 its own root, and no variable names the dependency's versioned cache path; probe recorded in PR A), so each consumer
@@ -24,14 +24,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = Path("plugins") / "pip-agents"
-# Source file (relative to the pip-agents plugin) -> the same relative path under vendor/pip-agents/.
-FILES = (
-    "scripts/validate_result.py",
-    "contract/result.schema.json",
-    "contract/brief.schema.json",
-    "contract/personas.json",
-    "contract/REVISION",
-)
+# Path under vendor/pip-agents/ -> its source, relative to the repo root. The batch planner lives in tools/ (it is
+# repo tooling, not part of the pip-agents plugin), and consumers that split a rulebook import the vendored copy so
+# BATCH_CAP has one definition.
+SOURCES = {
+    "scripts/validate_result.py": SOURCE / "scripts" / "validate_result.py",
+    "scripts/batching.py": Path("tools") / "batching.py",
+    "contract/result.schema.json": SOURCE / "contract" / "result.schema.json",
+    "contract/brief.schema.json": SOURCE / "contract" / "brief.schema.json",
+    "contract/personas.json": SOURCE / "contract" / "personas.json",
+    "contract/REVISION": SOURCE / "contract" / "REVISION",
+}
+FILES = tuple(SOURCES)
 CONSUMERS = ("review-panel", "review-clone")
 VENDOR_DIR = Path("vendor") / "pip-agents"
 MANIFEST = "VENDORED.json"
@@ -47,16 +51,15 @@ def sha256(data: bytes) -> str:
 
 def expected(root: Path) -> dict[str, bytes]:
     """Vendored relative path -> exact bytes, for one consumer. Includes the manifest."""
-    src = root / SOURCE
     out: dict[str, bytes] = {}
-    for rel in FILES:
-        p = src / rel
+    for rel, source in SOURCES.items():
+        p = root / source
         if not p.is_file():
             raise SyncError(f"missing source file {p}")
         out[rel] = p.read_bytes()
     revision = out["contract/REVISION"].decode("utf-8").strip()
     manifest = {
-        "source": SOURCE.as_posix(),
+        "sources": {rel: source.as_posix() for rel, source in sorted(SOURCES.items())},
         "revision": revision,
         "files": {rel: sha256(out[rel]) for rel in sorted(out)},
     }

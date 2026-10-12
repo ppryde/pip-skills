@@ -1,7 +1,7 @@
 # Reconcile, strictness, decisions (convene Step 5)
 
-Write the reviewers' payloads (a JSON list) to a temp file and run
-`cli.py parse --findings <file>`. Critic and arbiter verdicts are keyed by the
+The reviewers' payloads are the file `cli.py ingest --out` built in Step 4 (a JSON list; hand-written payloads in the
+older shape are still read). Run `cli.py parse --findings <file>`. Critic and arbiter verdicts are keyed by the
 fingerprints it prints. No findings file is ever trusted: every command
 recomputes fingerprints and ignores any `verdict`, `reason`,
 `severity_before`, `fingerprint` or `_source` in its input, so the same
