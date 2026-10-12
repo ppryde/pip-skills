@@ -54,8 +54,9 @@ Each sub-project gets its own implementation plan; all land on `feat/concordance
 
 1. **Shadow measurement**: `--json` output for every query command, `replay`, the
    mode switch, `usage.db` replay rows, chronicle's optional reader and report, and
-   estimators for the existing commands (`callers`, `tests`, `check`, `removed`,
-   `sig-drift`, `literals`, `review-context`).
+   the first estimators: `callers` (Grep for a symbol) and a pass-through that counts
+   the agent's own concordance calls. Replaying `check` needs the pre-edit state
+   rebuilt, so it lands with `check --since-edit` in sub-project 2.
 2. **Savers and labels**: `outline`, `show`, `check --since-edit`, `tests-for`,
    report-only-what-changed `review-context`, the exact/name-matched label, and the
    inject-mode hooks.
@@ -74,8 +75,8 @@ Dogfooding starts when all four have landed.
 
 1. **Locate** the session transcript under `$CLAUDE_CONFIG_DIR/projects/<slug>/<id>.jsonl`
    and its subagent transcripts (reviews run as subagents). `--transcript` overrides.
-   A session still being written (modified in the last 5 minutes, or with no final
-   assistant turn) is refused with exit 2 unless `--force`.
+   A session still being written (transcript modified in the last 15 minutes, the same
+   idle horizon chronicle uses for "live") is refused with exit 2 unless `--force`.
 2. **Walk** tool uses and pair each with its result, in memory. Inputs and results are
    never written anywhere.
 3. **Match** each tool call to an estimator (section 2). A call no estimator matches is
@@ -101,13 +102,12 @@ Dogfooding starts when all four have landed.
  "answerable": "yes", "drifted": false, "mode": "shadow"}
 ```
 
-`actual_tokens` is the agent's tool result size (characters / 4, the same estimate
-the usage log uses). No row carries a path, pattern, command line or content.
+`actual_tokens` is the agent's tool result size estimated with concordance's own
+`est_tokens` (characters / 3), so both sides use one scale. No row carries a path, pattern, command line or content.
 
-Rows are also appended to `usage.db` as `replay` events (one per tool call, payload =
-the numeric fields above), so `concordance stats --replay` reports the size
-comparison without chronicle. Replaying a session twice replaces its rows (keyed by
-`session_id`, `tool_use_id`).
+Rows are also stored in `usage.db` in a `replay_rows` table (numeric fields above,
+primary key `(session_id, tool_use_id)`), so `concordance stats --replay` reports the
+size comparison without chronicle. Replaying a session twice replaces its rows.
 
 **Modules**: `scripts/replay/` package: `transcript.py` (locate, walk, pair; in
 memory), `estimators/` (one module per estimator, each exporting `match(call) ->
@@ -207,9 +207,11 @@ and which input fields (notably `tool_use_id`) hooks receive.
 ### 4. Chronicle's side
 
 - **Discovery**: chronicle looks for concordance via the installed plugin's scripts or
-  `CONCORDANCE_CLI`. Absent: nothing in this section runs, nothing errors.
-- **Replay at sync**: for each session ingested since the last run, in a repo with a
-  concordance store, and finished, chronicle runs `concordance replay --session <id>
+  `CONCORDANCE_CLI`. Absent, or `CHRONICLE_NO_CONCORDANCE=1`: nothing in this section
+  runs, nothing errors.
+- **Replay at sync**: for each finished session (idle past chronicle's 15-minute live
+  horizon) not yet replayed at its current last activity, newest first and at most 20
+  per sync, chronicle runs `concordance replay --session <id>
   --json`. A per-session cursor prevents repeats; failures are marked and retried next
   sync; chronicle's main sync never fails because of concordance.
 - **Storage**: new table `concordance_rows(session_id, tool_use_id, agent_id, kind,
@@ -218,7 +220,8 @@ and which input fields (notably `tool_use_id`) hooks receive.
 - **Carried cost**: for each tool result, tokens × assistant turns after it until the
   session ends, is cleared or compacts, priced at the model's cache-read rate from
   chronicle's ratebook. Computed for actual and concordance figures alike.
-- **Report**: `chronicle report --concordance [--repo …] [--since …] [--json]`: per
+- **Report**: `chronicle concordance [--root …] [--days N | --since …]` (JSON, like every
+  chronicle verb): per
   kind, actual vs concordance size and carried cost, answerable rate, drift rate,
   coverage share; adders show firing rate, cost and hit rate; shadow and inject
   sessions side by side. A dashboard page is out of scope for now.
