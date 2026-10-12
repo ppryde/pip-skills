@@ -25,6 +25,9 @@ class TestClassify:
         ("<tool_use_error>InputValidationError: bad</tool_use_error>", "error:input-validation"),
         ("No such tool available: Foo", "error:no-such-tool"),
         ("Exit code 1\nboom", "error:exit-code"),
+        ("Exit code 1\ngrep: Blocked: sleep 30 is not allowed", "error:exit-code"),
+        ("Exit code 1\nFAILED test: Request interrupted by user", "error:exit-code"),
+        ("Exit code 2\nFile access blocked: x", "error:exit-code"),
         ("something entirely new the harness said", "error:other"),
     ])
     def test_error_text_lands_in_a_fixed_category(self, text, outcome):
@@ -95,6 +98,10 @@ class TestShape:
         ("poetry run pytest -q", "poetry run pytest"),
         ("gh pr view 12 --json x", "gh pr view"),
         ("git client-acme-merge", "git"),
+        ("git -C /x status", "git status"),
+        ("git -c k=v log --oneline", "git log"),
+        ("git --git-dir=/x status", "git status"),
+        ("timeout -s KILL 10 pytest -q", "pytest"),
         ("./.venv/bin/python -m pytest", "python -m pytest"),
         ("ls | grep foo", "ls +compound"),
         ("for f in *; do echo $f; done", "(shell-block) +compound"),

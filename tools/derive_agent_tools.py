@@ -209,11 +209,11 @@ def plan_for(evidence: dict, personas: list[Persona], snapshot: dict, min_runs: 
             if row.get("agent_type") != persona.id or row["tool"] in persona.tools:
                 continue
             outcomes = row.get("outcomes") or {}
-            hits = int(outcomes.get("error:no-such-tool", 0)) + int(outcomes.get("error:input-validation", 0))
+            hits = int(outcomes.get("error:no-such-tool", 0))
             if hits:
                 plan.proposals.append(Proposal(
                     persona.id, "LOOSENS", row["tool"],
-                    f"{hits} 'no such tool' / input-validation hit(s) for an ungranted tool across "
+                    f"{hits} 'no such tool' hit(s) for an ungranted tool across "
                     f"{summary['runs']} runs"))
     _shape_rules(evidence, plan)
     return plan

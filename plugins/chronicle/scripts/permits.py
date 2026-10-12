@@ -166,6 +166,10 @@ def _decision_outcome(raw: Any) -> str | None:
 
 def _classify_text(head: str) -> tuple[str, str | None]:
     text = re.sub(r"^<tool_use_error>", "", head.strip())
+    # A failed command's own output can quote a harness phrase; a harness
+    # denial never starts with the shell's exit-code header.
+    if _ERROR_PATTERNS[-1][1].search(text):
+        return _ERROR_PATTERNS[-1][0], None
     for category, pattern in _DENIAL_PATTERNS:
         if pattern.search(text):
             reason = None
@@ -245,6 +249,8 @@ _SECOND_WORD = {
     "poetry": ("mypy", "pytest", "python", "ruff"),
     "uv": ("install", "run"),
 }
+# Global flags whose next token is a value, not the subcommand.
+_VALUE_FLAGS = {"git": ("-C", "-c", "--git-dir", "--work-tree", "--namespace")}
 _PROGRAMS = frozenset((
     "ls", "cat", "head", "tail", "grep", "sed", "awk", "find", "diff", "mkdir", "rm", "cp", "mv",
     "echo", "printf", "pwd", "which", "curl", "tar", "python", "python3", "pytest", "ruff",
@@ -287,7 +293,8 @@ def bash_shape(command: str) -> str:
             tokens = shlex.split(first, comments=True)
         except ValueError:
             tokens = first.split()
-        tokens = [t for t in tokens if not _ASSIGNMENT.match(t)]
+        while tokens and _ASSIGNMENT.match(tokens[0]):
+            tokens = tokens[1:]
         if tokens and tokens[0] in ("export", "local", "declare") and len(tokens) == 1:
             tokens = []
         if tokens:
@@ -296,7 +303,10 @@ def bash_shape(command: str) -> str:
         wrapper = tokens[0]
         tokens = tokens[1:]
         while tokens and tokens[0].startswith("-"):
+            flag = tokens[0]
             tokens = tokens[1:]
+            if wrapper == "timeout" and flag in ("-s", "-k", "--signal", "--kill-after") and tokens:
+                tokens = tokens[1:]
         if wrapper in _NUMERIC_WRAPPERS:
             while tokens and _NUMERIC_ARG.match(tokens[0]):
                 tokens = tokens[1:]
@@ -305,7 +315,15 @@ def bash_shape(command: str) -> str:
         return "(empty)"
     program = _program_name(tokens[0])
     shape = program
-    rest = [t for t in tokens[1:] if not t.startswith("-")]
+    rest: list[str] = []
+    skip = False
+    for token in tokens[1:]:
+        if skip:
+            skip = False
+        elif token.startswith("-"):
+            skip = token in _VALUE_FLAGS.get(program, ())
+        else:
+            rest.append(token)
     if program in _SUBCOMMANDS and rest and rest[0] in _SUBCOMMANDS[program]:
         shape += " " + rest[0]
         if len(rest) > 1 and rest[1] in _SECOND_WORD.get(program, ()):

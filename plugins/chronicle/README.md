@@ -325,7 +325,7 @@ paths it saw there. Two things are then in the way, and both have to be dealt wi
 **1. The files are not on this filesystem.** If the container's config dir is a Docker *named
 volume*, use [`volumes add`](#docker-volumes) above. The rest of this item is the **legacy**
 `pull-volume` route, superseded by it and kept because it still works: it copies the volume
-out with a helper container, and the copy goes **stale** until you run it again — which is
+out with a helper container (run with `--network none`; a `--dest` containing `:` is refused), and the copy goes **stale** until you run it again — which is
 exactly how weeks of Enterprise sessions once went missing.
 
 ```
@@ -422,11 +422,12 @@ every session ever run under the old one. The columns are **write-once**, so
 `sync --full` re-reading a transcript cannot overwrite the snapshot with
 today's answer.
 
-Sources differ, and so does coverage:
+Sources differ, and so does coverage. For the default `~/.claude` only, `~/.claude.json`
+is read when the dir has no `.claude.json` of its own; a custom config dir never falls back.
 
 | Field | Source | Coverage |
 |---|---|---|
-| plan / seat / billing / rate-limit tier | `<config_dir>/.claude.json` at ingest | every session whose config dir has the file |
+| plan / seat / billing / rate-limit tier | `<config_dir>/.claude.json` at ingest; for the default `~/.claude` only, `~/.claude.json` when the dir has no `.claude.json` of its own (custom dirs never fall back) | every session whose config dir has the file, or the default dir's fallback |
 | `owner_account_uuid` | a `bridge-session` record in the transcript | only sessions bridged from claude.ai |
 | `turns.account_uuid` / `bridge_owner_uuid` | the `bridge-session` record in force at each turn (see "Account attribution") | only bridged sessions; `sync --full` backfills |
 
@@ -612,7 +613,8 @@ figures; where a source lacks them the 1.25× (5-minute) / 2× (1-hour) multipli
   model's price as time-limited rows ("through August 31" / "starting September 1"), which
   are skipped rather than guessed at.
 - **Status.** `chronicle pricing status` lists each model's effective ranges, `pricing_as_of`
-  and the last refresh attempt and result.
+  and the last refresh attempt and result, plus `prefix_priced` (models priced through a
+  family-prefix rate) and `unpriced_models` (models seen in turns with no rate at all).
 
 Price history is only ever appended to: nothing updates or deletes a row.
 
