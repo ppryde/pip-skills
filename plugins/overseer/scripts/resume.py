@@ -8,6 +8,9 @@ from scripts import db
 from scripts.models import Card, format_tokens
 from scripts.relations import is_ready
 
+PLANNED_CAP = 10  # the briefing is re-injected on every /clear: the long tail lives in `board`
+CLI_PATH = Path(__file__).resolve().parent / "cli.py"
+
 
 def _branch_exists(repo_root: Path, branch: str | None) -> bool:
     if not branch:
@@ -141,7 +144,9 @@ def handoff_report(
     lines += ["", "## Planned"]
     if data["planned"]:
         lines += [f"- {p['id']} — {p['title']} ({p['complexity'] or '?'})"
-                  for p in data["planned"]]
+                  for p in data["planned"][:PLANNED_CAP]]
+        if len(data["planned"]) > PLANNED_CAP:
+            lines.append(f"- ... {len(data['planned']) - PLANNED_CAP} more, see `board`")
     else:
         lines.append("_Backlog empty._")
     if data.get("parked"):
@@ -156,5 +161,5 @@ def handoff_report(
         lines += [f"- {p}" for p in data["quarantined"]]
     lines += ["", "## Resume",
               "In a fresh session, invoke the overseer ledger skill and run:",
-              f"    python plugins/overseer/scripts/cli.py --root {repo_root} resume"]
+              f'    python3 "{CLI_PATH}" --root {repo_root} resume']
     return "\n".join(lines) + "\n"

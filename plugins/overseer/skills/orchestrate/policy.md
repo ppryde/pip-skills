@@ -1,43 +1,32 @@
-# Orchestration Policy
+# Orchestration Policy (L cards, re-grades, riders)
 
-The single tuning point for delegation, review depth, and watchdogs.
-Tiers: cheap / mid / strong — map to the smallest, middle, and most capable
-models the harness offers (currently haiku / sonnet / opus-or-better).
+Read for an L card, a cross-plugin card, or a re-grade decision. S and M need
+none of it: their tier table, round caps and ceremony are in `SKILL.md`.
+Tiers: cheap / mid / strong — the smallest, middle and most capable models the
+harness offers (currently haiku / sonnet / opus-or-better).
 
-| Complexity | Planner | Workers | Reviewers | Rounds cap | Unresponsive after (no transcript change) |
-|---|---|---|---|---|---|
-| S | mid | 1 × cheap | 1 × mid | 2 | 60k without a report |
-| M | mid | 1–2 × mid | 2 × mid, distinct lenses | 3 | 100k without a report |
-| L | strong | mid, chunked | round 1: 3 (one strong); rounds 2+: 2 (strong retained) | 4 | 160k without a report |
+| Complexity | Planner | Workers | Reviewers | Rounds cap |
+|---|---|---|---|---|
+| L | strong | mid, chunked | round 1: 3 (one strong); rounds 2+: 2 (strong retained) | 4 |
 
-An `XL` card (it should be split) uses the L rounds cap, 4; a card with no complexity is treated as M (cap 3).
+An `XL` card (it should be split) uses the L rounds cap, 4; a card with no
+complexity is treated as M (cap 3). The caps live in code (`models.ROUND_CAPS`).
 
 ## Right-sizing the ceremony
-
-Applied once, at pickup, before bootstrap commits to a path. The full
-sequence — planner dispatch, plan-review loop, PLAN GATE — is the maximum
-weight a card can draw, not the toll every card pays regardless of size.
-
-| Signal | Ceremony |
-|---|---|
-| **S, fully specified** — exact behaviour known up front, touches 1–2 files, follows an existing house pattern, or is prose-only | Skip the planner dispatch, the plan-review loop, and the PLAN GATE conversation. Write a short task brief straight onto the card in place of `## Plan`, then dispatch the implementer. |
-| **M, or ambiguous** — multiple seams, behaviour requires choices the card doesn't make, or an S card whose spec turns out incomplete on pickup | Brainstorm-lite or a written plan, proportionate to what's actually undecided — not the full weight by default, but not force-fit to S-thin either. (Brainstorm-lite is an informal options-weighing on the card itself, **not** the `superpowers:brainstorming` skill — that stays out of the loop while a card is under orchestration; see "Relation to superpowers" in SKILL.md.) |
-| **L, novel architecture, or cross-plugin** | Full planner dispatch → plan-review → PLAN GATE, no shortcuts. |
-
-**Review gates are not a triage lever.** impl-review and verification run in
-full at every size — a card found wanting because its ceremony was skipped
-is unreviewed, not efficient. Triage only ever scales what happens *before*
-implementation.
+Applied once, at pickup. The full sequence (planner, plan-review loop, PLAN
+GATE) is the maximum weight a card can draw, not the toll every card pays.
+M's "brainstorm-lite" is an informal options-weighing on the card itself, **not**
+the `superpowers:brainstorming` skill, which stays out of the loop while a card
+is under orchestration.
 
 **Escalation, not endurance.** A card that outgrows its triage mid-implementation
-— a new seam appears, an ambiguity surfaces the brief didn't cover — stops
-and re-triages upward (task brief → brainstorm-lite → written plan) rather
-than being pushed through an undersized process. Log the re-triage in the
-card's `## Decisions`, same as a complexity re-grade.
+(a new seam appears, an ambiguity the brief didn't cover) stops and re-triages
+upward (task brief → brainstorm-lite → written plan) rather than being pushed
+through an undersized process. Log the re-triage in `## Decisions`, same as a
+complexity re-grade.
 
-Triage rides the card's own `complexity` field and the estimate bands below
-(S ≈ 100–200k, M ≈ 300–500k, L ≈ 700k+) — it is not a second scale. S is the
-default skip; L never skips; M is judged on the day.
+Triage rides the card's own `complexity` field and the estimate bands below; it
+is not a second scale. S is the default skip; L never skips; M is judged on the day.
 
 ## Riders
 - **Split L first.** The planner must attempt to decompose an L card into
@@ -49,7 +38,6 @@ default skip; L never skips; M is judged on the day.
   re-graded upward, the panel grows to match, and the re-grade is logged in
   the card's `## Decisions`.
 - **Estimate bands:** S ≈ 100–200k, M ≈ 300–500k, L ≈ 700k+ tokens. The 2×
-  tripwire is hard: CLI exit 2 → stop the card, escalate with the overrun
-  story.
+  tripwire is hard: CLI exit 2 → stop the card, escalate with the overrun story.
 - **Stacking eligibility:** S cards only; no scope-creep escalations; batch
   pre-declared or user-approved.

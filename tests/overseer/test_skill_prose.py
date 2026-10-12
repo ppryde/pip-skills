@@ -22,7 +22,7 @@ def test_retired_instructions_gone():
 
 
 def test_version_bumped():
-    assert json.loads((OVERSEER / ".claude-plugin" / "plugin.json").read_text())["version"] == "0.28.2"
+    assert json.loads((OVERSEER / ".claude-plugin" / "plugin.json").read_text())["version"] == "0.29.2"
 
 
 def test_cli_location_and_cheat_sheet_present():
@@ -33,9 +33,11 @@ def test_cli_location_and_cheat_sheet_present():
     assert "Locate the CLI" in SKILL
     assert "never search the filesystem for it" in SKILL
     assert "scripts/cli.py" in SKILL
+    block = SKILL.split("<!-- cli:begin -->", 1)[1].split("<!-- cli:end -->", 1)[0]
     for verb in ("resume", "bootstrap", "dispatch-prep", "set-stage", "set-section",
-                 "set-field", "block", "release", "show", "facts --pending"):
-        assert f"`{verb}`" in SKILL, verb
+                 "set-field", "facts", "handover"):
+        assert f"\n{verb} " in block or f"\n{verb}\n" in block, verb
+    assert "facts --pending" in SKILL
 
 
 def test_locate_the_cli_is_the_first_heading():

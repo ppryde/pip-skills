@@ -1,25 +1,17 @@
-# Adversarial review loop (both review stages)
+# Review loop: disputes, deadlock, L panels
 
-Applies to **plan-review** (over the card's plan) and **impl-review** (over the
-diff). `dispatch-prep` snapshots the plan or writes the diff for you; reviewers
-read files, never pasted walls.
+The steps themselves (panel, fixer, re-review, round cap, no pre-rated
+severities) are in `SKILL.md`; this is the part an S/M card rarely reaches.
 
-1. **Round n reviewers.** Panel per `policy.md` (count, tiers, lenses; L round 1
-   = 3 then 2 with the strong reviewer retained). For each slot A, B, C:
-   `dispatch-prep <id> --stage <stage> --role reviewer --slot <X> --round <n>
-   --lens <lens>`, then dispatch every `overseer:overseer-reviewer` **in one
-   turn**. Reviewers are independent: none sees another's current-round verdict.
-2. **Read the reports.** All `approved` → stage passes. Any `found wanting` with
-   C or I > 0 → step 3. Minors never force a round.
-3. **One fixer.** `dispatch-prep <id> --stage <stage> --role fixer --round <n>`
-   (it lists this round's verdict files) → dispatch `overseer:overseer-fixer`,
-   the same implementer lineage. You do not read the findings.
-4. **Re-review.** Round n+1 bundles list every earlier verdict and fix report;
-   reviewers must WITHDRAW or MAINTAIN (with new evidence) each DISPUTED finding.
-   A dispute maintained after that re-review is yours: open only that verdict
-   file and fix report, decide, and record the ruling in `## Decisions`.
-5. **Round cap per policy.** Cap hit → `block <id> --reason "user: review
-   deadlock — <summary>"`.
-6. The report hook logs every verdict under the round's header in `## Review
-   log` — you never call `log-review` in this loop.
-7. Never tell a reviewer what NOT to flag. Never pre-rate severities.
+- **L round 1** is 3 reviewers (one strong tier, lenses per `policy.md`), then 2
+  from round 2 with the strong reviewer retained.
+- **A maintained dispute.** Round n+1 reviewers must WITHDRAW or MAINTAIN (with
+  new evidence) each DISPUTED finding. One still maintained after that
+  re-review is yours: open only that verdict file and the fix report, decide,
+  and record the ruling in `## Decisions`. Do not open the other findings.
+- **Deadlock.** When the round cap hits with critical/important findings still
+  open, there is no further fixer: `block <id> --reason "user: review deadlock
+  — <summary>"` naming the findings that remain and the disputed ruling.
+- `dispatch-prep` for a fixer lists this round's verdict files and writes the
+  round n+1 bundles with every earlier verdict and fix report; you do not paste
+  them.
