@@ -1,9 +1,14 @@
 import json
+import sqlite3
 import subprocess
 import time
 from pathlib import Path
 
+import pytest
+
 from scripts import cli, concordance, ingest, report, store
+
+from .conftest import TranscriptBuilder
 
 T0 = "2026-09-01T10:00:00.000Z"
 T1 = "2026-09-01T10:00:05.000Z"
@@ -201,14 +206,119 @@ def test_sync_survives_replay_failure(builder, tmp_path, monkeypatch) -> None:
     assert out == {"replayed": 0, "failed": 1, "skipped": 0}
 
 
-def test_failed_session_is_retried(builder, tmp_path, monkeypatch) -> None:
-    conn, _ = _finished_session(builder)
+def test_failed_session_is_skipped_until_it_grows(builder, tmp_path, monkeypatch) -> None:
+    conn, sid = _finished_session(builder)
     results = iter([subprocess.CompletedProcess([], 2, "", "err"),
                     subprocess.CompletedProcess([], 0, json.dumps([_row("m1-tool0")]), "")])
     monkeypatch.setattr(concordance, "_exec", lambda cmd, timeout: next(results))
     env = _fake_cli(tmp_path)
-    assert concordance.sync_step(conn, now=time.time() + 10**7, env=env)["failed"] == 1
-    assert concordance.sync_step(conn, now=time.time() + 10**7, env=env)["replayed"] == 1
+    later = time.time() + 10**7
+    assert concordance.sync_step(conn, now=later, env=env)["failed"] == 1
+    assert concordance.sync_step(conn, now=later, env=env) == {"replayed": 0, "failed": 0,
+                                                              "skipped": 0}
+    with conn:
+        conn.execute("UPDATE sessions SET last_activity_at = last_activity_at + 1000 "
+                     "WHERE session_id = ?", (sid,))
+    assert concordance.sync_step(conn, now=later, env=env)["replayed"] == 1
+
+
+def _more_sessions(projects, conn, n: int) -> list[str]:
+    ids = []
+    for k in range(n):
+        b = TranscriptBuilder(projects, session_id=f"s{k + 2}")
+        path = (b.turn(f"x{k}", f"2026-09-0{k + 2}T10:00:00.000Z", tools=["Grep"])
+                .tool_result(f"r{k}", f"2026-09-0{k + 2}T10:00:05.000Z",
+                             tool_use_id=f"x{k}-tool0", content="x").write())
+        ingest.ingest_session(conn, path)
+        ids.append(f"s{k + 2}")
+    return ids
+
+
+def test_failing_newest_does_not_starve_older(builder, projects, tmp_path, monkeypatch) -> None:
+    conn, _ = _finished_session(builder)
+    newest = _more_sessions(projects, conn, 1)[0]
+    seen = []
+
+    def fake(cmd, timeout):
+        seen.append(cmd[cmd.index("--session") + 1])
+        ok = cmd[cmd.index("--session") + 1] != newest
+        return subprocess.CompletedProcess(cmd, 0 if ok else 2,
+                                           json.dumps([_row("m1-tool0")]) if ok else "", "")
+
+    monkeypatch.setattr(concordance, "_exec", fake)
+    env, later = _fake_cli(tmp_path), time.time() + 10**7
+    assert seen == [] and concordance.sync_step(conn, now=later, env=env, limit=1) == {
+        "replayed": 0, "failed": 1, "skipped": 0}
+    assert concordance.sync_step(conn, now=later, env=env, limit=1)["replayed"] == 1
+    assert seen[0] == newest and seen[1] != newest
+
+
+def test_limit_and_newest_first(builder, projects, tmp_path, monkeypatch) -> None:
+    conn, _ = _finished_session(builder)
+    _more_sessions(projects, conn, 2)
+    seen = []
+
+    def fake(cmd, timeout):
+        seen.append(cmd[cmd.index("--session") + 1])
+        return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
+    monkeypatch.setattr(concordance, "_exec", fake)
+    out = concordance.sync_step(conn, now=time.time() + 10**7, env=_fake_cli(tmp_path), limit=2)
+    assert out["replayed"] == 2 and seen == ["s3", "s2"]
+
+
+def test_budget_stops_new_starts(builder, projects, tmp_path, monkeypatch) -> None:
+    conn, _ = _finished_session(builder)
+    _more_sessions(projects, conn, 2)
+    ticks = iter(range(0, 10_000, 100))   # every clock() read advances 100 s
+    seen = []
+
+    def fake(cmd, timeout):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
+    monkeypatch.setattr(concordance, "_exec", fake)
+    out = concordance.sync_step(conn, now=time.time() + 10**7, env=_fake_cli(tmp_path),
+                                budget=250, clock=lambda: float(next(ticks)))
+    assert out["replayed"] == 2 and len(seen) == 2   # 3 candidates, third never started
+
+
+def test_timeout_is_bounded(monkeypatch, tmp_path) -> None:
+    got = []
+    monkeypatch.setattr(concordance, "_exec", lambda cmd, timeout: got.append(timeout) or 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        concordance.run_replay(tmp_path / "c.py", "s", tmp_path / "t")
+    assert got == [concordance.REPLAY_TIMEOUT] and concordance.REPLAY_TIMEOUT <= 120
+
+
+def test_bad_output_counts_as_failed(builder, tmp_path, monkeypatch) -> None:
+    for stdout in ("not json", '{"a": 1}'):
+        conn, _ = _finished_session(builder)
+        monkeypatch.setattr(concordance, "_exec",
+                            lambda cmd, timeout, o=stdout: subprocess.CompletedProcess(cmd, 0, o, ""))
+        out = concordance.sync_step(conn, now=time.time() + 10**7, env=_fake_cli(tmp_path))
+        assert out["failed"] == 1 and out["replayed"] == 0
+        conn.close()
+        store.db_path().unlink()
+
+
+def test_store_error_counts_as_failed(builder, tmp_path, monkeypatch) -> None:
+    conn, _ = _finished_session(builder)
+    monkeypatch.setattr(concordance, "_exec",
+                        lambda cmd, timeout: subprocess.CompletedProcess(cmd, 0, "[]", ""))
+
+    def boom(*a, **k):
+        raise sqlite3.OperationalError("disk")
+
+    monkeypatch.setattr(concordance, "store_rows", boom)
+    out = concordance.sync_step(conn, now=time.time() + 10**7, env=_fake_cli(tmp_path))
+    assert out == {"replayed": 0, "failed": 1, "skipped": 0}
+
+
+def test_candidate_lookup_failure_is_logged(tmp_path, capsys) -> None:
+    conn = sqlite3.connect(":memory:")   # no tables
+    out = concordance.sync_step(conn, now=time.time(), env=_fake_cli(tmp_path))
+    assert out["skipped"] == 1 and "candidate lookup skipped" in capsys.readouterr().err
 
 
 def test_live_session_is_not_replayed(builder, tmp_path, monkeypatch) -> None:
