@@ -1,0 +1,9 @@
+{
+  "name": "concordance-extract-ts",
+  "private": true,
+  "type": "module",
+  "description": "concordance's TypeScript fact extractor (parser only, no type checker).",
+  "dependencies": {
+    "typescript": "5.6.3"
+  }
+}

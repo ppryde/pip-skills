@@ -37,6 +37,7 @@ if str(_PLUGIN_ROOT) not in sys.path:
 import sqlite3
 
 from scripts import (
+    concordance,
     dedupe,
     ingest,
     permits_report,
@@ -86,6 +87,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     Docker trouble never fails the sync: it comes back as ``volume_errors``.
     Neither does a remote's: it comes back as ``remote_errors``, and
     ``CHRONICLE_NO_REMOTES=1`` skips remotes entirely, before any ssh call."""
+    started = time.monotonic()   # the concordance step budgets itself against this
     explicit = bool(args.projects)
     projects = [Path(p) for p in args.projects] if explicit else store.projects_dirs()
     configured, problems = ([], []) if explicit else store.load_volumes()
@@ -102,6 +104,13 @@ def cmd_sync(args: argparse.Namespace) -> int:
         # result (`pricing: {status, changed, ...}`) and a failure changes
         # nothing else about the sync. Off with CHRONICLE_NO_PRICING_REFRESH=1.
         pricing = pricerefresh.maybe_refresh(conn)
+        # Concordance replay of finished sessions: optional, never fatal, off with
+        # CHRONICLE_NO_CONCORDANCE=1.
+        try:
+            replay = concordance.sync_step(conn, sync_started=started)
+        except Exception as exc:  # noqa: BLE001 - optional reader: never fails sync
+            print(f"chronicle: concordance replay skipped: {exc!r}", file=sys.stderr)
+            replay = None
     finally:
         conn.close()
     # Config entries that were skipped as invalid are volume/remote errors
@@ -114,6 +123,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     out: dict[str, Any] = {
         **result,
         "pricing": pricing,
+        **({"concordance": replay} if replay is not None else {}),
         "remotes": remote_result["remotes"],
         "projects_dirs": [str(p) for p in projects],
         "db": str(store.db_path()),
@@ -419,6 +429,20 @@ def cmd_limits(args: argparse.Namespace) -> int:
     try:
         out = report.limits(conn, repo_root=args.root, since=_resolve_since(args), branch=args.branch,
                             account=args.account)
+    finally:
+        conn.close()
+    print(json.dumps(out))
+    return 0
+
+
+def cmd_concordance(args: argparse.Namespace) -> int:
+    conn = _open_readonly()
+    if conn is None:
+        print(json.dumps({"sessions": 0, "rows": 0, "by_kind": {}, "by_mode": {},
+                          "sessions_failed": 0, "sessions_pending": 0}))
+        return 0
+    try:
+        out = report.concordance(conn, repo_root=args.root, since=_resolve_since(args))
     finally:
         conn.close()
     print(json.dumps(out))
@@ -742,6 +766,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--branch", default=None)
     p.add_argument("--account", default=None)
     p.set_defaults(fn=cmd_limits)
+
+    p = sub.add_parser("concordance", help="replayed concordance counterfactuals: actual vs "
+                       "concordance size and carried cost (JSON)")
+    p.add_argument("--root", default=None)
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None)
+    window.add_argument("--since", type=_parse_since, default=None)
+    p.set_defaults(fn=cmd_concordance)
 
     p = sub.add_parser("sessions", help="session rows, most recent first (JSON)")
     p.add_argument("--root", default=None)
