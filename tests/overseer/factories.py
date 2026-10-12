@@ -26,3 +26,14 @@ def db_repo(tmp_path, monkeypatch):
     git_init(tmp_path)
     monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
     return tmp_path, db.connect(tmp_path, migrate=False)
+
+
+def write_legacy_card(root: Path, card: Card) -> Path:
+    """Write ``card`` as a pre-board.db ``.workflow/cards/<id>-<slug>.md`` file
+    (the file-store layout the one-time import still reads)."""
+    from scripts.store import slugify
+
+    path = root / "cards" / f"{card.id}-{slugify(card.title)}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(card.to_text())
+    return path

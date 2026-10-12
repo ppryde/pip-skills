@@ -30,17 +30,18 @@ adversarial review loops, integrated with sprint planning and superpowers.
   `conflicts` command to detect file-conflict patterns before merge.
 - Retro rollup on sprint close: `set-sprint-status closed` aggregates lessons and burn metrics.
 - Sprint pre-review: SPRINT GATE doctrine for superpowers integration, validation before stage entry.
-- Living knowledge base: durable facts under `knowledge/` with per-fact verification dates;
-  facts marked `[STALE]` after 90 days untouched; retirement to `retired/` (never deleted, supports
-  `superseded_by` chains); corrupt facts quarantined to `knowledge/corrupt/`; `knowledge.md` index
-  with active/stale/retired sections; `{{knowledge}}` injection into orchestration templates.
+- Living knowledge base: durable facts (rows in `board.db`) with per-fact verification dates;
+  facts marked `[STALE]` after 90 days untouched; retirement (never deleted, supports
+  `superseded_by` chains); `knowledge/` is a regenerated read-only view with a `knowledge.md`
+  index of active/stale/retired sections; `{{knowledge}}` injection into orchestration templates.
 - Context stewardship via the **`vigil`** plugin (a soft dependency): a promoted
   orchestrator caps its own context creep by handing its ledger rollup to vigil,
   which resets context in-process via `/clear` and re-injects the handover.
   Install `vigil` to enable it; overseer nudges you if it's missing.
-- Central per-repo storage: `board.db`, sprints, usage and the knowledge base
-  all live together under one folder, shared across every worktree — see
-  Storage below.
+- Central per-repo storage: `board.db` (cards, sprints, knowledge facts, pending facts,
+  stage evidence) and `usage.jsonl` live together under one folder, shared across every
+  worktree — see Storage below. Every card write is one `BEGIN IMMEDIATE` transaction, so a
+  CLI verb, the checklist hook and the report hook can no longer drop each other's edits.
 - `overseer backup`/`overseer restore` snapshot the board into a committed,
   diffable folder in the CURRENT working tree (not the shared central
   folder — see Storage below), and a PreToolUse hook can carry a fresh
@@ -57,10 +58,11 @@ shared by every worktree of that repo:
 
 ```
 $CLAUDE_CONFIG_DIR/overseer/<repo-label>-<hash>/
-├── board.db            # cards + meta (SQLite, WAL sidecars alongside)
-├── sprints/
-├── usage.jsonl
-├── knowledge/
+├── board.db            # cards, sprints, facts, pending facts, evidence (SQLite, WAL)
+├── board.db.pre-v2.<UTC>.bak   # one-off, verified copy taken by the v2 upgrade
+├── sprints/            # generated view of the sprints table (read-only)
+├── usage.jsonl         # append-only log (not in the database)
+├── knowledge/          # generated view of facts + pending (read-only)
 └── archive/
 ```
 
@@ -133,12 +135,14 @@ Because the live `board.db` is never committed, `backup`/`restore` are the
 bridge between the central folder and git — a diffable, mergeable safety net
 you can commit before a merge or push.
 
-- **`overseer backup [--dir PATH]`** dumps the repo's cards to `cards.json`
-  (one object per row, JSON columns copied verbatim for lossless round-trip),
-  copies `sprints/`, `usage.jsonl` and `knowledge/`, and writes a
-  `manifest.json` (schema version, overseer version, timestamp, repo label,
-  row/file counts) — all atomically swapped into `.overseer/backups/` (or
-  `--dir`) in the current working tree. No zip: plain JSON and text so the
+- **`overseer backup [--dir PATH]`** dumps every table — cards, meta, label colours,
+  sprints, facts, pending facts, stage evidence — to one JSON file each
+  (JSON columns copied verbatim for lossless round-trip), copies `usage.jsonl`,
+  and writes a `manifest.json` (schema version, overseer version, timestamp,
+  repo label, row counts) — all atomically swapped into `.overseer/backups/` (or
+  `--dir`) in the current working tree. It refuses a destination that exists,
+  is non-empty and has no `manifest.json` (it would replace the folder
+  wholesale), and any ancestor of the repo, the central folder or your home. No zip: plain JSON and text so the
   result diffs and merges cleanly in a PR. `--print-dir` prints the resolved
   absolute backup dir and exits without backing up — used by the pre-push
   hook to know exactly which path to `git add`/commit.
@@ -146,9 +150,56 @@ you can commit before a merge or push.
   backup, non-destructively: cards upsert by id with **last-modified-wins**
   (backup only replaces a row if it's newer); board-identity meta
   (`repo_root`, `schema_version`) is never overwritten; sprint/usage/
-  knowledge files are restored only if **absent** locally (fill-gaps, never
-  clobbers). Refuses loudly on a schema-version mismatch or corrupt JSON —
-  overseer's "never silently lose state" ethos extends to restores.
+  sprints, facts, pending facts, evidence and `usage.jsonl` are restored only
+  if **absent** locally (fill-gaps, never clobbers). A schema-1 snapshot (file
+  trees) still restores, through the importer. Refuses loudly on an unknown
+  snapshot schema or corrupt JSON — overseer's "never silently lose state" ethos
+  extends to restores.
+- **`overseer restore --from-bak FILE`** puts back a `board.db.pre-v2.*.bak`
+  exactly as it was before the schema upgrade (the board it replaces is saved
+  beside it as `*.pre-restore.*.bak`). The board is v1 again afterwards: install
+  the previous overseer version, or this one upgrades it again on next use.
+
+### Stage gates (0.28.0)
+
+Moving a card forward is checked against recorded evidence, not prose: into
+`implementation` (a real `## Plan` + a clean plan-review round; an S `--brief`
+card is exempt), into `verification` (a clean impl-review round), into
+`awaiting-merge` (a verifier `PASS`). `dispatch-prep` also enforces the round
+cap (S 2, M 3, L/XL 4) and the fixer-before-next-round order. The SubagentStop
+report hook records the evidence (`stage_evidence`) in the card's transaction;
+`dispatch-prep` records one `dispatch` row per reviewer/verifier, so a slot that
+never reports blocks the gate (a crash is not an approval). A refusal is exit 3
+with `GATE: ...` lines. Escapes: `--force-gate "user: <why>"` on `set-stage`,
+`dispatch-prep` or `bootstrap` (the reason is appended to the card's
+`## Decisions` and kept as a `force` evidence row; the dashboard's move API
+takes `force_gate` and records it as `dashboard: <reason>`, and a dashboard drag refused by a gate asks for that reason and retries; an empty reason is
+refused), `"gates": "warn"|"off"` in `.overseer/config.json`, or
+`OVERSEER_GATES=hard|warn|off` (a move that passes only because of `warn`/`off` leaves a `force` evidence row with status `bypassed` and a `GATE BYPASSED` line in `## Decisions`). Cards created before the board's `gates_from`
+date (set when the board is created or upgraded; a D1-era board is stamped when the
+first D2 command connects, binding from the next day) only warn.
+
+### Schema v2 upgrade (0.27.0)
+
+The first command after upgrading takes an online, integrity-checked copy of a
+populated v1 board (`board.db.pre-v2.<UTC>.bak`, newest three kept) **before any
+change**; if the copy cannot be verified the upgrade aborts with the board
+untouched. It then creates the v2 tables and imports `sprints/*.md`,
+`knowledge/facts|retired/*.md` and `knowledge/pending.jsonl` in one transaction
+(idempotent; nothing is moved or deleted; files that do not parse are listed on
+stderr and left in place), best-effort backfills `stage_evidence` from each live
+card's `## Review log` / `## Verification`, and records `gates_since`. Dry-run it
+on a copy first:
+
+```bash
+python3 scripts/check_migration.py <board.db> [--state DIR]
+```
+
+**Upgrade every Claude account that shares a board together.** An older overseer
+on the same `board.db` still writes the `sprints/` and `knowledge/` files; the
+newer version notices any file modified after its last export and imports it
+(file wins) before it rewrites the views, so that write is not lost — but
+nothing older than 0.27.0 reads the new tables.
 
 ### `overseer clear`
 

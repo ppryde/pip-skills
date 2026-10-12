@@ -1,24 +1,25 @@
-"""Pending Learned facts (WF-113 §5.5).
+"""Pending Learned facts (WF-113 5.5).
 
 Agents report a ``learned`` array of ``{statement, tags}`` objects in their
-``overseer-report`` JSON block (``scripts/schemas.py``); the report hook
-queues each one here; the orchestrator adjudicates at a stage boundary —
-accept (becomes a real KB fact) or reject (kept, with a reason, so the same
-claim is recognisable if re-proposed). The queue is one JSONL file beside the
-knowledge base: appends are the hot path (parallel hooks), status changes are
-rare and rewrite the file atomically.
+``overseer-report`` JSON block (``scripts/schemas.py``); the report hook queues
+each one here; the orchestrator adjudicates at a stage boundary -- accept
+(becomes a real KB fact) or reject (kept, with a reason, so the same claim is
+recognisable if re-proposed).
+
+The queue lives in ``board.db`` (``pending_facts``): an add is one INSERT and an
+adjudication one ``UPDATE ... WHERE status = 'pending'``, so parallel hooks and
+a concurrent accept can no longer lose a row (the old JSONL rewrite could).
+``knowledge/pending.jsonl`` is a regenerated view.
 """
 from __future__ import annotations
 
 import json
-import os
+import sqlite3
 import uuid
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
+from dataclasses import dataclass, field
+from datetime import datetime
 
-from scripts.knowledge import knowledge_root
-
-PENDING_FILENAME = "pending.jsonl"
+from scripts.db import commit_unless_txn, in_txn
 
 
 @dataclass
@@ -32,47 +33,47 @@ class PendingFact:
     reason: str = ""
 
 
-def _path(repo_root: Path) -> Path:
-    return knowledge_root(repo_root) / PENDING_FILENAME
+def _row(row: sqlite3.Row) -> PendingFact:
+    return PendingFact(
+        id=row["id"], card=row["card"], statement=row["statement"],
+        tags=json.loads(row["tags"] or "[]"), source=row["source"],
+        status=row["status"], reason=row["reason"],
+    )
 
 
 def add_pending(
-    repo_root: Path, card: str, statement: str, tags: list[str], source: str
+    conn: sqlite3.Connection, card: str, statement: str, tags: list[str], source: str
 ) -> PendingFact:
     fact = PendingFact(
         id=f"P-{uuid.uuid4().hex[:6]}", card=card, statement=statement, tags=tags, source=source
     )
-    path = _path(repo_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as fh:
-        fh.write(json.dumps(asdict(fact)) + "\n")
+    conn.execute(
+        "INSERT INTO pending_facts(id, card, statement, tags, source, status, reason, created) "
+        "VALUES (?,?,?,?,?,'pending','',?)",
+        (fact.id, card, statement, json.dumps(tags), source,
+         datetime.now().strftime("%Y-%m-%dT%H:%M")),
+    )
+    commit_unless_txn(conn)
     return fact
 
 
-def load_pending(repo_root: Path) -> list[PendingFact]:
-    path = _path(repo_root)
-    if not path.exists():
-        return []
-    facts: list[PendingFact] = []
-    for raw in path.read_text().splitlines():
-        try:
-            facts.append(PendingFact(**json.loads(raw)))
-        except (ValueError, TypeError):
-            continue
-    return facts
+def load_pending(conn: sqlite3.Connection) -> list[PendingFact]:
+    return [_row(r) for r in conn.execute("SELECT * FROM pending_facts ORDER BY rowid")]
 
 
-def set_status(repo_root: Path, fact_id: str, status: str, reason: str = "") -> PendingFact:
-    facts = load_pending(repo_root)
-    match = next((f for f in facts if f.id == fact_id), None)
-    if match is None:
-        raise FileNotFoundError(f"no pending fact with id {fact_id}")
-    if match.status != "pending":
-        raise ValueError(f"{fact_id} is already {match.status}")
-    match.status = status
-    match.reason = reason
-    path = _path(repo_root)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text("".join(json.dumps(asdict(f)) + "\n" for f in facts))
-    os.replace(tmp, path)
-    return match
+def set_status(conn: sqlite3.Connection, fact_id: str, status: str, reason: str = "") -> PendingFact:
+    """Adjudicate one pending fact. The UPDATE is conditional on ``pending``,
+    so two racing adjudications cannot both win."""
+    cur = conn.execute(
+        "UPDATE pending_facts SET status = ?, reason = ? WHERE id = ? AND status = 'pending'",
+        (status, reason, fact_id),
+    )
+    if cur.rowcount != 1:
+        row = conn.execute("SELECT status FROM pending_facts WHERE id = ?", (fact_id,)).fetchone()
+        if not in_txn(conn):
+            conn.rollback()
+        if row is None:
+            raise FileNotFoundError(f"no pending fact with id {fact_id}")
+        raise ValueError(f"{fact_id} is already {row['status']}")
+    commit_unless_txn(conn)
+    return _row(conn.execute("SELECT * FROM pending_facts WHERE id = ?", (fact_id,)).fetchone())

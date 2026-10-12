@@ -8,7 +8,7 @@ from factories import git_init
 from scripts import bundle, db
 from scripts.cli import main
 from scripts.dispatch import dispatch_dir
-from scripts.knowledge import Fact, ensure_kb, knowledge_root, save_fact
+from scripts.knowledge import Fact, save_fact
 
 TEMPLATES = bundle.TEMPLATES_DIR
 
@@ -34,11 +34,9 @@ def repo(tmp_path):
     card.worktree = str(tmp_path)
     card.set_section("## Plan", "1. chunk one", "t")
     db.save_card(conn, card)
-    kb = knowledge_root(tmp_path)
-    ensure_kb(kb)
-    save_fact(kb, Fact(id="KB-001", statement="dbt needs --target ci", tags=["dbt"],
+    save_fact(conn, Fact(id="KB-001", statement="dbt needs --target ci", tags=["dbt"],
                        created="2026-09-01", verified="2026-09-01"))
-    save_fact(kb, Fact(id="KB-002", statement="unrelated", tags=["web"],
+    save_fact(conn, Fact(id="KB-002", statement="unrelated", tags=["web"],
                        created="2026-09-01", verified="2026-09-01"))
     return tmp_path
 

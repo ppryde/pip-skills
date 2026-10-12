@@ -22,6 +22,7 @@ Layout of ``<data root>/census.json`` (see ``paths.census_path``)::
 """
 from __future__ import annotations
 
+import copy
 import fcntl
 import json
 import math
@@ -40,6 +41,8 @@ STALE_HORIZON_SECONDS = 90           # readers ignore entries older than this
 _LOCK_ATTEMPTS = 50                  # 50 × 10ms = 0.5s bounded wait for the lock
 _LOCK_DELAY_SECONDS = 0.01
 _GIT_BRANCH_TIMEOUT_SECONDS = 2      # bounded wait; a hung/slow git must never hang the status line
+WRITE_HEARTBEAT_SECONDS = 20         # a render that moved only updated_at rewrites the store
+                                     # at most this often; far inside STALE_HORIZON_SECONDS
 
 
 def store_path() -> Path:
@@ -263,6 +266,46 @@ def _git_branch(worktree_cwd: str | None) -> str | None:
     return branch
 
 
+def _head_stamp(worktree_cwd: str | None) -> list[Any] | None:
+    """(HEAD path, mtime_ns, inode, size) of the repo's HEAD file, or None.
+
+    A branch switch rewrites HEAD (new inode and mtime), so an unchanged stamp
+    means an unchanged branch and the ``git`` spawn can be skipped. Walks up from
+    the cwd to a ``.git`` directory, or a ``.git`` file (a linked worktree:
+    ``gitdir: <path>``). None on ANY doubt: the caller then asks git as before."""
+    if not worktree_cwd:
+        return None
+    try:
+        here = Path(worktree_cwd)
+        for directory in (here, *here.parents):
+            dot_git = directory / ".git"
+            if dot_git.is_dir():
+                head = dot_git / "HEAD"
+                break
+            if dot_git.is_file():
+                first = dot_git.read_text(encoding="utf-8", errors="replace").splitlines()[0]
+                if not first.startswith("gitdir:"):
+                    return None
+                gitdir = Path(first[len("gitdir:"):].strip())
+                head = (gitdir if gitdir.is_absolute() else directory / gitdir) / "HEAD"
+                break
+        else:
+            return None
+        info = head.stat()
+    except (OSError, IndexError, ValueError):
+        return None
+    return [str(head), info.st_mtime_ns, info.st_ino, info.st_size]
+
+
+def _cached_branch(previous: Any, worktree: str | None, stamp: list[Any] | None) -> tuple[bool, Any]:
+    """(hit, branch): the previous entry's branch when HEAD's stamp and the cwd match."""
+    if (stamp is not None and isinstance(previous, dict) and previous.get("branch") is not None
+            and previous.get("worktree_cwd") == worktree
+            and previous.get("branch_stamp") == stamp):
+        return True, previous["branch"]
+    return False, None
+
+
 _COMPUTE: Any = object()   # merge(): look the branch up itself
 
 
@@ -273,6 +316,7 @@ def merge(
     tmux_pane: str | None,
     now: float,
     branch: Any = _COMPUTE,
+    branch_stamp: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Fold one status-line payload into ``store`` in place; return ``store``.
 
@@ -284,6 +328,8 @@ def merge(
 
     ``branch`` is the already-looked-up branch name (a subprocess, so ``ingest``
     computes it before taking the lock); left out, it is looked up here.
+    ``branch_stamp`` is HEAD's stamp when the branch was read, kept so the next
+    render can reuse the branch while HEAD is untouched.
     """
     sid = payload.get("session_id")
     if not isinstance(sid, str) or not sid:
@@ -309,6 +355,8 @@ def merge(
         "branch": _git_branch(worktree) if branch is _COMPUTE else branch,
         "payload": payload,
     }
+    if branch_stamp is not None:
+        sessions[sid]["branch_stamp"] = branch_stamp
     if carried:
         sessions[sid]["carried"] = True
     # Sibling fields (worktree_cwd, payload) are replaced wholesale on every
@@ -340,8 +388,13 @@ def ingest(raw: str, now: float | None = None) -> None:
         return
 
     worktree = worktree_cwd(payload)
-    branch = _git_branch(worktree)   # a subprocess: never inside the census lock
     path = store_path()
+    stamp = _head_stamp(worktree)
+    raw_sid = payload["session_id"]
+    previous = _load(path)["sessions"].get(raw_sid) if isinstance(raw_sid, str) else None
+    hit, branch = _cached_branch(previous, worktree, stamp)
+    if not hit:
+        branch = _git_branch(worktree)   # a subprocess: never inside the census lock
     lock_path = path.with_name(path.name + ".lock")
     try:
         with os.fdopen(paths.open_private(lock_path, os.O_WRONLY | os.O_CREAT), "w") as lock:
@@ -352,11 +405,30 @@ def ingest(raw: str, now: float | None = None) -> None:
             # session process (the status-line pipeline), so TMUX_PANE is
             # already in its environment — no new plumbing needed to capture it.
             tmux_pane = os.environ.get("TMUX_PANE") or None
-            merge(store, payload, worktree, tmux_pane, now, branch)
-            _atomic_write(path, store)
+            sessions = store["sessions"]
+            sid = raw_sid if isinstance(raw_sid, str) else ""
+            before = copy.deepcopy(sessions.get(sid))
+            count = len(sessions)
+            merge(store, payload, worktree, tmux_pane, now, branch, stamp)
+            if not _only_timestamp_moved(before, sessions.get(sid), count, len(sessions), now):
+                _atomic_write(path, store)
     except OSError:
         return
     _note_session(payload)   # independent of the store write: never under the census lock
+
+
+def _only_timestamp_moved(before: Any, after: Any, count_before: int, count_after: int,
+                          now: float) -> bool:
+    """True when rewriting the store would change nothing but ``updated_at``, and
+    the stored one is younger than the heartbeat (so readers, who ignore entries
+    older than STALE_HORIZON_SECONDS, never see the session go stale)."""
+    if not isinstance(before, dict) or not isinstance(after, dict) or count_before != count_after:
+        return False
+    stored = _number(before.get("updated_at"))
+    if stored is None or not 0 <= now - stored < WRITE_HEARTBEAT_SECONDS:
+        return False
+    return ({k: v for k, v in before.items() if k != "updated_at"}
+            == {k: v for k, v in after.items() if k != "updated_at"})
 
 
 def _note_session(payload: dict[str, Any]) -> None:

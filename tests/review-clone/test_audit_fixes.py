@@ -186,3 +186,16 @@ def test_first_clone_keeps_all_comments_on_discovered_prs(tmp_path, monkeypatch)
     raw = json.loads((tmp_path / "jen" / "raw" / "pr-1.json").read_text())
     assert [c["id"] for c in raw["review_comments"]] == [1, 2]
     assert [c["id"] for c in raw["issue_comments"]] == [3, 4]
+
+
+def test_persona_root_has_one_definition():
+    """CR-13 (WF-268): collect.py takes PERSONA_ROOT from persona_io instead of redefining it."""
+    import ast
+    import scripts.collect as collect_mod
+    import scripts.persona_io as pio
+
+    assert collect_mod.PERSONA_ROOT is pio.PERSONA_ROOT
+    tree = ast.parse(Path(collect_mod.__file__).read_text())
+    assigned = [t.id for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                for t in n.targets if isinstance(t, ast.Name)]
+    assert "PERSONA_ROOT" not in assigned

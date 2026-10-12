@@ -98,7 +98,7 @@ chronicle sessions [--root R] [--days N] [--limit N]
 chronicle session <id>         # one session with its per-turn context series
 chronicle repos                # repo roots seen, with session counts
 chronicle ingest --transcript PATH [--session-id ID]   # one transcript, now
-chronicle open <url> [--config-dir DIR]   # macOS: open url in the right account's Chrome profile
+chronicle permits [--days N | --since 30d] [--skill S] [--agent-type T] [--json]   # subagent outcomes: allowed / denied / prompted
 chronicle volumes list | add <name> [--claude-dir D] | rm <name>   # docker volumes read in place
 chronicle pricing status       # rates per model with effective ranges, as-of date, last refresh
 chronicle pricing seed         # write the built-in rate table into the store's history
@@ -127,24 +127,6 @@ CLAUDE_CONFIG_DIRS=~/.claude-personal chronicle sync   # env alternative, os.pat
 
 The file is `{"claude_dirs": ["~/.claude-personal"]}`; chronicle reads it with its own small
 loader so it stays standalone. `--projects PATH` (repeatable) replaces the set for one run.
-
-### Opening a link in the right account's browser
-
-An artifact link only works in the browser identity that created it — useless if you're
-looking at it from the wrong Chrome window. For a contracting setup with one config dir per
-client, `chronicle open` picks the right one for you (macOS only):
-
-```bash
-chronicle open https://claude.ai/artifact/...              # the active account's profile
-chronicle open https://claude.ai/artifact/... --config-dir ~/.claude-client-b
-```
-
-It reads the signed-in email straight out of `<config dir>/.claude.json`'s `oauthAccount`
-(never written to the chronicle store — see "Accounts and plans" below on why `emailAddress`
-never crosses into it), matches it against Chrome's own `Local State` (which profile is
-signed in as which email), and launches a **new** Chrome window (`open -na`, never reusing
-whatever has focus) on that profile. No match names the profiles it did find, so you can see
-what's actually signed in rather than guess.
 
 ### Docker volumes
 
@@ -258,9 +240,9 @@ against a real transcript sample from an actual prod-access box:
 
 | Fidelity | Keeps, beyond the previous level | Loses (until you opt up) |
 |---|---|---|
-| `minimal` | ids, timestamps, session/agent ids, cwd, git branch, model, the API `usage` block, stop_reason, tool NAMES (no inputs), bridge/cost-state account ids, turn durations | effort; skill/plugin/mcp/agent-type attribution; qualifiers (which skill, which agent type); tool result SIZES; file edits and their line churn; Artifact publishes; usage-limit banners; titles; subagent task lines |
-| `attribution` | effort, the attribution stamps, Skill name, Agent `subagent_type`, MCP tool names, each tool result's LENGTH (a number, never its text), Edit/Write's file path + added/removed line COUNTS (content never kept), Artifact facts (action, file path, favicon, published URL), usage-limit banners | titles; subagent task lines; Artifact title/description (falls back to the file's stem) |
-| `titles` | session titles, and subagent task lines truncated to ~80 characters | — (this is the top level) |
+| `minimal` | ids, timestamps, session/agent ids, cwd, git branch, model, the API `usage` block, stop_reason, tool NAMES (no inputs), each tool result's OUTCOME as a fixed category (`ok`, `error:*`, `denied:*`, `prompted:*`) and its permission decision reduced to a closed vocabulary, bridge/cost-state account ids, turn durations | effort; skill/plugin/mcp/agent-type attribution; qualifiers (which skill, which agent type); tool result SIZES; file edits and their line churn; Artifact publishes; usage-limit banners; titles; subagent task lines |
+| `attribution` | effort, the attribution stamps, Skill name, Agent `subagent_type`, MCP tool names, each tool result's LENGTH (a number, never its text), Edit/Write's file path + added/removed line COUNTS (content never kept), Artifact facts (action, file path, favicon, published URL), usage-limit banners, per subagent its type (a built-in or `<plugin>:<name>`; any other name is folded to `(ad-hoc)`), whether it ran non-interactive, and its model | titles; subagent task lines; Artifact title/description (falls back to the file's stem); Bash command shapes |
+| `titles` | session titles, and subagent task lines truncated to ~80 characters, the raw agent-type name, and each Bash command's SHAPE (below) | — (this is the top level) |
 
 `titles` is the one level that knowingly admits customer or production detail: a session title
 or a subagent's opening line is model- or user-written prose, and can say anything. Opt into it
@@ -298,6 +280,43 @@ a literal `--` — a hostile-looking (but regex-validated) host string can never
 option. The remote script only reads: it opens nothing for writing, deletes nothing, and makes
 no network call of its own. Nothing is ever left on the remote box.
 
+### Outcomes, decisions and command shapes (permits)
+
+Every tool call also records what became of it, so the question "which permissions do my
+subagents actually need" is answered from data instead of from memory. The transcript's tool
+result is read ONCE to put the call in a fixed category, and the text is then dropped:
+
+- `tool_calls.outcome`: `ok`, `error:<kind>`, `denied:<cause>` (`classifier`, `safety-check`,
+  `worktree-guard`, `sleep-guard`, `file-outside-root`, `hook`, `config-rule`, ...) or
+  `prompted:approved|rejected|interrupted`. An unrecognised harness phrase is `error:other`
+  (counted, never dropped), so a Claude Code wording change shows up as a number.
+- `tool_calls.reason`: the classifier's label as an enum (`modify-shared-resources`, ...,
+  `other`) or the worktree guard's sub-cause (`wt:too-complex`, ...). The captured text is never stored.
+- `tool_calls.decision` and `prompted`: Claude Code 2.1.295+ writes a structured
+  `permissionDecision` on the tool result; it is stored as `<accept|reject>:<source>/<reasonType>`
+  from fixed lists (anything else is `other`), and `prompted` is 1 when a person was asked.
+- `tool_calls.shape`: a Bash command as a program from a fixed allowlist plus an allowlisted
+  subcommand (`git status`, `python3 -m pytest`, `poetry run pytest +compound`). Any other first
+  token prints `(script)` (a script or path) or `(other)`; no argument, path, value or
+  assignment is ever kept. Other tools are their own name.
+- `agents.agent_type`, `skill`, `non_interactive`, `model`: from the agent's meta sidecar and the
+  attribution stamps.
+
+`chronicle permits` aggregates it: per (skill, agent type) the agents, calls, errors, denials by
+cause and prompts (split by whether the agent ran non-interactive, since a denial in a headless agent
+and a prompt in an interactive one mean different things); per tool the shapes that drew a denial or a
+prompt; and a drift line (the share of `error:other`, unknown outcomes, and calls with no
+`permissionDecision` among Claude Code 2.1.295+ sessions) so a harness wording change shows up as a
+number. An agent type that is neither a built-in nor `<plugin>:<name>` always prints as `(ad-hoc)`.
+`--json` is the only interface `tools/derive_agent_tools.py` reads. The report is pull only: run it by
+hand or from a schedule you set up; chronicle ships no scheduler.
+
+All of it is filled by `sync`, and backfilled by `sync --full` for older rows (rows whose
+transcripts Claude Code has since pruned stay empty). A remote box keeps the outcome and the
+decision at every fidelity (they are fixed categories), the agent type and mode from
+`attribution`, and a command shape only at `titles`: on a production-access box even the program
+a command ran is a fact about what ran there.
+
 ### Sessions from a container
 
 A containerised dev environment writes its transcripts inside the container, and records the
@@ -306,7 +325,7 @@ paths it saw there. Two things are then in the way, and both have to be dealt wi
 **1. The files are not on this filesystem.** If the container's config dir is a Docker *named
 volume*, use [`volumes add`](#docker-volumes) above. The rest of this item is the **legacy**
 `pull-volume` route, superseded by it and kept because it still works: it copies the volume
-out with a helper container, and the copy goes **stale** until you run it again — which is
+out with a helper container (run with `--network none`; a `--dest` containing `:` is refused), and the copy goes **stale** until you run it again — which is
 exactly how weeks of Enterprise sessions once went missing.
 
 ```
@@ -403,11 +422,12 @@ every session ever run under the old one. The columns are **write-once**, so
 `sync --full` re-reading a transcript cannot overwrite the snapshot with
 today's answer.
 
-Sources differ, and so does coverage:
+Sources differ, and so does coverage. For the default `~/.claude` only, `~/.claude.json`
+is read when the dir has no `.claude.json` of its own; a custom config dir never falls back.
 
 | Field | Source | Coverage |
 |---|---|---|
-| plan / seat / billing / rate-limit tier | `<config_dir>/.claude.json` at ingest | every session whose config dir has the file |
+| plan / seat / billing / rate-limit tier | `<config_dir>/.claude.json` at ingest; for the default `~/.claude` only, `~/.claude.json` when the dir has no `.claude.json` of its own (custom dirs never fall back) | every session whose config dir has the file, or the default dir's fallback |
 | `owner_account_uuid` | a `bridge-session` record in the transcript | only sessions bridged from claude.ai |
 | `turns.account_uuid` / `bridge_owner_uuid` | the `bridge-session` record in force at each turn (see "Account attribution") | only bridged sessions; `sync --full` backfills |
 
@@ -593,7 +613,8 @@ figures; where a source lacks them the 1.25× (5-minute) / 2× (1-hour) multipli
   model's price as time-limited rows ("through August 31" / "starting September 1"), which
   are skipped rather than guessed at.
 - **Status.** `chronicle pricing status` lists each model's effective ranges, `pricing_as_of`
-  and the last refresh attempt and result.
+  and the last refresh attempt and result, plus `prefix_priced` (models priced through a
+  family-prefix rate) and `unpriced_models` (models seen in turns with no rate at all).
 
 Price history is only ever appended to: nothing updates or deletes a row.
 

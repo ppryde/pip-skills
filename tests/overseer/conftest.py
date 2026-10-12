@@ -62,3 +62,18 @@ def _no_ambient_task_env(tmp_path, monkeypatch):
     # plausibly has it set — left ambient, tests would search (and write)
     # their real second account's overseer tree.
     monkeypatch.delenv("CLAUDE_CONFIG_DIRS", raising=False)
+    # Stage gates (WF-265 D2) are HARD by default. The pre-D2 suites drive cards
+    # through stages without review evidence, so they run with the gates off;
+    # test_gates.py (and the hook/dashboard gate tests) opt back in explicitly.
+    monkeypatch.setenv("OVERSEER_GATES", "off")
+
+
+@pytest.fixture
+def board_conn(tmp_path):
+    """A fresh schema-v2 board for tests that exercise sprint/knowledge/pending
+    persistence (state lives in board.db, not in files). Pinned to tmp by the
+    autouse fixture above."""
+    from scripts import db
+    conn = db.connect(tmp_path, migrate=False)
+    yield conn
+    conn.close()

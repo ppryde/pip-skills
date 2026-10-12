@@ -110,3 +110,105 @@ class TestMergeBackwardCompatibility:
         }
         result = st.merge(store, {"session_id": "abc", "cwd": "/wt/a"}, "/wt/a", None, 2.0)
         assert result["sessions"]["abc"]["branch"] is None
+
+
+class TestBranchCacheAndWriteSkip:
+    """CV-6 (WF-268 lean bundle): the branch is cached by .git/HEAD's stamp, and a
+    render that moved only ``updated_at`` does not rewrite the store."""
+
+    def _repo(self, tmp_path, branch="feat/x"):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo, branch=branch)
+        return repo
+
+    def test_unchanged_head_does_not_spawn_git(self, store_file, tmp_path, monkeypatch):
+        repo = self._repo(tmp_path)
+        st.ingest(_payload(sid="abc", cwd=str(repo)), now=1.0)
+        calls = []
+        real = st._git_branch
+        monkeypatch.setattr(st, "_git_branch", lambda cwd: calls.append(cwd) or real(cwd))
+        st.ingest(_payload(sid="abc", cwd=str(repo)), now=2.0)
+        assert calls == []
+        assert _read(store_file)["sessions"]["abc"]["branch"] == "feat/x"
+
+    def test_branch_switch_is_noticed(self, store_file, tmp_path):
+        repo = self._repo(tmp_path)
+        st.ingest(_payload(sid="abc", cwd=str(repo)), now=1.0)
+        subprocess.run(["git", "checkout", "-b", "feat/y"], cwd=str(repo), check=True,
+                       capture_output=True)
+        st.ingest(_payload(sid="abc", cwd=str(repo)), now=2.0)
+        assert _read(store_file)["sessions"]["abc"]["branch"] == "feat/y"
+
+    def test_linked_worktree_head_is_followed(self, store_file, tmp_path):
+        repo = self._repo(tmp_path)
+        wt = tmp_path / "wt"
+        subprocess.run(["git", "worktree", "add", "-b", "wt/one", str(wt)], cwd=str(repo),
+                       check=True, capture_output=True)
+        st.ingest(_payload(sid="abc", cwd=str(wt)), now=1.0)
+        assert _read(store_file)["sessions"]["abc"]["branch"] == "wt/one"
+        subprocess.run(["git", "checkout", "-b", "wt/two"], cwd=str(wt), check=True,
+                       capture_output=True)
+        st.ingest(_payload(sid="abc", cwd=str(wt)), now=2.0)
+        assert _read(store_file)["sessions"]["abc"]["branch"] == "wt/two"
+
+    def test_cwd_change_does_not_reuse_another_repos_branch(self, store_file, tmp_path):
+        a = self._repo(tmp_path, "feat/a")
+        b = tmp_path / "b"
+        b.mkdir()
+        _init_git_repo(b, branch="feat/b")
+        st.ingest(_payload(sid="abc", cwd=str(a)), now=1.0)
+        st.ingest(_payload(sid="abc", cwd=str(b)), now=2.0)
+        assert _read(store_file)["sessions"]["abc"]["branch"] == "feat/b"
+
+    def test_failed_branch_lookup_is_retried_next_render(self, store_file, tmp_path, monkeypatch):
+        repo = self._repo(tmp_path)
+        real = st._git_branch
+        monkeypatch.setattr(st, "_git_branch", lambda cwd: None)   # git timed out once
+        st.ingest(_payload(sid="abc", cwd=str(repo)), now=1.0)
+        assert _read(store_file)["sessions"]["abc"]["branch"] is None
+        monkeypatch.setattr(st, "_git_branch", real)
+        st.ingest(_payload(sid="abc", cwd=str(repo)), now=2.0)
+        assert _read(store_file)["sessions"]["abc"]["branch"] == "feat/x"
+
+    def test_non_repo_cwd_still_none(self, store_file, tmp_path):
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        st.ingest(_payload(sid="abc", cwd=str(plain)), now=1.0)
+        st.ingest(_payload(sid="abc", cwd=str(plain)), now=2.0)
+        assert _read(store_file)["sessions"]["abc"]["branch"] is None
+
+    def test_repeat_render_inside_heartbeat_skips_the_write(self, store_file, tmp_path):
+        st.ingest(_payload(sid="abc", cwd="/wt/a"), now=100.0)
+        before = store_file.stat().st_mtime_ns
+        st.ingest(_payload(sid="abc", cwd="/wt/a"), now=105.0)
+        assert store_file.stat().st_mtime_ns == before
+        assert _read(store_file)["sessions"]["abc"]["updated_at"] == 100.0
+
+    def test_heartbeat_refreshes_updated_at_before_the_stale_horizon(self, store_file):
+        st.ingest(_payload(sid="abc", cwd="/wt/a"), now=100.0)
+        later = 100.0 + st.WRITE_HEARTBEAT_SECONDS + 1
+        st.ingest(_payload(sid="abc", cwd="/wt/a"), now=later)
+        assert _read(store_file)["sessions"]["abc"]["updated_at"] == later
+        assert st.WRITE_HEARTBEAT_SECONDS < st.STALE_HORIZON_SECONDS / 2
+
+    def test_a_changed_payload_is_always_written(self, store_file):
+        st.ingest(_payload(sid="abc", cwd="/wt/a", cost={"total": 1}), now=100.0)
+        st.ingest(_payload(sid="abc", cwd="/wt/a", cost={"total": 2}), now=101.0)
+        entry = _read(store_file)["sessions"]["abc"]
+        assert entry["updated_at"] == 101.0 and entry["payload"]["cost"] == {"total": 2}
+
+    def test_a_new_session_is_always_written(self, store_file):
+        st.ingest(_payload(sid="abc", cwd="/wt/a"), now=100.0)
+        st.ingest(_payload(sid="def", cwd="/wt/a"), now=101.0)
+        assert set(_read(store_file)["sessions"]) == {"abc", "def"}
+
+    def test_a_prune_forces_the_write(self, store_file):
+        ttl = st.SESSION_TTL_SECONDS
+        st.ingest(_payload(sid="old", cwd="/wt/o"), now=100.0)
+        st.ingest(_payload(sid="abc", cwd="/wt/a"), now=ttl + 90.0)   # old still inside the TTL
+        assert "old" in _read(store_file)["sessions"]
+        # 15s later: inside the heartbeat, only updated_at moved for abc, but old is now
+        # past the TTL, so the prune changes the session count and the store is rewritten.
+        st.ingest(_payload(sid="abc", cwd="/wt/a"), now=ttl + 105.0)
+        assert "old" not in _read(store_file)["sessions"]

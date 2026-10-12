@@ -83,16 +83,18 @@ def _run_ssh(argv: list[str], stdin: bytes, timeout: float) -> SSHResult:
     return SSHResult(completed.returncode, completed.stdout, completed.stderr)
 
 
-def ssh_argv(remote: store.Remote, request_b64: str) -> list[str]:
+def ssh_argv(remote: store.Remote, request_b64: str | None = None) -> list[str]:
     """The exact ssh invocation: options first (never disabled: host-key
     checking, batch mode, no agent/X11 forwarding), ``--`` before the host so
     a hostile-looking (but regex-validated) host can never be read as an
-    option, then the remote command. The script text travels on stdin; the
-    request travels as an argv token (base64: alphanumeric + `+/=`, so it is
-    inert wherever a shell might still touch it) because stdin IS the script
-    — `python3 -` reads it to EOF before running, so nothing can follow it on
-    the same stream (see `remote_agent`'s module docstring)."""
-    return [
+    option, then the remote command. Both the script and the request travel on
+    stdin (the request as a literal at the top of the script, see
+    `bundle_source`): the request lists every file and offset the mirror knows,
+    and as a single argv token it outgrew the 128 KiB per-argument limit after
+    about a thousand transcripts, failing every pull from then on. A
+    ``request_b64`` given here is still appended as ``argv[1]`` (the agent reads
+    either), but the client no longer passes one."""
+    argv = [
         "ssh",
         "-o", "BatchMode=yes",
         "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT_S}",
@@ -101,25 +103,35 @@ def ssh_argv(remote: store.Remote, request_b64: str) -> list[str]:
         "-o", "StrictHostKeyChecking=yes",
         "-a", "-x", "-T",
         "--", remote.host,
-        "python3", "-", request_b64,
+        "python3", "-",
     ]
+    if request_b64 is not None:
+        argv.append(request_b64)
+    return argv
 
 
-def bundle_source() -> str:
-    """``redact.py`` + `remote_agent.py``'s source, concatenated into one
-    Python 3.8-compatible script: `remote_agent.py` uses `redact`'s names
-    directly (no `import redact` — there is nothing on the remote disk to
-    import it from), and its own leading ``from __future__ import
-    annotations`` is dropped so the bundle carries exactly one (redact.py's,
-    at the very top — a `from __future__` after other statements is a
-    SyntaxError)."""
+def _without_future_import(source: str) -> str:
+    return "\n".join(line for line in source.splitlines()
+                     if line.strip() != "from __future__ import annotations")
+
+
+def bundle_source(request_b64: str | None = None) -> str:
+    """``redact.py`` + ``permits.py`` + `remote_agent.py``'s source,
+    concatenated into one Python 3.8-compatible script: `permits.py` and
+    `remote_agent.py` use `redact`'s names (and `redact` the few of `permits`
+    it guards an import of) directly — there is nothing on the remote disk to
+    import them from — and their own ``from __future__ import annotations``
+    lines are dropped so the bundle carries exactly one (redact.py's, at the
+    very top — a `from __future__` after other statements is a SyntaxError).
+
+    ``request_b64`` (the base64 request) is prepended to the agent half as a
+    ``REQUEST_B64 = '...'`` literal, which `remote_agent.main` reads: stdin is
+    the one channel with no size limit."""
     redact_src = (_SCRIPTS_DIR / "redact.py").read_text()
-    agent_src = (_SCRIPTS_DIR / "remote_agent.py").read_text()
-    agent_lines = [
-        line for line in agent_src.splitlines()
-        if line.strip() != "from __future__ import annotations"
-    ]
-    return redact_src + "\n\n" + "\n".join(agent_lines) + "\n"
+    permits_src = _without_future_import((_SCRIPTS_DIR / "permits.py").read_text())
+    agent_src = _without_future_import((_SCRIPTS_DIR / "remote_agent.py").read_text())
+    literal = f"REQUEST_B64 = {request_b64!r}\n\n" if request_b64 is not None else ""
+    return redact_src + "\n\n" + permits_src + "\n\n" + literal + agent_src + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -281,8 +293,8 @@ def _pull_once(remote: store.Remote, *, transport: Transport, state: dict[str, A
     to the mirror, mutating ``state`` in place. The caller saves ``state`` and
     the mirror's `.claude.json` only when this returns ``ok``."""
     request = _request_for(remote, state, max_bytes=max_bytes, deadline_s=deadline_s)
-    argv = ssh_argv(remote, _b64(request))
-    result = transport(argv, bundle_source().encode("utf-8"), SSH_TOTAL_TIMEOUT_S)
+    argv = ssh_argv(remote)
+    result = transport(argv, bundle_source(_b64(request)).encode("utf-8"), SSH_TOTAL_TIMEOUT_S)
     if result.returncode != 0:
         stderr = result.stderr.decode(errors="replace").strip()[:500]
         return PullResult(ok=False, error=f"ssh exited {result.returncode}: {stderr or 'no output'}")

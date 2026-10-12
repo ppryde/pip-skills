@@ -20,6 +20,10 @@ STAGES = [
 ]
 PRIORITIES = {"P0", "P1", "P2", "P3", "P4"}
 COMPLEXITIES = {"S", "M", "L", "XL"}
+# Maximum reviewer rounds per complexity (policy.md "Rounds cap" column; a test
+# asserts the two agree). A card with no complexity is treated as M.
+ROUND_CAPS = {"S": 2, "M": 3, "L": 4, "XL": 4}
+DEFAULT_ROUND_CAP = 3
 # Mirrors the frontend's curated swatch palette (dashboard/frontend/src/board/
 # labelColor.ts PALETTE_KEYS) — same 9 keys, same order. That module owns the
 # label -> key hash for the un-configured default; this tuple is the set of

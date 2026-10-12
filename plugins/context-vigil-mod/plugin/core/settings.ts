@@ -11,6 +11,14 @@ export function pendingKey(session: string): string {
 export const PENDING_KEEP_MS = 14 * 86_400_000
 export const PENDING_PREFIX = 'pending:'
 
+// PROBES §15: a session left named `Archive: <name>` because the mod's rename back failed. Per
+// session id, so a /resume or restart still knows it; pruned like a pending handover.
+export type Stranded = { name: string; at: number }
+export const STRANDED_PREFIX = 'stranded:'
+export function strandedKey(session: string): string {
+  return `${STRANDED_PREFIX}${session}`
+}
+
 export const DEFAULTS: Settings = {
   nudgeAt: 35, step: 5, bar: true, auto: false, idleMin: 30,
   lastLight: false, lastLightAt: 25, limits: true, limitPct: 95,

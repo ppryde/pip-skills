@@ -76,3 +76,30 @@ python3 tools/measure_spawn.py report <session-dir> [--persona NAME]
   for both (tool list read back: Read, Bash, Monitor).
 - Tests: `tests/agents/` (run by `tests/run.sh`). Sync to wf-claude-market: copy `plugins/pip-agents/`, the three
   tools and `tests/agents/` as one unit; the build is deterministic, so wf runs the same `--check`.
+
+## derive_agent_tools.py (permissions, WF-271 PR 3)
+
+Stdlib only; **read-only**: it prints to stdout and opens no file for writing (a test runs it under a read-only
+tree). Reads `chronicle permits --json` and proposes `tools:` changes as a unified diff for review.
+
+```
+chronicle permits --json > permits.json
+python3 tools/derive_agent_tools.py --evidence permits.json              # diffs + a settings snippet, stdout only
+python3 tools/derive_agent_tools.py --evidence permits.json --snapshot   # the tests/agents/evidence.json text
+python3 tools/derive_agent_tools.py --evidence permits.json --check      # diff the committed snapshot; exit 1 on drift
+```
+
+- Tightening (remove a tool exposed and unused across `--min-runs`, default 10) is proposed normally; with Bash granted,
+  Grep and Glob are never proposed for removal (not exposed, so zero calls prove nothing). A persona below
+  `--min-runs` gets nothing. Loosening (add a tool, or an allow line) is labelled LOOSENS and needs evidence of need
+  ("no such tool", or a read-only shape a person approved temporarily at least 3 times and never otherwise).
+  A shape the classifier, safety check, worktree guard or sleep guard refused is never an allow rule: it is listed under
+  "investigate the command shape" with its sub-cause, and the remedy is charter text a human writes.
+- The diff targets `personas/tools.md` when the plugin keeps its grants there (then run `tools/build_agents.py`), else
+  the agent file's frontmatter. A person applies it with `git apply` in a reviewed PR.
+- `tests/agents/evidence.json` is the checked-in snapshot (aggregates only: per persona runs, tool-call counts, denial
+  causes, prompts) plus the human-written `unobserved` reasons, which the generator carries over and never invents.
+  The persona lint (`tests/agents/test_derive_agent_tools.py`) requires every granted tool to be observed in the snapshot
+  or listed `unobserved` with a one-line reason. **Day one every grant is `unobserved`**: no `pip-agents:*` run can exist
+  before the consumer PRs move dispatches onto the personas, so that is the starting state, not a defect. The scan of the
+  work account (aggregates only) is the owner's own act and is not part of any PR.
