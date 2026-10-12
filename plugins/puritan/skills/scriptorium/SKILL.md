@@ -40,7 +40,7 @@ Search for: `"[pattern]" [original author]`; `"[pattern]" best practices <curren
 
 ### Step 3: Discover Existing Doctrines
 Read `<plugin-root>/skills/doctrines/INDEX.md` (generated; do not open doctrine files unless needed):
-1. Claimed ID prefixes and ranges come from the INDEX; do not rely on a hard-coded list. Also Glob `doctrines/*.md`; for any file with no INDEX row, read its Violation Catalog ids for its prefix, and check collisions against those too
+1. Claimed ID prefixes and ranges come from the INDEX; do not rely on a hard-coded list. Also Glob `doctrines/*.md` (not `BATCHES.md`); for any file with no INDEX row, read its Violation Catalog ids for its prefix, and check collisions against those too
 2. Identify cross-reference opportunities; new doctrines should link to related existing ones
 3. If an existing doctrine already covers your pattern, update it instead
 
