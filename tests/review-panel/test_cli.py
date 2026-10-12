@@ -203,3 +203,35 @@ def test_cli_does_not_depend_on_cwd_or_pythonpath(tmp_path):
     p = subprocess.run([sys.executable, "-I", str(CLI), "--help"], cwd=tmp_path,
                        env=_env(tmp_path), capture_output=True, text=True)
     assert p.returncode == 0 and "reconcile" in p.stdout
+
+
+# RP-11: one argument grammar through `resolve --args`
+def test_resolve_args_adhoc_works_without_a_config_file(tmp_path):
+    out = j(tmp_path, "resolve", "--config", tmp_path / "nope.yml", "--args", "general", "full")
+    assert out["status"] == "ok"
+    assert out["review"]["scope"] == "full"
+    assert [r["key"] for r in out["review"]["reviewers"]] == ["general"]
+
+
+def test_resolve_args_profile_form_without_config_offers_seed(tmp_path):
+    for toks in ([], ["pre-merge"], ["full"]):
+        out = j(tmp_path, "resolve", "--config", tmp_path / "nope.yml", "--args", *toks, expect=3)
+        assert out["status"] == "config-missing"
+
+
+def test_resolve_args_profile_and_modifiers(tmp_path):
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("profiles:\n  p1: { reviewers: { general: strict } }\ndefaults: { profile: p1 }\n")
+    out = j(tmp_path, "resolve", "--config", cfg, "--args", "p1", "inline")
+    assert out["review"]["output"] == "inline" and out["review"]["scope"] == "changed"
+    assert j(tmp_path, "resolve", "--config", cfg, "--args")["review"]["reviewers"][0]["strictness"] == "strict"
+
+
+def test_resolve_args_listing_and_errors(tmp_path):
+    assert "general" in j(tmp_path, "resolve", "--args", "reviewers")["reviewers"]
+    assert "committee" in j(tmp_path, "resolve", "--args", "strategies")["strategies"]
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("profiles:\n  p1: { reviewers: { general: strict } }\n")
+    out = j(tmp_path, "resolve", "--config", cfg, "--args", "bogus", expect=1)
+    assert out["status"] == "error" and "p1" in out["error"]
+    j(tmp_path, "resolve", "--config", cfg, "--args", "$(touch x)", expect=1)
