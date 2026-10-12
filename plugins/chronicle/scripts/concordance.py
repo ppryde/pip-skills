@@ -19,7 +19,8 @@ def _valid(row: object) -> bool:
 
 def store_rows(conn: sqlite3.Connection, session_id: str, rows: list[dict[str, object]]) -> int:
     """Replace the session's rows with the well-formed ones; return how many were stored."""
-    good = [r for r in rows if _valid(r)]
+    # a repeated tool_use_id keeps its last row, so the count is what is stored
+    good = list({r["tool_use_id"]: r for r in rows if _valid(r)}.values())
     with conn:
         conn.execute("DELETE FROM concordance_rows WHERE session_id = ?", (session_id,))
         conn.executemany(
