@@ -96,6 +96,8 @@ def report(days: int = 30, repo: str | None = None, now: float | None = None,
         if not isinstance(p, dict):
             skipped += 1
             continue
+        if p.get("origin") == "replay":  # replay's own CLI calls are measurement, not usage
+            continue
         if exit_code == 2:  # a failed run: counted apart, kept out of cost and effectiveness
             failures[command] += 1
             continue

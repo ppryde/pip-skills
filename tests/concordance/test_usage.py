@@ -178,3 +178,11 @@ def test_session_comes_from_claude_code_session_id(make_repo, monkeypatch) -> No
     sessions = {r[0] for r in conn.execute("SELECT session FROM events")}
     conn.close()
     assert sessions == {"sess-1"}
+
+
+def test_replay_origin_events_are_excluded(tmp_path: Path) -> None:
+    db = tmp_path / "u.db"
+    usage.record("callers", "r", "v", 10, 5, 0, {}, session="s", path=db)
+    usage.record("callers", "r", "v", 10, 5, 0, {"origin": "replay"}, session="s", path=db)
+    rep = usage.report(path=db)
+    assert rep["commands"]["callers"]["runs"] == 1
