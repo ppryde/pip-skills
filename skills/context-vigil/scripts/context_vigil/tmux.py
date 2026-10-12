@@ -46,12 +46,20 @@ def send_detached(target: str, keystrokes: List[List[str]], delay: str) -> None:
 
     The callers check the pane before the delay; a dialog can open during it. The
     detached shell asks ``cli _pane-safe`` again after the sleep and sends nothing
-    when the answer is no (a manual /clear still loads the handover)."""
+    when the answer is no (a manual /clear still loads the handover). A running
+    turn alone (exit 2) is polled every 0.5s for up to ``CONTEXT_VIGIL_BUSY_WAIT``
+    seconds (default 10): the footer reads "esc to interrupt" until every Stop
+    hook has finished. A dialog or typed text (exit 1) drops the send at once."""
     tmux = shlex.quote(binary())
     sends = [f"{tmux} send-keys -t {shlex.quote(target)} "
              + " ".join(shlex.quote(k) for k in keys) for keys in keystrokes]
     check = f"{shlex.quote(sys.executable)} -m context_vigil.cli _pane-safe {shlex.quote(target)}"
-    script = f"sleep {shlex.quote(delay)}; if {check}; then {'; '.join(sends)}; fi"
+    raw_wait = os.environ.get("CONTEXT_VIGIL_BUSY_WAIT", "10")
+    busy_wait = int(raw_wait) if raw_wait.isdigit() else 10   # whole seconds only
+    script = (f"sleep {shlex.quote(delay)}; end=$((SECONDS + {busy_wait})); "
+              f"while :; do {check}; rc=$?; "
+              f"if [ $rc -eq 0 ]; then {'; '.join(sends)}; break; fi; "
+              f'[ $rc -eq 2 ] && [ "$SECONDS" -lt "$end" ] || break; sleep 0.5; done')
     package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env = dict(os.environ)
     inherited = env.get("PYTHONPATH")

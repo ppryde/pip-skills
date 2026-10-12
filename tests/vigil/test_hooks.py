@@ -42,22 +42,24 @@ DIALOG_SCREEN = (
 )
 
 
-def _fake_tmux(tmp_path, screen, capture_fails=False, in_mode="0", later_screen=None, name="tmux"):
+def _fake_tmux(tmp_path, screen, capture_fails=False, in_mode="0", later_screen=None, name="tmux",
+               sequence=None):
     """A fake tmux on a private bin dir: has-session ok, capture-pane prints `screen`
-    (or fails; from the 2nd capture on, `later_screen` when given), display-message
-    prints `in_mode`; every other call (rename-window, send-keys) appends its argv to
+    (or fails; from the 2nd capture on, `later_screen` when given; with `sequence`,
+    capture n prints sequence[n], the last one repeating), display-message prints
+    `in_mode`; every other call (rename-window, send-keys) appends its argv to
     `marker`. Every call is logged to `all-calls`. Never a real tmux server."""
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
-    shot = tmp_path / "screen.txt"
-    shot.write_text(screen)
-    later = tmp_path / "screen-later.txt"
-    later.write_text(screen if later_screen is None else later_screen)
+    screens = sequence or [screen, screen if later_screen is None else later_screen]
+    for i, text in enumerate(screens):
+        (tmp_path / f"screen-{i}.txt").write_text(text)
+    last = len(screens) - 1
     counter = tmp_path / "captures"
     marker = tmp_path / "tmux-called"
     capture = "exit 1" if capture_fails else (
         f'n=$(cat "{counter}" 2>/dev/null || echo 0); echo $((n+1)) > "{counter}"; '
-        f'if [ "$n" = 0 ]; then cat "{shot}"; else cat "{later}"; fi; exit 0'
+        f'[ "$n" -gt {last} ] && n={last}; cat "{tmp_path}/screen-$n.txt"; exit 0'
     )
     fake = bindir / name
     fake.write_text(
@@ -332,6 +334,52 @@ class TestStopHook:
         assert result.returncode == 0 and result.stdout.strip() == ""
         assert _wait_calls(marker, 1) == ["send-keys -t %9 /clear Enter"]
         assert not st.clear_flag(tmp_path).exists()
+
+    def _busy_env(self, bindir, wait="3"):
+        env = _auto_env(bindir)
+        env["VIGIL_CLEAR_DELAY"] = "0"
+        env["VIGIL_BUSY_WAIT"] = wait
+        return env
+
+    def test_busy_busy_idle_after_the_delay_sends_clear(self, tmp_path, monkeypatch):
+        # Another Stop hook is still running: the footer stays busy for two
+        # re-checks; the busy-only hold is retried, then /clear goes out.
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")
+        bindir, marker = _fake_tmux(tmp_path, None, sequence=[
+            BUSY_SCREEN, BUSY_SCREEN, BUSY_SCREEN, NAMED_SCREEN])
+        result = _run(STOP, {"cwd": str(tmp_path)}, self._busy_env(bindir), tmp_path)
+        assert result.returncode == 0 and result.stdout.strip() == ""
+        assert _wait_calls(marker, 1) == ["send-keys -t %9 /clear Enter"]
+        assert int((tmp_path / "captures").read_text()) == 4
+        assert not st.clear_flag(tmp_path).exists()
+
+    def test_busy_for_the_whole_window_holds_and_stays_armed(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")
+        bindir, marker = _fake_tmux(tmp_path, BUSY_SCREEN)
+        # whole seconds against bash's $SECONDS: a 2s wait is 1-2s in practice
+        result = _run(STOP, {"cwd": str(tmp_path)}, self._busy_env(bindir, wait="2"), tmp_path)
+        assert result.returncode == 0 and result.stdout.strip() == ""
+        time.sleep(3.5)  # past the window plus a poll
+        tries = int((tmp_path / "captures").read_text())
+        assert tries >= 3  # the in-hook check plus more than one re-check
+        time.sleep(0.8)
+        assert int((tmp_path / "captures").read_text()) == tries  # it gave up
+        assert not marker.exists()
+        assert st.clear_flag(tmp_path).exists()
+
+    def test_busy_then_typed_text_drops_at_once(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")
+        bindir, marker = _fake_tmux(tmp_path, None, sequence=[
+            BUSY_SCREEN, BUSY_SCREEN, TYPED_SCREEN, NAMED_SCREEN])
+        result = _run(STOP, {"cwd": str(tmp_path)}, self._busy_env(bindir), tmp_path)
+        assert result.returncode == 0 and result.stdout.strip() == ""
+        time.sleep(2.5)
+        assert int((tmp_path / "captures").read_text()) == 3  # no retry after typed text
+        assert not marker.exists()
+        assert st.clear_flag(tmp_path).exists()
 
     def test_named_session_sends_clear(self, tmp_path, monkeypatch):
         st = _promote_and_arm(tmp_path, "%9")

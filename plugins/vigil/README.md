@@ -19,11 +19,14 @@ other plugin.
   open. Otherwise (or if the pane cannot be read) it sends nothing, leaves the
   handover armed and tells you via a systemMessage; a Stop that was itself
   caused by a Stop hook sends nothing and says nothing.
-  The pane is checked again after the `VIGIL_CLEAR_DELAY` wait (default 1s),
+  The pane is checked again after the `VIGIL_CLEAR_DELAY` wait (default 2s),
   and this re-check also refuses a running turn (`esc to interrupt` in the
   footer under the prompt box; the hook's own check cannot use it, since the
-  footer still shows it while the Stop hook runs). If the pane has stopped
-  being safe by then (you started typing, a dialog opened, a turn began), the
+  footer still shows it while the Stop hook runs). The footer keeps showing it
+  until EVERY Stop hook has finished, so a busy-only hold is retried every 0.5s
+  for up to `VIGIL_BUSY_WAIT` seconds (default 10); raise it if your other Stop
+  hooks run longer. If the pane is still busy after that, or has stopped being
+  safe (you started typing, a dialog opened), the
   dispatch is dropped **silently**: the hook has already
   returned, so no message can reach you. The handover stays armed and completes
   at the next Stop, or when you type `/clear` yourself.

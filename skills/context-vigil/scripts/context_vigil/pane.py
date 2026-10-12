@@ -25,6 +25,8 @@ FOOTER_PATTERN = r"(?i)enter to (select|confirm)|esc to (cancel|continue)"
 # A running turn: the footer under the box reads
 # "⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt" (2.1.296).
 BUSY_PATTERN = r"(?i)esc to interrupt"
+# The busy hold's reason: the post-delay re-check retries on it (and only on it).
+BUSY_REASON = "the session is busy (a turn is running)"
 _RULE = re.compile(RULE_PATTERN)
 _FOOTER = re.compile(FOOTER_PATTERN)
 _BUSY = re.compile(BUSY_PATTERN)
@@ -98,22 +100,38 @@ def below_box(screen: str) -> str:
     return "\n".join(plain(line) for line in raw[start:])
 
 
-def safe_to_type(screen: str, busy: bool = False) -> bool:
-    """``busy`` also refuses a running turn. Only the detached post-delay re-check
+def hold_reason(screen: str, busy: bool = False) -> Optional[str]:
+    """Why typing into this screen is unsafe, or None when it is safe.
+
+    ``busy`` also holds on a running turn. Only the detached post-delay re-check
     passes it: while a hook runs the footer still reads "esc to interrupt" (seen
-    live, 2.1.296), so the in-hook checks would refuse every handover."""
+    live, 2.1.296), so the in-hook checks would refuse every handover.
+    """
     row = input_row(screen)
     if row is None:
-        return False
+        return "no empty prompt box is on screen"
     if _FOOTER.search(plain(screen)):
-        return False
+        return "a dialog or permission prompt is open"
+    if typed_text(row) != "":
+        return "the prompt box is not empty"
     if busy and _BUSY.search(below_box(screen)):
-        return False   # a turn is running: typed keys would queue behind it
-    return typed_text(row) == ""
+        return BUSY_REASON
+    return None
+
+
+def safe_to_type(screen: str, busy: bool = False) -> bool:
+    return hold_reason(screen, busy) is None
+
+
+def pane_hold_reason(target: str, busy: bool = False) -> Optional[str]:
+    """None when the pane is safe to type into; otherwise why we must not."""
+    if tmux.in_mode(target):
+        return "the pane is in copy mode"   # copy mode and friends swallow the keys
+    screen = tmux.capture(target)
+    if screen is None:
+        return "the pane could not be read (tmux capture-pane failed)"
+    return hold_reason(screen, busy)
 
 
 def pane_safe(target: str, busy: bool = False) -> bool:
-    if tmux.in_mode(target):
-        return False   # copy mode and friends swallow the keys
-    screen = tmux.capture(target)
-    return screen is not None and safe_to_type(screen, busy)
+    return pane_hold_reason(target, busy) is None

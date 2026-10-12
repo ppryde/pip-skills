@@ -68,10 +68,22 @@ fi
 # during the delay): a held dispatch leaves the handover armed, untouched.
 # That hold is SILENT — the hook has already returned, so no systemMessage can
 # reach the person; the next Stop (or their own /clear) completes it.
-delay="${VIGIL_CLEAR_DELAY:-1}"
+# The footer reads "esc to interrupt" until EVERY Stop hook has finished, so a
+# busy-only hold (pane-safe exit 2) is polled every 0.5s for up to
+# VIGIL_BUSY_WAIT seconds; a dialog or typed text (exit 1) drops it at once.
+delay="${VIGIL_CLEAR_DELAY:-2}"
+busy_wait="${VIGIL_BUSY_WAIT:-10}"
+case "$busy_wait" in ""|*[!0-9]*) busy_wait=10 ;; esac  # whole seconds only
 (
   sleep "$delay"
-  "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" pane-safe "${TMUX_PANE:-}" || exit 0
+  end=$((SECONDS + busy_wait))
+  while :; do
+    "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" pane-safe "${TMUX_PANE:-}"
+    rc=$?
+    [ "$rc" -eq 0 ] && break
+    [ "$rc" -eq 2 ] && [ "$SECONDS" -lt "$end" ] || exit 0
+    sleep 0.5
+  done
   decision="$(printf '%s' "$input" \
     | "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" stop-hook 2>/dev/null || true)"
   first_line="$(printf '%s\n' "$decision" | head -n1)"

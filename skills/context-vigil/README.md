@@ -99,6 +99,11 @@ The mode is decided per turn.
 
 - **Auto** — Claude is running inside tmux. After the handover is written the
   `Stop` hook sends `/clear` to the pane, and the resume prompt is typed for you.
+  Keys are sent `CONTEXT_VIGIL_CLEAR_DELAY` / `CONTEXT_VIGIL_KICK_DELAY` seconds
+  later (default 2) and only into an empty prompt with no dialog open. While a
+  turn still shows `esc to interrupt` (other Stop hooks finishing) the send is
+  retried every 0.5s for up to `CONTEXT_VIGIL_BUSY_WAIT` seconds (default 10);
+  a dialog or typed text drops it, and the handover waits for your `/clear`.
 - **Manual** — no reachable tmux. You get the nudge, the agent writes the
   handover, and you type `/clear`. The handover is injected after `/clear`, but
   without tmux nothing types for you: send any message (e.g. "go") to start

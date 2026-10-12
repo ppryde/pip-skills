@@ -105,3 +105,28 @@ def test_pane_safety_patterns_are_shared_by_vigil_and_skill():
     # turn the same way; the wording must not drift.
     for name in ("RULE_PATTERN", "FOOTER_PATTERN", "BUSY_PATTERN"):
         assert py_const(VIGIL / "pane.py", name) == py_const(SKILL / "pane.py", name), name
+
+
+def _shape(path: Path, name: str) -> str:
+    """A function's AST with docstrings and type annotations removed: the plugin
+    writes ``int | None`` where the skill writes ``Optional[int]``."""
+    for node in ast.parse(path.read_text()).body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            node.returns = None
+            for arg in node.args.args + node.args.kwonlyargs:
+                arg.annotation = None
+            body = node.body
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+                node.body = body[1:]
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.AnnAssign):
+                    sub.annotation = ast.Constant(None)
+            return ast.dump(node, include_attributes=False)
+    raise AssertionError(f"{name} not found in {path}")
+
+
+def test_pane_logic_is_shared_by_vigil_and_skill():
+    # The screen-reading functions are copies; pin their bodies so a fix to one reaches both.
+    for name in ("plain", "typed_text", "_input_index", "input_row", "below_box", "hold_reason"):
+        assert _shape(VIGIL / "pane.py", name) == _shape(SKILL / "pane.py", name), name
+    assert py_const(VIGIL / "pane.py", "BUSY_REASON") == py_const(SKILL / "pane.py", "BUSY_REASON")

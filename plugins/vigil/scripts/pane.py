@@ -25,6 +25,8 @@ FOOTER_PATTERN = r"(?i)enter to (select|confirm)|esc to (cancel|continue)"
 # A running turn: the footer under the box reads
 # "⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt" (2.1.296).
 BUSY_PATTERN = r"(?i)esc to interrupt"
+# The busy hold's reason: the post-delay re-check retries on it (and only on it).
+BUSY_REASON = "the session is busy (a turn is running)"
 _RULE = re.compile(RULE_PATTERN)
 _FOOTER = re.compile(FOOTER_PATTERN)
 _BUSY = re.compile(BUSY_PATTERN)
@@ -110,10 +112,10 @@ def hold_reason(screen: str, busy: bool = False) -> str | None:
         return "no empty prompt box is on screen"
     if _FOOTER.search(plain(screen)):
         return "a dialog or permission prompt is open"
-    if busy and _BUSY.search(below_box(screen)):
-        return "the session is busy (a turn is running)"
     if typed_text(row) != "":
         return "the prompt box is not empty"
+    if busy and _BUSY.search(below_box(screen)):
+        return BUSY_REASON
     return None
 
 
