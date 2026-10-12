@@ -29,7 +29,10 @@ Read the file at HEAD too (not just the hunk) — context matters for rules that
 
 ### 3 — Walk the rule list
 
-For each rule in the PERSONA body, decide if it applies to any changed file. If yes, draft a finding.
+Write the diff (`git diff 'origin/<base>...HEAD'` limited to the in-scope files, written to a file) into a scratch dir (`mktemp -d -t review-clone.XXXXXX`, on its own) and run `python3 <plugin>/scripts/gate.py batches --alias '<alias>' --target '<diff file>' --work-dir '<scratch>'`.
+
+- `"inline": true` (30 rules or fewer): walk the rules yourself. For each rule in the PERSONA body, decide if it applies to any changed file. If yes, draft a finding.
+- `"inline": false` (more than 30 rules): dispatch each `seats[]` entry as a `pip-agents:reviewer-rules` agent, in parallel (`Agent` with `subagent_type` and `prompt` from the entry; one batch is at most 30 rules). Write each final message to a file with the Write tool and run `python3 <plugin>/scripts/gate.py review-ingest --brief '<seat brief>' --message '<message file>' --out '<scratch>/candidates.json'`; `rejected`: dispatch that batch once more, then report it as unchecked. Read `candidates.json`: each entry is a candidate finding (`id` = the rule id, `file`, `line`, `evidence`, `fix`, `citation`; `tier: "medium"` means one link unproven). Draft each as below, with the PERSONA rule's own **Severity** and your voice, not the batch agent's severity word. Mention any `injection_attempts` the command printed, and any batch with `seat_error` or `unchecked`.
 
 When a finding fires, record its **line anchor** from the hunk it sits in — you need this for inline PR posting (Step 5, option 4 `post-inline-pr`, posted in Step 6b):
 - `path` — repo-relative file path

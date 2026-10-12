@@ -496,6 +496,10 @@ def run_collect(
         "search_truncated": sorted(set(_truncated)),
         "resumed_prs": resumed,
     }
+    # Top-level integers for the pip-agents gatekeeper, which reads counts by name from this file.
+    snapshot["pr_count"] = counts["prs"]
+    snapshot["comment_count"] = counts["review_comments"] + counts["issue_comments"]
+    snapshot["error_count"] = len(errors)
     if digest:
         snapshot["digest"] = build_digest(alias, handles)  # the full corpus, always
         if explicit_since:

@@ -56,3 +56,7 @@ Private and internal repos are allowed when your `gh` login can read them (`coll
 ## Collector
 
 `collect.py` fetches 3 PRs at a time, backs off on rate limits (`Retry-After`), records PRs that fail in the snapshot's `errors` instead of aborting, and checkpoints each PR, so an interrupted run resumes when you run the same command again.
+
+## pip-agents
+
+review-clone depends on [`pip-agents`](../pip-agents/README.md). The collectors run through `pip-agents:gatekeeper`: `scripts/gate.py brief-collect` builds the brief from validated values, the gatekeeper runs the one `collect.py` command and returns a result envelope with the snapshot **path and counts** (`pr_count`, `comment_count`, `error_count`, top-level integers in `snapshot.json`), and `gate.py check-collect` validates it. `--paths` and `--extensions` values are refused unless they match `[A-Za-z0-9._/@+-]+` (no spaces or shell characters), so nothing but the validated values reaches the gatekeeper's run line. The corpus never passes through the session. A persona with more than 30 rules is reviewed in batches by `pip-agents:reviewer-rules` (`gate.py batches`, `gate.py review-ingest`); 30 or fewer stay inline. The validator and batch planner are vendored in `vendor/pip-agents/` (a skill cannot reach a dependency plugin's files); `python3 tools/sync_contract.py` refreshes them and `tests/agents/test_sync_contract.py` fails on drift.
