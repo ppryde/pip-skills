@@ -747,6 +747,104 @@ def _session_filter(repo_root: str | None, since: float | None,
     return where, params
 
 
+def _unmeasured(conn: sqlite3.Connection, where: str, params: list[Any],
+                now: float) -> tuple[int, int]:
+    """(failed, pending) finished sessions: failed replays are remembered per last activity
+    in `meta`; pending ones have no outcome yet. Both are absent from the rows above."""
+    failed = pending = 0
+    for last, replayed, bad in conn.execute(
+            "SELECT s.last_activity_at, m.value, f.value FROM sessions s "
+            "LEFT JOIN meta m ON m.key = 'concordance_replayed:' || s.session_id "
+            "LEFT JOIN meta f ON f.key = 'concordance_failed:' || s.session_id "
+            f"{where}{' AND' if where else ' WHERE'} s.last_activity_at IS NOT NULL", params):
+        if now - last <= LIVE_HORIZON_SECONDS or str(last) == replayed:
+            continue
+        failed, pending = failed + (str(last) == bad), pending + (str(last) != bad)
+    return failed, pending
+
+
+def concordance(conn: sqlite3.Connection, *, repo_root: str | None = None,
+                since: float | None = None, now: float | None = None) -> dict[str, Any]:
+    """Replayed concordance counterfactuals, by tool kind and by mode.
+
+    Savings are honest: a call concordance would not have answered (uncovered) counts
+    at its actual tokens and carried cost, so it never shows as a saving; the sums are
+    also split by whether the answer would have been enough (`by_answerable`).
+
+    Carried cost is the extra context the agent carried for the rest of the
+    session: tokens x later turns x the cache-read price, over the turns of the
+    same agent after the call's result and before the next compaction. A turn
+    whose model has no rate counts as unpriced rather than as free.
+
+    ``sessions_failed`` / ``sessions_pending`` count finished sessions in scope with no
+    rows: their replay failed at the current last activity, or has not run yet."""
+    where, params = _session_filter(repo_root, since, conn=conn)
+    failed, pending = _unmeasured(conn, where, params, time.time() if now is None else now)
+    empty: dict[str, Any] = {"sessions": 0, "rows": 0, "by_kind": {}, "by_mode": {},
+                             "sessions_failed": failed, "sessions_pending": pending}
+    if not _has_table(conn, "concordance_rows"):
+        return empty
+    rows = conn.execute(
+        "SELECT c.*, t.result_ts FROM concordance_rows c "
+        "LEFT JOIN sessions s ON s.session_id = c.session_id "
+        "LEFT JOIN tool_calls t ON t.session_id = c.session_id AND t.tool_use_id = c.tool_use_id"
+        f"{where}", params).fetchall()
+    book = ratebook.load(conn)
+    out = dict(empty, sessions=len({r["session_id"] for r in rows}), rows=len(rows))
+    for r in rows:
+        actual_usd, conc_usd, unpriced = 0.0, 0.0, 0
+        if r["result_ts"] is not None:
+            cutoff = conn.execute(
+                "SELECT MIN(ts) FROM events WHERE session_id = ? AND agent_id = ? "
+                "AND kind = 'compaction' AND ts > ?",
+                (r["session_id"], r["agent_id"], r["result_ts"])).fetchone()[0]
+            turns = conn.execute(
+                "SELECT model, ts FROM turns WHERE session_id = ? AND agent_id = ? AND ts > ?"
+                + (" AND ts < ?" if cutoff is not None else ""),
+                (r["session_id"], r["agent_id"], r["result_ts"],
+                 *([cutoff] if cutoff is not None else []))).fetchall()
+            for turn in turns:
+                rates = book.rates_for(turn["model"], ts=turn["ts"])
+                if rates is None or "cache_read" not in rates:
+                    unpriced += 1
+                    continue
+                per_token = rates["cache_read"] / 1_000_000
+                actual_usd += r["actual_tokens"] * per_token
+                conc_usd += r["concordance_tokens"] * per_token
+        covered = bool(r["covered"])
+        counter_tokens = r["concordance_tokens"] if covered else r["actual_tokens"]
+        counter_usd = conc_usd if covered else actual_usd
+        for group, key in (("by_kind", r["kind"]), ("by_mode", r["mode"])):
+            g = out[group].setdefault(key, {
+                "calls": 0, "covered": 0, "uncovered": 0, "actual_tokens": 0,
+                "concordance_tokens": 0, "counterfactual_tokens": 0,
+                "actual_carried_usd": 0.0, "concordance_carried_usd": 0.0,
+                "counterfactual_carried_usd": 0.0,
+                "unpriced_turns": 0, "drifted": 0,
+                "answerable": {"yes": 0, "no": 0, "unknown": 0}, "by_answerable": {}})
+            part = g["by_answerable"].setdefault(r["answerable"], {
+                "calls": 0, "actual_tokens": 0, "counterfactual_tokens": 0,
+                "actual_carried_usd": 0.0, "counterfactual_carried_usd": 0.0})
+            g["calls"] += 1
+            g["covered"] += covered
+            g["uncovered"] += not covered
+            g["actual_tokens"] += r["actual_tokens"]
+            g["concordance_tokens"] += r["concordance_tokens"] if covered else 0
+            g["counterfactual_tokens"] += counter_tokens
+            g["actual_carried_usd"] += actual_usd
+            g["concordance_carried_usd"] += conc_usd if covered else 0.0
+            g["counterfactual_carried_usd"] += counter_usd
+            g["unpriced_turns"] += unpriced
+            g["drifted"] += r["drifted"] == "yes"
+            g["answerable"][r["answerable"]] = g["answerable"].get(r["answerable"], 0) + 1
+            part["calls"] += 1
+            part["actual_tokens"] += r["actual_tokens"]
+            part["counterfactual_tokens"] += counter_tokens
+            part["actual_carried_usd"] += actual_usd
+            part["counterfactual_carried_usd"] += counter_usd
+    return out
+
+
 def is_live(ended_at: float | None, last_activity_at: float | None, now: float) -> bool:
     if ended_at is not None:
         return False

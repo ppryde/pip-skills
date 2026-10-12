@@ -209,6 +209,25 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_session_kind ON events(session_id, kind);
 CREATE INDEX IF NOT EXISTS events_uuid ON events(uuid);
 
+-- Numbers and labels only, from `concordance replay --json`: never a path,
+-- pattern, command line or content. Replaced wholesale per session.
+CREATE TABLE IF NOT EXISTS concordance_rows (
+    session_id         TEXT NOT NULL,
+    tool_use_id        TEXT NOT NULL,
+    agent_id           TEXT NOT NULL DEFAULT '',
+    kind               TEXT NOT NULL,
+    estimator          TEXT NOT NULL,
+    covered            INTEGER NOT NULL,
+    actual_tokens      INTEGER NOT NULL,
+    concordance_tokens INTEGER NOT NULL,
+    latency_ms         INTEGER NOT NULL,
+    answerable         TEXT NOT NULL,
+    drifted            TEXT NOT NULL,
+    mode               TEXT NOT NULL,
+    PRIMARY KEY (session_id, tool_use_id)
+);
+CREATE INDEX IF NOT EXISTS concordance_rows_session ON concordance_rows(session_id);
+
 CREATE TABLE IF NOT EXISTS accounts (
     -- Identity only, and deliberately only the parts that do not change and
     -- do not identify a person. The mutable half of an account — which plan

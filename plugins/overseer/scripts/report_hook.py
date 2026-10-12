@@ -119,6 +119,30 @@ def _record(card: Card, role: str, report: Report, detail: str, spend: int, now:
         card.set_section("## Verification", detail, now)
 
 
+def _evidence(conn, card: Card, report: Report, now: str) -> None:
+    """The stage-gate evidence for this report (WF-265 D2), written in the same
+    transaction as the card text so the two cannot disagree. Idempotent: a hook
+    that fires twice for one report adds nothing (``record_evidence_once``).
+    Implementer reports are progress, not gate evidence."""
+    detail = str(report.detail)
+    if isinstance(report, ReviewerReport):
+        db.record_evidence_once(
+            conn, card.id, report.stage, "review", round_no=report.round, slot=report.slot,
+            status=report.status, critical=report.critical, important=report.important,
+            minor=report.minor, detail=detail, ts=now)
+    elif isinstance(report, FixerReport):
+        db.record_evidence_once(
+            conn, card.id, report.stage, "fix", round_no=report.round,
+            status=report.status, detail=detail, ts=now)
+    elif isinstance(report, VerifierReport):
+        db.record_evidence_once(
+            conn, card.id, "verification", "verify", status=report.status.strip().upper(),
+            detail=detail, ts=now)
+    elif isinstance(report, PlannerReport) and report.status == "DONE":
+        db.record_evidence_once(conn, card.id, "planning", "plan", status="DONE",
+                                detail=detail, ts=now)
+
+
 def handle(payload: dict[str, object], repo_root: Path, now: str) -> dict[str, object] | None:
     """Returns a hook-output dict (``{"decision": "block", ...}``) when the
     reply should be bounced once, else None — the caller (``cli.py``'s
@@ -157,7 +181,11 @@ def handle(payload: dict[str, object], repo_root: Path, now: str) -> dict[str, o
     spend = budget_tokens(totals)
     conn = db.connect(repo_root)
     try:
-        card = db.mutate_card(conn, report.card, lambda c: _record(c, role, report, detail, spend, now))
+        def apply(c: Card) -> None:
+            _record(c, role, report, detail, spend, now)
+            _evidence(conn, c, report, now)
+
+        card = db.mutate_card(conn, report.card, apply)
         if card is None:
             entry["error"] = f"no card {report.card}"
         else:

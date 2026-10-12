@@ -135,6 +135,10 @@ class MoveBody(BaseModel):
     stage: str | None = None
     status: str | None = None
     reason: str | None = None
+    # Override a refused stage gate (WF-265 D2). A human's drag is allowed to
+    # break a gate, but only with a reason: it is recorded in the card's
+    # `## Decisions` as "dashboard: <reason>".
+    force_gate: str | None = None
 
 
 class ThresholdBody(BaseModel):
@@ -593,6 +597,8 @@ def _mutation_error(exc: CliError) -> HTTPException:
     """Mutation mapping: timeout -> 504, everything else (incl. id validation) -> 400."""
     if exc.returncode == 504:
         return HTTPException(status_code=504, detail=exc.stderr)
+    if exc.returncode == 3:  # the CLI's "GATE: ..." refusal: a conflict, not a bad request
+        return HTTPException(status_code=409, detail=exc.stderr)
     return HTTPException(status_code=400, detail=exc.stderr)
 
 
@@ -974,7 +980,9 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     def move_card(card_id: str, body: MoveBody, root: str | None = None) -> dict[str, Any]:
         """Dispatch table — overseer has no unified set-status verb.
 
-        `stage` wins if present (`set-stage id <stage>`); else `status` maps to
+        `stage` wins if present (`set-stage id <stage>`; a refused stage gate
+        is a 409 carrying the CLI's `GATE:` lines, and `force_gate` — a
+        non-empty reason — overrides it); else `status` maps to
         park/done/abandon/block/unblock. The resulting status after `unblock`
         is stage-derived (`in-flight` if the card has a stage else `planned`) —
         this endpoint returns the refreshed board so the client sees the
@@ -984,9 +992,17 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         if body.stage is not None:
+            force: list[str] = []
+            if body.force_gate is not None:
+                reason = " ".join(body.force_gate.split())
+                if not reason:
+                    raise HTTPException(
+                        status_code=400, detail="a reason is required to force a stage gate")
+                force = ["--force-gate", f"dashboard: {reason}"]
+
             def do_stage() -> None:
                 check_id(card_id)
-                run_overseer(effective, "set-stage", card_id, body.stage)  # type: ignore[arg-type]
+                run_overseer(effective, "set-stage", card_id, body.stage, *force)  # type: ignore[arg-type]
 
             return _mutate(do_stage, effective)
 

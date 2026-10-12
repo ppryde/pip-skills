@@ -13,14 +13,17 @@ if __package__ in (None, ""):  # direct invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts import census  # noqa: E402
+from scripts import pane as pane_mod  # noqa: E402
 from scripts import context as ctx  # noqa: E402
 from scripts import snapshot as snap  # noqa: E402
 from scripts import state as st  # noqa: E402
+from scripts.store import resolve_root  # noqa: E402
 from scripts.config import (  # noqa: E402
     ConfigError,
     get_config,
     load_config,
     set_config,
+    stored_window,
 )
 from typing import cast  # noqa: E402
 
@@ -43,6 +46,7 @@ def _current_context_percent(
     cfg: dict[str, object],
     session_id: str | None = None,
     transcript_path: str | None = None,
+    payload_model: str | None = None,
 ) -> int | None:
     # census first: keyed by session id when we have one (this session's own
     # entry, never a sibling's — see census.context_percent), else the
@@ -64,12 +68,18 @@ def _current_context_percent(
                 Path.home(),
                 Path(env_dir) if env_dir else None,
             )
-        tokens = ctx.context_tokens(transcript) if transcript else None
-        pct = (
-            ctx.context_percent(tokens, cast(int, cfg["context.window"]))
-            if tokens is not None
-            else None
+        reading = ctx.context_reading(transcript) if transcript else None
+        if reading is None:
+            return None
+        tokens, transcript_model = reading
+        # The window is detected (explicit config, [1m] model id, usage over
+        # 200k); 200k is assumed only when it is unknown.
+        window = ctx.detect_window(
+            tokens,
+            [payload_model, transcript_model, *ctx.configured_model_ids(root)],
+            stored_window(root),
         )
+        pct = ctx.context_percent(tokens, window)
     return pct
 
 
@@ -166,7 +176,7 @@ def _read_hook_payload() -> dict[str, object]:
 
 def _hook_root(payload: dict[str, object], args: argparse.Namespace) -> Path:
     cwd = payload.get("cwd")
-    return Path(cast(str, cwd)) if isinstance(cwd, str) and cwd else args.root
+    return resolve_root(Path(cast(str, cwd)) if isinstance(cwd, str) and cwd else args.root)
 
 
 def _hook_session_id(payload: dict[str, object], args: argparse.Namespace) -> str | None:
@@ -205,11 +215,54 @@ def cmd_clear_armed_hook(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_stop_guard_hook(args: argparse.Namespace) -> int:
+    """Stop-hook re-entry guard: prints ACTIVE when this Stop was itself caused
+    by a Stop hook (``stop_hook_active``), so the dispatcher never re-triggers."""
+    if _read_hook_payload().get("stop_hook_active") is True:
+        print("ACTIVE")
+    return 0
+
+
+def cmd_pane_check_hook(args: argparse.Namespace) -> int:
+    """Read-only Stop-hook helper: may the armed ``/clear`` be typed now?
+
+    Prints ``IDLE`` when nothing is armed (the hook then spawns no dispatch),
+    ``OK`` when armed and the pane's prompt is empty with no dialog open, and
+    otherwise ``HOLD:<reason>``. Never consumes the flag, so a held handover
+    stays armed for a later turn or the human's own /clear.
+    """
+    payload = _read_hook_payload()
+    if not st.clear_requested(_hook_root(payload, args)):
+        print("IDLE")
+        return 0
+    pane = os.environ.get("TMUX_PANE", "")
+    if not pane:
+        print("HOLD:no tmux pane is known")
+        return 0
+    reason = pane_mod.pane_hold_reason(pane)
+    print("OK" if reason is None else f"HOLD:{reason}")
+    return 0
+
+
+def cmd_pane_safe(args: argparse.Namespace) -> int:
+    """Flag-independent post-delay re-check: exit 0 when ``pane`` is an empty prompt
+    with no dialog open and no turn running; 2 when a running turn is the ONLY
+    reason (stop.sh retries: other Stop hooks may still be finishing); 1 otherwise."""
+    if not args.pane:
+        return 1
+    reason = pane_mod.pane_hold_reason(args.pane, busy=True)
+    if reason is None:
+        return 0
+    return 2 if reason == pane_mod.BUSY_REASON else 1
+
+
 def cmd_session_start_hook(args: argparse.Namespace) -> int:
     payload = _read_hook_payload()
     root = _hook_root(payload, args)
     if st.is_active(root):
-        handoff = st.consume_handoff(root)
+        # A handoff is injected only after /clear (source == "clear"): the
+        # plain startup/resume/compact sources never consume or inject it.
+        handoff = st.consume_handoff(root) if payload.get("source") == "clear" else None
         if handoff:
             print(json.dumps({
                 "hookSpecificOutput": {
@@ -352,8 +405,10 @@ def cmd_nudge_hook(args: argparse.Namespace) -> int:
 
     Registered on both events: UserPromptSubmit fires once per user turn, but
     unattended (auto-handover) runs receive no user prompts at all, so
-    PostToolUse — which fires after every tool call inside the agentic loop —
-    is the channel that actually reaches unattended sessions. The
+    PostToolUse is the channel that reaches them. Its registration is matched
+    to ``TaskCreate|TaskUpdate`` (hooks.json): an unattended run is nudged at
+    its task boundaries (not on every tool call), so it must use the Task
+    tools to be nudged. The
     handover-gate (below) is what keeps the PostToolUse registration
     non-chatty: it nudges once per cycle regardless of how many times, or via
     which event, this hook is invoked afterward.
@@ -380,6 +435,7 @@ def cmd_nudge_hook(args: argparse.Namespace) -> int:
         cfg,
         session_id=_hook_session_id(payload, args),
         transcript_path=hook_transcript if isinstance(hook_transcript, str) else None,
+        payload_model=ctx.payload_model_id(payload),
     )
     if pct is None or pct < threshold:
         return 0
@@ -399,7 +455,11 @@ def cmd_nudge_hook(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="vigil", description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path("."))
+    parser.add_argument(
+        "--root", type=Path, default=None,
+        help="state root (default: $CLAUDE_PROJECT_DIR, else the enclosing git work "
+             "tree of the cwd); an explicit --root overrides $CLAUDE_PROJECT_DIR",
+    )
     parser.add_argument(
         "--session-id", dest="session_id", default=None,
         help="census lookup key for this session (defaults to hook stdin's "
@@ -433,6 +493,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_handover)
 
     sub.add_parser("stop-hook").set_defaults(func=cmd_stop_hook)
+    sub.add_parser("stop-guard-hook").set_defaults(func=cmd_stop_guard_hook)
+    psafe = sub.add_parser("pane-safe")
+    psafe.add_argument("pane")
+    psafe.set_defaults(func=cmd_pane_safe)
+    sub.add_parser("pane-check-hook").set_defaults(func=cmd_pane_check_hook)
     sub.add_parser("clear-armed-hook").set_defaults(func=cmd_clear_armed_hook)
     sub.add_parser("session-start-hook").set_defaults(func=cmd_session_start_hook)
     sub.add_parser("nudge-hook").set_defaults(func=cmd_nudge_hook)
@@ -446,9 +511,15 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return 0 if not exc.code else 1
+    args.root = (
+        resolve_root(Path(".")) if args.root is None else resolve_root(args.root, honour_env=False)
+    )
     try:
         result: int = args.func(args)
         return result
+    except OSError as exc:
+        print(f"error: vigil state unavailable: {exc}", file=sys.stderr)
+        return 1
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

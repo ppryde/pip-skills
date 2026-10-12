@@ -22,7 +22,7 @@ from scripts.store import derive_repo_label, slugify
 IDENTITY_META_KEYS = {
     "repo_root", "schema_version", "workflow_fs_imported", "migrated_from_workflow",
     # board-local upgrade/view bookkeeping: never carried between boards
-    "state_imported_v2", "gates_since", "views_exported_at", "v2_report",
+    "state_imported_v2", "gates_since", "gates_from", "views_exported_at", "v2_report",
 }
 # "archive/corrupt" is quarantined files ONLY — never "archive/cards", which
 # the DB owns and cards.json already carries. migrate_workflow_to_central

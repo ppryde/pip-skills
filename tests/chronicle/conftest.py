@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from scripts.transcript import SYNTHETIC_MODEL
 
 
@@ -28,6 +29,12 @@ def _isolate_chronicle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # the real code path — they unset this themselves and use an injected
     # fake transport instead, never a real host.
     monkeypatch.setenv("CHRONICLE_NO_REMOTES", "1")
+    # Same for concordance: no sync in the suite may spawn a real concordance or
+    # touch its stores. Tests of the replay step pass an explicit env instead.
+    monkeypatch.delenv("CONCORDANCE_CLI", raising=False)
+    monkeypatch.setenv("CHRONICLE_NO_CONCORDANCE", "1")
+    monkeypatch.setenv("CONCORDANCE_DB", str(tmp_path / "concordance" / "concordance.db"))
+    monkeypatch.setenv("CONCORDANCE_USAGE_DB", str(tmp_path / "concordance" / "usage.db"))
 
 
 def _assistant(message_id: str, *, ts: str, model: str = "claude-opus-5", blocks=None,

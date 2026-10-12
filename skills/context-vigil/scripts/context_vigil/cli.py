@@ -603,8 +603,13 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
 
 
 def _cmd_pane_safe(args: argparse.Namespace) -> int:
-    """Exit 0 when the pane is safe to type into (the detached sender's re-check)."""
-    return 0 if pane.pane_safe(args.target) else 1
+    """The detached sender's re-check, after the hook has returned: exit 0 when the
+    pane is safe to type into; 2 when a running turn is the ONLY reason (the sender
+    retries: other Stop hooks may still be finishing); 1 otherwise."""
+    reason = pane.pane_hold_reason(args.target, busy=True)
+    if reason is None:
+        return 0
+    return 2 if reason == pane.BUSY_REASON else 1
 
 
 def _cmd_hook(args: argparse.Namespace) -> int:

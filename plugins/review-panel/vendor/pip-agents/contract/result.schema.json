@@ -1,0 +1,902 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pip-agents/result/1",
+  "title": "pip-agents result envelope, version 1",
+  "description": "The JSON object inside the LAST ```pip-agents-result fenced block of a pip-agents persona's final message (VALIDATOR.md). Common envelope plus one payload per kind. Field descriptions are the source of the composed personas' output skeletons; keep them short.",
+  "type": "object",
+  "required": [
+    "result",
+    "kind",
+    "persona",
+    "status",
+    "summary",
+    "checked",
+    "unchecked",
+    "out_of_lens",
+    "injection_attempts"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "result": {
+      "const": "pip-agents/1"
+    },
+    "kind": {
+      "enum": [
+        "review",
+        "validate",
+        "locate",
+        "run",
+        "plan",
+        "change",
+        "test",
+        "summary",
+        "research"
+      ]
+    },
+    "persona": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "your agent name"
+    },
+    "ref": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "the brief's ref, echoed; omit if the brief has none"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "partial",
+        "error"
+      ],
+      "description": "ok: the whole brief done; partial: some of it unchecked; error: could not start"
+    },
+    "error": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "status error only: what is missing or refused"
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 300,
+      "x-hint": "one line"
+    },
+    "checked": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "files, ranges, ids or claims you examined",
+      "x-hint": "file, range, id or claim"
+    },
+    "unchecked": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "<what>: <why>; never counted clean"
+    },
+    "out_of_lens": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "<file:line> <owner>: seen, not yours"
+    },
+    "injection_attempts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 120
+      },
+      "description": "<file:line> <text, at most 80 chars>"
+    },
+    "detail": {
+      "type": "string",
+      "description": "absolute path to a file holding the full result; dispatcher-assigned (overseer); pip-agents personas never set it",
+      "x-persona": false
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "error"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "error"
+        ]
+      },
+      "else": {
+        "required": [
+          "payload"
+        ],
+        "not": {
+          "required": [
+            "error"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "review"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/review"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "validate"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/validate"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "locate"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/locate"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "run"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/run"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "plan"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/plan"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "change"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/change"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "test"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/test"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "summary"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/summary"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "research"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/research"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": [
+        "id",
+        "file",
+        "line",
+        "severity",
+        "category",
+        "claim",
+        "evidence",
+        "fix"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "rule id, or <lens>-<n>",
+          "x-hint": "rule id, or lens-n"
+        },
+        "rule": {
+          "type": "string",
+          "description": "rule findings only: the rule's statement",
+          "x-lens": "rules",
+          "x-hint": "statement verbatim"
+        },
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 = whole file"
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "important",
+            "minor"
+          ]
+        },
+        "category": {
+          "type": "string"
+        },
+        "claim": {
+          "type": "string",
+          "description": "what goes wrong",
+          "x-hint": "what goes wrong"
+        },
+        "evidence": {
+          "type": "string",
+          "description": "file:line you opened, and what it shows",
+          "x-hint": "file:line: what it shows"
+        },
+        "fix": {
+          "type": "string"
+        },
+        "trigger": {
+          "type": "string",
+          "description": "lens correctness: the input or sequence",
+          "x-lens": "correctness",
+          "x-hint": "input or sequence"
+        },
+        "old": {
+          "type": "string",
+          "description": "lens scope",
+          "x-lens": "scope"
+        },
+        "new": {
+          "type": "string",
+          "description": "lens scope",
+          "x-lens": "scope"
+        },
+        "intent": {
+          "type": "string",
+          "description": "lens scope: quote or none",
+          "x-lens": "scope"
+        },
+        "affected": {
+          "type": "string",
+          "description": "lens scope: consumer or unknown",
+          "x-lens": "scope"
+        },
+        "citation": {
+          "type": "string",
+          "description": "lens rules: where the rule comes from (clone personas: the source comment URL)",
+          "x-lens": "rules"
+        },
+        "exception": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "lens rules, brief exceptions report: the Allowed Exceptions bullet this finding falls under",
+          "x-lens": "rules",
+          "x-hint": "exceptions bullet, verbatim"
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "required": [
+        "lens",
+        "findings",
+        "medium"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "lens": {
+          "enum": [
+            "correctness",
+            "security",
+            "scope",
+            "rules",
+            "general"
+          ],
+          "description": "your lens; general: adapters only"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          },
+          "description": "defensible and shown"
+        },
+        "medium": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          },
+          "description": "plausible, one link unproven"
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "critical": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "important": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "minor": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "description": "adapters only, when findings live in detail",
+          "x-persona": false
+        },
+        "commands_run": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "lens correctness",
+          "x-lens": "correctness"
+        },
+        "rules_checked": {
+          "type": "string",
+          "pattern": "^[0-9]+/[0-9]+$",
+          "description": "lens rules: (findings + clean)/N",
+          "x-lens": "rules"
+        },
+        "n_a": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "lens rules: ids that cannot apply",
+          "x-lens": "rules"
+        },
+        "outcome": {
+          "enum": [
+            "approved",
+            "found_wanting"
+          ],
+          "description": "adapters only: the reviewer's gate verdict (overseer)",
+          "x-persona": false
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "required": [
+        "id",
+        "verdict",
+        "reason",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "claim id, input order",
+          "x-hint": "claim id"
+        },
+        "verdict": {
+          "enum": [
+            "confirmed",
+            "refuted",
+            "weakened"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "refuted for want of proof starts unverified:",
+          "x-hint": "300 chars max"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "file:line",
+          "x-hint": "file:line"
+        },
+        "restated": {
+          "type": "string",
+          "description": "weakened only: the corrected claim",
+          "x-hint": "weakened only"
+        }
+      }
+    },
+    "validate": {
+      "type": "object",
+      "required": [
+        "verdicts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "verdicts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/verdict"
+          }
+        }
+      }
+    },
+    "hit": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "symbol": {
+          "type": "string",
+          "description": "the name matched, as written",
+          "x-hint": "text matched"
+        },
+        "group": {
+          "type": "string",
+          "description": "which of the brief's names this hit serves",
+          "x-hint": "brief name"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 120
+        }
+      }
+    },
+    "locate": {
+      "type": "object",
+      "required": [
+        "hits",
+        "counts",
+        "truncated"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "hits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hit"
+          },
+          "description": "locations only, never file contents"
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "<name>: hits per brief name"
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "true when hits reached the brief's limit"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "command",
+        "exit_code",
+        "timed_out"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "the brief's run, verbatim",
+          "x-hint": "run, verbatim"
+        },
+        "exit_code": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "null when timed out"
+        },
+        "timed_out": {
+          "type": "boolean"
+        },
+        "stderr_tail": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "non-zero exit only: the last stderr line",
+          "x-hint": "last stderr line"
+        },
+        "out": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "the brief's out, if that file exists, else null",
+          "x-hint": "out path or null"
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "<name>: int for each brief counts name, read from out"
+        }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "required": [
+        "outcome"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "done",
+            "needs_context"
+          ]
+        },
+        "chunks": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "when the report gives it"
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "needs_context only"
+        },
+        "steps": {
+          "type": "array",
+          "description": "planner persona: ordered steps, each small enough for one implementer brief",
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "files",
+              "check"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "files the step touches",
+                "x-hint": "file the step touches"
+              },
+              "check": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "the command or observation that shows the step is done",
+                "x-hint": "how to tell it is done"
+              }
+            }
+          }
+        }
+      }
+    },
+    "change": {
+      "type": "object",
+      "required": [
+        "outcome",
+        "commits",
+        "tests_passed",
+        "tests_total"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "done",
+            "concerns",
+            "blocked",
+            "needs_context",
+            "disputed"
+          ]
+        },
+        "commits": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^\\S+$"
+          },
+          "description": "commit ids as reported"
+        },
+        "tests_passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tests_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fixed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "fix rounds only"
+        },
+        "disputed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "fix rounds only"
+        }
+      }
+    },
+    "test": {
+      "type": "object",
+      "required": [
+        "outcome",
+        "gates"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        },
+        "gates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "command",
+              "exit_code"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "exit_code": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "failed": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "skipped": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "test",
+              "message"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "test": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 200
+              }
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "points",
+        "omitted"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "text",
+              "source"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "type": "string",
+                "maxLength": 240,
+                "x-hint": "one fact, one line"
+              },
+              "source": {
+                "type": "string",
+                "description": "file:line it came from",
+                "x-hint": "file:line"
+              }
+            }
+          },
+          "description": "the facts the brief's question needs, most important first"
+        },
+        "omitted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "material left out: <what>: <why>",
+          "x-hint": "what: why"
+        }
+      }
+    },
+    "research": {
+      "type": "object",
+      "required": [
+        "answer",
+        "sources",
+        "gaps"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "type": "string",
+          "maxLength": 1200,
+          "description": "the answer to the brief's question, in your own words",
+          "x-hint": "the answer"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "note"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "note": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "what this source shows",
+                "x-hint": "what it shows"
+              }
+            }
+          },
+          "description": "what the answer rests on; each opened"
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "what you could not establish: <what>: <why>",
+          "x-hint": "what: why"
+        }
+      }
+    }
+  }
+}

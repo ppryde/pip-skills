@@ -160,6 +160,25 @@ you can commit before a merge or push.
   beside it as `*.pre-restore.*.bak`). The board is v1 again afterwards: install
   the previous overseer version, or this one upgrades it again on next use.
 
+### Stage gates (0.28.0)
+
+Moving a card forward is checked against recorded evidence, not prose: into
+`implementation` (a real `## Plan` + a clean plan-review round; an S `--brief`
+card is exempt), into `verification` (a clean impl-review round), into
+`awaiting-merge` (a verifier `PASS`). `dispatch-prep` also enforces the round
+cap (S 2, M 3, L/XL 4) and the fixer-before-next-round order. The SubagentStop
+report hook records the evidence (`stage_evidence`) in the card's transaction;
+`dispatch-prep` records one `dispatch` row per reviewer/verifier, so a slot that
+never reports blocks the gate (a crash is not an approval). A refusal is exit 3
+with `GATE: ...` lines. Escapes: `--force-gate "user: <why>"` on `set-stage`,
+`dispatch-prep` or `bootstrap` (the reason is appended to the card's
+`## Decisions` and kept as a `force` evidence row; the dashboard's move API
+takes `force_gate` and records it as `dashboard: <reason>`, and a dashboard drag refused by a gate asks for that reason and retries; an empty reason is
+refused), `"gates": "warn"|"off"` in `.overseer/config.json`, or
+`OVERSEER_GATES=hard|warn|off` (a move that passes only because of `warn`/`off` leaves a `force` evidence row with status `bypassed` and a `GATE BYPASSED` line in `## Decisions`). Cards created before the board's `gates_from`
+date (set when the board is created or upgraded; a D1-era board is stamped when the
+first D2 command connects, binding from the next day) only warn.
+
 ### Schema v2 upgrade (0.27.0)
 
 The first command after upgrading takes an online, integrity-checked copy of a

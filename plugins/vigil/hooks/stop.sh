@@ -7,10 +7,8 @@ trap 'exit 0' EXIT
 
 input="$(cat)"
 
-py="python3"
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/../../.venv/bin/python" ]; then
-  py="${CLAUDE_PLUGIN_ROOT}/../../.venv/bin/python"
-fi
+# PATH python3, or the interpreter named by VIGIL_PYTHON. Never a repo-adjacent interpreter.
+py="${VIGIL_PYTHON:-python3}"
 
 # Loud manual fallback: consume nothing, force no continuation. When a handover
 # is armed, tell the *user* to type /clear via the systemMessage channel — plain
@@ -26,6 +24,13 @@ loud_manual() {
   fi
 }
 
+# A Stop caused by a Stop hook must never re-trigger the dispatcher.
+guard="$(printf '%s' "$input" \
+  | "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" stop-guard-hook 2>/dev/null || true)"
+if [ "$guard" = "ACTIVE" ]; then
+  exit 0
+fi
+
 if [ -z "${TMUX:-}" ]; then
   loud_manual
   exit 0
@@ -35,32 +40,67 @@ fi
 # stop-hook eat the flag and then fail silently at send-keys. Probe reachability
 # BEFORE consuming; if the server is unreachable, fall through to the same loud
 # manual path so the flag is preserved for the human's own /clear.
-if ! tmux has-session 2>/dev/null; then
+tmux="${VIGIL_TMUX_BIN:-tmux}"  # the same binary pane.py uses
+if ! "$tmux" has-session 2>/dev/null; then
   loud_manual
   exit 0
 fi
 
-decision="$(printf '%s' "$input" \
-  | "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" stop-hook 2>/dev/null || true)"
+# Never type /clear into a pane that is not an empty prompt: a dialog or
+# permission prompt would take it as an answer, and typed text would be
+# clobbered. Unsafe or unreadable -> keep the flag armed and say why.
+# Nothing armed at this Stop -> no dispatch at all: a delayed subshell spawned
+# now would consume a flag armed DURING its delay and type into a busy turn.
+pane_check="$(printf '%s' "$input" \
+  | "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" pane-check-hook 2>/dev/null || true)"
+if [ "$pane_check" = "IDLE" ]; then
+  exit 0
+fi
+if [ "$pane_check" != "OK" ]; then
+  why="${pane_check#HOLD:}"
+  [ "$why" = "$pane_check" ] && why="the pane could not be checked"
+  printf '{"systemMessage":"vigil: handover pending, /clear not sent because %s. It stays armed: type /clear to complete it."}\n' "$why"
+  exit 0
+fi
 
-first_line="$(printf '%s\n' "$decision" | head -n1)"
-if [ "$first_line" = "DISPATCH_CLEAR" ]; then
+# Dispatch detached. The flag is consumed only AFTER the post-sleep pane
+# re-check passes (the person may have started typing, or a dialog opened,
+# during the delay): a held dispatch leaves the handover armed, untouched.
+# That hold is SILENT — the hook has already returned, so no systemMessage can
+# reach the person; the next Stop (or their own /clear) completes it.
+# The footer reads "esc to interrupt" until EVERY Stop hook has finished, so a
+# busy-only hold (pane-safe exit 2) is polled every 0.5s for up to
+# VIGIL_BUSY_WAIT seconds; a dialog or typed text (exit 1) drops it at once.
+delay="${VIGIL_CLEAR_DELAY:-2}"
+busy_wait="${VIGIL_BUSY_WAIT:-10}"
+case "$busy_wait" in ""|*[!0-9]*) busy_wait=10 ;; esac  # whole seconds only
+busy_wait=$((10#$busy_wait))  # base 10: a leading 0 (08, 09) is not octal
+(
+  sleep "$delay"
+  end=$((SECONDS + busy_wait))
+  while :; do
+    "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" pane-safe "${TMUX_PANE:-}"
+    rc=$?
+    [ "$rc" -eq 0 ] && break
+    [ "$rc" -eq 2 ] && [ "$SECONDS" -lt "$end" ] || exit 0
+    sleep 0.5
+  done
+  decision="$(printf '%s' "$input" \
+    | "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" stop-hook 2>/dev/null || true)"
+  first_line="$(printf '%s\n' "$decision" | head -n1)"
+  [ "$first_line" = "DISPATCH_CLEAR" ] || exit 0
   # Second line, if present, is "TITLE:<text>" — the task summary vigil
   # renames the tmux window to before it types /clear, so the window
   # reflects what the fresh session is about to work on.
   title_line="$(printf '%s\n' "$decision" | sed -n '2p')"
-  title=""
   case "$title_line" in
     TITLE:*) title="${title_line#TITLE:}" ;;
+    *) title="" ;;
   esac
-  delay="${VIGIL_CLEAR_DELAY:-1}"
-  (
-    sleep "$delay"
-    if [ -n "$title" ]; then
-      tmux rename-window -t "${TMUX_PANE:-}" -- "$title" || true
-    fi
-    tmux send-keys -t "${TMUX_PANE:-}" "/clear" Enter || true
-  ) >/dev/null 2>&1 </dev/null &
-fi
+  if [ -n "$title" ]; then
+    "$tmux" rename-window -t "${TMUX_PANE:-}" -- "$title" || true
+  fi
+  "$tmux" send-keys -t "${TMUX_PANE:-}" "/clear" Enter || true
+) >/dev/null 2>&1 </dev/null &
 
 exit 0

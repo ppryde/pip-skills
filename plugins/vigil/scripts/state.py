@@ -1,28 +1,62 @@
-"""Vigil runtime state under `.claude/vigil/`, keyed by the repo root (cwd).
+"""Vigil runtime state under `$CLAUDE_CONFIG_DIR/vigil/<repo-key>/`, keyed by the repo root.
 
-The vigil root is the per-session key: one root, one watch. Every function is
-quarantine-safe — it only touches its own marker files and never raises on a
-missing path.
-
-Single-writer assumption: these markers (`active`, `paused`, `cooldown`,
-`clear-requested`, `handover-gate`, `handoff.md`) live under one
-`.claude/vigil/` per root and carry no session identity. If two live sessions share a single root
-they share — and race on — the same markers: one session's nudge gates the
-other, one session's `/clear` cooldown silences the other. Vigil therefore
-assumes exactly one session per root, which the intended per-worktree session
-model (one checkout, one watch) gives for free. Sharing a root across concurrent
-sessions is unsupported.
+The vigil root is keyed per repo root: `active`, `paused` and `config.json` are
+repo-wide (one watch per root). Everything a handover moves through (`handoff.md`,
+`clear-requested`, `handover-gate`, `cooldown`, `rename-title`, `archive/`) lives
+per session lineage under `sessions/<lineage>/`, where the lineage is the tmux pane
+(stable across `/clear`, unlike the session id) or `default` outside tmux. Two
+sessions in different panes of one repo therefore never inject, consume or silence
+each other's handover. Two sessions sharing a pane lineage (both outside tmux) still
+share it. Every function is quarantine-safe — it only touches its own marker files
+and never raises on a missing path.
 """
 from __future__ import annotations
 
+import os
+import re
+import secrets
 import time
 from pathlib import Path
 
-from scripts.store import _uniquify, ensure_root, vigil_root
+from scripts.store import (
+    PRIVATE_FILE_MODE,
+    _private_dir,
+    ensure_root,
+    marker_exists,
+    read_private,
+    touch_private,
+    vigil_root,
+    write_private,
+)
+
+_UNSAFE_LINEAGE = re.compile(r"[^A-Za-z0-9_-]")
 
 COOLDOWN_TTL_SECONDS = 300
 GATE_TTL_SECONDS = 6 * 60 * 60  # 6h self-heal: mirrors COOLDOWN_TTL_SECONDS's pattern
+ARCHIVE_KEEP = 20  # consumed handoffs kept in archive/ (newest first)
 MAX_TITLE_LENGTH = 60  # keeps a tmux window title readable in the status bar
+
+
+def lineage() -> str:
+    """The session lineage this process belongs to: its tmux pane (stable across
+    ``/clear``, which changes the session id), else ``default`` outside tmux."""
+    pane = os.environ.get("TMUX_PANE", "")
+    return _UNSAFE_LINEAGE.sub("", pane) or "default"
+
+
+def session_root(repo_root: Path) -> Path:
+    """Per-lineage state dir: ``<vigil_root>/sessions/<lineage>/``. Holds the
+    handoff, clear request, gate, cooldown and title, so two sessions in two
+    panes of one repo never inject or consume each other's handover."""
+    return vigil_root(repo_root) / "sessions" / lineage()
+
+
+def _ensure_session_root(repo_root: Path) -> Path:
+    ensure_root(repo_root)
+    sessions = vigil_root(repo_root) / "sessions"
+    _private_dir(sessions)
+    _private_dir(session_root(repo_root))
+    return session_root(repo_root)
 
 
 def active_marker(repo_root: Path) -> Path:
@@ -30,11 +64,11 @@ def active_marker(repo_root: Path) -> Path:
 
 
 def clear_flag(repo_root: Path) -> Path:
-    return vigil_root(repo_root) / "clear-requested"
+    return session_root(repo_root) / "clear-requested"
 
 
 def gate_marker(repo_root: Path) -> Path:
-    return vigil_root(repo_root) / "handover-gate"
+    return session_root(repo_root) / "handover-gate"
 
 
 def paused_flag(repo_root: Path) -> Path:
@@ -42,15 +76,15 @@ def paused_flag(repo_root: Path) -> Path:
 
 
 def cooldown_marker(repo_root: Path) -> Path:
-    return vigil_root(repo_root) / "cooldown"
+    return session_root(repo_root) / "cooldown"
 
 
 def handoff_path(repo_root: Path) -> Path:
-    return vigil_root(repo_root) / "handoff.md"
+    return session_root(repo_root) / "handoff.md"
 
 
 def rename_title_path(repo_root: Path) -> Path:
-    return vigil_root(repo_root) / "rename-title"
+    return session_root(repo_root) / "rename-title"
 
 
 def _sanitize_title(title: str) -> str | None:
@@ -75,25 +109,25 @@ def _sanitize_title(title: str) -> str | None:
 
 
 def handoff_archive_dir(repo_root: Path) -> Path:
-    return vigil_root(repo_root) / "archive"
+    return session_root(repo_root) / "archive"
 
 
 def begin(repo_root: Path) -> None:
     ensure_root(repo_root)
-    active_marker(repo_root).touch()
+    touch_private(active_marker(repo_root))
 
 
 def is_active(repo_root: Path) -> bool:
-    return active_marker(repo_root).exists()
+    return marker_exists(active_marker(repo_root))
 
 
 def is_paused(repo_root: Path) -> bool:
-    return paused_flag(repo_root).exists()
+    return marker_exists(paused_flag(repo_root))
 
 
 def pause(repo_root: Path) -> None:
     ensure_root(repo_root)
-    paused_flag(repo_root).touch()
+    touch_private(paused_flag(repo_root))
 
 
 def resume(repo_root: Path) -> None:
@@ -101,15 +135,15 @@ def resume(repo_root: Path) -> None:
     # Do not clear the gate while a handover is queued: the gate is what stops
     # the trigger re-nudging over an already-armed `clear-requested`. Clearing it
     # here would fire a redundant nudge on top of the pending handover.
-    if not clear_flag(repo_root).exists():
+    if not marker_exists(clear_flag(repo_root)):
         clear_gate(repo_root)
 
 
 def _marker_active(marker: Path, ttl_seconds: float) -> bool:
-    if not marker.exists():
+    if not marker_exists(marker):
         return False
     try:
-        age = time.time() - marker.stat().st_mtime
+        age = time.time() - os.lstat(marker).st_mtime
     except OSError:
         return False
     if age >= ttl_seconds:
@@ -128,8 +162,8 @@ def cooldown_active(repo_root: Path) -> bool:
 
 
 def set_gate(repo_root: Path) -> None:
-    ensure_root(repo_root)
-    gate_marker(repo_root).touch()
+    _ensure_session_root(repo_root)
+    touch_private(gate_marker(repo_root))
 
 
 def gate_active(repo_root: Path) -> bool:
@@ -151,7 +185,7 @@ def clear_requested(repo_root: Path) -> bool:
     """
     if not is_active(repo_root) or is_paused(repo_root):
         return False
-    return clear_flag(repo_root).exists()
+    return marker_exists(clear_flag(repo_root))
 
 
 def request_clear(repo_root: Path, handoff_text: str, title: str | None = None) -> str:
@@ -161,39 +195,47 @@ def request_clear(repo_root: Path, handoff_text: str, title: str | None = None) 
         return "paused"
     if _cooldown_active(repo_root):
         return "cooldown"
-    ensure_root(repo_root)
-    handoff_path(repo_root).write_text(handoff_text)
+    _ensure_session_root(repo_root)
+    write_private(handoff_path(repo_root), handoff_text)
     sanitized = _sanitize_title(title) if title else None
     if sanitized:
-        rename_title_path(repo_root).write_text(sanitized)
+        write_private(rename_title_path(repo_root), sanitized)
     else:
         # A stale title from an earlier arm must not bleed into this one.
         rename_title_path(repo_root).unlink(missing_ok=True)
-    clear_flag(repo_root).touch()
+    touch_private(clear_flag(repo_root))
     return "armed"
 
 
 def consume_rename_title(repo_root: Path) -> str | None:
     """Read the pending window-rename title, then delete it (at most once)."""
     path = rename_title_path(repo_root)
-    if not path.exists():
-        return None
-    try:
-        text = path.read_text().strip()
-    except OSError:
+    text = read_private(path)
+    if text is None:
         return None
     path.unlink(missing_ok=True)
-    return text or None
+    return text.strip() or None
 
 
 def consume_clear_flag(repo_root: Path) -> bool:
     if not is_active(repo_root) or is_paused(repo_root):
         return False
-    if not clear_flag(repo_root).exists():
+    if not marker_exists(clear_flag(repo_root)):
+        return False  # a symlink or other non-file is never a request
+    # Claiming the flag IS the test: of two racing Stop hooks exactly one wins
+    # the rename; the other gets FileNotFoundError and dispatches nothing. A
+    # rename, not unlink(): on APFS two concurrent unlink() calls of one path
+    # can BOTH succeed (measured: ~75% of 2000 two-thread races), so unlink
+    # cannot pick a single winner. rename() to a unique name can (0 of 10000).
+    flag = clear_flag(repo_root)
+    claimed = flag.with_name(f"{flag.name}.consumed-{os.getpid()}-{secrets.token_hex(4)}")
+    try:
+        os.rename(flag, claimed)
+    except FileNotFoundError:
         return False
-    clear_flag(repo_root).unlink(missing_ok=True)  # remove FIRST: cannot re-fire
-    ensure_root(repo_root)
-    cooldown_marker(repo_root).touch()
+    claimed.unlink(missing_ok=True)
+    _ensure_session_root(repo_root)
+    touch_private(cooldown_marker(repo_root))
     return True
 
 
@@ -214,39 +256,47 @@ def begin_cycle(repo_root: Path) -> None:
     outlives census's lag window and suppresses both the nudge and
     ``request_clear`` through the grace period.
     """
-    ensure_root(repo_root)
+    _ensure_session_root(repo_root)
     clear_flag(repo_root).unlink(missing_ok=True)
     rename_title_path(repo_root).unlink(missing_ok=True)
     clear_gate(repo_root)
-    cooldown_marker(repo_root).touch()
+    touch_private(cooldown_marker(repo_root))
 
 
 def read_handoff(repo_root: Path) -> str | None:
-    path = handoff_path(repo_root)
-    if not path.exists():
-        return None
+    return read_private(handoff_path(repo_root))
+
+
+def prune_archive(repo_root: Path, keep: int = ARCHIVE_KEEP) -> None:
+    """Keep only the newest ``keep`` archived handoffs. Never raises."""
     try:
-        return path.read_text()
+        files = sorted(
+            (f for f in handoff_archive_dir(repo_root).iterdir() if f.is_file()),
+            key=lambda f: (f.stat().st_mtime_ns, f.name),
+            reverse=True,
+        )
     except OSError:
-        return None
+        return
+    for old in files[max(keep, 0):]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
 
 
 def consume_handoff(repo_root: Path) -> str | None:
     """Read the pending handoff, then archive it so it injects at most once.
 
     Returns the handoff text, or None if there is no pending handoff. Archiving
-    (move to <vigil_root>/archive/, uniquified) clears the re-injection gate —
+    (move to <vigil_root>/archive/ as a timestamped name, newest 20 kept) clears the re-injection gate —
     the handoff file's presence IS that gate — so a later unrelated launch will
     not re-inject a stale briefing. Quarantine-safe: on any archive failure it
     still removes the live handoff so re-injection cannot repeat, and never
     raises.
     """
     path = handoff_path(repo_root)
-    if not path.exists():
-        return None
-    try:
-        text = path.read_text()
-    except OSError:
+    text = read_private(path)  # no-follow: a planted symlink reads as nothing
+    if text is None:
         return None
     # The text is now in hand — from here we MUST return it, never raise
     # (the docstring's contract). Archiving is best-effort; if it fails we
@@ -254,9 +304,14 @@ def consume_handoff(repo_root: Path) -> str | None:
     # and even that removal is guarded.
     try:
         archive = handoff_archive_dir(repo_root)
-        archive.mkdir(parents=True, exist_ok=True)
-        target = _uniquify(archive / "handoff.md")
+        _private_dir(archive)  # 0700, symlink and owner checked
+        target = archive / f"handoff-{time.time_ns()}.md"
         path.rename(target)
+        try:
+            os.chmod(target, PRIVATE_FILE_MODE)
+        except OSError:
+            pass
+        prune_archive(repo_root)
     except OSError:
         try:
             path.unlink(missing_ok=True)
