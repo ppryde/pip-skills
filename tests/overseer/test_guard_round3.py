@@ -314,8 +314,13 @@ class TestCentralBoardsAreFoundInTheUpgradeWindow:
 # --------------------------------------------------------------------------
 
 SKILLS = PLUGIN / "skills"
-DOC_FILES = sorted([*SKILLS.glob("*/SKILL.md"), *SKILLS.glob("*/references/*.md"),
+# references/cli.md is generated from the parser (every verb, hook backends included, as bare
+# signatures); the SKILL's inlined `<!-- cli:begin -->` block is the documented S/M vocabulary and
+# is extracted below as verb rows.
+DOC_FILES = sorted([*SKILLS.glob("*/SKILL.md"),
+                    *(p for p in SKILLS.glob("*/references/*.md") if p.name != "cli.md"),
                     *SKILLS.glob("*/policy.md")])
+CLI_BLOCK = re.compile(r"<!-- cli:begin -->.*?<!-- cli:end -->", re.S)
 ORCH_DIR = SKILLS / "orchestrate"
 CLI_TOKEN = 'python3 "<base directory>/../../scripts/cli.py" --root .'
 VERBS = set(re.findall(r'add_parser\("([a-z-]+)"', (PLUGIN / "scripts" / "cli.py").read_text()))
@@ -331,7 +336,8 @@ EXPECTED_DENY = {
         "not by the guarded orchestrator",
 }
 
-_PLACEHOLDERS = {"<id>": "WF-001", "<P-id>": "P-1", "<other>": "WF-002", "<repo-root>": "."}
+_PLACEHOLDERS = {"<id>": "WF-001", "<card-id>": "WF-001", "<P-id>": "P-1", "<fact-id>": "P-1",
+                 "<other>": "WF-002", "<repo-root>": "."}
 _ALT_WORD = re.compile(r"\S+(?:\\\|\S+)+")
 
 
@@ -404,6 +410,14 @@ def extract_documented_commands() -> list[tuple[str, str, str]]:
     found: list[tuple[str, str, str]] = []
     for path in DOC_FILES:
         text = path.read_text()
+        for block in CLI_BLOCK.findall(text):  # generated signatures: one verb per line
+            for line in block.splitlines():
+                if not line.strip() or line.startswith(("<!--", "```")):
+                    continue
+                sig = re.sub(r"\s*\|\s*", r"\\|", line.strip())
+                for variant in _variants(sig):
+                    found.append((path.name, line.strip(), _cli(_with_heredoc(_fill(variant)))))
+        text = CLI_BLOCK.sub("", text)
         for m in re.finditer(r"^```[^\n]*\n(.*?)^```", text, re.S | re.M):
             for line in m.group(1).splitlines():
                 line = line.strip()

@@ -126,7 +126,8 @@ def review_diff(worktree: Path, *, max_bytes: int = MAX_DIFF_BYTES) -> ReviewDif
     excluded = [(p, why) for p, _, why in files if why]
     kept = [p for p, _, why in files if not why]
     warnings: list[str] = []
-    dirty = _dirty_files(worktree)
+    # With no base branch the diff is `git diff HEAD`, which already shows tracked edits.
+    dirty = _dirty_files(worktree) if argv != ["diff", "HEAD"] else []
     dirty_warning = ""
     if dirty:
         shown = ", ".join(dirty[:10]) + (f" and {len(dirty) - 10} more" if len(dirty) > 10 else "")

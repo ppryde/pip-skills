@@ -152,3 +152,15 @@ def test_bundle_writes_the_notes_into_diff_patch_and_warns_on_stderr(repo, capsy
     assert "uncommitted" in out.err
     assert out.out.strip().endswith("bundle-reviewer-A-r1.md")  # stdout stays one path
     assert bundle  # module imported for the public surface
+
+
+def test_no_dirty_warning_when_there_is_no_base_and_the_diff_is_against_head(tmp_path):
+    subprocess.run(["git", "init", "-q", "-b", "trunk"], cwd=tmp_path, check=True)
+    _git(tmp_path, "config", "user.email", "t@t")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "a.txt").write_text("one\n")
+    _git(tmp_path, "add", "a.txt")
+    _git(tmp_path, "commit", "-qm", "base")
+    (tmp_path / "a.txt").write_text("one\ntwo\n")
+    out = gitops.review_diff(tmp_path)
+    assert "+two" in out.text and out.warnings == []

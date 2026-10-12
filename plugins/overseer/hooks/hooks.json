@@ -31,6 +31,15 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/dashboard-refresh.sh"
           }
         ]
+      },
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"
+          }
+        ]
       }
     ],
     "Stop": [

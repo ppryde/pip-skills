@@ -1644,6 +1644,7 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
             lens=args.lens,
             variables=bundle.parse_vars(args.var or []),
             verbosity=str(config.load_config(args.root).get("verbosity", "terse")),
+            knowledge_max=_knowledge_max(config.load_config(args.root)),
             archived=db.load_archived_cards(_conn(args.root)),
             today=_today(),
         )
@@ -1656,6 +1657,12 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
     _stamp_orchestrator(args.root, card.id)
     print(path)
     return 0
+
+
+def _knowledge_max(cfg: dict) -> int:
+    """Repo config ``knowledge_max``: a positive integer, else the default."""
+    value = cfg.get("knowledge_max", bundle.MAX_FACTS)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else bundle.MAX_FACTS
 
 
 def cmd_new_sprint(args: argparse.Namespace) -> int:
@@ -1957,10 +1964,40 @@ def cmd_merge_boards(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_help(args: argparse.Namespace) -> int:
+    from scripts.cliref import signatures
+
+    sigs = signatures(build_parser())
+    if args.verb is None:
+        print("\n".join(sigs.values()))
+        return 0
+    if args.verb not in sigs:
+        print(f"error: unknown verb {args.verb!r}; verbs: {', '.join(sigs)}", file=sys.stderr)
+        return 1
+    print(sigs[args.verb])
+    return 0
+
+
+def _show_section(card: Card, wanted: str, as_json: bool) -> int:
+    key = wanted.strip().lstrip("#").strip().lower()
+    for header, text in card.sections.items():
+        if header.lstrip("#").strip().lower() == key and header:
+            if as_json:
+                print(json.dumps({"id": card.id, "section": header, "text": text}))
+            else:
+                print(text)
+            return 0
+    have = ", ".join(h.lstrip("# ") for h in card.sections if h) or "(none)"
+    print(f"error: {card.id} has no section {wanted!r}; sections: {have}", file=sys.stderr)
+    return 1
+
+
 def cmd_show(args: argparse.Namespace) -> int:
     # db.load_card already spans both live and archived rows, so a single
     # `_load` covers what used to be a live lookup plus an archive-dir glob.
     card = _load(args.root, args.id)
+    if args.section is not None:
+        return _show_section(card, args.section, args.json)
     data = {
         "id": card.id,
         "title": card.title,
@@ -2518,7 +2555,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("show")
     p.add_argument("id")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--section", help="print only this section (Plan, Verification, Decisions, "
+                                     "'Review log', ...)")
     p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("help", help="one-line usage for a verb (or every verb)")
+    p.add_argument("verb", nargs="?")
+    p.set_defaults(func=cmd_help)
 
     p = sub.add_parser("repos")
     p.add_argument("--json", action="store_true")

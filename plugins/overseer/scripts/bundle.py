@@ -37,7 +37,10 @@ KNOWN_PLACEHOLDERS = (
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 _VAR_KEY = re.compile(r"\A\w+\Z")
 _ROUND_FILE = re.compile(r"\Ar(\d+)-[A-Za-z0-9]+\.md\Z")
-MAX_FACTS = 15
+MAX_FACTS = 8  # default; repo config `knowledge_max` overrides
+# Roles whose bundle carries no knowledge unless the orchestrator asks (`--var knowledge=1`):
+# they act on named findings / gate commands, not on repo lore.
+KNOWLEDGE_ON_REQUEST = ("fixer", "verifier")
 
 
 class BundleError(ValueError):
@@ -100,7 +103,7 @@ def _files_for_rounds(directory: Path, rounds: set[int], *, include_fix: bool) -
     return found
 
 
-def _knowledge(repo_root: Path, card: Card, today: str) -> str:
+def _knowledge(repo_root: Path, card: Card, today: str, limit: int = MAX_FACTS) -> str:
     if not card.labels:
         return "_(none)_"
     conn = db.connect(repo_root, migrate=False)
@@ -114,7 +117,7 @@ def _knowledge(repo_root: Path, card: Card, today: str) -> str:
             continue
         stale = " [STALE — verify first]" if fact.effective_status(today) == "stale" else ""
         lines.append(f"  - {fact.id}{stale}: {fact.statement}")
-    return "\n".join(lines[:MAX_FACTS]) or "_(none)_"
+    return "\n".join(lines[:limit]) or "_(none)_"
 
 
 def _calibration(archived: list[Card]) -> str:
@@ -139,6 +142,7 @@ def prepare(
     lens: str | None,
     variables: dict[str, str],
     verbosity: str,
+    knowledge_max: int = MAX_FACTS,
     archived: list[Card],
     today: str,
 ) -> Path:
@@ -159,8 +163,8 @@ def prepare(
         "worktree": str(worktree),
         "reply_path": str(directory / reply),
         "cli": f"{sys.executable} {CLI_PATH} --root {repo_root}",
-        "knowledge": _knowledge(repo_root, card, today),
-        "calibration": _calibration(archived),
+        "knowledge": _knowledge(repo_root, card, today, knowledge_max),
+        "calibration": _calibration(archived) if role == "planner" else "",
         "charter": "" if verbosity == "normal" else TERSE_CHARTER,
         "lens": lens or "general",
         "prior_findings": _bullets(
@@ -182,6 +186,10 @@ def prepare(
             except gitops.GitError as exc:
                 raise BundleError(f"could not write the diff: {exc}") from exc
         values["target_path"] = str(target)
+    if role in KNOWLEDGE_ON_REQUEST:
+        # Opt in with `--var knowledge=1`; otherwise the bundle carries no facts.
+        if variables.pop("knowledge", "") != "1":
+            values["knowledge"] = "_(none)_"
     clash = sorted(set(variables) & set(values))
     if clash:
         raise BundleError(f"--var cannot override built-in placeholder(s): {', '.join(clash)}")

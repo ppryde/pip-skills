@@ -22,10 +22,9 @@ sprint is ready to activate.
   it a grab-bag?
 
 ## Charter
-- Hunt the failure case. Distrust the plan's own framing; verify against the
-  card table and the conflict report.
-- Default to "found wanting" when uncertain.
-- Evidence for every finding: name the card(s) and the specific problem.
+As the reviewer agent's Charter (`overseer-reviewer`), applied to the sprint plan:
+hunt the failure case, default to "found wanting" when uncertain, and name the
+card(s) and the specific problem for every finding.
 
 ## Verdict (final message)
 - **Verdict:** approved | found wanting
