@@ -11,6 +11,10 @@ Twelve doctrines. Three skills. No sinful templates shall pass.
 - **visitation** — Formal inspection of an existing email template against all doctrines.
 - **scribe** — Righteous generation of new email templates, correct by construction.
 
+## Audit agents
+
+Elder and Visitation split the rule audit into batches of at most 30 rules and, when a run selects more than 30 rules or covers 10 or more templates, dispatch one `pip-agents:reviewer-rules` agent per batch (the plugin depends on `pip-agents`, which Claude Code installs with it). Transactional mail carries no unsubscribe requirement (UX-016 applies to marketing only).
+
 ## Usage
 
 ```
