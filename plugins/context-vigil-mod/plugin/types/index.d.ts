@@ -72,6 +72,7 @@ export type Pending = {
   followUp: string | null
   createdAt: number
   unattended?: boolean   // R3-06: the clear that follows is the mod's own; a reload offers it, never runs it
+  archived?: string      // PROBES §15: the name the mod renamed `Archive: <it>` just before its clear
 }
 
 // A handover the model has been asked to write and has not written yet. `started` turns
@@ -90,7 +91,7 @@ export type EventKind =
   | 'arm' | 'disarm' | 'threshold' | 'bar' | 'handover.requested' | 'handover.written'
   | 'guard.wait' | 'guard.baseline' | 'clear.skipped' | 'clear' | 'resume' | 'resume.sent' | 'last_light.fired' | 'last_light.choice'
   | 'limit.latched' | 'limit.cleared' | 'limit.early_stop' | 'rc.answer' | 'setup'
-  | 'standdown' | 'rename' | 'last_light.skip' | 'last_light.off' | 'last_light.on' | 'last_light.dropped'
+  | 'standdown' | 'rename' | 'archive' | 'last_light.skip' | 'last_light.off' | 'last_light.on' | 'last_light.dropped'
 
 export type EventRecord = { ts: string; session: string; kind: EventKind } & Record<string, unknown>
 
