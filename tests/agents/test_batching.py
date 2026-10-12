@@ -74,3 +74,11 @@ def test_unscoped_units_are_never_packed(batching):
     mixed = [mk(batching, "n", 3, scope=()), mk(batching, "a", 3), mk(batching, "b", 3)]
     sizes = sorted(b.size for b in batching.plan_batches(mixed))
     assert sizes == [3, 6]  # only the two declared, identical scopes pack
+
+
+def test_cap_under_twice_the_floor_fails_fast(batching, monkeypatch):
+    # [10, 1] merges to 11 > cap and cuts to [6, 5], both under the floor: the rebalance used to loop forever.
+    monkeypatch.setattr(batching, "BATCH_CAP", 10)
+    monkeypatch.setattr(batching, "BATCH_FLOOR", 8)
+    with pytest.raises(ValueError, match="BATCH_CAP"):
+        batching.plan_batches([mk(batching, "flat", 11)])

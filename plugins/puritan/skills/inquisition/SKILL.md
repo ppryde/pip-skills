@@ -50,7 +50,7 @@ For each doctrine in config:
 Always drop files matching the config's `exclude` globs.
 
 ### Step 3b: Pre-flight Size Check
-Count total files and unique directories before dispatching. If the scope exceeds **100 files**, pause and ask:
+Count files and unique directories before dispatching. If the scope exceeds **100 files**, pause and ask:
 
 > "Found **N files across X directories** matching your configured targets. This audit may consume significant tokens. How would you like to proceed?
 > 1. Proceed with full audit
@@ -62,7 +62,7 @@ At or under 100 files proceed silently. In non-interactive report mode, phrase i
 > "⚠ Scope: N files across X directories. Proceeding with audit. Use `targets:` in `.architecture/config.yml` to narrow scope."
 
 ### Step 4: Run Audit
-Write each doctrine's scope (absolute paths, one per line) with Write to `<tmp>/pip-agents/<run>/<doctrine>.scope.txt`; `<tmp>` is the OS temp dir, never the repo. Dispatch one `pip-agents:reviewer-rules` per `batch:` line. Its whole prompt is this brief (spans and ids copied from the line, never rule or file text):
+Run `mktemp -d "${TMPDIR:-/tmp}/pip-agents.XXXXXX"` once; `<run>` is its output (not a fixed name or the repo). Write each doctrine's scope (absolute paths, one per line) with Write to `<run>/<doctrine>.scope.txt`. Dispatch one `pip-agents:reviewer-rules` per `batch:` line. Its whole prompt is this brief (spans and ids copied from the line, never rule or file text):
 ```
 brief: pip-agents/1
 kind: review
@@ -119,7 +119,7 @@ Covenant is user-invoked only. If they decline, offer the minimal template from 
 
 ## Voice
 
-Deliver all findings in the voice of the Witchfinder —
+Deliver findings in the Witchfinder's voice —
 formally uncompromising, dramatically precise, with a
 knowing wink. Violations are heresies. Resolutions are
 absolution. The codebase is the sanctum.
