@@ -110,6 +110,17 @@ since the cursor last saw them, parses only the bytes appended since, and record
 time. On a machine with ~50 sessions and ~180 transcript files a no-change sync is a
 directory walk that finishes in well under a second.
 
+### Concordance replay numbers
+
+`chronicle concordance [--root R] [--since ...]` (JSON) reports what concordance would have
+saved on replayed sessions: actual vs concordance tokens per call, and the carried cost
+(tokens x the later turns of the same agent x the cache-read price at each turn's time;
+unpriced turns are counted, never costed as $0). The rows come from `concordance replay`,
+which `chronicle sync` runs as an optional last step for finished sessions. The step never
+fails a sync: a per-session timeout (120 s) and a step budget (300 s) bound it, and a failed
+session is skipped until it grows. Set `CHRONICLE_NO_CONCORDANCE=1` to switch it off.
+Chronicle never imports concordance (it only calls its CLI) and stores numbers and labels only.
+
 ### Several Claude accounts (config dirs)
 
 Claude Code keeps one account per config dir (`~/.claude`, or `CLAUDE_CONFIG_DIR`), each with

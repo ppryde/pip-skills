@@ -48,6 +48,21 @@ verdicts. Reviews add one `record-review` row with their findings. The log is ke
 is separate from the per-repo index caches, so deleting an index loses no history. `stats`
 reports usage, budget pressure by diff size and effectiveness; `--json` is for chronicle.
 
+## Measuring it: replay
+
+`concordance replay --session <id>` reads a finished session's transcripts in memory and, for
+each covered tool call, asks the real CLI what concordance would have returned. It stores one
+row per call: actual tokens, concordance tokens, CLI latency, whether the answer would have
+been enough (yes / no / unknown) and whether the file has changed since (drifted). Rows hold
+numbers and labels only; nothing from the transcript is stored. A session idle for under 15
+minutes is refused (exit 2) unless `--force`; replaying again replaces that session's rows.
+Today's estimators cover whole-repo, unfiltered bare-identifier Greps (callers), the agent's own
+concordance calls (passthrough) and Read drift (exact reconstruction; unknown on doubt).
+`concordance stats --replay` summarises the rows; replay's own CLI calls are tagged
+`CONCORDANCE_ORIGIN=replay` and left out of usage stats. `concordance mode inject|shadow
+[--session ID]` sets the delivery mode (pure shadow by default; it never blocks or rewrites an
+agent tool, and inject-mode hooks arrive later). Every query command takes `--json`.
+
 ## Worktrees
 
 One store per repo (keyed by the git common dir) under
