@@ -38,6 +38,7 @@ def test_callers_json_miss_is_not_found(make_repo) -> None:
     repo = make_repo(BASE)
     doc = json.loads(cli(repo.root, "callers", "nope_nothing", "--json").stdout)
     assert doc["found"] is False and doc["hits"] == []
+    assert doc["target"] is None and doc["definition"] is None
 
 
 def test_check_json_counts_verdicts_and_keeps_exit_code(make_repo) -> None:
@@ -58,3 +59,18 @@ def test_review_context_json_lists_sections(make_repo) -> None:
                               "def unused():\n    return 1\n"})
     doc = json.loads(cli(repo.root, "review-context", "--json").stdout)
     assert doc["sections"] and all({"title", "count"} <= set(s) for s in doc["sections"])
+
+
+def test_tests_json_hits_have_path_and_line(make_repo) -> None:
+    repo = make_repo(BASE)
+    doc = json.loads(cli(repo.root, "tests", "refund", "--json").stdout)
+    assert doc["found"] is True and doc["hits"]
+    assert all(set(h) == {"path", "line"} for h in doc["hits"])
+    assert any(h["path"] == "tests/test_api.py" for h in doc["hits"])
+
+
+def test_coverage_json_has_no_target_keys(make_repo) -> None:
+    repo = make_repo(BASE)
+    doc = json.loads(cli(repo.root, "coverage", "--json").stdout)
+    assert doc["command"] == "coverage" and doc["root"]
+    assert not {"found", "target", "definition", "hits"} & set(doc)

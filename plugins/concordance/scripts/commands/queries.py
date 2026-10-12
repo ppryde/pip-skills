@@ -32,9 +32,10 @@ def diff_command(args: argparse.Namespace, cwd: Path, stats: dict[str, object],
                  facts: dict[str, object]) -> tuple[str, int, str]:
     ctx = build(cwd, args.base, args.deadline)
     view_id = ctx.head.view_id
-    facts.update(root=str(ctx.root), view_id=view_id, verdicts=len(verdicts(ctx)), sections=[])
+    n_verdicts = len(verdicts(ctx))
+    facts.update(root=str(ctx.root), view_id=view_id, verdicts=n_verdicts, sections=[])
     stats.update(touched=len(ctx.diff.touched), files=ctx.head_cov.total,
-                 verdicts=len(verdicts(ctx)), repo_name=ctx.root.name)
+                 verdicts=n_verdicts, repo_name=ctx.root.name)
     by_command: dict[str, Callable[[], list[Section]]] = {
         "removed": lambda: [contract_section(ctx)],
         "sig-drift": lambda: [verdict_section(ctx), drift_section(ctx)],
@@ -51,7 +52,7 @@ def diff_command(args: argparse.Namespace, cwd: Path, stats: dict[str, object],
         facts["sections"] = section_facts(sections)
         return render(header(ctx), sections, footer(ctx), args.budget, stats), 0, view_id
     if args.command == "check":
-        return check_text(ctx), (1 if verdicts(ctx) else 0), view_id
+        return check_text(ctx), (1 if n_verdicts else 0), view_id
     report = ctx.reports[0]
     summary = (f"head view {report.view_id}: {report.files} files, {report.parsed} parsed, "
                f"{report.reused} reused, {len(report.failed)} failed, "
@@ -76,8 +77,7 @@ def name_command(args: argparse.Namespace, cwd: Path, stats: dict[str, object],
     view = worktree_view(cwd)
     ensure_view(store, view, args.deadline)
     vi = ViewIndex(store, view)
-    facts.update(root=str(view.root), view_id=view.view_id, found=False, target=None,
-                 definition=None, hits=[])
+    facts.update(root=str(view.root), view_id=view.view_id)
     if args.command == "coverage":
         cov = store.coverage(view.view_id)
         lines = [f"coverage: {cov.total - len(cov.not_indexed)}/{cov.total} files indexed",
@@ -85,6 +85,7 @@ def name_command(args: argparse.Namespace, cwd: Path, stats: dict[str, object],
                  *[f"  not indexed: {p}" for p in cov.not_indexed],
                  *[f"  not indexed ({why}): {p}" for p, why in sorted(view.skipped.items())]]
         return "\n".join(lines), 0, view.view_id
+    facts.update(found=False, target=None, definition=None, hits=[])
     found = vi.lookup(args.name)
     if found.target is None:
         return miss_text(args.name, found), 0, view.view_id
