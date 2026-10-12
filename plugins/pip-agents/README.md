@@ -19,7 +19,7 @@ validator. No skills, no hooks. Each consumer plugin moves onto it in its own PR
 | `pip-agents:summariser` | summary | Read | digests files into sourced points, lists what it left out | library, no consumer yet |
 | `pip-agents:researcher` | research | Read, Grep, Glob | answers one question from local files, with sources and gaps | library, no consumer yet (web research is never granted) |
 
-The implementer is the only persona with Edit and Write (the lint allows them for kind `change` only); nothing holds Agent, Skill, WebFetch, WebSearch or an MCP tool.
+The implementer is the only persona with Edit and Write (the lint allows them for kind `change` only); nothing holds Agent, Skill, WebFetch, WebSearch or an MCP tool. The implementer's write boundary (edit only inside `target:`, `git add`/`commit` only, no push) is advisory charter prose: the validator does not check that its commits touch only the target. Before a consumer wires it, the lead must compare `git diff --name-only` of the returned commits with the brief's `target:` (see `contract/VALIDATOR.md`).
 
 Install: `/plugin install pip-agents --marketplace ppryde/pip-skills`
 

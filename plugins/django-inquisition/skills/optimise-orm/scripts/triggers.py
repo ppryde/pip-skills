@@ -177,7 +177,7 @@ def plan_batches(nominees):
             out[-1] = out[-1] + b
         else:
             out.append(b)
-    return out
+    return out  # a last batch under the floor stays as is when the previous one is full (unreachable today)
 
 
 def write_batches(batches, index: Path, out_dir: Path):
@@ -227,7 +227,9 @@ def main(argv=None):
             if not a.out_dir or not Path(a.out_dir).is_absolute():
                 raise Bad("--batches needs --out-dir, an absolute path")
             out_dir = Path(a.out_dir)
-            if str(out_dir.resolve()).startswith(str(Path(a.index).resolve().parent.parent)):
+            skill_dir = Path(a.index).resolve().parent.parent
+            real = out_dir.resolve()
+            if real == skill_dir or skill_dir in real.parents:
                 raise Bad("--out-dir must be outside the skill directory")
         notes, scanned, nominees = [], [], []
         lines = scan(rows, files, groups, a.max_lines, notes, scanned, a.thorough, nominees)

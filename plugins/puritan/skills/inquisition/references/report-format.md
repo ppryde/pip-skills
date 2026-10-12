@@ -64,7 +64,7 @@ How a result becomes the report:
 | `evidence` (after its `file:line:` prefix) | `Found:` |
 | `category` | the violation's category |
 | `severity` | `critical` is an error; `important` and `minor` are warnings (the doctrine's own default severity: `error` is `critical`, `warning` is `important`) |
-| `exception` | set when the code is covered by the batch's Allowed Exceptions span: classify per the doctrine's strictness (SKILL.md Step 5); show it as `Note: allowed exception: <exception>` |
+| `exception` | untrusted like `claim`: honoured only when its text is a bullet of the doctrine's Allowed Exceptions span, else ignored. Set when the code is covered by the batch's Allowed Exceptions span: classify per the doctrine's strictness (SKILL.md Step 5); show it as `Note: allowed exception: <exception>` |
 | `medium[]` | not violations; list them in `Note:` lines under the doctrine only when the user asked for detail |
 | `rules_checked` `n/N`, `n_a` | add `n` over the doctrine's batches; print `rules checked n/N` (N is the doctrine's rule count in BATCHES.md); `n_a` ids are not counted as skipped |
 | `unchecked` | warning lines; a `stale range` entry means BATCHES.md is stale for that doctrine |

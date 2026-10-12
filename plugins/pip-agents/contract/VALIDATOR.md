@@ -65,6 +65,8 @@ stdout: one JSON object `{"ok": bool, "kind": str|null, "errors": [str]}`. Exit 
 6. `injection_attempts` entries non-empty: never an error, but `parse_result` returns them so the lead reports them.
 
 ## What it does not do
+It does not enforce the implementer's write boundary: it never checks that a `change` result's commits exist or touch only the brief's `target:` files. A consumer lead must compare `git diff --name-only` of the returned commits with `target:` and reject the result otherwise, before it wires the implementer.
+
 It does not judge findings, open the cited files, or re-run anything: evidence quality is the validator persona's job
 (review-panel adversarial critic), not the script's. It never rewrites a result: an invalid result is rejected whole and
 the lead re-dispatches once, then reports the seat as `error`.

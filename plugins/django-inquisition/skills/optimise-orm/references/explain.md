@@ -16,7 +16,7 @@ Read this only when EXPLAIN is reachable (Step 2), `--no-explain` is not set, an
 
 `EXPLAIN ANALYZE` executes the statement. Run it only when every one of these holds; otherwise refuse, print `EXPLAIN ANALYZE refused: <reason>` once, and use plain `EXPLAIN` for that finding:
 
-- The database is local or a test database: the `DATABASES` `HOST` is empty, `localhost`, `127.0.0.1`, `::1` or a unix-socket path, or the database name starts with `test_` or the settings module is a test settings module. A named remote host, or anything that looks like staging or production, is refused.
+- The database is local: the `DATABASES` `HOST` is empty, `localhost`, `127.0.0.1`, `::1` or a unix-socket path, AND the database name starts with `test_` or the settings module is a test settings module. Any other host is refused whatever the name (a remote host with a `test_` database is refused), as is anything that looks like staging or production.
 - The finding is SELECT-shaped. A write-shaped finding is never analysed.
 - It runs inside `BEGIN … ROLLBACK` (a `transaction.atomic()` that is rolled back), so nothing the query touches is kept.
 

@@ -1,6 +1,6 @@
 {
   "name": "email-absolution",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "dependencies": ["pip-agents"],
   "description": "Righteous HTML email construction. Doctrines, visitation, and absolution for the transactional email sanctum.",
   "author": {

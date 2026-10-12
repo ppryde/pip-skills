@@ -22,7 +22,7 @@ After running visitation, offer to generate a PR checklist. Build the "Tested in
 - [ ] Tested in <stack.rendering_targets, e.g. Outlook 2019, Gmail, Apple Mail>
 - [ ] Plain-text version generated (if the ESP requires it)
 - [ ] Subject and preheader reviewed
-- [ ] Unsubscribe link present and tested
+- [ ] Unsubscribe link present and tested (marketing sends only)
 ```
 
 ## Error handling

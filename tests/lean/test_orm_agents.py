@@ -158,3 +158,28 @@ def test_explain_defaults_to_plain_explain_and_refuses_analyze_unless_asked():
         assert needle in analyze, needle
     assert "actual" in analyze and "ratio" in analyze  # the 5x actual/estimated bump needs ANALYZE
     assert "EXPLAIN (ANALYZE" not in SKILL_MD
+
+
+def test_a_last_batch_under_the_floor_stays_when_the_previous_batch_is_full():
+    """Pins the documented exception to the floor: nothing to merge it into without breaking the cap."""
+    _, batches = plan({"fetching": trig.BATCH_CAP - 1, "writes": 3})
+    assert [len(b) for b in batches] == [trig.BATCH_CAP - 1, 3]
+
+
+def test_out_dir_guard_is_a_path_ancestor_test_not_a_string_prefix(tmp_path):
+    f = FIXTURES / "01-basic-n-plus-one" / "target.py"
+    skill_dir = INDEX.resolve().parent.parent
+    assert run(f, "--batches", "--out-dir", skill_dir / "scratch").returncode == 2
+    sibling = skill_dir.parent / (skill_dir.name + "-x")  # shares the string prefix, is not inside the skill
+    assert not sibling.exists()
+    try:
+        r = run(f, "--batches", "--out-dir", sibling)
+        assert "outside the skill directory" not in (r.stderr + r.stdout)
+    finally:
+        import shutil
+        shutil.rmtree(sibling, ignore_errors=True)
+
+
+def test_analyze_gate_is_a_conjunction_remote_test_db_is_refused():
+    analyze = EXPLAIN.split("## ANALYZE", 1)[1]
+    assert "AND" in analyze and "remote host with a `test_` database is refused" in analyze

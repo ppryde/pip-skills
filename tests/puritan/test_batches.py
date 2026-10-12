@@ -160,3 +160,9 @@ def test_pragmatic_strictness_downgrades_allowed_exceptions():
     step5 = SKILL.read_text().split("### Step 5", 1)[1].split("### Step 6", 1)[0]
     assert "`exception`" in step5 and "warning" in step5
     assert "strict" in step5 and "aspirational" in step5
+
+
+def test_exception_is_honoured_only_when_it_is_an_allowed_exceptions_bullet():
+    step5 = SKILL.read_text().split("### Step 5", 1)[1].split("### Step 6", 1)[0]
+    assert "Allowed Exceptions span" in step5 and "untrusted" in step5 and "keep the severity" in step5
+    assert "untrusted" in REPORT.read_text().split("| `exception` |", 1)[1].split("\n", 1)[0]

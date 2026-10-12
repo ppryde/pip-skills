@@ -233,3 +233,13 @@ def test_elder_dispatch_default_and_precedence_documented():
     assert "Audit in rule batches" in text(skill_md("elder"))
     elder = text(skill_md("elder"))
     assert "Argument precedence" in elder and "doctrine <name>" in elder
+
+
+def test_pr_checklist_unsubscribe_item_is_marketing_only():
+    t = (PLUGIN / "skills" / "visitation" / "references" / "integration.md").read_text(encoding="utf-8")
+    assert "Unsubscribe link present and tested (marketing sends only)" in t
+
+
+def test_fan_out_acceptance_step_is_its_own_list_item():
+    t = (PLUGIN / "references" / "audit.md").read_text(encoding="utf-8")
+    assert "\n3. Each agent ends with" in t and "`-`. 3." not in t
