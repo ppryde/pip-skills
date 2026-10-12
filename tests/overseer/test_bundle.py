@@ -193,6 +193,16 @@ def test_fixer_gets_no_knowledge_unless_asked(repo, capsys, role, stage):
     assert "dbt needs --target ci" in (d / "bundle-fixer-r1.md").read_text()
 
 
+def test_verifier_bundle_never_carries_facts_and_the_knowledge_var_is_refused(repo, capsys):
+    code, _, _ = _prep(repo, capsys, "--stage", "verification", "--role", "verifier")
+    assert code == 0
+    d = dispatch_dir(repo, "WF-001", "verification")
+    assert "dbt needs --target ci" not in next(d.glob("bundle-verifier*.md")).read_text()
+    code, _, err = _prep(repo, capsys, "--stage", "verification", "--role", "verifier",
+                         "--var", "knowledge=1")
+    assert code == 1 and "built-in" in err
+
+
 def test_knowledge_var_is_still_refused_for_other_roles(repo, capsys):
     code, _, err = _prep(repo, capsys, "--stage", "impl-review", "--role", "reviewer", "--slot", "A",
                          "--var", "knowledge=1")

@@ -39,8 +39,9 @@ _VAR_KEY = re.compile(r"\A\w+\Z")
 _ROUND_FILE = re.compile(r"\Ar(\d+)-[A-Za-z0-9]+\.md\Z")
 MAX_FACTS = 8  # default; repo config `knowledge_max` overrides
 # Roles whose bundle carries no knowledge unless the orchestrator asks (`--var knowledge=1`):
-# they act on named findings / gate commands, not on repo lore.
-KNOWLEDGE_ON_REQUEST = ("fixer", "verifier")
+# the fixer acts on named findings, not on repo lore. (The verifier template has no
+# `{{knowledge}}` slot at all, so it never carries facts and is not listed.)
+KNOWLEDGE_ON_REQUEST = ("fixer",)
 
 
 class BundleError(ValueError):

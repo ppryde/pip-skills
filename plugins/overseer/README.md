@@ -33,7 +33,8 @@ adversarial review loops, integrated with sprint planning and superpowers.
 - Living knowledge base: durable facts (rows in `board.db`) with per-fact verification dates;
   facts marked `[STALE]` after 90 days untouched; retirement (never deleted, supports
   `superseded_by` chains); `knowledge/` is a regenerated read-only view with a `knowledge.md`
-  index of active/stale/retired sections; `{{knowledge}}` injection into orchestration templates.
+  index of active/stale/retired sections; `{{knowledge}}` injection into orchestration templates (fixer bundles carry
+  none unless dispatched with `--var knowledge=1`).
 - Context stewardship via the **`vigil`** plugin (a soft dependency): a promoted
   orchestrator caps its own context creep by handing its ledger rollup to vigil,
   which resets context in-process via `/clear` and re-injects the handover.

@@ -5,7 +5,7 @@ import subprocess
 import pytest
 from factories import git_init
 
-from scripts import bundle, gitops
+from scripts import gitops
 
 
 def _git(path, *argv):
@@ -151,7 +151,6 @@ def test_bundle_writes_the_notes_into_diff_patch_and_warns_on_stderr(repo, capsy
     assert patch.startswith("# WARNING") and "dirty.txt" in patch and "yarn.lock" in patch
     assert "uncommitted" in out.err
     assert out.out.strip().endswith("bundle-reviewer-A-r1.md")  # stdout stays one path
-    assert bundle  # module imported for the public surface
 
 
 def test_no_dirty_warning_when_there_is_no_base_and_the_diff_is_against_head(tmp_path):
@@ -164,3 +163,52 @@ def test_no_dirty_warning_when_there_is_no_base_and_the_diff_is_against_head(tmp
     (tmp_path / "a.txt").write_text("one\ntwo\n")
     out = gitops.review_diff(tmp_path)
     assert "+two" in out.text and out.warnings == []
+
+
+def test_untracked_work_still_warns_when_there_is_no_base(tmp_path):
+    subprocess.run(["git", "init", "-q", "-b", "trunk"], cwd=tmp_path, check=True)
+    _git(tmp_path, "config", "user.email", "t@t")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "a.txt").write_text("one\n")
+    _git(tmp_path, "add", "a.txt")
+    _git(tmp_path, "commit", "-qm", "base")
+    (tmp_path / "a.txt").write_text("one\ntwo\n")  # tracked: already in `git diff HEAD`
+    (tmp_path / "new.py").write_text("x = 1\n")
+    out = gitops.review_diff(tmp_path)
+    joined = "\n".join(out.warnings)
+    assert "new.py" in joined and "a.txt" not in joined
+
+
+def test_base_ref_lookups_carry_the_timeout(repo, monkeypatch):
+    seen = []
+    real = gitops._git
+
+    def spy(cwd, *argv, timeout=None):
+        seen.append((argv[0], timeout))
+        return real(cwd, *argv, timeout=timeout)
+
+    monkeypatch.setattr(gitops, "_git", spy)
+    gitops.base_ref(repo)
+    assert seen and all(t == gitops.DIFF_TIMEOUT for _, t in seen)
+
+
+def test_a_hung_git_status_only_drops_the_dirty_warning(repo, monkeypatch):
+    _commit(repo, {"a.txt": "one\ntwo\n"})
+    real = gitops._git
+
+    def hang_status(cwd, *argv, timeout=None):
+        if argv[0] == "status":
+            raise subprocess.TimeoutExpired(["git", *argv], timeout)
+        return real(cwd, *argv, timeout=timeout)
+
+    monkeypatch.setattr(gitops, "_git", hang_status)
+    out = gitops.review_diff(repo)
+    assert "+two" in out.text and out.warnings == []
+
+
+def test_hostile_paths_cannot_forge_a_diff_line_and_the_read_command_is_quoted(repo):
+    (repo / "x\nINJECT").write_text("d\n")  # untracked, newline in the name
+    _commit(repo, {"big file.txt": "line\n" * 5000})
+    out = gitops.review_diff(repo, max_bytes=1000)
+    assert "\nINJECT" not in out.text
+    assert "-- 'big file.txt'" in out.text
