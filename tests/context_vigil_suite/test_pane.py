@@ -26,6 +26,22 @@ TRUST = screen(" Quick safety check: Is this a project you created or one you tr
 PERMISSION = screen(" Do you want to proceed?", " ❯ 1. Yes", "   2. No",
                     " Esc to cancel · Tab to amend")
 REMOTE_MENU = screen("   Remote Control", "   ❯ Continue", "   Enter to select · Esc to continue")
+# Live captures, Claude Code 2.1.296, in a session named "Great Refactoring probe": the
+# name is drawn into the upper rule; a running turn shows "esc to interrupt" in the
+# footer under the box, and it is still there while the Stop hook runs.
+NAMED_RULE = "\x1b[38;5;244m" + "─" * 94 + " Great Refactoring probe ─"
+LOWER_RULE = "\x1b[38;5;244m" + "─" * 120
+IDLE_FOOTER = ("\x1b[39m  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)"
+               " · ← 1 agent\x1b[39m")
+BUSY_FOOTER = ("\x1b[39m  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)"
+               " · esc to interrupt · ← 1 agent\x1b[39m")
+NAMED_IDLE = screen("✽ Cerebrating… (1s · thinking)", NAMED_RULE, "\x1b[39m❯\xa0",
+                    LOWER_RULE, IDLE_FOOTER, STATUS)
+BUSY = screen("✽ Cerebrating… (1s · thinking)", NAMED_RULE, "\x1b[38;5;246m❯\xa0\x1b[39m",
+              LOWER_RULE, BUSY_FOOTER, STATUS)
+# The phrase in transcript text above an idle box is not a running turn.
+TRANSCRIPT_MENTIONS_BUSY = screen("⏺ BUSY_PATTERN matches esc to interrupt in the footer.",
+                                  "", RULE, IDLE_ROW, RULE, STATUS)
 TRANSCRIPT_PROMPT_ONLY = screen("❯ Use the Bash tool to run exactly: sleep 30",
                                 "  Ran 2 shell commands")
 
@@ -33,10 +49,25 @@ TRANSCRIPT_PROMPT_ONLY = screen("❯ Use the Bash tool to run exactly: sleep 30"
 @pytest.mark.parametrize("text,safe", [
     (IDLE, True), (IDLE_EMPTY, True),
     (TYPED, False), (TRUST, False), (PERMISSION, False), (REMOTE_MENU, False),
+    (NAMED_IDLE, True), (BUSY, True), (TRANSCRIPT_MENTIONS_BUSY, True),
     (TRANSCRIPT_PROMPT_ONLY, False), ("", False),
 ])
 def test_safe_to_type(text: str, safe: bool) -> None:
     assert pane.safe_to_type(text) is safe
+
+
+@pytest.mark.parametrize("text,safe", [
+    (IDLE, True), (NAMED_IDLE, True), (TRANSCRIPT_MENTIONS_BUSY, True),
+    (BUSY, False), (TYPED, False), (TRUST, False),
+])
+def test_safe_to_type_busy_check(text: str, safe: bool) -> None:
+    # busy=True is the post-delay re-check only; the in-hook check never sees BUSY.
+    assert pane.safe_to_type(text, busy=True) is safe
+
+
+def test_named_rule_is_a_rule() -> None:
+    assert pane.input_row(NAMED_IDLE) is not None
+    assert pane.input_row(screen("─" * 12 + " not a rule", "❯ x")) is None
 
 
 def test_typed_text_ignores_dim_placeholder() -> None:
