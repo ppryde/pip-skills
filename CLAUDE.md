@@ -18,7 +18,7 @@ Each entry names the plugin and, in brackets, the skills it provides.
 - **django-inquisition** — Django ORM performance audit against ~70 heuristics, ranked by impact (optimise-orm)
 - **email-absolution** — righteous HTML email construction (elder, scribe, visitation)
 - **overseer** — per-repo ledger of cards, sprints and token budgets, plus an orchestrator that drives a card end-to-end with delegated agents and adversarial review (ledger, orchestrate)
-- **pip-agents** — shared subagent personas (reviewer-correctness, -security, -scope, -rules, validator, explorer, gatekeeper) built from one base by `tools/build_agents.py`, with one brief/result JSON contract and its validator; consumers declare it as a dependency; no skills
+- **pip-agents** — shared subagent personas (reviewer-correctness, -security, -scope, -rules, validator, gatekeeper, and the specialists explorer, planner, implementer, verifier, summariser, researcher) built from one base by `tools/build_agents.py`, with one brief/result JSON contract and its validator; consumers declare it as a dependency; no skills
 - **puritan** — architectural doctrine suite (covenant, doctrines, inquisition, scriptorium)
 - **review-clone** — clone a reviewer's voice and rules from their public GitHub review history, every finding citing a real comment (clone-reviewer, review-as)
 - **review-panel** — composable code review: reviewer lenses × orchestration strategies, composed into named profiles (convene, reviewers, strategies)

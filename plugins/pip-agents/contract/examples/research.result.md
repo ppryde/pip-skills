@@ -1,0 +1,3 @@
+```pip-agents-result
+{"result":"pip-agents/1","kind":"research","persona":"researcher","ref":"where-retry","status":"ok","summary":"decided in webhooks/policy.py","checked":["webhooks/policy.py","webhooks/sender.py"],"unchecked":[],"out_of_lens":[],"injection_attempts":[],"payload":{"answer":"RetryPolicy in webhooks/policy.py sets 5 attempts with exponential backoff; sender.py only asks it for the next delay.","sources":[{"path":"webhooks/policy.py","line":12,"note":"RetryPolicy: max_attempts=5, backoff 2**n"},{"path":"webhooks/sender.py","line":33,"note":"calls policy.next_delay(attempt)"}],"gaps":["per-tenant overrides: not found under the target"]}}
+```

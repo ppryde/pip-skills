@@ -8,7 +8,7 @@
   "additionalProperties": false,
   "properties": {
     "brief": {"const": "pip-agents/1"},
-    "kind": {"enum": ["review", "validate", "locate", "run", "plan", "change", "test"], "description": "must equal the dispatched persona's kind (tools.md)"},
+    "kind": {"enum": ["review", "validate", "locate", "run", "plan", "change", "test", "summary", "research"], "description": "must equal the dispatched persona's kind (tools.md)"},
     "ref": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{1,64}$", "description": "dispatcher correlation id (seat, batch, chunk); echoed in the result"},
     "target": {"type": "string", "description": "what is examined: a diff file, a file-list file, or up to 20 space-separated paths"},
     "rules": {"type": "string", "description": "<abs path> L<a>-<b>[,L<c>-<d>] [(<ids>)], or an id list; never #fragment"},
@@ -16,22 +16,26 @@
     "intent": {"type": "string", "description": "path to what was approved: card, issue, plan or task text"},
     "tests": {"type": "string", "description": "the one test command a Bash-bearing reviewer may run, verbatim"},
     "context": {"type": "string", "description": "path to extra dispatcher facts (base ref, untrusted sources, env map)"},
-    "question": {"type": "string", "maxLength": 300, "description": "locate: what to find, one sentence"},
+    "question": {"type": "string", "maxLength": 300, "description": "locate: what to find; research, summary: what to answer, one sentence"},
     "names": {"type": "string", "description": "locate: comma-separated symbols, modules or patterns; each gets a counts entry"},
     "limit": {"type": "integer", "minimum": 1, "maximum": 500, "description": "locate: maximum hits, default 200"},
     "run": {"type": "string", "description": "run: the one command, no shell metacharacters"},
     "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 600000},
     "out": {"type": "string", "description": "run: the file the command writes"},
     "counts": {"type": "string", "description": "run: comma-separated top-level integer keys to read from out"},
-    "bundle": {"type": "string", "description": "plan/change/test: an overseer dispatch bundle path (adapters only)"}
+    "bundle": {"type": "string", "description": "plan/change/test: an overseer dispatch bundle path (adapters; the specialists take intent, target and tests instead)"}
   },
   "allOf": [
     {"if": {"properties": {"kind": {"const": "review"}}}, "then": {"required": ["target"]}},
     {"if": {"properties": {"kind": {"const": "validate"}}}, "then": {"required": ["claims", "target"]}},
     {"if": {"properties": {"kind": {"const": "locate"}}}, "then": {"required": ["question", "target"]}},
     {"if": {"properties": {"kind": {"const": "run"}}}, "then": {"required": ["run"], "dependentRequired": {"counts": ["out"]}}},
-    {"if": {"properties": {"kind": {"enum": ["plan", "change", "test"]}}}, "then": {"required": ["bundle"]}},
-    {"if": {"not": {"properties": {"kind": {"const": "locate"}}}}, "then": {"not": {"anyOf": [{"required": ["question"]}, {"required": ["names"]}, {"required": ["limit"]}]}}},
+    {"if": {"properties": {"kind": {"enum": ["plan", "change"]}}}, "then": {"anyOf": [{"required": ["bundle"]}, {"required": ["intent"]}]}},
+    {"if": {"properties": {"kind": {"const": "test"}}}, "then": {"anyOf": [{"required": ["bundle"]}, {"required": ["tests"]}]}},
+    {"if": {"properties": {"kind": {"const": "summary"}}}, "then": {"required": ["target"]}},
+    {"if": {"properties": {"kind": {"const": "research"}}}, "then": {"required": ["question", "target"]}},
+    {"if": {"not": {"properties": {"kind": {"enum": ["locate", "research", "summary"]}}}}, "then": {"not": {"required": ["question"]}}},
+    {"if": {"not": {"properties": {"kind": {"const": "locate"}}}}, "then": {"not": {"anyOf": [{"required": ["names"]}, {"required": ["limit"]}]}}},
     {"if": {"not": {"properties": {"kind": {"const": "run"}}}}, "then": {"not": {"anyOf": [{"required": ["run"]}, {"required": ["out"]}, {"required": ["counts"]}, {"required": ["timeout_ms"]}]}}}
   ]
 }

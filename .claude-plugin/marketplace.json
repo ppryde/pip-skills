@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.67.30",
+  "version": "1.67.31",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -239,7 +239,7 @@
     {
       "name": "pip-agents",
       "source": "./plugins/pip-agents",
-      "description": "Shared subagent personas for pip-skills plugins (reviewer-correctness, -security, -scope, -rules, validator, explorer, gatekeeper), built from one base with one brief/result JSON contract and its validator. Consumers declare it as a dependency; no skills.",
+      "description": "Shared subagent personas for pip-skills plugins (reviewer-correctness, -security, -scope, -rules, validator, gatekeeper and the specialists explorer, planner, implementer, verifier, summariser, researcher), built from one base with one brief/result JSON contract and its validator. Consumers declare it as a dependency; no skills.",
       "category": "engineering",
       "tags": [
         "agents",

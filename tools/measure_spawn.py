@@ -82,8 +82,15 @@ def run(plugin_dir: Path, persona: str, config_dir: Path | None, model: str | No
         "validate": head + f"claims: {project / 'claims.json'}\ntarget: {project / 'diff.patch'}\n",
         "locate": head + f"question: where is add defined\ntarget: {project / 'scope.txt'}\nnames: add\n",
         "run": head + "run: echo hello\n",
+        "plan": head + f"intent: {project / 'task.md'}\ntarget: {project / 'scope.txt'}\n",
+        "change": head + f"intent: {project / 'task.md'}\ntarget: {project / 'scope.txt'}\ntests: python3 -c pass\n",
+        "test": head + "tests: python3 -c pass\n",
+        "summary": head + f"target: {project / 'target.py'}\nquestion: what does add do\n",
+        "research": head + f"target: {project / 'scope.txt'}\nquestion: where is add defined\n",
     }
-    kind = {"validator": "validate", "explorer": "locate", "gatekeeper": "run"}.get(persona, "review")
+    (project / "task.md").write_text("Make add return a + b.\n")
+    kind = {"validator": "validate", "explorer": "locate", "gatekeeper": "run", "planner": "plan", "implementer": "change",
+            "verifier": "test", "summariser": "summary", "researcher": "research"}.get(persona, "review")
     brief = briefs[kind].format(kind=kind)
     if ask_tools:  # probe which tools resolve in the agent: its prompt is replaced by a question
         brief = "List the exact name of every tool you can call, one per line, then stop. Do not call any."

@@ -377,6 +377,48 @@ def _run(brief: dict, res: dict, errs: list[str]) -> None:
         errs.append("stderr_tail only when exit_code is non-zero or null")
 
 
+def _plan(brief: dict, res: dict, errs: list[str]) -> None:
+    p = res["payload"]
+    steps = p.get("steps")
+    if steps is not None and p.get("chunks") is not None and p["chunks"] != len(steps):
+        errs.append(f"chunks {p['chunks']} is not the number of steps {len(steps)}")
+    if p.get("outcome") == "done" and res.get("status") == "ok" and not steps:
+        errs.append("a done plan from a persona lists its steps")
+    if p.get("outcome") == "needs_context" and not p.get("questions"):
+        errs.append("needs_context lists its questions")
+
+
+def _change(brief: dict, res: dict, errs: list[str]) -> None:
+    p = res["payload"]
+    if p.get("tests_passed", 0) > p.get("tests_total", 0):
+        errs.append("tests_passed exceeds tests_total")
+    if p.get("outcome") == "done" and not p.get("commits"):
+        errs.append("a done change names its commits")
+
+
+def _test(brief: dict, res: dict, errs: list[str]) -> None:
+    p = res["payload"]
+    gates = p.get("gates", [])
+    failed = bool(p.get("failures")) or any(g.get("exit_code") != 0 for g in gates)
+    if p.get("outcome") == "pass" and failed:
+        errs.append("outcome pass with a failing gate or listed failures")
+    if p.get("outcome") == "fail" and not failed:
+        errs.append("outcome fail with every gate at exit 0 and no failures")
+    if "tests" in brief and [g.get("command") for g in gates] != [brief["tests"]]:
+        errs.append("gates must be the brief's tests command, verbatim")
+
+
+def _summary(brief: dict, res: dict, errs: list[str]) -> None:
+    if res.get("status") == "ok" and not res["payload"].get("points"):
+        errs.append("an ok summary has at least one point")
+
+
+def _research(brief: dict, res: dict, errs: list[str]) -> None:
+    p = res["payload"]
+    if res.get("status") == "ok" and not p.get("sources"):
+        errs.append("an ok research answer cites at least one source")
+
+
 def cross_check(brief: dict, res: dict, persona: str, claim_ids: list[str] | None = None) -> list[str]:
     errs: list[str] = []
     schema = result_schema()
@@ -421,6 +463,8 @@ def cross_check(brief: dict, res: dict, persona: str, claim_ids: list[str] | Non
         _locate(brief, res, errs)
     elif kind == "run":
         _run(brief, res, errs)
+    elif kind in ("plan", "change", "test", "summary", "research"):
+        {"plan": _plan, "change": _change, "test": _test, "summary": _summary, "research": _research}[kind](brief, res, errs)
     return errs
 
 

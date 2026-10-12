@@ -5,6 +5,15 @@
   "gatekeeper": {
     "kind": "run"
   },
+  "implementer": {
+    "kind": "change"
+  },
+  "planner": {
+    "kind": "plan"
+  },
+  "researcher": {
+    "kind": "research"
+  },
   "reviewer-correctness": {
     "kind": "review",
     "lens": "correctness"
@@ -21,7 +30,13 @@
     "kind": "review",
     "lens": "security"
   },
+  "summariser": {
+    "kind": "summary"
+  },
   "validator": {
     "kind": "validate"
+  },
+  "verifier": {
+    "kind": "test"
   }
 }

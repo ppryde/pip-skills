@@ -57,7 +57,11 @@ stdout: one JSON object `{"ok": bool, "kind": str|null, "errors": [str]}`. Exit 
      equal the brief's `names` (no names: `counts` empty).
    - `run`: `command` equals the brief's `run` verbatim; `counts` keys equal the brief's `counts` names; `out` is null or
      equals the brief's `out`; `stderr_tail` only when `exit_code` is non-zero or null.
-   - `plan`, `change`, `test`: schema only; these come from adapters (MAPPING.md), not personas.
+   - `plan` (planner persona): `chunks`, when given, equals the number of `steps`; a `done` plan lists its steps; `needs_context`
+     lists its questions. `change` (implementer): `tests_passed` at most `tests_total`; a `done` change names its commits. `test`
+     (verifier): `outcome` is `pass` iff every gate exits 0 and no failures are listed; with a `tests:` line in the brief the
+     single gate is that command verbatim. `summary` (summariser) and `research` (researcher): an `ok` result has at least one
+     point or source. Adapter results (overseer, MAPPING.md) are checked against the schema only: they never reach `cross_check`.
 6. `injection_attempts` entries non-empty: never an error, but `parse_result` returns them so the lead reports them.
 
 ## What it does not do
