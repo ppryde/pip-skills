@@ -1,5 +1,7 @@
 import json
+import os
 import sqlite3
+import sys
 import subprocess
 import time
 from pathlib import Path
@@ -288,7 +290,7 @@ def test_timeout_is_bounded(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(concordance, "_exec", lambda cmd, timeout: got.append(timeout) or 1 / 0)
     with pytest.raises(ZeroDivisionError):
         concordance.run_replay(tmp_path / "c.py", "s", tmp_path / "t")
-    assert got == [concordance.REPLAY_TIMEOUT] and concordance.REPLAY_TIMEOUT <= 120
+    assert got == [concordance.REPLAY_TIMEOUT] and concordance.REPLAY_TIMEOUT == 30.0
 
 
 def test_bad_output_counts_as_failed(builder, tmp_path, monkeypatch) -> None:
@@ -343,3 +345,103 @@ def test_cmd_sync_survives_concordance_blowup(builder, monkeypatch, capsys) -> N
     monkeypatch.setattr(concordance, "sync_step", boom)
     assert cli.main(["sync"]) == 0
     assert "concordance replay skipped" in capsys.readouterr().err
+
+
+def test_step_budget_is_what_the_dashboards_timeout_leaves() -> None:
+    assert concordance.step_budget(0.0) == 45.0
+    assert concordance.step_budget(60.0) == 30.0
+    assert concordance.step_budget(90.0) == 0.0 and concordance.step_budget(500.0) == 0.0
+
+
+def test_step_budget_follows_the_time_sync_already_spent(builder, projects, tmp_path,
+                                                         monkeypatch) -> None:
+    conn, _ = _finished_session(builder)
+    _more_sessions(projects, conn, 2)
+    now = [60.0]   # sync spent 60 s before the step: budget 30 s
+
+    def fake(cmd, timeout):
+        now[0] += 20
+        return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
+    monkeypatch.setattr(concordance, "_exec", fake)
+    out = concordance.sync_step(conn, now=time.time() + 10**7, env=_fake_cli(tmp_path),
+                                sync_started=0.0, clock=lambda: now[0])
+    assert out["replayed"] == 2   # starts at 0 s and 20 s of the step; the third would be at 40 s
+
+
+def test_step_is_skipped_when_sync_already_spent_its_share(builder, tmp_path, monkeypatch) -> None:
+    conn, _ = _finished_session(builder)
+    monkeypatch.setattr(concordance, "_exec", lambda cmd, timeout: 1 / 0)
+    out = concordance.sync_step(conn, now=time.time() + 10**7, env=_fake_cli(tmp_path),
+                                sync_started=0.0, clock=lambda: 95.0)
+    assert out == {"replayed": 0, "failed": 0, "skipped": 1}
+
+
+def _mark(conn, key: str, value: float) -> None:
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, str(value)))
+
+
+def test_recent_started_marker_skips_the_session(builder, tmp_path, monkeypatch) -> None:
+    conn, sid = _finished_session(builder)
+    monkeypatch.setattr(concordance, "_exec", lambda cmd, timeout: 1 / 0)
+    now = time.time() + 10**7
+    _mark(conn, f"concordance_started:{sid}", now - 60)
+    out = concordance.sync_step(conn, now=now, env=_fake_cli(tmp_path))
+    assert out == {"replayed": 0, "failed": 0, "skipped": 1}
+
+
+def test_stale_started_marker_does_not_block(builder, tmp_path, monkeypatch) -> None:
+    conn, sid = _finished_session(builder)
+    monkeypatch.setattr(concordance, "_exec",
+                        lambda cmd, timeout: subprocess.CompletedProcess(cmd, 0, "[]", ""))
+    now = time.time() + 10**7
+    _mark(conn, f"concordance_started:{sid}", now - 700)
+    assert concordance.sync_step(conn, now=now, env=_fake_cli(tmp_path))["replayed"] == 1
+
+
+def test_started_marker_is_written_before_spawn_and_cleared_after(builder, tmp_path,
+                                                                  monkeypatch) -> None:
+    conn, sid = _finished_session(builder)
+    during = []
+
+    def fake(cmd, timeout):
+        during.append(conn.execute("SELECT value FROM meta WHERE key = ?",
+                                   (f"concordance_started:{sid}",)).fetchone())
+        return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
+    monkeypatch.setattr(concordance, "_exec", fake)
+    concordance.sync_step(conn, now=time.time() + 10**7, env=_fake_cli(tmp_path))
+    assert during[0] is not None
+    assert conn.execute("SELECT 1 FROM meta WHERE key = ?",
+                        (f"concordance_started:{sid}",)).fetchone() is None
+
+
+def test_timeout_kills_the_whole_process_group(tmp_path) -> None:
+    pidfile = tmp_path / "grandchild.pid"
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import subprocess, sys, time\n"
+        "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        f"open({str(pidfile)!r}, 'w').write(str(g.pid))\n"
+        "time.sleep(60)\n")
+    with pytest.raises(subprocess.TimeoutExpired):
+        concordance._run([sys.executable, str(child)], 1.5)
+    pid = int(pidfile.read_text())
+    for _ in range(40):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+    os.kill(pid, 9)
+    pytest.fail("the replay's grandchild outlived the timeout")
+
+
+def test_cmd_sync_hands_the_step_its_start_time(builder, monkeypatch) -> None:
+    seen = {}
+    monkeypatch.setattr(concordance, "sync_step",
+                        lambda conn, **kw: seen.update(kw) or {"replayed": 0, "failed": 0,
+                                                              "skipped": 0})
+    assert cli.main(["sync"]) == 0
+    assert isinstance(seen["sync_started"], float)

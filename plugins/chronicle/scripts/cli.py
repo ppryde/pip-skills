@@ -80,6 +80,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     Docker trouble never fails the sync: it comes back as ``volume_errors``.
     Neither does a remote's: it comes back as ``remote_errors``, and
     ``CHRONICLE_NO_REMOTES=1`` skips remotes entirely, before any ssh call."""
+    started = time.monotonic()   # the concordance step budgets itself against this
     explicit = bool(args.projects)
     projects = [Path(p) for p in args.projects] if explicit else store.projects_dirs()
     configured, problems = ([], []) if explicit else store.load_volumes()
@@ -99,7 +100,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         # Concordance replay of finished sessions: optional, never fatal, off with
         # CHRONICLE_NO_CONCORDANCE=1.
         try:
-            replay = concordance.sync_step(conn)
+            replay = concordance.sync_step(conn, sync_started=started)
         except Exception as exc:  # noqa: BLE001 - optional reader: never fails sync
             print(f"chronicle: concordance replay skipped: {exc!r}", file=sys.stderr)
             replay = None

@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -41,12 +42,33 @@ def store_rows(conn: sqlite3.Connection, session_id: str, rows: list[dict[str, o
     return len(good)
 
 
-REPLAY_TIMEOUT = 120.0   # per session; a hung concordance costs at most this
-STEP_BUDGET = 300.0      # whole step; no new session starts once this has elapsed
+# The overseer dashboard runs `chronicle sync` under a 120 s timeout. The step must finish
+# inside it: it never starts once sync has spent SYNC_CEILING, runs at most STEP_BUDGET, and
+# one replay (REPLAY_TIMEOUT) may overrun the budget by no more than the ceiling's headroom.
+REPLAY_TIMEOUT = 30.0    # per session; a hung concordance costs at most this
+STEP_BUDGET = 45.0       # whole step; no new session starts once this has elapsed
+SYNC_CEILING = 90.0      # no new session starts once sync + step have spent this
+STARTED_TTL = 600.0      # a started marker this fresh means a replay may still be running
+
+
+def step_budget(sync_elapsed: float) -> float:
+    """Seconds the step may spend starting sessions, given what sync already spent."""
+    return max(0.0, min(STEP_BUDGET, SYNC_CEILING - sync_elapsed))
 
 
 def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+    """Run cmd in its own process group; on timeout kill the group, not just the child."""
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.kill()
+        proc.communicate()
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 
 _exec: Callable[[list[str], float], subprocess.CompletedProcess[str]] = _run
@@ -81,11 +103,14 @@ def run_replay(cli: Path, session_id: str, transcript: Path,
 
 def sync_step(conn: sqlite3.Connection, *, now: float | None = None, limit: int = 20,
               env: Mapping[str, str] | None = None,
-              budget: float | None = None,
+              budget: float | None = None, sync_started: float | None = None,
               clock: Callable[[], float] = time.monotonic) -> dict[str, int]:
     """Replay finished sessions not yet replayed (or failed) at their current last activity.
     A failure is remembered per last_activity_at, so a session that keeps failing is
-    skipped until it grows; at most ``budget`` seconds are spent. Never raises."""
+    skipped until it grows; a session whose replay started under STARTED_TTL ago and has no
+    outcome is skipped too (chronicle may have been killed mid-replay). The budget is what
+    the caller's timeout leaves after ``sync_started`` (a ``clock`` reading); when none is
+    left the step is skipped. Never raises."""
     out = {"replayed": 0, "failed": 0, "skipped": 0}
     e = os.environ if env is None else env
     if e.get("CHRONICLE_NO_CONCORDANCE") == "1":
@@ -95,12 +120,19 @@ def sync_step(conn: sqlite3.Connection, *, now: float | None = None, limit: int 
         if cli is None:
             return out
         t = time.time() if now is None else now
+        if budget is None:
+            budget = step_budget(0.0 if sync_started is None else clock() - sync_started)
+            if budget <= 0:
+                out["skipped"] += 1
+                return out
         # the marker is compared in Python: SQLite's REAL-to-TEXT cast differs from str(float)
         candidates = conn.execute(
-            "SELECT s.session_id, s.last_activity_at, c.path, m.value, f.value FROM sessions s "
+            "SELECT s.session_id, s.last_activity_at, c.path, m.value, f.value, st.value "
+            "FROM sessions s "
             "JOIN cursors c ON c.session_id = s.session_id AND c.agent_id = '' "
             "LEFT JOIN meta m ON m.key = 'concordance_replayed:' || s.session_id "
             "LEFT JOIN meta f ON f.key = 'concordance_failed:' || s.session_id "
+            "LEFT JOIN meta st ON st.key = 'concordance_started:' || s.session_id "
             "WHERE s.last_activity_at IS NOT NULL AND s.last_activity_at < ? "
             "ORDER BY s.last_activity_at DESC",
             (t - report.LIVE_HORIZON_SECONDS,)).fetchall()
@@ -108,12 +140,16 @@ def sync_step(conn: sqlite3.Connection, *, now: float | None = None, limit: int 
         print(f"chronicle: concordance candidate lookup skipped: {exc!r}", file=sys.stderr)
         out["skipped"] += 1
         return out
-    todo = [c for c in candidates if str(c[1]) not in (c[3], c[4])][:limit]
+    pending = [c for c in candidates if str(c[1]) not in (c[3], c[4])]
+    todo = [c for c in pending if not _recently_started(c[5], t)]
+    out["skipped"] += len(pending) - len(todo)
     spent_from = clock()
-    allowed = STEP_BUDGET if budget is None else budget
-    for sid, last, path, _, _ in todo:
-        if clock() - spent_from >= allowed:
+    for sid, last, path, _, _, _ in todo[:limit]:
+        if clock() - spent_from >= budget:
             break
+        with contextlib.suppress(Exception), conn:  # best effort: it only guards against stacking
+            conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                         (f"concordance_started:{sid}", str(t)))
         try:
             rows = run_replay(cli, sid, Path(path))
             if rows is not None:
@@ -126,4 +162,12 @@ def sync_step(conn: sqlite3.Connection, *, now: float | None = None, limit: int 
         with contextlib.suppress(Exception), conn:  # an unwritable marker only means a retry
             conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
                          (f"{key}:{sid}", str(last)))
+            conn.execute("DELETE FROM meta WHERE key = ?", (f"concordance_started:{sid}",))
     return out
+
+
+def _recently_started(marker: object, now: float) -> bool:
+    try:
+        return 0 <= now - float(str(marker)) < STARTED_TTL
+    except ValueError:
+        return False
