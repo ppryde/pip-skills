@@ -1,6 +1,6 @@
 {
   "name": "concordance",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "An owned, worktree-native symbol index for Python and TypeScript, built for review: who calls this, which tests guard it, what still relies on what the diff removed, which call sites no longer match a changed signature. Detection runs in the CLI at zero agent tokens; a review procedure and a review-panel blast-radius lens tell the reviewer exactly when to use it.",
   "author": {
     "name": "Pip",
