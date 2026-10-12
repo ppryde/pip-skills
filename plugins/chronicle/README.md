@@ -113,12 +113,18 @@ directory walk that finishes in well under a second.
 ### Concordance replay numbers
 
 `chronicle concordance [--root R] [--since ...]` (JSON) reports what concordance would have
-saved on replayed sessions: actual vs concordance tokens per call, and the carried cost
-(tokens x the later turns of the same agent x the cache-read price at each turn's time;
-unpriced turns are counted, never costed as $0). The rows come from `concordance replay`,
-which `chronicle sync` runs as an optional last step for finished sessions. The step never
-fails a sync: a per-session timeout (120 s) and a step budget (300 s) bound it, and a failed
-session is skipped until it grows. Set `CHRONICLE_NO_CONCORDANCE=1` to switch it off.
+cost, call by call, on replayed sessions. The comparison is honest: a call concordance would
+not have answered (`uncovered`) counts at its actual tokens, so it never shows as a saving;
+`actual_tokens` against `counterfactual_tokens` is the like-for-like pair, and
+`by_answerable` splits both (and the carried USD) by whether the answer would have been enough
+(yes / no / unknown; only `yes` is a believable saving). The carried cost is tokens x the later
+turns of the same agent x the cache-read price at each turn's time (unpriced turns are counted,
+never costed as $0). `sessions_failed` and `sessions_pending` count finished sessions with no
+rows yet, so unmeasured sessions are visible. The rows come from `concordance replay`, which
+`chronicle sync` runs as an optional last step for finished sessions. The step never fails a
+sync and stays inside the dashboard's 120 s timeout: it gets min(45 s, 90 s minus what sync
+already spent), 30 s per replay in its own process group (killed as a group on timeout), and a
+failed session is skipped until it grows. Set `CHRONICLE_NO_CONCORDANCE=1` to switch it off.
 Chronicle never imports concordance (it only calls its CLI) and stores numbers and labels only.
 
 ### Several Claude accounts (config dirs)

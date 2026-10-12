@@ -417,7 +417,8 @@ def cmd_limits(args: argparse.Namespace) -> int:
 def cmd_concordance(args: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
-        print(json.dumps({"sessions": 0, "rows": 0, "by_kind": {}, "by_mode": {}}))
+        print(json.dumps({"sessions": 0, "rows": 0, "by_kind": {}, "by_mode": {},
+                          "sessions_failed": 0, "sessions_pending": 0}))
         return 0
     try:
         out = report.concordance(conn, repo_root=args.root, since=_resolve_since(args))

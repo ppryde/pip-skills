@@ -1,8 +1,8 @@
 import json
 import os
 import sqlite3
-import sys
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -445,3 +445,101 @@ def test_cmd_sync_hands_the_step_its_start_time(builder, monkeypatch) -> None:
                                                               "skipped": 0})
     assert cli.main(["sync"]) == 0
     assert isinstance(seen["sync_started"], float)
+
+
+def test_uncovered_rows_never_count_as_saving_and_sums_split_by_answerable() -> None:
+    conn = store.connect()
+    concordance.store_rows(conn, "s", [
+        _row("a"),                                                            # covered, yes
+        _row("b", answerable="no", concordance_tokens=1200),                  # covered, no
+        _row("c", covered=False, concordance_tokens=0, answerable="unknown",
+             actual_tokens=9000),                                             # uncovered
+    ])
+    grep = report.concordance(conn)["by_kind"]["grep"]
+    assert grep["calls"] == 3 and grep["covered"] == 2 and grep["uncovered"] == 1
+    assert grep["actual_tokens"] == 15000
+    assert grep["counterfactual_tokens"] == 300 + 1200 + 9000   # uncovered: unchanged
+    by = grep["by_answerable"]
+    assert by["yes"]["actual_tokens"] == 3000 and by["yes"]["counterfactual_tokens"] == 300
+    assert by["no"]["counterfactual_tokens"] == 1200
+    assert by["unknown"]["actual_tokens"] == 9000 == by["unknown"]["counterfactual_tokens"]
+
+
+def test_carried_usd_of_an_uncovered_row_is_unchanged(builder, projects) -> None:
+    conn, sid = _seeded(builder, projects)
+    concordance.store_rows(conn, sid, [_row("m1-tool0", covered=False, concordance_tokens=0,
+                                            answerable="unknown")])
+    grep = report.concordance(conn)["by_kind"]["grep"]
+    assert grep["actual_carried_usd"] > 0
+    assert grep["counterfactual_carried_usd"] == grep["actual_carried_usd"]
+    assert grep["concordance_carried_usd"] == 0
+    unknown = grep["by_answerable"]["unknown"]
+    assert unknown["counterfactual_carried_usd"] == unknown["actual_carried_usd"] > 0
+
+
+def test_carried_usd_split_by_answerable(builder, projects) -> None:
+    conn, sid = _seeded(builder, projects)
+    concordance.store_rows(conn, sid, [_row("m1-tool0", answerable="no")])
+    by = report.concordance(conn)["by_kind"]["grep"]["by_answerable"]
+    assert set(by) == {"no"}
+    assert abs(by["no"]["actual_carried_usd"] - 2 * PER_TURN) < 1e-9
+    assert abs(by["no"]["counterfactual_carried_usd"] - 2 * 300 * 0.5 / 1_000_000) < 1e-9
+
+
+def test_failed_and_pending_sessions_are_visible(builder, projects) -> None:
+    conn, sid = _seeded(builder, projects)
+    now = conn.execute("SELECT last_activity_at FROM sessions").fetchone()[0] + 10**6
+    assert report.concordance(conn, now=now)["sessions_pending"] == 1
+    last = conn.execute("SELECT last_activity_at FROM sessions").fetchone()[0]
+    with conn:
+        conn.execute("INSERT INTO meta(key, value) VALUES (?, ?)",
+                     (f"concordance_failed:{sid}", str(last)))
+    out = report.concordance(conn, now=now)
+    assert out["sessions_failed"] == 1 and out["sessions_pending"] == 0
+    with conn:
+        conn.execute("DELETE FROM meta WHERE key LIKE 'concordance_failed:%'")
+        conn.execute("INSERT INTO meta(key, value) VALUES (?, ?)",
+                     (f"concordance_replayed:{sid}", str(last)))
+    out = report.concordance(conn, now=now)
+    assert out["sessions_failed"] == 0 and out["sessions_pending"] == 0
+    # a live session is not yet measurable: neither failed nor pending
+    assert report.concordance(conn, now=last + 5)["sessions_pending"] == 0
+
+
+REAL_CLI = Path(__file__).resolve().parents[2] / "plugins" / "concordance" / "scripts" / "cli.py"
+
+
+def test_sync_step_against_the_real_concordance_cli(builder, tmp_path, monkeypatch) -> None:
+    """The one cross-boundary check: no fake _exec, a fixture repo and session in tmp_path."""
+    repo = tmp_path / "repo"
+    (repo / "app").mkdir(parents=True)
+    (repo / "app" / "svc.py").write_text("def refund(loan, amount):\n    return amount\n")
+    (repo / "app" / "api.py").write_text(
+        "from app.svc import refund\n\n\ndef handle(loan):\n    return refund(loan, 5)\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for args in (["init", "-q", "-b", "main"], ["add", "-A"],
+                 ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    monkeypatch.delenv("CHRONICLE_NO_CONCORDANCE", raising=False)
+    monkeypatch.setenv("CONCORDANCE_CLI", str(REAL_CLI))
+    # CLAUDE_CONFIG_DIR, CHRONICLE_DB, CONCORDANCE_DB and CONCORDANCE_USAGE_DB are already
+    # pinned to tmp_path by the autouse fixture; a stray real one would fail this assert
+    for var in ("CLAUDE_CONFIG_DIR", "CHRONICLE_DB", "CONCORDANCE_DB", "CONCORDANCE_USAGE_DB"):
+        assert os.environ[var].startswith(str(tmp_path)), var
+    path = (builder.turn("m1", T0, tools=[("Grep", {"pattern": "refund"})], cwd=str(repo))
+            .tool_result("r1", T1, tool_use_id="m1-tool0",
+                         content=f"{repo}/app/api.py:5:    return refund(loan, 5)")
+            .turn("m2", T2).write())
+    conn = store.connect()
+    ingest.ingest_session(conn, path)
+
+    out = concordance.sync_step(conn, now=time.time() + 10**7)
+
+    assert out == {"replayed": 1, "failed": 0, "skipped": 0}
+    row = conn.execute("SELECT kind, estimator, covered, concordance_tokens, mode "
+                       "FROM concordance_rows").fetchone()
+    assert tuple(row) == ("grep", "callers", 1, row[3], "shadow") and row[3] > 0
+    grep = report.concordance(conn)["by_kind"]["grep"]
+    assert grep["covered"] == 1 and grep["counterfactual_tokens"] == row[3]
+    assert (tmp_path / "concordance" / "usage.db").exists()
