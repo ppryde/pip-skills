@@ -60,6 +60,7 @@ export const V = {
   handoverRequested: '📜 Handing over — as /vho',
   settingUp: '⚙️ Setting up context-vigil-mod…',
   renameFailed: '🏷️ couldn\'t name the new session — carrying on',
+  archiveFailed: '🏷️ couldn\'t mark this session as archived — handing over anyway',
   resumeFailed: (path: string | null, held: string | null) =>
     `▶️ Couldn't resume${path ? ` — the handover is at ${path}` : ''}${held ? ` — your message was not sent: ${held}` : ''}`,
   heldNotSent: (held: string) => `🌅 Your held message was not sent: ${held}`,
