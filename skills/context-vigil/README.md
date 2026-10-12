@@ -102,7 +102,7 @@ The mode is decided per turn.
   Keys are sent `CONTEXT_VIGIL_CLEAR_DELAY` / `CONTEXT_VIGIL_KICK_DELAY` seconds
   later (default 2) and only into an empty prompt with no dialog open. While a
   turn still shows `esc to interrupt` (other Stop hooks finishing) the send is
-  retried every 0.5s for up to `CONTEXT_VIGIL_BUSY_WAIT` seconds (default 10);
+  retried every 0.5s for up to `CONTEXT_VIGIL_BUSY_WAIT` seconds (default 10; whole seconds only, anything else means 10);
   a dialog or typed text drops it, and the handover waits for your `/clear`.
 - **Manual** — no reachable tmux. You get the nudge, the agent writes the
   handover, and you type `/clear`. The handover is injected after `/clear`, but

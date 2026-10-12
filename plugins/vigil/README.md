@@ -24,7 +24,7 @@ other plugin.
   footer under the prompt box; the hook's own check cannot use it, since the
   footer still shows it while the Stop hook runs). The footer keeps showing it
   until EVERY Stop hook has finished, so a busy-only hold is retried every 0.5s
-  for up to `VIGIL_BUSY_WAIT` seconds (default 10); raise it if your other Stop
+  for up to `VIGIL_BUSY_WAIT` seconds (default 10; whole seconds only, anything else means 10); raise it if your other Stop
   hooks run longer. If the pane is still busy after that, or has stopped being
   safe (you started typing, a dialog opened), the
   dispatch is dropped **silently**: the hook has already

@@ -74,6 +74,7 @@ fi
 delay="${VIGIL_CLEAR_DELAY:-2}"
 busy_wait="${VIGIL_BUSY_WAIT:-10}"
 case "$busy_wait" in ""|*[!0-9]*) busy_wait=10 ;; esac  # whole seconds only
+busy_wait=$((10#$busy_wait))  # base 10: a leading 0 (08, 09) is not octal
 (
   sleep "$delay"
   end=$((SECONDS + busy_wait))

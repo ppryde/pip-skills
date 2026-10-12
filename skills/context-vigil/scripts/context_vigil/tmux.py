@@ -55,7 +55,7 @@ def send_detached(target: str, keystrokes: List[List[str]], delay: str) -> None:
              + " ".join(shlex.quote(k) for k in keys) for keys in keystrokes]
     check = f"{shlex.quote(sys.executable)} -m context_vigil.cli _pane-safe {shlex.quote(target)}"
     raw_wait = os.environ.get("CONTEXT_VIGIL_BUSY_WAIT", "10")
-    busy_wait = int(raw_wait) if raw_wait.isdigit() else 10   # whole seconds only
+    busy_wait = int(raw_wait) if raw_wait.isascii() and raw_wait.isdigit() else 10   # whole ASCII seconds only
     script = (f"sleep {shlex.quote(delay)}; end=$((SECONDS + {busy_wait})); "
               f"while :; do {check}; rc=$?; "
               f"if [ $rc -eq 0 ]; then {'; '.join(sends)}; break; fi; "
