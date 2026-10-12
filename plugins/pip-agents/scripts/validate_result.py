@@ -306,6 +306,8 @@ def _review(brief: dict, res: dict, persona: dict, errs: list[str], schema: dict
             errs.append(f"{where} {fid}: file {file} is in neither checked nor the brief's target")
         if rule_ids is not None and fid not in rule_ids:
             errs.append(f"{where} {fid}: not a rule id in the brief's rules")
+        if "exception" in f and brief.get("exceptions") != "report":
+            errs.append(f"{where} {fid}: `exception` only when the brief says `exceptions: report`")
     if lens == "rules" and res["status"] != "error":
         rc = p.get("rules_checked")
         if rc is None:

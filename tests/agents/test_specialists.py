@@ -112,3 +112,40 @@ def test_every_specialist_declares_its_consumer():
         consumer = row.rstrip("|").split("|")[-1].strip()
         assert consumer, name
         assert consumer.startswith("library, no consumer yet") or "django-inquisition" in consumer, (name, consumer)
+
+
+# ---- the rules lens additions of the adoption bundle: `exceptions:` and `exception` ----------------------------
+
+RULES_BRIEF = "brief: pip-agents/1\nkind: review\nref: ddd-1of2\ntarget: /t/scope.txt\nrules: /r/ddd.md L1-40,L90-99 (DDD-001,DDD-002)\n"
+
+
+def rules_result(**finding):
+    f = {"id": "DDD-001", "rule": "r", "file": "/t/a.py", "line": 3, "severity": "critical", "category": "c", "claim": "c",
+         "evidence": "e", "fix": "f"}
+    f.update(finding)
+    return {"result": "pip-agents/1", "kind": "review", "persona": "reviewer-rules", "ref": "ddd-1of2", "status": "ok",
+            "summary": "s", "checked": ["/t/a.py"], "unchecked": [], "out_of_lens": [], "injection_attempts": [],
+            "payload": {"lens": "rules", "findings": [f], "medium": [], "rules_checked": "2/2", "n_a": []}}
+
+
+def test_exception_field_needs_the_report_flag(vr):
+    res = rules_result(exception="Test doubles may import infrastructure")
+    _, errs = vr.parse_result(block(res), vr.parse_brief(RULES_BRIEF), "reviewer-rules")
+    assert any("exceptions: report" in e for e in errs), errs
+    _, errs = vr.parse_result(block(res), vr.parse_brief(RULES_BRIEF + "exceptions: report\n"), "reviewer-rules")
+    assert errs == [], errs
+
+
+def test_exceptions_key_is_review_only_and_enumerated(vr):
+    assert vr.check_brief(vr.parse_brief(RULES_BRIEF + "exceptions: skip\n")) == []
+    assert vr.check_brief(vr.parse_brief(RULES_BRIEF + "exceptions: maybe\n"))
+    assert vr.check_brief(vr.parse_brief("brief: pip-agents/1\nkind: summary\ntarget: /t/a\nexceptions: report\n"))
+
+
+def test_exception_is_a_rules_lens_field_only(vr):
+    brief = "brief: pip-agents/1\nkind: review\nref: ddd-1of2\ntarget: /t/a.py\nexceptions: report\n"
+    res = rules_result(exception="x")
+    res["persona"], res["payload"]["lens"] = "reviewer-scope", "scope"
+    del res["payload"]["rules_checked"], res["payload"]["n_a"]
+    _, errs = vr.parse_result(block(res), vr.parse_brief(brief), "reviewer-scope")
+    assert any("belongs to lens rules" in e for e in errs), errs

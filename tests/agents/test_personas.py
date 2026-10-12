@@ -97,11 +97,11 @@ def test_skeletons(ba):
             if pmap[n]["kind"] == "review":
                 assert banned not in pay, (n, banned)
         if pmap[n]["kind"] == "review":
-            others = {"trigger", "commands_run", "old", "new", "intent", "affected", "rules_checked", "n_a", "rule", "citation"}
+            others = {"trigger", "commands_run", "old", "new", "intent", "affected", "rules_checked", "n_a", "rule", "citation", "exception"}
             own = {
                 "correctness": {"trigger", "commands_run"},
                 "scope": {"old", "new", "intent", "affected"},
-                "rules": {"rules_checked", "n_a", "rule", "citation"},
+                "rules": {"rules_checked", "n_a", "rule", "citation", "exception"},
                 "security": set(),
             }[pmap[n]["lens"]]
             seen = set(pay) | set(pay["findings"][0])

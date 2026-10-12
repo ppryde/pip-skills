@@ -23,6 +23,7 @@
     "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 600000},
     "out": {"type": "string", "description": "run: the file the command writes"},
     "counts": {"type": "string", "description": "run: comma-separated top-level integer keys to read from out"},
+    "exceptions": {"enum": ["report", "skip"], "description": "review, lens rules: report code covered by an Allowed Exceptions span as findings carrying `exception`, or skip it (default)"},
     "bundle": {"type": "string", "description": "plan/change/test: an overseer dispatch bundle path (adapters; the specialists take intent, target and tests instead)"}
   },
   "allOf": [
@@ -35,6 +36,7 @@
     {"if": {"properties": {"kind": {"const": "summary"}}}, "then": {"required": ["target"]}},
     {"if": {"properties": {"kind": {"const": "research"}}}, "then": {"required": ["question", "target"]}},
     {"if": {"not": {"properties": {"kind": {"enum": ["locate", "research", "summary"]}}}}, "then": {"not": {"required": ["question"]}}},
+    {"if": {"not": {"properties": {"kind": {"const": "review"}}}}, "then": {"not": {"required": ["exceptions"]}}},
     {"if": {"not": {"properties": {"kind": {"const": "locate"}}}}, "then": {"not": {"anyOf": [{"required": ["names"]}, {"required": ["limit"]}]}}},
     {"if": {"not": {"properties": {"kind": {"const": "run"}}}}, "then": {"not": {"anyOf": [{"required": ["run"]}, {"required": ["out"]}, {"required": ["counts"]}, {"required": ["timeout_ms"]}]}}}
   ]

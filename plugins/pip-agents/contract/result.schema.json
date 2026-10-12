@@ -357,6 +357,13 @@
           "type": "string",
           "description": "lens rules: where the rule comes from (clone personas: the source comment URL)",
           "x-lens": "rules"
+        },
+        "exception": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "lens rules, brief exceptions report: the Allowed Exceptions bullet this finding falls under",
+          "x-lens": "rules",
+          "x-hint": "exceptions bullet, verbatim"
         }
       }
     },
