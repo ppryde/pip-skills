@@ -132,14 +132,14 @@ def test_private_dirs_and_files_refuse_symlinks_and_tighten_modes(layout, tmp_pa
     assert victim.exists()
 
 
-@pytest.mark.parametrize("bad", ["-x/y", "../..", "a/..", "./a", "a/-b", "a/.b", "a b/c", "a/b/c"])
+@pytest.mark.parametrize("bad", ["-x/y", "../..", "a/..", "./a", "a/-b", "a/.", "a b/c", ".x/y", "a/b/c"])
 def test_repo_slug_rejects_flag_like_and_dot_segments(bad):
     with pytest.raises(ValueError):
         C._check_repo(bad)
 
 
 def test_repo_slug_accepts_normal_names():
-    for ok in ("own/rep", "my-org/some.repo_x", "a1/b2"):
+    for ok in ("own/rep", "my-org/some.repo_x", "a1/b2", "org/.github", "org/.dotfiles"):
         assert C._check_repo(ok) == ok
 
 

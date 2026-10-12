@@ -174,8 +174,10 @@ def discover_prs(repo: str, handles: list[str], since: str) -> list[int]:
     return sorted(seen)
 
 
-_REPO_SEG = r"[A-Za-z0-9][A-Za-z0-9._-]*"
-_REPO_RE = re.compile(rf"{_REPO_SEG}/{_REPO_SEG}")
+_REPO_OWNER = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+# Repo names may start with a dot (org/.github) but never be "." or "..".
+_REPO_NAME = r"(?!\.{1,2}$)(?!-)[A-Za-z0-9._-]+"
+_REPO_RE = re.compile(rf"{_REPO_OWNER}/{_REPO_NAME}")
 
 
 def _check_repo(repo: str) -> str:
