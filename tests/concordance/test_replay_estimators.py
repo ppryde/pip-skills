@@ -183,7 +183,16 @@ def test_passthrough_needs_an_invocation_shape(tmp_path: Path) -> None:
         assert estimators.match(_call("Bash", {"command": cmd}, "", tmp_path)) is None, cmd
     for cmd in ("python plugins/concordance/scripts/cli.py callers foo",
                 "cd x && python3 /a/concordance/scripts/cli.py review-context --base main",
-                "concordance check"):
+                "concordance check",
+                # the installed plugin: a version folder sits before scripts/
+                ("python ~/.claude/plugins/cache/pip-skills/concordance/0.2.1/scripts/cli.py "
+                 "review-context --base main"),
+                # review-procedure's documented shape, from the skill's base directory
+                ("python /c/plugins/cache/m/concordance/0.2.1/skills/review-procedure/../../"
+                 "scripts/cli.py callers refund"),
+                # a quoted path
+                'python "/a b/concordance/0.2.1/scripts/cli.py" callers x',
+                "python '/a/concordance/scripts/cli.py' tests x"):
         q = estimators.match(_call("Bash", {"command": cmd}, "", tmp_path))
         assert q is not None and q.estimator == "passthrough", cmd
 
