@@ -15,8 +15,9 @@ file listed in the profile's `context:` (e.g. docs/spec.md). Summarise long
 context files before dispatch to stay within budget.
 
 ## Stages
-1. **Reviewers (parallel).** One subagent per seated reviewer, `model: sonnet`,
-   prompted with diff + HEAD files + context files. Output: finding contract.
+1. **Reviewers (parallel).** One `pip-agents` seat per seated reviewer, briefed with the diff as `target` and every
+   profile `context:` file as `--context`; the seat Reads HEAD files as it needs them. Output: the result envelope,
+   ingested into one payloads file.
 
 ## Reconciliation
 Run `reconcile` (SKILL Step 5). No verdict stage, so every finding is kept.

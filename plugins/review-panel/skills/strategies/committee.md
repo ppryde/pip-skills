@@ -17,9 +17,8 @@ bodies are not inlined into the prompt. Clone reviewers apply their persona
 spec/architecture unless the profile sets `context:`.
 
 ## Stages
-1. **Reviewers (parallel).** One subagent per seated reviewer, `model: sonnet`.
-   Input: the diff file + the changed-file list (+ any `context:` files).
-   Output: the finding contract JSON.
+1. **Reviewers (parallel).** One `pip-agents` seat per seated reviewer (`model: sonnet` is the persona's own).
+   Input: the diff file as `target` (+ any `context:` files). Output: the result envelope, ingested into one payloads file.
 
 ## Reconciliation
 Run `reconcile` (SKILL Step 5). No verdict stage, so every finding is kept.

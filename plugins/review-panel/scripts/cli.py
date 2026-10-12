@@ -22,6 +22,33 @@ orchestrator wrote with the Write tool; finding text is never an argument.
              {"status":"config-missing"} exit 3 when the config file is absent;
              {"status":"error","error":...} exit 1 on a bad config/request.
 
+  brief      one reviewer key -> the brief(s) for its pip-agents persona
+               --reviewer KEY --target FILE --work-dir DIR [--target-kind diff|files]
+               [--intent FILE] [--claims FILE] [--context FILE ...] [--tests CMD]
+             KEY is a builtin name or clone:<alias>. The lens (`lens:` in the
+             reviewer file's frontmatter, default `rules`) picks the persona. A rules
+             seat gets a generated rulebook file (0600) of at most 30 rules, so a bigger
+             book is several seats sharing one `ref`. Briefs hold paths only.
+             stdout {"status":"ok","seats":[{ref,persona,lens,brief,prompt[,batch]}]}
+             {"status":"error","error":...} exit 1 (unknown reviewer, missing persona).
+
+  ingest     a seat's final message -> validated, adapted, appended to --out
+               --brief FILE --message FILE --persona NAME --out FILE
+             Validates the ```pip-agents-result block with the vendored pip-agents
+             validator (rejected whole, never repaired). A review seat appends its
+             reviewer payload to --out (a JSON list); a validator merges its verdicts
+             into --out (a JSON object keyed by claim id = fingerprint).
+             stdout {"status":"ok","kind",...,"seat_error","injection_attempts"};
+             {"status":"rejected","errors":[...]} exit 1, nothing written.
+
+  claims     findings -> validator briefs (critic, or arbiter with --disputed)
+               --findings FILE --target FILE --out-dir DIR [--disputed]
+               [--per-call 10] [--max-calls 8]
+             FILE: `parse` output (or `match` output with --disputed). Sends one of
+             each set of twins; a claim is {id, claim, where} with severity, evidence
+             and reasoning withheld. stdout {"status":"ok","calls":[{ref,persona,
+             claims,claims_file,brief,prompt}],"twins_skipped":n,"unverified":n}.
+
   parse      reviewer payloads -> findings with fingerprints
                --findings FILE
              FILE: a JSON list of reviewer payloads (or one payload).
@@ -80,7 +107,7 @@ sys.path.insert(0, str(_ROOT))
 from scripts.arguments import parse_arguments  # noqa: E402
 from scripts.config import (  # noqa: E402
     VALID_OUTPUT, VALID_SCOPE, VALID_STRICTNESS,
-    ConfigError, load_config, resolve_adhoc, resolve_profile,
+    ConfigError, load_config, parse_reviewer_key, resolve_adhoc, resolve_profile,
 )
 from scripts.contract import (  # noqa: E402
     VALID_SEVERITY, ContractError, _as_list, assign_fingerprints, collate, finding_from_dict,
@@ -90,13 +117,17 @@ from scripts.discovery import (  # noqa: E402
     available_reviewers, discover_strategies,
 )
 from scripts.exceptions import load_allowed_exceptions  # noqa: E402
+from scripts.lens import LensError  # noqa: E402
 from scripts.matching import match  # noqa: E402
+from scripts.envelope import ingest  # noqa: E402
 from scripts.reconcile import reconcile  # noqa: E402
+from scripts.seats import SeatError, claim_calls, seat_briefs  # noqa: E402
 from scripts.strictness import load_decisions  # noqa: E402
 
 _REVIEWERS_DIR = _ROOT / "skills" / "reviewers"
 _STRATEGIES_DIR = _ROOT / "skills" / "strategies"
 _DEFAULT_CONFIG = ".review-panel/config.yml"
+_MAX_MESSAGE_BYTES = 2_000_000
 
 
 class CliError(Exception):
@@ -318,6 +349,76 @@ def cmd_reconcile(args) -> int:
     return 0
 
 
+def cmd_brief(args) -> int:
+    try:
+        ref = parse_reviewer_key(args.reviewer, "pragmatic")
+        seats = seat_briefs(
+            ref, reviewers_dir=Path(args.reviewers_dir), work_dir=Path(args.work_dir), target=args.target,
+            target_kind=args.target_kind, intent=args.intent, claims=args.claims, context=args.context,
+            tests=args.tests,
+        )
+    except (ConfigError, SeatError, LensError, OSError) as exc:
+        _emit({"status": "error", "error": str(exc)})
+        return 1
+    _emit({"status": "ok", "seats": seats})
+    return 0
+
+
+def _read_text(path: str) -> str:
+    try:
+        p = Path(path)
+        if not p.is_file() or p.stat().st_size > _MAX_MESSAGE_BYTES:
+            raise CliError(f"{path} is not a regular file within {_MAX_MESSAGE_BYTES} bytes")
+        return p.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CliError(f"cannot read {path}: {exc}") from exc
+
+
+def cmd_ingest(args) -> int:
+    got = ingest(_read_text(args.message), _read_text(args.brief), args.persona)
+    if not got.ok:
+        _emit({"status": "rejected", "errors": got.errors})
+        return 1
+    out = Path(args.out)
+    shape = list if got.kind == "review" else dict
+    existing = shape()
+    if out.exists():
+        existing = _read_json(args.out)
+        if not isinstance(existing, shape):
+            raise CliError(f"{args.out} must hold a JSON {shape.__name__} (it holds {type(existing).__name__})")
+    if got.kind == "review":
+        existing.append(got.payload)
+        count = len(got.payload["findings"])
+    else:
+        existing.update(got.verdicts)
+        count = len(got.verdicts)
+    _write_scratch(args.out, json.dumps(existing, indent=2) + "\n")
+    _emit({"status": "ok", "kind": got.kind, "seat": got.seat, "envelope_status": got.status,
+           ("findings" if got.kind == "review" else "verdicts"): count, "seat_error": got.seat_error,
+           "injection_attempts": got.injection_attempts, "summary": got.summary})
+    return 0
+
+
+def cmd_claims(args) -> int:
+    data = _read_json(args.findings)
+    if not isinstance(data, dict):
+        raise CliError(f"{args.findings} is not parse/match output")
+    raw = (data.get("only_a", []) + data.get("only_b", [])) if args.disputed else data.get("findings", [])
+    if not isinstance(raw, list):
+        raise CliError(f"{args.findings}: findings must be a list")
+    findings = [finding_from_dict(d) for d in raw if isinstance(d, dict)]
+    try:
+        result = claim_calls(
+            findings, target=args.target, work_dir=Path(args.out_dir), role="arbiter" if args.disputed else "critic",
+            per_call=args.per_call, max_calls=args.max_calls, drop_twins=not args.disputed,
+        )
+    except (SeatError, OSError) as exc:
+        _emit({"status": "error", "error": str(exc)})
+        return 1
+    _emit({"status": "ok", **result})
+    return 0
+
+
 def _safe_relative(path: str) -> Path:
     p = Path(path)
     if p.is_absolute() or ".." in p.parts:
@@ -425,6 +526,34 @@ def build_parser() -> argparse.ArgumentParser:
     rc.add_argument("--reviewers-dir", default=str(_REVIEWERS_DIR))
     rc.add_argument("--out")
     rc.set_defaults(fn=cmd_reconcile)
+
+    b = sub.add_parser("brief", help="write a seat's brief(s) for its pip-agents persona")
+    b.add_argument("--reviewer", required=True, help="a reviewer key: a builtin name or clone:<alias>")
+    b.add_argument("--target", required=True, help="the diff file (or a file-list file)")
+    b.add_argument("--target-kind", choices=["diff", "files"], default="diff")
+    b.add_argument("--work-dir", required=True)
+    b.add_argument("--intent")
+    b.add_argument("--claims")
+    b.add_argument("--context", action="append", help="a context file; repeat for several")
+    b.add_argument("--tests", help="the one test command a correctness seat may run, verbatim")
+    b.add_argument("--reviewers-dir", default=str(_REVIEWERS_DIR))
+    b.set_defaults(fn=cmd_brief)
+
+    ig = sub.add_parser("ingest", help="validate a seat's final message and add it to the findings/verdicts file")
+    ig.add_argument("--brief", required=True)
+    ig.add_argument("--message", required=True)
+    ig.add_argument("--persona", required=True, help="the bare agent name, e.g. reviewer-scope or validator")
+    ig.add_argument("--out", required=True)
+    ig.set_defaults(fn=cmd_ingest)
+
+    cl = sub.add_parser("claims", help="batch findings into validator briefs (critic or arbiter)")
+    cl.add_argument("--findings", required=True, help="`parse` output, or `match` output with --disputed")
+    cl.add_argument("--target", required=True, help="the diff file")
+    cl.add_argument("--out-dir", required=True)
+    cl.add_argument("--disputed", action="store_true", help="arbiter: only `only_a` and `only_b`")
+    cl.add_argument("--per-call", type=int, default=10)
+    cl.add_argument("--max-calls", type=int, default=8)
+    cl.set_defaults(fn=cmd_claims)
 
     rp = sub.add_parser("report", help="render the markdown report")
     rp.add_argument("--reconciled", required=True)

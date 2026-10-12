@@ -31,11 +31,11 @@ Ask each of these in turn, accepting defaults shown in brackets:
 
 Run `python3 <plugin>/scripts/collect.py check --repo '<repo>'` (single-quoted; it writes nothing). If it fails, stop and show why. Otherwise read `references/privacy.md`, print the notice it gives for the repo's visibility, and continue without confirmation.
 
-### Step 3 — Run the collector (Haiku subagent)
+### Step 3 — Run the collector (pip-agents gatekeeper)
 
-Data collection is pure I/O — `gh` API calls, file writes, no reasoning. **Read `<plugin>/references/collect-and-render.md`** (shared with `review-as` refresh) and follow its "Collect" section as the **clone** variant: dispatch to a Haiku subagent, never run `collect.py` directly from this session. Its quoting and validation rules apply to `<handles>`, `<repo>`, `<paths>` and `<extensions>`.
+Pure I/O, no reasoning. **Read `<plugin>/references/collect-and-render.md`** (shared with `review-as` refresh) and follow its "Collect" section as the **clone** variant (a `gate.py` brief, `pip-agents:gatekeeper`; never run `collect.py` from this session). Its quoting and validation rules apply to `<handles>`, `<repo>`, `<paths>` and `<extensions>`.
 
-The subagent's final message is the snapshot JSON. Parse it (or re-read `snapshot.json`) and continue from Step 4. If the run was cut off, run the same command again: it resumes.
+`gate.py check-collect` prints the `snapshot` path: read `snapshot.json` there and continue from Step 4. If cut off, dispatch the same brief again: it resumes.
 
 ### Step 4 — Pre-extract gate
 
