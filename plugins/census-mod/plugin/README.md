@@ -62,7 +62,7 @@ continue anyway (two writers on one store: a warning, not a ban). Then:
    status line and not record, or keep both. The shared status-line script and the census
    launcher are never touched.
 4. **Layout** (band on): your two lines (the default), compact (one line), or minimal.
-5. **PR**: also look the branch's PR up with `gh` (review state, PRs opened elsewhere); No means `gh` is never called. The PR segment still follows PRs the session itself creates, readies, closes or merges (see "PR state from events").
+5. **PR**: also look the branch's PR up with `gh` (review state, PRs opened elsewhere). **No is the default and the recommended answer**: `gh` is never called on its own; the PR segment still follows PRs the session itself creates, readies, closes or merges (see "PR state from events"), and `/census-mod:pr-refresh` asks `gh` once when you want it. An install that already answered Yes keeps Yes (nothing is migrated).
 
 `/census-setup off` (or answering No to record and band) stops recording and drawing and puts
 a removed status line back exactly, but only if `settings.json` has no status line now (or
@@ -73,7 +73,7 @@ The payload's `census_mod.git` (`branch`, `uncommitted`, `ahead`, `has_upstream`
 Precedence: an environment variable (`CENSUS_MOD_STORE`, `CENSUS_STATUSLINE_SEGMENTS`) wins,
 then the answers (kept in `$.store`), then the defaults. Before any answer the mod records to
 the real store **only if** this account's status line does not carry the census ingest block
-(otherwise it records nothing until you answer), draws the band, and uses `gh`. Dismissing the
+(otherwise it records nothing until you answer), draws the band, and does not call `gh` (the PR answer is opt-in). Dismissing the
 first-session offer keeps those defaults and is never repeated.
 
 Recording needs only the bundled `scripts/cli.py` and `python3`; there is no discovery step. If
@@ -125,7 +125,7 @@ measurable from a mod and is left out.
   start and after an Edit/Write/NotebookEdit/Bash call, a `.git/HEAD` or index change
   (watched through classic `SessionStart`'s `watchPaths`, resolved for worktrees), or a
   cwd change; at most one every 5 seconds. Detached and unborn HEAD follow census's rules.
-- gh (only when the PR answer is Yes): exactly `gh pr list --head <branch> --state open --limit 1 --json
+- gh (only when the PR answer is Yes, or once per `/census-mod:pr-refresh`): exactly `gh pr list --head <branch> --state open --limit 1 --json
   number,url,reviewDecision`, in the session's directory, 5 s timeout. Run on a branch
   change, after a Bash call containing `git push` or `gh pr`, and when the answer is over
   10 minutes old and the session was active in the last 10. Cached per repo and branch in
@@ -151,8 +151,36 @@ lacks keeps its old value.
 - Only open PRs reach the payload's `pr` and the segment. This works with the PR answer set to No.
 - gh, where it is on, is the newest word when it answers; an empty answer does not close an event record younger than
   two minutes (GitHub may not have listed a new PR yet).
-- Gaps, which only gh covers: PRs opened outside the session, remote reviews, merges on github.com, and whether a
-  subagent's `gh` commands carry the block (not known).
+- Gaps, which only gh covers: PRs opened outside the session, remote reviews and merges on github.com. A local session
+  never receives a GitHub event for them (see the WF-269 notes: `session.receive` with source `github` belongs to cloud
+  auto-fix), so an external merge reaches census-mod only through `/census-mod:pr-refresh`, a Yes answer, or the
+  status-line source below.
+- Subagents: a subagent's Bash `tool.call` carries `agentId`, and its result carries `gitOperation` exactly like the main
+  loop's (probed for commit and push, and for `gh pr` create, ready, merge and close); census-mod does not filter on
+  `agentId`, so a PR a subagent opens, readies, merges or closes moves the record. A command that exits non-zero comes
+  back as an error with no block, so a compound command ending in a failure loses the block for the steps before it.
+
+### `/census-mod:pr-refresh`
+
+Asks `gh` once for the current branch's open PR and records the answer as the newest word, whatever the PR answer is and
+even inside the 10 minute failure backoff. It does not turn `gh` on. A `gh` that fails or is missing changes nothing (the
+record stands; the reply says gh did not answer). A detached HEAD has no branch to look up.
+
+### Two optional sources below the session's own events
+
+Precedence is **the session's own events > the status-line command's `pr` > gh**.
+
+- **Status-line command's pr.** Where this account's status line command carries census's ingest block (or is `census
+  ingest` / `census statusline`), the engine's payload `pr` (`number`, `url`, `review_state`; absent without an open PR)
+  is kept by census's ingest in the session record as `status_line_pr` (with its write time). census-mod reads it from
+  `<census dir>/sessions/<session id>.json` on its 30 s tick and when a branch or PR record moves, and uses it when no
+  event record covers the branch, ahead of a gh record. It is ignored when older than 5 minutes (the command is not
+  running), is never taken as a close (an absent `pr` means "none open or not fetched yet"), and the mod's own writes
+  carry it forward untouched. Engine freshness: about 1 s for changes in the session, about 2.5 min for outside changes.
+- **Prompt-hint confirmation (off by default).** `CENSUS_MOD_PR_HINT=1` makes the mod read `PR #N` from the engine's
+  prompt hint. When the branch's record is that open PR and unconfirmed (after a push, or old), it is confirmed: the grey
+  goes, the record keeps its own source. The hint never closes, reopens or starts a record (it carries no URL and lags a
+  close by seconds), and a confirmation is made at most every 5 minutes.
 
 ## The band
 

@@ -105,12 +105,13 @@ export function writerActive(entries: { updatedAt: number; hasCensusMod: boolean
 
 // ---- settings: env > $.store > defaults ----------------------------------------------------------
 
-export type SetupEnv = HomeEnv & { CENSUS_MOD_STORE?: string; CENSUS_STATUSLINE_SEGMENTS?: string; CENSUS_MOD_PLACEMENT?: string }
-export type Effective = { record: RecordMode; shadowDir: string | null; draw: boolean; placement: Placement; segments: string | undefined; pr: boolean }
+export type SetupEnv = HomeEnv & { CENSUS_MOD_STORE?: string; CENSUS_STATUSLINE_SEGMENTS?: string; CENSUS_MOD_PLACEMENT?: string; CENSUS_MOD_PR_HINT?: string }
+export type Effective = { record: RecordMode; shadowDir: string | null; draw: boolean; placement: Placement; segments: string | undefined; pr: boolean; prHint: boolean }
 
 /**
  * Before any answer: record to the real store ONLY if this account's status line does not carry the
- * census ingest block (else a second writer would share the store), draw yes, gh yes. An answer replaces
+ * census ingest block (else a second writer would share the store), draw yes, gh NO (opt-in; an install that
+ * answered Yes keeps it). An answer replaces
  * the default; an environment variable replaces both.
  */
 export function effective(saved: Saved, env: SetupEnv, det: Detection, configRoot: string | null): Effective {
@@ -131,7 +132,8 @@ export function effective(saved: Saved, env: SetupEnv, det: Detection, configRoo
     // An install that never answered stays where it was (above); the question recommends below for new ones.
     placement: ((p: string | undefined): Placement | null => (p === 'above' || p === 'below' ? p : null))(env.CENSUS_MOD_PLACEMENT?.trim().toLowerCase()) ?? saved.placement ?? 'above',
     segments: envSegments || (saved.preset ? PRESETS[saved.preset] : undefined),
-    pr: saved.pr ?? true,
+    pr: saved.pr ?? false,
+    prHint: /^(1|true|on|yes)$/i.test(env.CENSUS_MOD_PR_HINT?.trim() ?? ''),
   }
 }
 
@@ -160,7 +162,7 @@ export const L = {
   presetTwo: 'Your two lines',
   presetCompact: 'Compact — one line',
   presetMinimal: 'Minimal — context, limits / git',
-  prYes: 'Yes',
+  prYes: 'Yes — look up with gh',
   prNo: "No — no gh lookups (PRs this session makes still show)",
 } as const
 
@@ -235,8 +237,8 @@ export const Q = {
   }),
   pr: (): Question => ({
     header: '🔀 PR',
-    question: "Look up the branch's open PR (number, review state) using gh? No means gh is never called; PRs this session creates, readies or merges still show.",
-    options: [rec(L.prYes, true), L.prNo],
+    question: "Look up the branch's open PR (number, review state) using gh? No means gh is never called; PRs this session creates, readies or merges still show, and /census-mod:pr-refresh asks gh once on demand.",
+    options: [rec(L.prNo, true), L.prYes],
   }),
 }
 

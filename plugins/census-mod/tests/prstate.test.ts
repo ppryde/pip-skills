@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { applyPatch, gitOperationOf, hasDraftFlag, markStale, patchFor, prKey, repoOf, toPr } from '../plugin/core/prstate'
+import { applyPatch, gitOperationOf, hasDraftFlag, hintPrNumber, markStale, patchFor, payloadPrOf, prKey, repoOf, toPr } from '../plugin/core/prstate'
 import type { PrRecord } from '../plugin/core/prstate'
 import { SEGMENTS } from '../plugin/core/render'
 
@@ -115,4 +115,21 @@ test('an unconfirmed PR is drawn in grey; a confirmed one keeps its review colou
   expect(stale).toEqual([[{ t: '🔀 #7 approved', tone: 'grey' }]])
   const fresh = SEGMENTS.pr!({ ...base, pr: { number: 7, url: '', reviewState: 'approved' } } as never)
   expect(fresh[0]?.some(r => r.tone === 'green')).toBe(true)
+})
+
+test('a status-line word is a drawable PR only when well-formed and fresh', () => {
+  const NOW = 1_791_000_000_000
+  const text = (pr: object | undefined) => JSON.stringify({ payload: {}, ...(pr ? { status_line_pr: pr } : {}) })
+  const ok = { number: 42, url: 'u', review_state: 'approved', at: NOW / 1000 - 30 }
+  expect(payloadPrOf(text(ok), NOW)).toEqual({ number: 42, url: 'u', reviewState: 'approved' })
+  expect(payloadPrOf(text({ number: 42, at: NOW / 1000 }), NOW)).toEqual({ number: 42, url: '' })
+  expect(payloadPrOf(text({ ...ok, at: NOW / 1000 - 301 }), NOW)).toBeNull() // the command is not running
+  for (const bad of [undefined, { number: 0, at: NOW / 1000 }, { number: '4', at: NOW / 1000 }, { number: 4.5, at: NOW / 1000 }, { number: 4 }, { number: 4, at: 'now' }]) expect(payloadPrOf(text(bad as object), NOW)).toBeNull()
+  expect(payloadPrOf('{nope', NOW)).toBeNull()
+  expect(payloadPrOf('[]', NOW)).toBeNull()
+})
+
+test('the hint names a PR only as "PR #<digits>"', () => {
+  expect(hintPrNumber('PR #158 · ? for shortcuts')).toBe(158)
+  for (const no of ['', 'PR #0', 'PR# 7', 'XPR #7', 'pr #7', 'PR #', 42, undefined, null]) expect(hintPrNumber(no)).toBeNull()
 })

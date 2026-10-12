@@ -36,13 +36,14 @@ export function parsePrList(stdout: string): Pr | null | undefined {
   return pr
 }
 
-/** `start`: the first sight of a branch by a bound session (a start, a /clear, a restart): a fresh cached answer stands. */
-export type Why = 'branch' | 'push' | 'age' | 'start'
+/** `manual`: /census-mod:pr-refresh, which asks once, backoff or not. `start`: the first sight of a branch by a bound session (a start, a /clear, a restart): a fresh cached answer stands. */
+export type Why = 'branch' | 'push' | 'age' | 'start' | 'manual'
 
 /** A Bash command that can have opened, updated or closed a PR. */
 export const touchesPr = (command: string): boolean => command.includes('git push') || command.includes('gh pr')
 
 export function shouldRefresh(why: Why, entry: GhEntry | undefined, now: number, lastActiveAt: number | null): boolean {
+  if (why === 'manual') return true
   if (entry?.failedAt !== undefined && now < entry.failedAt + BACKOFF_MS) return false
   if (entry === undefined) return true
   if (why === 'branch' || why === 'push') return true

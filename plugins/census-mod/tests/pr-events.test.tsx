@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { START, classicStart, world } from './world'
+import { START, classicStart, world, GH_ON } from './world'
 import type { World } from './world'
 
 const SEC = 1000
@@ -165,6 +165,7 @@ test('a result without gitOperation (gh pr view, checkout) changes nothing', asy
 
 test('with gh on, an event record is not flipped to closed by a gh list that has not caught up yet', async ($, on) => {
   const w = world(on)
+  w.store.set('census-mod:setup', GH_ON)
   w.remote.value = 'git@github.com:o/r.git\n'
   w.gh.stdout = '[]' // GitHub has not listed the new PR yet
   await $.session.start(START)
@@ -180,6 +181,7 @@ test('with gh on, an event record is not flipped to closed by a gh list that has
 
 test('gh, when it answers, is recorded as the newest word on the branch', async ($, on) => {
   const w = world(on)
+  w.store.set('census-mod:setup', GH_ON)
   w.remote.value = 'git@github.com:o/r.git\n'
   w.gh.stdout = JSON.stringify([{ number: 102, url: 'https://github.com/o/r/pull/102', reviewDecision: 'APPROVED' }])
   await $.session.start(START)
@@ -191,6 +193,7 @@ test('gh, when it answers, is recorded as the newest word on the branch', async 
 
 test('a failing gh after a close does not reopen the PR (the event record stands)', async ($, on) => {
   const w = world(on)
+  w.store.set('census-mod:setup', GH_ON)
   w.remote.value = 'git@github.com:o/r.git\n'
   w.gh.stdout = JSON.stringify([{ number: 7, url: 'u', reviewDecision: 'APPROVED' }])
   await $.session.start(START)
@@ -207,6 +210,7 @@ test('a failing gh after a close does not reopen the PR (the event record stands
 
 test('a gh answer with no review decision clears draft and pending', async ($, on) => {
   const w = world(on)
+  w.store.set('census-mod:setup', GH_ON)
   w.remote.value = 'git@github.com:o/r.git\n'
   w.gh.stdout = '[]'
   await $.session.start(START)

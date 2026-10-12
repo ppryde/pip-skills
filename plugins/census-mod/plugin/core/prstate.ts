@@ -115,3 +115,42 @@ export function toPr(rec: PrRecord | undefined, now: number): Pr | null {
 
 /** Does the command pass --draft to `gh pr create`? */
 export const hasDraftFlag = (command: string): boolean => /(?:^|\s)(?:--draft|-d)(?:\s|=|$)/.test(command)
+
+// ---- the two optional sources below the session's own events (decision 24) --------------------------------------
+// Precedence: the session's own events > the status-line payload's `pr` > gh. Neither source here is read from GitHub by
+// the mod, and neither can prove a close: a payload without `pr` is "none open OR not fetched yet", and a hint
+// without the text means nothing.
+
+/** A status-line command that wrote its payload's `pr` longer ago than this is not running: its word is not used. */
+export const PAYLOAD_PR_FRESH_MS = 5 * 60_000
+
+/**
+ * The `status_line_pr` of a census session record (written by census's ingest when a status-line command sends a
+ * payload with `pr`): a drawable PR when it is well-formed and fresh, else null. `at` is the writer's epoch seconds.
+ */
+export function payloadPrOf(recordText: string, now: number): Pr | null {
+  let data: unknown
+  try {
+    data = JSON.parse(recordText)
+  } catch {
+    return null
+  }
+  const pr = typeof data === 'object' && data !== null ? (data as { status_line_pr?: { number?: unknown; url?: unknown; review_state?: unknown; at?: unknown } }).status_line_pr : undefined
+  if (!pr || typeof pr !== 'object') return null
+  if (typeof pr.number !== 'number' || !Number.isInteger(pr.number) || pr.number <= 0) return null
+  if (typeof pr.at !== 'number' || !Number.isFinite(pr.at) || now - pr.at * 1000 > PAYLOAD_PR_FRESH_MS) return null
+
+  return { number: pr.number, url: typeof pr.url === 'string' ? pr.url : '', ...(typeof pr.review_state === 'string' && pr.review_state ? { reviewState: pr.review_state } : {}) }
+}
+
+/** The PR number the engine's prompt hint names (`PR #158`), or null. Only a number: the rest of the text is the engine's. */
+export function hintPrNumber(hint: unknown): number | null {
+  if (typeof hint !== 'string') return null
+  const m = /\bPR #(\d{1,9})\b/.exec(hint)
+  const n = m ? Number(m[1]) : 0
+
+  return n > 0 ? n : null
+}
+
+/** Re-confirm an event-or-gh record the hint names: no more than this often, and only when it has something to say. */
+export const HINT_CONFIRM_MS = 5 * 60_000

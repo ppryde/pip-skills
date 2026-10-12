@@ -184,3 +184,6 @@ export async function bandLines(ui: { drawn: () => Promise<unknown> }): Promise<
   const root = (await ui.drawn()) as Node
   return (root.children ?? []).map(textOf).filter(l => l !== '')
 }
+
+/** The setup answers of an install that said Yes to gh lookups (the default, with no answer, is No). */
+export const GH_ON = { offered: true, pr: true }

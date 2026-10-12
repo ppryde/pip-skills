@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { START, classicStart, world } from './world'
+import { START, classicStart, world, GH_ON } from './world'
 import type { World } from './world'
 
 const SEC = 1000
@@ -69,6 +69,7 @@ test('HEAD and the index are watched through classic SessionStart (git dir resol
 
 test('gh is asked for the branch\'s open PR at the start: exact argv, cwd the worktree; the answer lands in the payload', async ($, on) => {
   const w = world(on)
+  w.store.set('census-mod:setup', GH_ON)
   w.gh.stdout = PR
   await $.session.start(START)
   await w.clock.advance(0)
@@ -83,6 +84,7 @@ test('gh is asked for the branch\'s open PR at the start: exact argv, cwd the wo
 
 test('gh runs after a Bash git push or gh pr, not after any other command, and on a branch change', async ($, on) => {
   const w = world(on)
+  w.store.set('census-mod:setup', GH_ON)
   await $.session.start(START)
   await w.clock.advance(0)
   const base = ghRuns(w).length
@@ -118,6 +120,7 @@ test('gh stays quiet on a detached HEAD', async ($, on) => {
 
 test('a gh failure keeps the cached PR and backs off for 10 minutes', async ($, on) => {
   const w = world(on)
+  w.store.set('census-mod:setup', GH_ON)
   w.gh.stdout = PR
   await $.session.start(START)
   await w.clock.advance(2 * SEC)
@@ -142,6 +145,7 @@ test('a gh failure keeps the cached PR and backs off for 10 minutes', async ($, 
 
 test('gh missing: no PR, one log line, and the backoff holds', async ($, on) => {
   const w = world(on)
+  w.store.set('census-mod:setup', GH_ON)
   w.gh.throws = true
   await $.session.start(START)
   await w.clock.advance(2 * SEC)
@@ -155,6 +159,7 @@ test('gh missing: no PR, one log line, and the backoff holds', async ($, on) => 
 
 test('a stale PR answer is refreshed on the clock tick, but only while the session is active', async ($, on) => {
   const w = world(on)
+  w.store.set('census-mod:setup', GH_ON)
   await $.session.start(START)
   await w.clock.advance(2 * SEC)
   await $.tool.call(call('Edit', { file_path: '/repo/a' })) // activity
@@ -171,6 +176,7 @@ test('a stale PR answer is refreshed on the clock tick, but only while the sessi
 
 test('in a linked worktree gh runs in the worktree, not the session\'s cwd', async ($, on) => {
   const w = world(on)
+  w.store.set('census-mod:setup', GH_ON)
   w.git.dir = '/repo/.git/worktrees/w\n/wt\n'
   await $.session.start(START)
   await w.clock.advance(0)
@@ -182,6 +188,7 @@ test('in a linked worktree gh runs in the worktree, not the session\'s cwd', asy
 
 test('the PR is cached per repo and branch in $.store, and a fresh bind of the same branch does not re-ask', async ($, on) => {
   const w = world(on)
+  w.store.set('census-mod:setup', GH_ON)
   w.gh.stdout = PR
   await $.session.start(START)
   await w.clock.advance(2 * SEC)
@@ -199,6 +206,7 @@ test('the PR is cached per repo and branch in $.store, and a fresh bind of the s
 
 test('a restart with a stale cached answer asks again', async ($, on) => {
   const w = world(on)
+  w.store.set('census-mod:setup', GH_ON)
   w.store.set('gh:["/repo","main"]', { at: 1_791_000_000_000 - 11 * MIN, pr: null })
   await $.session.start(START)
   await w.clock.advance(2 * SEC)

@@ -9,9 +9,20 @@ const CFG = '/home/u/.claude'
 
 // ---- defaults and precedence -------------------------------------------------------------------
 
-test('before any answer: record to the real store only when the status line has no census ingest block; draw yes; gh yes', async () => {
-  expect(effective({}, {}, NO_DETECTION, CFG)).toEqual({ record: 'yes', shadowDir: null, draw: true, placement: 'above', segments: undefined, pr: true })
-  expect(effective({}, {}, WITH_BLOCK, CFG)).toMatchObject({ record: 'no', draw: true, pr: true })
+test('before any answer: record to the real store only when the status line has no census ingest block; draw yes; gh NO (opt-in), hint confirmation off', async () => {
+  expect(effective({}, {}, NO_DETECTION, CFG)).toEqual({ record: 'yes', shadowDir: null, draw: true, placement: 'above', segments: undefined, pr: false, prHint: false })
+  expect(effective({}, {}, WITH_BLOCK, CFG)).toMatchObject({ record: 'no', draw: true, pr: false })
+})
+
+test('an install that already answered Yes to gh keeps it; the default for the unanswered is No', async () => {
+  expect(effective({ pr: true }, {}, NO_DETECTION, CFG).pr).toBe(true)
+  expect(effective({ pr: false }, {}, NO_DETECTION, CFG).pr).toBe(false)
+  expect(effective({ offered: true, record: 'yes' }, {}, NO_DETECTION, CFG).pr).toBe(false)
+})
+
+test('CENSUS_MOD_PR_HINT turns the prompt-hint PR confirmation on; anything else leaves it off', async () => {
+  for (const on of ['1', 'true', 'ON', ' yes ']) expect(effective({}, { CENSUS_MOD_PR_HINT: on }, NO_DETECTION, CFG).prHint).toBe(true)
+  for (const off of ['', '0', 'no', 'maybe']) expect(effective({}, { CENSUS_MOD_PR_HINT: off }, NO_DETECTION, CFG).prHint).toBe(false)
 })
 
 test('an answer replaces the default', async () => {

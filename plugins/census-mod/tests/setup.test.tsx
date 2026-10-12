@@ -34,7 +34,7 @@ test('/census-setup is a registered command that asks, in order: record, draw (a
 
   expect(r.text).toContain('questions follow')
   expect(headers(w)).toEqual(['📝 Record', '🎛️ Draw', '📐 Layout', '🔀 PR'])
-  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below', preset: 'two', pr: true, offered: true })
+  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below', preset: 'two', pr: false, offered: true })
   expect(w.toasts.at(-1)).toBe('🧭 census-mod is set up')
   expect(w.logs.join('\n')).toContain('undo any time: /census-setup off')
 })
@@ -47,7 +47,7 @@ test('the exact questions', async ($, on) => {
     { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards and liveness use it) (Recommended)', "No — don't record (dashboards won't see this account)"] },
     { header: '🎛️ Draw', question: 'Should census-mod draw your status line, and where?', options: ["Yes — below the input, under Claude Code's hint line (Recommended)", 'Yes — above the input, in the band', 'No — record only, draw nothing'] },
     { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Your two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git'] },
-    { header: '🔀 PR', question: "Look up the branch's open PR (number, review state) using gh? No means gh is never called; PRs this session creates, readies or merges still show.", options: ['Yes (Recommended)', "No — no gh lookups (PRs this session makes still show)"] },
+    { header: '🔀 PR', question: "Look up the branch's open PR (number, review state) using gh? No means gh is never called; PRs this session creates, readies or merges still show, and /census-mod:pr-refresh asks gh once on demand.", options: ["No — no gh lookups (PRs this session makes still show) (Recommended)", 'Yes — look up with gh'] },
   ])
 })
 
@@ -136,6 +136,27 @@ test('CENSUS_STATUSLINE_SEGMENTS outranks a stored layout', async ($, on) => {
 
   expect(await bandLines(ui)).toEqual(['✻  Opus 5.5'])
   await ui.unmount()
+})
+
+test('PR Yes turns gh lookups on, and the summary says so', async ($, on) => {
+  const w = world(on)
+  w.answer.value = q => (q.header === '🔀 PR' ? pick(w, 'Yes')(q) : q.options[0] ?? null)
+  await setupRun($, w)
+  await w.clock.advance(SEC)
+
+  expect(saved(w)).toMatchObject({ pr: true })
+  expect(w.logs.join('\n')).toContain('PR segment: on, with gh lookups')
+  await $.tool.call({ tool: 'Bash', command: 'git push' } as never)
+  await w.clock.advance(SEC)
+  expect(w.runs.filter(r => r.argv[0] === 'gh').length).toBeGreaterThan(0)
+})
+
+test('PR No (the recommended answer) says how to ask gh once, and gh is not called', async ($, on) => {
+  const w = world(on)
+  await setupRun($, w)
+
+  expect(w.logs.join('\n')).toContain('/census-mod:pr-refresh')
+  expect(w.runs.filter(r => r.argv[0] === 'gh')).toHaveLength(0)
 })
 
 test('PR No means gh is never called, whatever triggers it', async ($, on) => {
