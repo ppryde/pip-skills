@@ -404,6 +404,19 @@ def cmd_limits(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_concordance(args: argparse.Namespace) -> int:
+    conn = _open_readonly()
+    if conn is None:
+        print(json.dumps({"sessions": 0, "rows": 0, "by_kind": {}, "by_mode": {}}))
+        return 0
+    try:
+        out = report.concordance(conn, repo_root=args.root, since=_resolve_since(args))
+    finally:
+        conn.close()
+    print(json.dumps(out))
+    return 0
+
+
 def cmd_sessions(args: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
@@ -744,6 +757,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--branch", default=None)
     p.add_argument("--account", default=None)
     p.set_defaults(fn=cmd_limits)
+
+    p = sub.add_parser("concordance", help="replayed concordance counterfactuals: actual vs "
+                       "concordance size and carried cost (JSON)")
+    p.add_argument("--root", default=None)
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None)
+    window.add_argument("--since", type=_parse_since, default=None)
+    p.set_defaults(fn=cmd_concordance)
 
     p = sub.add_parser("sessions", help="session rows, most recent first (JSON)")
     p.add_argument("--root", default=None)
