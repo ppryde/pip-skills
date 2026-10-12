@@ -121,11 +121,17 @@ def test_every_inlined_verb_is_a_real_verb_and_none_is_a_hook_backend():
 
 
 def test_the_skill_names_the_verbs_an_sm_card_needs():
+    """The block holds only the hot verbs (called on every card); the occasional ones keep
+    their exact shape in the prose where a rule needs them (owner decision, SKILL < 11 KB)."""
     block = SKILL.split("<!-- cli:begin -->", 1)[1].split("<!-- cli:end -->", 1)[0]
     for verb in ("resume", "bootstrap", "dispatch-prep", "set-stage", "set-section", "set-field",
-                 "show", "block", "release", "facts", "accept-fact", "reject-fact", "handover"):
+                 "facts", "accept-fact", "reject-fact", "handover", "vigil", "help"):
         assert re.search(rf"(?m)^{re.escape(verb)}\b", block), verb
     assert "--brief" in block and "--advance" in block and "--section" in block
+    prose = _flat(SKILL.replace(block, ""))
+    for shape in ("`show <id> --section Plan`", "`block <id> --reason", "`release <card>`",
+                  "`park <id>`", "`abandon <id>`", "`depends <id> --on <other>`", "`unclaim <id>`"):
+        assert shape in prose, shape
 
 
 def test_tier_table_matches_the_code():

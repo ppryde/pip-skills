@@ -22,17 +22,18 @@ SKILL = PLUGIN / "skills" / "orchestrate" / "SKILL.md"
 REF = PLUGIN / "skills" / "orchestrate" / "references" / "cli.md"
 BEGIN, END = "<!-- cli:begin -->", "<!-- cli:end -->"
 
-# Verbs an S/M card needs, inlined in SKILL.md in this order. Everything else lives in cli.md.
+# Hot verbs: the ones the orchestrator calls on every card, inlined in SKILL.md in this order.
+# The rest (block, park, release, show, conflicts, ...) appear in SKILL prose by their exact
+# shape where a rule needs them, and in full in cli.md and `help <verb>`.
 INLINE = (
-    "resume", "bootstrap", "dispatch-prep", "set-stage", "set-section", "set-field", "show",
-    "block", "unblock", "park", "unpark", "done", "abandon", "release", "depends",
-    "facts", "accept-fact", "reject-fact", "conflicts", "handoff", "handover", "vigil",
-    "usage", "help",
+    "resume", "bootstrap", "dispatch-prep", "set-stage", "set-section", "set-field",
+    "facts", "accept-fact", "reject-fact", "handover", "vigil", "help",
 )
 # Rarely-used optional flags left out of the inline lines (they end in `[...]`); cli.md has all.
 ELIDE = {
     "bootstrap": {"jira", "linear", "type", "slug", "labels", "goal", "force_gate"},
-    "set-field": {"order", "repo", "sprint", "body", "touches", "labels", "priority", "estimate"},
+    "set-field": {"order", "repo", "sprint", "body", "touches", "labels", "priority", "estimate",
+                  "title", "complexity"},
     "dispatch-prep": {"force_gate"},
     "set-stage": {"force_gate"},
     "facts": {"tag", "stale", "json"},
