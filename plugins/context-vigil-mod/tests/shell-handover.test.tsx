@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
+import { TITLE_CMD } from '../plugin/core/title'
 import { V } from '../plugin/core/voice'
 import { START, human, turn, world, type World } from './world'
 
@@ -295,19 +296,287 @@ async function handoverThenClear($: any, w: World, transcript: string | null = '
   await w.clock.advance(500)
 }
 
-test('an unnamed old session is renamed, and the grep targets its own transcript', async ($, on) => {
+const READ_TITLE = (path: string) => ['sh', '-c', TITLE_CMD, 'sh', path]
+const DERIVED = '/cfg/projects/-repo/s1.jsonl'   // the pre-clear transcript when no event carried its path
+
+test('an unnamed old session is renamed, and the title read targets its own transcript', async ($, on) => {
   const w = world(on)
   await handoverThenClear($, w)
   expect(w.renames).toEqual(['Fix the bar'])
-  expect(w.greps).toEqual([['grep', '-c', '-F', '"type":"custom-title"', '/t/s1.jsonl']])
+  expect(w.greps).toEqual([READ_TITLE(DERIVED), READ_TITLE('/t/s1.jsonl')])
 })
 
-test('an already-named old session keeps its name: no rename, resume still submitted', async ($, on) => {
+test('a carried name the archive did not touch is kept: no rename, resume still submitted', async ($, on) => {
   const w = world(on)
-  w.titled.add('/t/s1.jsonl')
+  w.titles.set('/t/s1.jsonl', 'mine')
   await handoverThenClear($, w)
   expect(w.commands).not.toContain('rename')
   expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
+// The outgoing session's transcript is known (classic.SessionStart carried it), so the archive
+// /rename lands on it, and /clear carries whatever it holds into /t/s2.jsonl (PROBES §15).
+async function archivedHandover($: any, w: World, sessionName = 'Fix the bar') {
+  await $.session.start(START)
+  await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/s1.jsonl' } as never)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call({ session_name: sessionName }) as never)
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+}
+
+test('a named session is archived before the clear; the new one keeps the name', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/t/s1.jsonl', 'My work')
+  await archivedHandover($, w)
+  expect(w.commands).toEqual(['rename', 'clear', 'rename'])
+  expect(w.renames).toEqual(['Archive: My work', 'My work'])
+  expect(w.titles.get('/t/s1.jsonl')).toBe('Archive: My work')
+  expect(w.titles.get('/t/s2.jsonl')).toBe('My work')   // never left as the archive name
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
+test('an unnamed session is not archived; the new one takes the handover name', async ($, on) => {
+  const w = world(on)
+  await archivedHandover($, w)
+  expect(w.commands).toEqual(['clear', 'rename'])
+  expect(w.renames).toEqual(['Fix the bar'])
+  expect(w.titles.has('/t/s1.jsonl')).toBe(false)
+  expect(w.titles.get('/t/s2.jsonl')).toBe('Fix the bar')
+})
+
+test('a name the person gave with the prefix is never nested and never stripped', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/t/s1.jsonl', 'Archive: notes')
+  await archivedHandover($, w)
+  expect(w.renames).toEqual([])
+  expect(w.titles.get('/t/s1.jsonl')).toBe('Archive: notes')
+  expect(w.titles.get('/t/s2.jsonl')).toBe('Archive: notes')
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
+test('a /clear you run yourself, no archive by the mod: a carried prefixed name is kept', async ($, on) => {
+  const old = { session: 's1', path: '/cfg/context-vigil-mod/handovers/s1-1.md', reason: 'request', markdown: '# OLD', resume: true, followUp: null, createdAt: 1_000_000, name: 'Fix the bar' }
+  const w = world(on, { store: { 'pending:s1': old } })
+  w.titles.set('/t/s1.jsonl', 'Archive: notes')
+  await $.session.start(START)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  expect(w.renames).toEqual([])
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
+// The successor's rename back fails: it stays `Archive: My work` until its own handover, which
+// does not archive it again but gives ITS successor the name back.
+test('archive passes, the rename back is refused: notice, resume, and the next handover heals it', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/t/s1.jsonl', 'My work')
+  w.renameRefusedAt.add(2)
+  await archivedHandover($, w)
+  expect(w.renames).toEqual(['Archive: My work'])
+  expect(w.titles.get('/t/s2.jsonl')).toBe('Archive: My work')
+  expect(w.notices).toContain(V.renameFailed)
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call({ ...call({ session_name: 'Other' }), tool_use_id: 'h2' } as never)
+  await w.clock.settle()
+  w.sessionId.value = 's3'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s3.jsonl' } as never)
+  await w.clock.advance(500)
+  expect(w.titles.get('/t/s2.jsonl')).toBe('Archive: My work')   // not nested
+  expect(w.titles.get('/t/s3.jsonl')).toBe('My work')
+  expect(w.renames).toEqual(['Archive: My work', 'My work'])
+})
+
+// A handover from the current session to the next id, as the mod drives it.
+async function handOverTo($: any, w: World, next: string, id: string) {
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call({ ...call({ session_name: 'Other' }), tool_use_id: id } as never)
+  await w.clock.settle()
+  w.sessionId.value = next
+  await $.classic.SessionStart({ source: 'clear', transcript_path: `/t/${next}.jsonl` } as never)
+  await w.clock.advance(500)
+}
+
+test('the stranded mark outlives a /resume: the resumed session\'s handover still heals, and the mark is spent', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/t/s1.jsonl', 'My work')
+  w.renameRefusedAt.add(2)
+  await archivedHandover($, w)
+  expect(w.store.get('stranded:s2')).toMatchObject({ name: 'My work' })
+  await $.classic.SessionStart({ source: 'resume', transcript_path: '/t/s2.jsonl' } as never)   // $.state reset; the mark is in $.store
+  await handOverTo($, w, 's3', 'h2')
+  expect(w.titles.get('/t/s3.jsonl')).toBe('My work')
+  expect(w.store.has('stranded:s2')).toBe(false)
+})
+
+test('a /clear of your own moves the stranded mark to the new session, whose handover heals it', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/t/s1.jsonl', 'My work')
+  w.renameRefusedAt.add(2)
+  await archivedHandover($, w)
+  w.sessionId.value = 's3'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s3.jsonl' } as never)   // no pending: nothing renamed
+  expect(w.titles.get('/t/s3.jsonl')).toBe('Archive: My work')
+  expect(w.store.has('stranded:s2')).toBe(false)
+  expect(w.store.get('stranded:s3')).toMatchObject({ name: 'My work' })
+  await handOverTo($, w, 's4', 'h2')
+  expect(w.titles.get('/t/s4.jsonl')).toBe('My work')
+  expect(w.store.has('stranded:s3')).toBe(false)
+})
+
+test('the archive record cannot be saved: no archive rename, the handover goes on unarchived', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/t/s1.jsonl', 'My work')
+  await $.session.start(START)
+  await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/s1.jsonl' } as never)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  // The handover is saved; the next write of it (the archive record) is refused.
+  w.onStoreSet.value = async key => { if (key === 'pending:s1') throw new Error('store full') }
+  await w.clock.settle()
+  w.onStoreSet.value = null
+  expect(w.commands).toContain('clear')
+  expect(w.renames).toEqual([])
+  expect(w.titles.get('/t/s1.jsonl')).toBe('My work')
+  const events = [...w.files].filter(([k]) => k.includes('/events/')).map(([, t]) => t).join('')
+  expect(events).toContain('archive-unrecorded')
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  expect(w.titles.get('/t/s2.jsonl')).toBe('My work')   // carried, kept
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
+// The engine still answering the old id after the clear (a slow start): the stranded mark goes
+// to the id the clear's SessionStart carried (its transcript's name), never to the old session.
+async function strandedClear($: any, w: World, transcript: string | undefined) {
+  w.titles.set('/t/s1.jsonl', 'My work')
+  w.renameRefusedAt.add(2)
+  await $.session.start(START)
+  await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/s1.jsonl' } as never)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  await $.classic.SessionStart({ source: 'clear', transcript_path: transcript, session_title: 'Archive: My work' } as never)   // w.sessionId still 's1'
+  await w.clock.advance(500)
+}
+
+test('the stranded mark is keyed by the id the clear carried, not the not-yet-rebound engine id', async ($, on) => {
+  const w = world(on)
+  await strandedClear($, w, '/t/s2.jsonl')
+  expect(w.store.get('stranded:s2')).toMatchObject({ name: 'My work' })
+  expect(w.store.has('stranded:s1')).toBe(false)
+})
+
+test('a Windows transcript path still names the new id', async ($, on) => {
+  const w = world(on)
+  await strandedClear($, w, 'C:\\t\\s2.jsonl')
+  expect(w.store.get('stranded:s2')).toMatchObject({ name: 'My work' })
+})
+
+test('no new id known at all: no stranded mark, and it says why', async ($, on) => {
+  const w = world(on)
+  await strandedClear($, w, undefined)
+  expect([...w.store.keys()].filter(k => k.startsWith('stranded:'))).toEqual([])
+  const events = [...w.files].filter(([k]) => k.includes('/events/')).map(([, t]) => t).join('')
+  expect(events).toContain('stranded-unkeyed')
+  expect(w.notices).toContain(V.renameFailed)
+})
+
+test('stranded marks are pruned 14 days on, a malformed one at once; a moved mark counts from the move', async ($, on) => {
+  const DAY = 86_400_000
+  const now = 30 * DAY
+  const w = world(on, { now, store: {
+    'stranded:old': { name: 'A', at: now - 15 * DAY },
+    'stranded:fresh': { name: 'B', at: now - 1 * DAY },
+    'stranded:bad': { name: 'C' },
+    'stranded:s1': { name: 'D', at: now - 13 * DAY },
+  } })
+  await $.session.start(START)
+  expect(w.store.has('stranded:old')).toBe(false)
+  expect(w.store.has('stranded:bad')).toBe(false)
+  expect(w.store.has('stranded:fresh')).toBe(true)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(w.store.get('stranded:s2')).toEqual({ name: 'D', at: now })
+})
+
+test('a refused archive rename still clears and resumes, and says so', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/t/s1.jsonl', 'My work')
+  w.renameRefused.value = true
+  await archivedHandover($, w)
+  expect(w.notices).toContain(V.archiveFailed)
+  expect(w.commands).toContain('clear')
+  expect(w.titles.get('/t/s2.jsonl')).toBe('My work')   // the original name was carried; nothing to rename
+  expect(w.notices).not.toContain(V.renameFailed)
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
+test('a refused clear after the archive gives the session its name back', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/t/s1.jsonl', 'My work')
+  w.clearRefused.value = true
+  await $.session.start(START)
+  await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/s1.jsonl' } as never)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(w.renames).toEqual(['Archive: My work', 'My work'])
+  expect(w.titles.get('/t/s1.jsonl')).toBe('My work')
+  expect(w.notices).toContain(V.clearRejected)
+  expect((w.store.get('pending:s1') as { archived?: string }).archived).toBeUndefined()   // nothing left to strip
+})
+
+test('a refused clear whose restore also fails logs it, keeps the record, and still says the clear was refused', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/t/s1.jsonl', 'My work')
+  w.clearRefused.value = true
+  w.renameRefusedAt.add(2)
+  await $.session.start(START)
+  await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/s1.jsonl' } as never)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(w.titles.get('/t/s1.jsonl')).toBe('Archive: My work')
+  expect(w.notices).toContain(V.clearRejected)
+  const events = [...w.files].filter(([k]) => k.includes('/events/')).map(([, t]) => t).join('')
+  expect(events).toContain('archive-unrestored')
+  expect((w.store.get('pending:s1') as { archived?: string }).archived).toBe('My work')
+})
+
+test('the engine\'s session_title on the clear names the carried title, no transcript read needed', async ($, on) => {
+  const old = { session: 's1', path: '/cfg/context-vigil-mod/handovers/s1-1.md', reason: 'request', markdown: '# OLD', resume: true, followUp: null, createdAt: 1_000_000, name: 'Fix the bar', archived: 'My work' }
+  const w = world(on, { store: { 'pending:s1': old } })
+  await $.session.start(START)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', session_title: 'Archive: My work' } as never)
+  await w.clock.advance(500)
+  expect(w.renames).toEqual(['My work'])
+  expect(w.greps).toEqual([])
+})
+
+test('session_title null is unnamed: the handover name, even when the transcript cannot be read', async ($, on) => {
+  const old = { session: 's1', path: '/cfg/context-vigil-mod/handovers/s1-1.md', reason: 'request', markdown: '# OLD', resume: true, followUp: null, createdAt: 1_000_000, name: 'Fix the bar' }
+  const w = world(on, { store: { 'pending:s1': old } })
+  w.grepFails.value = true
+  await $.session.start(START)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl', session_title: null } as never)
+  await w.clock.advance(500)
+  expect(w.renames).toEqual(['Fix the bar'])
+  expect(w.greps).toEqual([])
 })
 
 test('no sh (Windows): the name check reads the transcript file instead of grep', async ($, on) => {
@@ -340,7 +609,7 @@ test('no transcript path means the name is unknown: no rename', async ($, on) =>
   const w = world(on)
   await handoverThenClear($, w, null)
   expect(w.commands).not.toContain('rename')
-  expect(w.greps).toEqual([])
+  expect(w.greps).toEqual([READ_TITLE(DERIVED)])   // only the pre-clear archive check
 })
 
 test('a stored handover with no name resumes without any rename', async ($, on) => {
