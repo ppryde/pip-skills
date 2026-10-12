@@ -56,6 +56,15 @@ def _parser() -> argparse.ArgumentParser:
     st.add_argument("--days", type=int, default=30)
     st.add_argument("--repo", choices=("this", "all"), default="all")
     st.add_argument("--json", action="store_true")
+    st.add_argument("--replay", action="store_true", help="replay summary instead of usage")
+    rp = sub.add_parser("replay", help="replay a finished session: actual vs concordance cost, "
+                                       "numbers only")
+    rp.add_argument("--session", required=True)
+    rp.add_argument("--transcript", default=None, help="main transcript path (default: find it)")
+    rp.add_argument("--force", action="store_true", help="replay even if the session looks live")
+    md = sub.add_parser("mode", help="set the delivery mode: shadow (default) or inject")
+    md.add_argument("mode", choices=("shadow", "inject"))
+    md.add_argument("--session", default=None, help="this session only (default: repo default)")
     return p
 
 
@@ -69,6 +78,10 @@ def main(argv: list[str] | None = None) -> int:
         return records.record_review(args, cwd)
     if args.command == "stats":
         return records.stats(args, cwd)
+    if args.command == "replay":
+        return records.replay(args, cwd)
+    if args.command == "mode":
+        return records.mode(args, cwd)
     started = time.monotonic()
     stats: dict[str, object] = {}
     facts: dict[str, object] = {}

@@ -1,4 +1,4 @@
-"""The usage-log commands: record-review and stats."""
+"""The usage-log commands: record-review, stats, replay and mode."""
 from __future__ import annotations
 
 import argparse
@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from scripts import usage
+from scripts import modes, usage
 from scripts.commands import common
 
 
@@ -43,7 +43,33 @@ def record_review(args: argparse.Namespace, cwd: Path) -> int:
     return 0
 
 
+def _replay_stats(args: argparse.Namespace) -> int:
+    from scripts.replay import store as replay_store
+    try:
+        rep = replay_store.summary(days=args.days)
+    except Exception as exc:  # noqa: BLE001 - unusable usage log: exit 2, never a traceback
+        print(f"concordance: usage log unavailable: {exc!r}", file=sys.stderr)
+        return 2
+    if args.json:
+        common.say(json.dumps(rep, indent=2))
+        return 0
+    by_kind = rep["by_kind"]
+    assert isinstance(by_kind, dict)
+    head = (f"replay, last {rep['days']} days: {rep['sessions']} sessions, "
+            f"{rep['rows']} calls, {rep['covered']} covered")
+    lines = [head]
+    for kind, k in sorted(by_kind.items()):
+        a = k["answerable"]
+        lines.append(f"{kind}: {k['calls']} calls, {k['covered']} covered, actual "
+                     f"{k['actual_tokens']} vs concordance {k['concordance_tokens']} tokens, "
+                     f"answerable {a['yes']}/{a['no']}/{a['unknown']}, drifted {k['drifted']}")
+    common.say("\n".join(lines))
+    return 0
+
+
 def stats(args: argparse.Namespace, cwd: Path) -> int:
+    if args.replay:
+        return _replay_stats(args)
     repo = common.repo_key_of(cwd) if args.repo == "this" else None
     if args.repo == "this" and not repo:
         print("concordance: --repo this needs a git repository", file=sys.stderr)
@@ -54,4 +80,38 @@ def stats(args: argparse.Namespace, cwd: Path) -> int:
         print(f"concordance: usage log unavailable: {exc!r}", file=sys.stderr)
         return 2
     common.say(json.dumps(rep, indent=2) if args.json else usage.format_report(rep))
+    return 0
+
+
+def replay(args: argparse.Namespace, cwd: Path) -> int:
+    from scripts.replay import core, transcript
+    from scripts.replay import store as replay_store
+    try:
+        files = transcript.session_files(
+            args.session, main=Path(args.transcript) if args.transcript else None)
+    except FileNotFoundError as exc:
+        print(f"concordance: {exc}", file=sys.stderr)
+        return 2
+    if not args.force and not transcript.is_finished(files):
+        print("concordance: session not finished (idle < 15 min); use --force", file=sys.stderr)
+        return 2
+    session = transcript.load(args.session, files)
+    rows = core.replay_session(session, modes.get_mode(args.session, common.repo_key_of(cwd)))
+    try:
+        replay_store.save(rows)
+    except Exception as exc:  # noqa: BLE001 - unusable usage log: exit 2, never a traceback
+        print(f"concordance: usage log unavailable: {exc!r}", file=sys.stderr)
+        return 2
+    common.say(json.dumps(rows))
+    return 0
+
+
+def mode(args: argparse.Namespace, cwd: Path) -> int:
+    repo = common.repo_key_of(cwd)
+    if not repo and not args.session:
+        print("concordance: mode needs a git repository or --session", file=sys.stderr)
+        return 2
+    modes.set_mode(args.mode, args.session, repo)
+    scope = f"session {args.session}" if args.session else "repo default"
+    common.say(f"mode: {args.mode} ({scope})")
     return 0
