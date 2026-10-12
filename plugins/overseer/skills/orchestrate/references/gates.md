@@ -15,8 +15,8 @@ route around it.
 - A reviewer or verifier that was dispatched but never reported blocks its
   gate: an absent verdict is not an approval.
 Evidence is written by the report hook; you never record it. Escape, only when
-the user says to proceed anyway: `--force-gate "user: <why>"` on `set-stage` or
-`dispatch-prep` (recorded in `## Decisions`, shown on the card); an empty reason
-is refused. Cards created before the gates shipped only warn. Repo config
+the user says to proceed anyway: `--force-gate "user: <why>"` on `set-stage`,
+`dispatch-prep` or `bootstrap` (recorded in `## Decisions`, shown on the card); an empty reason
+is refused. Cards created before the gates shipped only warn. A bypass under `warn`/`off` is also written to `## Decisions` (`GATE BYPASSED`). Repo config
 `"gates": "warn"|"off"` or `OVERSEER_GATES=warn|off` softens them.
 

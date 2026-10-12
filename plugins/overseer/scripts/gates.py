@@ -77,11 +77,14 @@ def _review_problems(card: Card, stage: str, ev: "Sequence[Evidence]") -> "list[
     reviews = [e for e in ev if e.stage == stage and e.kind == "review" and e.round is not None]
     dispatches = [e for e in ev if e.stage == stage and e.kind == "dispatch"
                   and e.detail == "reviewer" and e.round is not None]
-    rounds = [e.round for e in reviews + dispatches if e.round is not None]
-    if not rounds:
+    rows = [e for e in reviews + dispatches if e.round is not None]
+    if not rows:
         return [f"GATE: {stage} has no reviewer evidence - run the {stage} review loop "
                 f"(dispatch-prep {card.id} --stage {stage} --role reviewer --slot A --round 1)"]
-    latest = max(rounds)
+    # The latest round is the round of the NEWEST evidence row, not the highest
+    # round number: after a verification FAIL and rework a fresh round 1 must
+    # not be hidden behind an old, clean round 2.
+    latest = max(rows, key=lambda e: e.id).round
     problems: list[str] = []
     last_dispatch: dict[str, int] = {}
     for e in dispatches:
@@ -102,6 +105,10 @@ def _review_problems(card: Card, stage: str, ev: "Sequence[Evidence]") -> "list[
         else:
             crit += e.critical
             imp += e.important
+            # A report that says "found wanting" with zero counts is
+            # inconsistent: never read it as an approval.
+            if not (e.critical or e.important) and not e.status.lower().startswith("approved"):
+                imp += 1
     if crit or imp:
         problems.append(
             f"GATE: {stage} round {latest} has open findings ({crit}C {imp}I) - "

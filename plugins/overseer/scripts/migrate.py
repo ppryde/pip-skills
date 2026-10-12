@@ -328,6 +328,21 @@ def gates_floor(*, populated: bool) -> str:
     return day.isoformat()
 
 
+def stamp_gates_from(conn: sqlite3.Connection) -> None:
+    """A D1-era board (already at schema v2, so ``finish_v2`` never ran for it)
+    gets ``gates_from`` the first time D2 code connects -- the install, not the
+    first refused move -- so cards created after the upgrade are bound even
+    when no gate check has happened yet. Cards of the stamp day stay exempt
+    (the stamp is a date, and today's earlier cards have no evidence)."""
+    from scripts.db import get_meta, set_meta
+
+    if get_meta(conn, "gates_from") is not None:
+        return
+    populated = conn.execute("SELECT 1 FROM cards LIMIT 1").fetchone() is not None
+    set_meta(conn, "gates_from", gates_floor(populated=populated))
+    conn.commit()
+
+
 def finish_v2(conn: sqlite3.Connection, state: "Path | None", *, imported: bool) -> None:
     """Inside the upgrade transaction: import the legacy files, backfill evidence
     (populated boards only) and stamp the markers. ``gates_since`` is the moment

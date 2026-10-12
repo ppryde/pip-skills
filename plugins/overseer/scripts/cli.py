@@ -333,6 +333,8 @@ def _settle_gates(
         unmet = "; ".join(p.removeprefix("GATE: ").split(" - ")[0] for p in problems)
         db.record_evidence(conn, card.id, stage, "force", status="bypassed",
                            detail=f"{label}: gates={mode} [unmet: {unmet}]", ts=now)
+        card.append_section(
+            "Decisions", f"- {now} — GATE BYPASSED ({label}, gates={mode}): [unmet: {unmet}]", now)
         if mode == "off":
             return
     notes.extend(f"WARNING {p}" for p in problems)
@@ -625,6 +627,28 @@ def worktree_path(main_root: Path, card_id: str, cfg: dict) -> Path:
     return parent / f"{main_root.name}-{card_id.lower()}"
 
 
+def _brief_gate_problems(args: argparse.Namespace) -> "list[str]":
+    """Dry run of ``bootstrap --brief``'s move to `implementation`, so a refusal
+    happens before the card, worktree and branch are created. Only the refusing
+    case returns problems (hard mode, a card the gates bind)."""
+    if _gate_mode(args.root) != "hard":
+        return []
+    conn = _conn(args.root)
+    if args.card:
+        card = db.load_card(conn, args.card)
+        if card is None:
+            return []  # _load reports it
+        probe = Card(id=card.id, title=card.title, status=card.status, stage="bootstrap",
+                     complexity=card.complexity, body=card.body, created=card.created)
+    else:
+        probe = Card(id="NEW", title=args.title or "", status="planned", stage="bootstrap",
+                     complexity=args.complexity, created=_today())
+    probe.set_section("## Plan", args.brief, _now())
+    brief = gates.Evidence(0, "planning", "brief", None, "", "brief", None, None, None, "")
+    problems = gates.check_transition(probe, "implementation", [brief])
+    return problems if problems and _card_gated(conn, probe) else []
+
+
 def cmd_bootstrap(args: argparse.Namespace) -> int:
     """new-card + base-branch detection + worktree + branch + set-field +
     set-stage planning, in one orchestrator turn instead of seven.
@@ -647,6 +671,10 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
         args.brief = Path(args.brief_file).read_text().rstrip("\n")
     elif args.brief == "-":
         args.brief = sys.stdin.read().rstrip("\n")
+    if args.brief and force is None:
+        refused = _brief_gate_problems(args)
+        if refused:
+            raise gates.GateRefused(refused)  # before any card, worktree or branch exists
     try:
         card = _load(args.root, args.card) if args.card else _create_card(args)
     except sqlite3.IntegrityError:
@@ -1570,6 +1598,14 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
     entry is one Bash call instead of set-stage-then-dispatch-prep. Prints
     only the bundle path either way."""
     force = _force_reason(args)
+    chunk = args.chunk
+    if chunk is None and args.role == "implementer":
+        chunk = 1
+    try:  # bad --slot/--chunk/--role fails BEFORE a forced gate or dispatch row is written
+        bundle.reply_name(args.role, round_no=args.round, slot=args.slot, chunk=chunk)
+    except bundle.BundleError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     notes: list[str] = []
     dispatched: list[int] = []
 
@@ -1590,9 +1626,6 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
 
     card = _edit(args.root, args.card_id, prep, ack=args.advance)
     _flush_notes(notes)
-    chunk = args.chunk
-    if chunk is None and args.role == "implementer":
-        chunk = 1
     try:
         path = bundle.prepare(
             args.root,

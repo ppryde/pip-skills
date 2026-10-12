@@ -320,6 +320,7 @@ def connect_at(path: Path, repo_root: Path, *, migrate: bool = True) -> sqlite3.
     if migrate:
         from scripts import migrate as _migrate
         _migrate.post_upgrade(conn, state)
+        _migrate.stamp_gates_from(conn)
         _migrate.reimport_newer_files(conn, state)
     # Set-if-absent: record the repo's main root so the dashboard's `repos`
     # verb can enumerate one board per repo. Never overwrites an existing

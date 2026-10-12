@@ -113,6 +113,22 @@ class TestRules:
                 ev(3, "plan-review", "review", 2, "A", "approved", 0, 0)]
         assert gates.check_transition(c, "implementation", rows) == []
 
+    def test_rework_after_fail_starts_a_fresh_cycle(self):
+        """A new round 1 after an old clean round 2 is the latest evidence."""
+        c = mk("impl-review")
+        # (record_evidence_once replaced the old round-1 slot-A row)
+        rows = [ev(2, "impl-review", "fix", 1),
+                ev(3, "impl-review", "review", 2, "A", "approved", 0, 0),
+                ev(4, "impl-review", "dispatch", 1, "A", detail="reviewer"),
+                ev(5, "impl-review", "review", 1, "A", "found wanting", 2, 0)]
+        out = gates.check_transition(c, "verification", rows)
+        assert len(out) == 1 and "round 1 has open findings (2C 0I)" in out[0]
+
+    def test_found_wanting_with_zero_counts_is_not_an_approval(self):
+        c = mk("impl-review")
+        rows = [ev(1, "impl-review", "review", 1, "A", "found wanting", 0, 0)]
+        assert gates.check_transition(c, "verification", rows)
+
     def test_crashed_reviewer_is_not_an_approval(self):
         c = mk("impl-review")
         rows = [ev(1, "impl-review", "dispatch", 1, "A", detail="reviewer"),
@@ -302,6 +318,24 @@ class TestSetStage:
         assert run(repo, "set-stage", "WF-001", "implementation") == 0
         assert db.get_meta(db.connect(repo, migrate=False), "gates_from") > card(repo).created
 
+    def test_d1_era_board_is_stamped_on_connect_not_first_refusal(self, repo):
+        conn = db.connect(repo, migrate=False)
+        conn.execute("DELETE FROM meta WHERE key = 'gates_from'")
+        conn.commit()
+        conn.close()
+        stamped = db.get_meta(db.connect(repo), "gates_from")
+        assert stamped is not None and stamped > card(repo).created  # no gate check ran
+        # a card created on/after the stamp day is bound, not merely warned
+        conn = db.connect(repo, migrate=False)
+        conn.execute("UPDATE cards SET created = ? WHERE id = 'WF-001'", (stamped,))
+        conn.commit()
+        assert run(repo, "set-stage", "WF-001", "implementation") == 3
+
+    def test_bypass_under_warn_or_off_is_in_decisions(self, repo, monkeypatch):
+        monkeypatch.setenv("OVERSEER_GATES", "off")
+        assert run(repo, "set-stage", "WF-001", "implementation") == 0
+        assert "GATE BYPASSED (new -> implementation, gates=off)" in card(repo).sections["## Decisions"]
+
     def test_unblock_and_unpark_are_not_gated(self, repo):
         set_plan(repo)
         seed(repo, review("plan-review", 1, "A"))
@@ -334,6 +368,12 @@ class TestDispatchPrep:
         assert run(repo, "dispatch-prep", "WF-001", "--stage", "impl-review", "--role",
                    "reviewer", "--round", "1") == 1  # no --slot: BundleError
         assert not [e for e in evidence(repo) if e.kind == "dispatch"]
+
+    def test_bad_slot_with_force_leaves_no_override_trace(self, repo):
+        assert run(repo, "dispatch-prep", "WF-001", "--stage", "impl-review", "--role",
+                   "reviewer", "--round", "4", "--force-gate", "user: x") == 1
+        assert not [e for e in evidence(repo) if e.kind in ("force", "dispatch")]
+        assert "FORCED" not in card(repo).body
 
     def test_round_cap_and_fixer_ordering(self, repo, capsys):
         assert self.prep(repo, rnd="2") == 3  # no fixer report for round 1
@@ -385,12 +425,24 @@ class TestBootstrapBrief:
         assert c.stage == "implementation"
         assert [e.kind for e in db.evidence_for(db.connect(proj, migrate=False), "WF-001")] == ["brief"]
 
-    def test_m_brief_is_refused_and_leaves_no_brief_evidence(self, proj, capsys):
+    def test_m_brief_is_refused_before_any_side_effect(self, proj, tmp_path, capsys):
         assert main(["--root", str(proj), "bootstrap", "--title", "T", "--complexity", "M",
                      "--brief", "do the thing"]) == 3
+        assert "GATE: plan-review has no reviewer evidence" in capsys.readouterr().err
         conn = db.connect(proj, migrate=False)
-        assert db.load_card(conn, "WF-001").stage == "bootstrap"
-        assert db.evidence_for(conn, "WF-001") == []
+        assert db.load_card(conn, "WF-001") is None  # no orphan card
+        assert not (tmp_path / "wt").exists()
+        branches = subprocess.run(["git", "branch", "--list", "feat/*"], cwd=proj,
+                                  capture_output=True, text=True).stdout
+        assert branches.strip() == ""
+
+    def test_refuse_then_force_on_same_title_works(self, proj):
+        argv = ["--root", str(proj), "bootstrap", "--title", "T", "--complexity", "M",
+                "--brief", "x"]
+        assert main(argv) == 3
+        assert main([*argv, "--force-gate", "user: tiny"]) == 0
+        c = db.load_card(db.connect(proj, migrate=False), "WF-001")
+        assert c.stage == "implementation" and "GATE FORCED" in c.sections["## Decisions"]
 
     def test_m_brief_with_force_is_recorded(self, proj):
         assert main(["--root", str(proj), "bootstrap", "--title", "T", "--complexity", "M",
