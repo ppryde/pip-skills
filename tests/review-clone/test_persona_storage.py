@@ -28,8 +28,9 @@ def layout(tmp_path, monkeypatch):
     return cfg, home, root
 
 
-def legacy_persona(home, alias="old", body="## Rules\n"):
-    d = home / ".claude" / "review-clone" / alias
+def legacy_persona(home, alias="old", body="## Rules\n", base=None):
+    """A pre-RA-8 persona. Legacy lives under the account's own config dir (`base`)."""
+    d = (base if base is not None else Path(os.environ["CLAUDE_CONFIG_DIR"]) / "review-clone") / alias
     d.mkdir(parents=True)
     pio.write_persona(d / "PERSONA.md", {"alias": alias, "drift_log": [], "drift_log_archived_count": 0}, body)
     return d

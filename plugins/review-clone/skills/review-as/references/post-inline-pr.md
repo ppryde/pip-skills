@@ -8,11 +8,11 @@ Only when the selected output is `post-inline-pr`. Every message posted to the P
 
 ```json
 {"prefix": "[From <alias>]:", "lead": "<N> findings",
- "items": [{"id": "<short unique id>", "path": "<repo-relative path>", "line": 42,
+ "items": [{"path": "<repo-relative path>", "line": 42,
             "side": "RIGHT", "body": "<severity> — <comment>\n\nCitation: <url>"}]}
 ```
 
-`path`/`line`/`side` are the anchor you recorded in Step 3 (`side` `LEFT` for a removed line). `plan` checks them against the PR diff, so a wrong claim just moves the finding to the summary. Leave `line` out for a finding with no single line.
+`path`/`line`/`side` are the anchor you recorded in Step 3 (`side` `LEFT` for a removed line). `plan` checks them against the PR diff, so a wrong claim just moves the finding to the summary. Do not write an `id`: the script derives a stable one from alias, path, line and body, so a second run on the same PR posts only genuinely new findings. Leave `line` out for a finding with no single line.
 
 **3 — Plan (read-only).**
 

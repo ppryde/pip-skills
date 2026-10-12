@@ -131,7 +131,7 @@ def _run_gh(cmd: list[str]) -> subprocess.CompletedProcess:
 
 def check_repo_access(repo: str) -> dict:
     """Visibility and the caller's permission on `repo`; raises GhError when unreadable."""
-    cmd = ["gh", "repo", "view", repo, "--json", "visibility,viewerPermission"]
+    cmd = ["gh", "repo", "view", "--json", "visibility,viewerPermission", "--", repo]
     try:
         result = _run_gh(cmd)
     except subprocess.CalledProcessError as exc:
@@ -174,7 +174,8 @@ def discover_prs(repo: str, handles: list[str], since: str) -> list[int]:
     return sorted(seen)
 
 
-_REPO_RE = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
+_REPO_SEG = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+_REPO_RE = re.compile(rf"{_REPO_SEG}/{_REPO_SEG}")
 
 
 def _check_repo(repo: str) -> str:
@@ -469,6 +470,13 @@ def run_collect(
     errors = [{"pr": int(n), "error": e} for n, e in sorted(progress["errors"].items(),
                                                             key=lambda kv: int(kv[0]))]
     vis = visibility or {}
+    previous = _snapshot_watermark(alias)
+    if progress["errors"]:
+        # A failed PR's comments may be older than the newest one fetched: do not
+        # advance the watermark past them, so the next incremental run retries.
+        watermark = previous or explicit_since or since
+    else:
+        watermark = _newest(raw_dir) or explicit_since or since
     snapshot = {
         "alias": alias,
         "collected_at": now_iso,
@@ -481,13 +489,15 @@ def run_collect(
         "counts": counts,
         "visibility": vis.get("visibility", "unknown"),
         "private_source": bool(vis.get("private", False)),
-        "watermark": _newest(raw_dir) or explicit_since or since,
+        "watermark": watermark,
         "errors": errors,
         "search_truncated": sorted(set(_truncated)),
         "resumed_prs": resumed,
     }
     if digest:
-        snapshot["digest"] = build_digest(alias, handles, since=explicit_since)
+        snapshot["digest"] = build_digest(alias, handles)  # the full corpus, always
+        if explicit_since:
+            snapshot["digest_new"] = build_digest(alias, handles, since=explicit_since)
     write_private(persona_dir / "snapshot.json", json.dumps(snapshot, indent=2))
     if errors:
         print(f"warning: {len(errors)} PR(s) failed; re-run the same command to resume "
@@ -513,12 +523,12 @@ def _clip(text: str, limit: int) -> str:
 
 
 def build_digest(alias: str, handles: list[str], since: str | None = None) -> dict:
-    """Write digest.jsonl: one compact JSON object per handle-authored comment.
+    """Write digest.jsonl (digest-new.jsonl when `since` is given): one compact JSON object per handle-authored comment.
 
     Review comments keep the last few hunk lines, the handles' own replies (a
     withdrawal is theirs) and a count of the other authors' replies; bodies are
     truncated. `since` limits it to comments created on or after that time
-    (refresh). The full text stays in raw/pr-<n>.json for on-demand reading."""
+    (refresh) and writes digest-new.jsonl, leaving the full digest.jsonl intact. The full text stays in raw/pr-<n>.json for on-demand reading."""
     persona_dir = PERSONA_ROOT / alias
     raw_dir = persona_dir / "raw"
     handle_set = {h.lower() for h in handles}
@@ -553,7 +563,7 @@ def build_digest(alias: str, handles: list[str], since: str | None = None) -> di
             rows.append({"pr": pr, "title": title, "kind": "description",
                          "body": _clip(data["pr_description"], DIGEST_BODY * 2)})
     text = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
-    out = persona_dir / "digest.jsonl"
+    out = persona_dir / ("digest-new.jsonl" if since else "digest.jsonl")
     ensure_private_dir(persona_dir)
     write_private(out, text)
     return {"file": str(out), "items": len(rows), "bytes": len(text.encode("utf-8"))}
@@ -565,10 +575,12 @@ def cleanup_private_data(alias: str) -> dict:
     check_alias(alias, PERSONA_ROOT)
     d = PERSONA_ROOT / alias
     removed = []
+    if (d / "raw").is_symlink():
+        raise ValueError(f"refusing to clean up through a symlinked raw/: {d / 'raw'}")
     if (d / "raw").is_dir():
         shutil.rmtree(d / "raw")
         removed.append(str(d / "raw"))
-    for name in ("digest.jsonl", "progress.json"):
+    for name in ("digest.jsonl", "digest-new.jsonl", "progress.json"):
         if (d / name).exists():
             (d / name).unlink()
             removed.append(str(d / name))
@@ -660,7 +672,7 @@ def main(argv: list[str] | None = None) -> int:
             workers=args.workers,
             fresh=args.fresh,
         )
-    except GhError as exc:
+    except (GhError, ValueError) as exc:
         return _fail(str(exc))
     # Print the snapshot to stdout (machine-readable) for the skill to consume
     print(json.dumps(snapshot))

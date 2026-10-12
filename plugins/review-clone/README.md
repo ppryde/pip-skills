@@ -27,7 +27,8 @@ Personas are personal, portable across repos, and kept per Claude account under 
 ```
 <config dir>/review-clone/personas/<alias>/PERSONA.md      # rules + voice
 <config dir>/review-clone/personas/<alias>/raw/            # cached scrape (delete with `collect.py cleanup`)
-<config dir>/review-clone/personas/<alias>/digest.jsonl    # compact corpus the extraction reads
+<config dir>/review-clone/personas/<alias>/digest.jsonl    # compact corpus the extraction reads (always the full corpus)
+<config dir>/review-clone/personas/<alias>/digest-new.jsonl # only the comments the last refresh added
 <config dir>/review-clone/personas/<alias>/snapshot.json   # provenance, watermark, errors
 <config dir>/commands/review-as-<alias>.md                 # auto-registered command
 ```
@@ -50,7 +51,7 @@ Personas from earlier versions under `~/.claude/review-clone/<alias>/` are still
 
 `review-clone` derives personas from GitHub review comments. The cloned person is not notified. A disclaimer line is written into every PERSONA.md.
 
-Private and internal repos are allowed when your `gh` login can read them (`collect.py check` verifies this first). Their raw comments and diff hunks are stored only on your machine, owner-only; the persona is marked `private_source` with a matching disclaimer, and the skill offers to delete the raw scrape afterwards (`collect.py cleanup --alias <alias>`). Later refreshes only fetch comments newer than the stored watermark and merge them in, so nothing old is lost.
+Private and internal repos are allowed when your `gh` login can read them (`collect.py check` verifies this first). Their raw comments and diff hunks are stored only on your machine, owner-only; the persona is marked `private_source` with a matching disclaimer, and the skill offers to delete the raw scrape afterwards (`collect.py cleanup --alias <alias>`). Later refreshes (`collect.py --incremental`) only fetch comments newer than the stored watermark and merge them in, so nothing old is lost; the watermark is held back while any PR failed. Other collector commands: `check --repo`, `digest --alias [--since]`, `cleanup --alias`; flags `--workers` (max 4), `--fresh` (ignore a checkpoint). Personas from older versions under `<config dir>/review-clone/<alias>/` are read-only and are not touched by `cleanup`; the legacy fallback never reads another account's config dir.
 
 ## Collector
 

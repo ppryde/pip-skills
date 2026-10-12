@@ -71,7 +71,7 @@ def test_dirty_file_goes_to_summary(tmp_path):
     code, res, _ = run_plan(tmp_path, g, [item("a"), item("b", line=1)])
     assert res["counts"]["reasons"] == {"working-tree-dirty": 2}
     assert "2 findings on files with uncommitted changes: commit or stash, then re-run" in res["preview"]
-    assert any("git status --porcelain --untracked-files=no -- src/a.py" in c for c in g.lines())
+    assert any("git status --porcelain --untracked-files=no -- :(top)src/a.py" in c for c in g.lines())
 
 
 def test_head_moves_between_fetch_and_reread_retries_then_stale(tmp_path):

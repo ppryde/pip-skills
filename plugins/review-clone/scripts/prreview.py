@@ -33,6 +33,7 @@ Exit codes: 0 ok / posted / fallback_summary / nothing-to-post, 1 failed,
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -406,7 +407,14 @@ def _load_items(path: str) -> tuple[str, str, list[dict]]:
     for n, it in enumerate(data["items"]):
         if not isinstance(it, dict):
             continue
-        fid = str(it.get("id", ""))
+        if it.get("id") in (None, ""):
+            # No id supplied (review-as): derive a stable one from the content so a
+            # second run on the same PR is not mistaken for the first.
+            basis = "\x00".join([str(data.get("prefix", "")), str(it.get("path", "")),
+                                 str(it.get("line", "")), str(it.get("body", ""))])
+            fid = "c" + hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
+        else:
+            fid = str(it.get("id"))
         if not _ID_RE.match(fid):
             fid = f"i{n}"
         if fid in seen:
@@ -471,7 +479,7 @@ def make_plan(env: Env, findings: str, out: str, pr: str | None, dedup: bool) ->
             continue
         if status == "placed":
             rc2, dirty, _ = env.run(["git", "status", "--porcelain", "--untracked-files=no",
-                                     "--", path])
+                                     "--", f":(top){path}"])
             if rc2 == 0 and dirty.strip():
                 status, reason = "unplaced", "working-tree-dirty"
         rec = {"id": it["id"], "path": it.get("path"), "line": it.get("line"),

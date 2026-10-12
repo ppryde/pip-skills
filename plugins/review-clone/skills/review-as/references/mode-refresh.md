@@ -4,11 +4,11 @@
 
 ### 1 — Pull since last scan (Haiku subagent)
 
-Refresh is pure data gathering — no reasoning happens here. Drift detection and rule updates (Steps 3–4) stay on the main Opus session. Dispatch the collector as the **refresh** variant in `<plugin>/references/collect-and-render.md` (read it now): alias and repo from the persona frontmatter (`<repo>` is validated as the reference requires), handles from frontmatter joined with commas, `--months`, `--paths`/`--extensions` from the persona's filters, plus `--since '<last_scanned_at>'`. Its reply is the snapshot JSON: parse it (or re-read `snapshot.json` in the persona dir; `persona_io.py paths --alias '<alias>'` prints it) and continue from Step 2. New comments are merged into `raw/`; nothing old is lost.
+Refresh is pure data gathering — no reasoning happens here. Drift detection and rule updates (Steps 3–4) stay on the main Opus session. Dispatch the collector as the **refresh** variant in `<plugin>/references/collect-and-render.md` (read it now): alias and repo from the persona frontmatter (`<repo>` is validated as the reference requires), handles from frontmatter joined with commas, `--months`, `--paths`/`--extensions` from the persona's filters, plus `--incremental` (it starts from the `watermark` in the persona's `snapshot.json`; for a persona with no snapshot yet, pass `--since '<last_scanned_at>'` instead). Its reply is the snapshot JSON: parse it (or re-read `snapshot.json` in the persona dir; `persona_io.py paths --alias '<alias>'` prints it) and continue from Step 2. New comments are merged into `raw/`; nothing old is lost.
 
 ### 2 — Pre-extract gate
 
-Read the new snapshot.json. Display delta counts, and `errors` if any (PRs that failed; re-running the collector retries only those). Read the new comments from `snapshot.digest.file` (`digest.jsonl`: only comments since the last scan), not from `raw/`; open one `raw/pr-<n>.json` only when a comment needs its full text. If `counts.prs > 100 OR counts.review_comments + counts.issue_comments > 200`, prompt to confirm before extracting.
+Read the new snapshot.json. Display delta counts, and `errors` if any (PRs that failed; re-running the collector retries only those). Read the new comments from `snapshot.digest_new.file` (`digest-new.jsonl`: only comments since the watermark; `digest.jsonl` stays the full corpus), not from `raw/`; open one `raw/pr-<n>.json` only when a comment needs its full text. If `counts.prs > 100 OR counts.review_comments + counts.issue_comments > 200`, prompt to confirm before extracting.
 
 ### 3 — Drift detection (LLM-judged)
 
@@ -26,7 +26,7 @@ For each newly-derived rule:
 
 Take frontmatter and body from `persona_io.py read`, edit them, then save with `persona_io.py write` (frontmatter JSON file + body file written with the Write tool). Writes always land in the account's persona dir, so a persona found under the old `~/.claude/review-clone/` location moves there on its first refresh; the old copy is left untouched. For the frontmatter alone, `persona_io.py update --alias '<alias>' --set <part.json>` merges top-level keys.
 
-- Bump `last_scanned_at`
+- Bump `last_scanned_at` only when `snapshot.errors` is empty; with failed PRs leave it (the collector also holds the watermark back) so the next refresh retries them
 - Update `snapshot:` counts: new totals = previous totals + the delta from this refresh's snapshot (comments are already limited to those created since the last scan)
 - Append/modify rules
 - Refresh voice patterns if new openers/quirks emerge
@@ -40,3 +40,7 @@ The slash-command file (`command_file` from `persona_io.py paths`) embeds the pe
 
 > Refreshed `<alias>` from `<old_scanned>` → `<new_scanned>`.
 > +<N> rules · <M> superseded · <K> voice refinements
+
+### 6 — Private-data cleanup
+
+If the new `snapshot.private_source` is true, ask once, as clone-reviewer Step 8 does: "Delete the raw scrape and digests (private-repo text)? The persona keeps its rules; refresh only needs new comments. [y/N]". On yes run the `cleanup` collector command listed in `<plugin>/references/collect-and-render.md`.

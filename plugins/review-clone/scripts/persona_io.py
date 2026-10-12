@@ -51,9 +51,12 @@ def legacy_roots() -> list[Path]:
     if PERSONA_ROOT != _DEFAULT_ROOT or os.environ.get("REVIEW_CLONE_ROOT"):
         return []
     out: list[Path] = []
-    for r in (Path.home() / ".claude" / "review-clone", config_dir() / "review-clone"):
-        if r != PERSONA_ROOT and r not in out:
-            out.append(r)
+    # This account's config dir only: with CLAUDE_CONFIG_DIR set to another
+    # account, the other account's personas are not visible (~/.claude is the
+    # fallback only when CLAUDE_CONFIG_DIR is unset, where it is the config dir).
+    r = config_dir() / "review-clone"
+    if r != PERSONA_ROOT:
+        out.append(r)
     return out
 
 
@@ -90,7 +93,7 @@ def safe_alias(alias: str) -> str:
 def check_alias(alias: str, root: Path) -> str:
     """Traversal-only check for an existing persona; strict slug rules for a new one."""
     safe_alias(alias)
-    if (root / alias).is_dir():
+    if (root / alias).is_dir() or any((r / alias).is_dir() for r in legacy_roots()):
         return alias
     return validate_alias(alias)
 
@@ -266,10 +269,21 @@ def _coerce_scalar(val: str) -> Any:
 
 
 def ensure_private_dir(path: Path) -> None:
-    """Create a directory (and parents) readable by the owner only (0700)."""
+    """Create a directory (and parents) readable by the owner only (0700).
+
+    Refuses a symlinked directory at or below the persona root, and tightens an
+    existing directory there to 0700."""
+    try:
+        within = path.relative_to(PERSONA_ROOT)
+        owned = [PERSONA_ROOT / Path(*within.parts[: i + 1]) for i in range(len(within.parts))]
+    except ValueError:
+        owned = [path]
+    for p in owned:
+        if p.is_symlink():
+            raise ValueError(f"refusing to use a symlinked directory: {p}")
     missing = [p for p in [path, *path.parents] if not p.exists()]
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for p in missing:
+    for p in dict.fromkeys([*missing, *owned]):
         try:
             os.chmod(p, 0o700)
         except OSError:
@@ -277,13 +291,20 @@ def ensure_private_dir(path: Path) -> None:
 
 
 def write_private(path: Path, text: str) -> None:
-    """Write text to a file created 0600 (owner only), refusing to follow a symlink."""
+    """Write text to a file that is 0600 from creation, refusing to follow a symlink."""
     if path.is_symlink():
         raise ValueError(f"refusing to write through a symlink: {path}")
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0),
+                     0o600)
+    except OSError as exc:
+        raise ValueError(f"cannot write {path} privately: {exc}") from exc
+    try:
+        os.fchmod(fd, 0o600)  # before any text lands in a pre-existing, looser file
+    except OSError:
+        pass
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(text)
-    os.chmod(path, 0o600)
 
 
 def write_persona(path: Path, frontmatter: dict[str, Any], body: str) -> None:
