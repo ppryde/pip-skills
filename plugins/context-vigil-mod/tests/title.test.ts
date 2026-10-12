@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { archiveName, lastTitle } from '../plugin/core/title'
+import { TITLE_CMD, archiveName, lastTitle } from '../plugin/core/title'
 
 test('lastTitle: the last custom-title line wins; ai-title is not a name', () => {
   const t = ['{"type":"ai-title","aiTitle":"Banana"}', '{"type":"custom-title","customTitle":"A"}', '{"type":"user"}', '{"type":"custom-title","customTitle":"Archive: A"}', ''].join('\n')
@@ -21,4 +21,8 @@ test('lastTitle: a later row that only nests the text (a tool input) does not hi
 test('the archive prefix is never nested', () => {
   expect(archiveName('My work')).toBe('Archive: My work')
   expect(archiveName('Archive: My work')).toBe('Archive: My work')
+})
+
+test('TITLE_CMD anchors on a title row (type first, as the engine writes it) and prints only the last', () => {
+  expect(TITLE_CMD).toBe(String.raw`out=$(grep '^{"type":"custom-title"' "$1"); s=$?; [ "$s" -eq 0 ] && printf '%s\n' "$out" | tail -n 1; exit $s`)
 })

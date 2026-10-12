@@ -119,7 +119,6 @@ declare module 'claude-code' {
       handoverMentioned: boolean
       countdownEndsAt: number | null
       lastApiAt: number | null
-      stranded: string | null   // PROBES §15: this session carries `Archive: <it>` because the rename back failed
       returnHeld: string[] | null
       phoneFacts: PhoneFacts | null
     }

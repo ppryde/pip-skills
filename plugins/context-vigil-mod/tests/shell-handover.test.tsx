@@ -393,6 +393,68 @@ test('archive passes, the rename back is refused: notice, resume, and the next h
   expect(w.renames).toEqual(['Archive: My work', 'My work'])
 })
 
+// A handover from the current session to the next id, as the mod drives it.
+async function handOverTo($: any, w: World, next: string, id: string) {
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call({ ...call({ session_name: 'Other' }), tool_use_id: id } as never)
+  await w.clock.settle()
+  w.sessionId.value = next
+  await $.classic.SessionStart({ source: 'clear', transcript_path: `/t/${next}.jsonl` } as never)
+  await w.clock.advance(500)
+}
+
+test('the stranded mark outlives a /resume: the resumed session\'s handover still heals, and the mark is spent', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/t/s1.jsonl', 'My work')
+  w.renameRefusedAt.add(2)
+  await archivedHandover($, w)
+  expect(w.store.get('stranded:s2')).toMatchObject({ name: 'My work' })
+  await $.classic.SessionStart({ source: 'resume', transcript_path: '/t/s2.jsonl' } as never)   // $.state reset; the mark is in $.store
+  await handOverTo($, w, 's3', 'h2')
+  expect(w.titles.get('/t/s3.jsonl')).toBe('My work')
+  expect(w.store.has('stranded:s2')).toBe(false)
+})
+
+test('a /clear of your own moves the stranded mark to the new session, whose handover heals it', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/t/s1.jsonl', 'My work')
+  w.renameRefusedAt.add(2)
+  await archivedHandover($, w)
+  w.sessionId.value = 's3'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s3.jsonl' } as never)   // no pending: nothing renamed
+  expect(w.titles.get('/t/s3.jsonl')).toBe('Archive: My work')
+  expect(w.store.has('stranded:s2')).toBe(false)
+  expect(w.store.get('stranded:s3')).toMatchObject({ name: 'My work' })
+  await handOverTo($, w, 's4', 'h2')
+  expect(w.titles.get('/t/s4.jsonl')).toBe('My work')
+  expect(w.store.has('stranded:s3')).toBe(false)
+})
+
+test('the archive record cannot be saved: no archive rename, the handover goes on unarchived', async ($, on) => {
+  const w = world(on)
+  w.titles.set('/t/s1.jsonl', 'My work')
+  await $.session.start(START)
+  await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/s1.jsonl' } as never)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  // The handover is saved; the next write of it (the archive record) is refused.
+  w.onStoreSet.value = async key => { if (key === 'pending:s1') throw new Error('store full') }
+  await w.clock.settle()
+  w.onStoreSet.value = null
+  expect(w.commands).toContain('clear')
+  expect(w.renames).toEqual([])
+  expect(w.titles.get('/t/s1.jsonl')).toBe('My work')
+  const events = [...w.files].filter(([k]) => k.includes('/events/')).map(([, t]) => t).join('')
+  expect(events).toContain('archive-unrecorded')
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  expect(w.titles.get('/t/s2.jsonl')).toBe('My work')   // carried, kept
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
 test('a refused archive rename still clears and resumes, and says so', async ($, on) => {
   const w = world(on)
   w.titles.set('/t/s1.jsonl', 'My work')

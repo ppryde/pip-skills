@@ -4,24 +4,27 @@
 
 export const ARCHIVE_PREFIX = 'Archive: '
 
-// Prints the transcript's last 50 lines holding the custom-title text (lastTitle skips the ones
-// that only nest it, such as a tool input); exits 1 when it has none, 2 when grep cannot read it.
-// Positional args: $1 = transcript path.
-export const TITLE_CMD = 'out=$(grep -F \'"type":"custom-title"\' "$1"); s=$?; [ "$s" -eq 0 ] && printf \'%s\\n\' "$out" | tail -n 50; exit $s'
+// A title row as the engine writes it: `type` is its first key (all 2,419 custom-title rows in two
+// accounts' transcripts, 2026-10-12). Anchored, so text nested in another row (a tool input) never matches.
+export const TITLE_ROW = '{"type":"custom-title"'
+
+// Prints the transcript's last title row; exits 1 when it has none, 2 when grep cannot read it.
+// Positional args: $1 = transcript path. (BRE: `{` is literal.)
+export const TITLE_CMD = `out=$(grep '^${TITLE_ROW}' "$1"); s=$?; [ "$s" -eq 0 ] && printf '%s\\n' "$out" | tail -n 1; exit $s`
 
 /** The last custom title in transcript text: null = none, undefined = a title line that does not parse (cannot tell). */
 export function lastTitle(text: string): string | null | undefined {
   const lines = text.split('\n')
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i] ?? ''
-    if (!line.includes('"type":"custom-title"')) continue
+    if (!line.startsWith(TITLE_ROW)) continue
     let row: { type?: unknown; customTitle?: unknown }
     try {
       row = JSON.parse(line) as typeof row
     } catch {
       return undefined
     }
-    if (row?.type !== 'custom-title') continue   // the text nested in another row (a tool input), not a title row
+    if (row?.type !== 'custom-title') continue
     return typeof row.customTitle === 'string' ? row.customTitle : undefined
   }
   return null

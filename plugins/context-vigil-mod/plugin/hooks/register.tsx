@@ -4,7 +4,8 @@ import type { Activity, Awaiting, EventKind, EventRecord, Git, Latch, Mode, Pend
 import { ASK, DEFAULT_OVERRIDES, checkOverrides, fromModelThresholds, formatKey, formatOverride, formatWindow, overridesJson, ordered, parseKey, parseOverridesArgs, patternFor, removeOverride, resolve, sameKey, setOverride } from '../core/overrides'
 import type { Resolved } from '../core/overrides'
 import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath, overridesPath } from '../core/name'
-import { DEFAULTS, PENDING_KEEP_MS, PENDING_PREFIX, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
+import { DEFAULTS, PENDING_KEEP_MS, PENDING_PREFIX, STORE_KEY, STRANDED_PREFIX, loadSettings, pendingKey, strandedKey } from '../core/settings'
+import type { Stranded } from '../core/settings'
 import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
@@ -36,7 +37,6 @@ const barDismissedA = atom({ plugin: 'context-vigil-mod', key: 'barDismissed' } 
 const pendingA = atom({ plugin: 'context-vigil-mod', key: 'pending' } as const, null)
 const countdownA = atom({ plugin: 'context-vigil-mod', key: 'countdownEndsAt' } as const, null)
 const transcriptA = atom({ plugin: 'context-vigil-mod', key: 'transcriptPath' } as const, null as string | null)
-const strandedA = atom({ plugin: 'context-vigil-mod', key: 'stranded' } as const, null as string | null)
 // Information only (PROBES §11): what the session's cache is. The fire-time check stays the gate.
 const cacheTtlA = atom({ plugin: 'context-vigil-mod', key: 'cacheTtl' } as const, 'unknown' as CacheTtl)
 const ttlReadA = atom({ plugin: 'context-vigil-mod', key: 'ttlRead' } as const, false)
@@ -546,7 +546,6 @@ async function resetSessionState($: EngineInterface) {
   await update($, barDismissedA, () => false)
   await update($, countdownA, () => null)
   await update($, handoverCountA, () => 0)
-  await update($, strandedA, () => null)
   await update($, cacheTtlA, () => 'unknown')
   await update($, ttlReadA, () => false)
   await update($, ttlInfoDismissedA, () => false)
@@ -562,6 +561,11 @@ async function resetSessionState($: EngineInterface) {
 async function prunePending($: EngineInterface) {
   const now = await nowMs($)
   for (const key of await $.store.keys().catch(() => [] as string[])) {
+    if (key.startsWith(STRANDED_PREFIX)) {
+      const s = (await $.store.get(key)) as Stranded | null | undefined
+      if (!s || now - s.at > PENDING_KEEP_MS) await $.store.delete(key)
+      continue
+    }
     if (!key.startsWith(PENDING_PREFIX)) continue
     const p = (await $.store.get(key)) as Pending | null | undefined
     if (!p || now - p.createdAt > PENDING_KEEP_MS) await $.store.delete(key)
@@ -902,17 +906,20 @@ async function archiveOutgoing($: EngineInterface): Promise<string | null> {
     }
     if (title === null) return null
     if (isArchived(title)) {
-      // Ours only when the last handover's rename back failed (`stranded`): already archived, so
-      // just recorded, and the successor gets the name back. Otherwise the person's: left alone.
-      const stranded = await read($, strandedA)
-      const ours = stranded !== null && title === archiveName(stranded)
-      if (ours) await recordArchived($, stranded)
+      // Ours only when an earlier rename back failed (a stranded mark for this session): already
+      // archived, so just recorded, and the successor gets the name back. Otherwise the person's.
+      const key = strandedKey(await $.session.id())
+      const stranded = (await $.store.get(key).catch(() => null)) as Stranded | null | undefined
+      const ours = !!stranded && title === archiveName(stranded.name)
+      if (ours && (await recordArchived($, stranded.name))) await $.store.delete(key).catch(() => {})
       await log($, 'archive', { kept: true, ours })
       return null
     }
+    // Recorded first: an archive the successor could not undo is worse than none. A rename that
+    // then fails leaves a record no carried name will match (the name was never changed).
+    if (!(await recordArchived($, title))) return null
     await $.command.run({ command: 'rename', args: archiveName(title) })
     await log($, 'archive', { name: archiveName(title) })
-    await recordArchived($, title)
     return title
   } catch {
     await notify($, V.archiveFailed)
@@ -921,10 +928,28 @@ async function archiveOutgoing($: EngineInterface): Promise<string | null> {
   }
 }
 
-// The pending handover carries the archived name across the clear, for the successor.
-async function recordArchived($: EngineInterface, name: string) {
+// The pending handover carries the archived name across the clear, for the successor. False when
+// it could not be saved: the caller then archives nothing.
+async function recordArchived($: EngineInterface, name: string): Promise<boolean> {
   const pending = await read($, pendingA)
-  if (pending) await savePending($, { ...pending, archived: name }).catch(() => log($, 'guard.wait', { reason: 'archive-unrecorded' }))
+  if (!pending) return false
+  try {
+    await savePending($, { ...pending, archived: name })
+    return true
+  } catch {
+    await log($, 'guard.wait', { reason: 'archive-unrecorded' })
+    return false
+  }
+}
+
+// A clear of your own carries a stranded `Archive: <name>` into the new session: so does its mark.
+async function moveStranded($: EngineInterface, from: string, to: string) {
+  try {
+    const mark = await $.store.get(strandedKey(from))
+    if (!mark) return
+    await $.store.set(strandedKey(to), mark)
+    await $.store.delete(strandedKey(from))
+  } catch { /* the mark stays where it was; nothing is renamed on its account */ }
 }
 
 // The clear was refused, so this is still the archived session: its own name back, and no record
@@ -959,8 +984,12 @@ async function renameSession($: EngineInterface, handoverName: string | undefine
   try {
     await $.command.run({ command: 'rename', args: name })
   } catch {
-    // Left as `Archive: <name>` by us: the next handover knows it and gives its successor the name back.
-    if (title !== null) await update($, strandedA, () => name)
+    // Left as `Archive: <name>` by us: a mark in $.store lets this session's next handover (after a
+    // /resume or a restart too) give its successor the name back.
+    if (title !== null) {
+      const mark: Stranded = { name, at: await nowMs($) }
+      await $.store.set(strandedKey(await $.session.id()), mark).catch(() => log($, 'guard.wait', { reason: 'stranded-unsaved' }))
+    }
     await notify($, V.renameFailed)
     await log($, 'guard.wait', { reason: 'rename-rejected' })
   }
@@ -1171,6 +1200,7 @@ export const register: Register = on => {
     lastApiMirror = null   // the new session has run no turn
     const before = session
     session = await $.session.id()
+    if (session !== before) await moveStranded($, before, session)
     // A slow start can leave the engine still answering the old id: this clear's events then land in the
     // old session's file. Say so rather than look like a log that went missing.
     if (session === before) {
