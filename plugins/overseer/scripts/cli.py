@@ -325,8 +325,14 @@ def _settle_gates(
         notes.append(f"GATE FORCED ({label}): {force}")
         return
     mode = _gate_mode(repo_root)
-    if mode == "hard" and _card_gated(conn, card):
-        raise gates.GateRefused(problems)
+    if mode == "hard":
+        if _card_gated(conn, card):
+            raise gates.GateRefused(problems)
+        # Created before the gates bind (gates_from): warn only, but leave an
+        # audit line so the window is never silent.
+        unmet = "; ".join(p.removeprefix("GATE: ").split(" - ")[0] for p in problems)
+        card.append_section(
+            "Decisions", f"- {now} — GATE UNBOUND ({label}, card pre-dates gates_from): [unmet: {unmet}]", now)
     if mode != "hard":
         # An environment/config escape leaves a trace too (a `force` evidence
         # row), so a gate is never passed silently.

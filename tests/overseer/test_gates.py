@@ -331,6 +331,13 @@ class TestSetStage:
         conn.commit()
         assert run(repo, "set-stage", "WF-001", "implementation") == 3
 
+    def test_pre_gates_from_card_leaves_an_audit_line(self, repo):
+        conn = db.connect(repo, migrate=False)
+        db.set_meta(conn, "gates_from", "2999-01-01")
+        conn.commit()
+        assert run(repo, "set-stage", "WF-001", "implementation") == 0
+        assert "GATE UNBOUND (new -> implementation" in card(repo).sections["## Decisions"]
+
     def test_bypass_under_warn_or_off_is_in_decisions(self, repo, monkeypatch):
         monkeypatch.setenv("OVERSEER_GATES", "off")
         assert run(repo, "set-stage", "WF-001", "implementation") == 0
