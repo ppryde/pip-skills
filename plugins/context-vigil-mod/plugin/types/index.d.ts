@@ -90,7 +90,7 @@ export type EventKind =
   | 'arm' | 'disarm' | 'threshold' | 'bar' | 'handover.requested' | 'handover.written'
   | 'guard.wait' | 'guard.baseline' | 'clear.skipped' | 'clear' | 'resume' | 'resume.sent' | 'last_light.fired' | 'last_light.choice'
   | 'limit.latched' | 'limit.cleared' | 'limit.early_stop' | 'rc.answer' | 'setup'
-  | 'standdown' | 'rename' | 'last_light.skip' | 'last_light.off' | 'last_light.on' | 'last_light.dropped'
+  | 'standdown' | 'rename' | 'archive' | 'last_light.skip' | 'last_light.off' | 'last_light.on' | 'last_light.dropped'
 
 export type EventRecord = { ts: string; session: string; kind: EventKind } & Record<string, unknown>
 

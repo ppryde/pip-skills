@@ -28,9 +28,10 @@ export type World = {
   renameRefused: { value: boolean }    // makes $.command.run({ command: 'rename' }) reject
   renames: string[]                    // args of every rename command run
   shell: { value: boolean }            // whether `sh` runs (it does not on Windows)
-  titled: Set<string>                  // transcript paths holding a custom-title line
-  grepFails: { value: boolean }        // makes the custom-title grep exit 2
-  greps: string[][]                    // argv of every grep run
+  titles: Map<string, string>          // transcript path → its last custom title; a rename sets the current one's
+  transcript: { value: string | null } // the current session's transcript, from classic.SessionStart
+  grepFails: { value: boolean }        // makes the custom-title read exit 2
+  greps: string[][]                    // argv of every custom-title read
   store: Map<string, unknown>          // $.store by key — per account, NOT wiped by a clear
   handoverWriteRefused: { value: boolean }               // makes fs.write under /handovers/ deny
   cacheWrites: { value: { h1: number; m5: number } | 'none' | 'fail' | { raw: string } }   // what the transcript tail says the latest response wrote
@@ -53,7 +54,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined }, model: { value: 'claude-opus-5-5[1m]' },
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '', dir: '/repo/.git' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, submitFails: { count: 0 }, eventsWriteRefused: { value: false }, renames: [],
-    shell: { value: true }, titled: new Set(), grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
+    shell: { value: true }, titles: new Map(), transcript: { value: null }, grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
     handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, askHold: { held: false, waiting: [] }, asks: [], askReply: { value: null }, promptReadFails: { count: 0 }, onStoreSet: { value: null }, fsRead: { gate: null, error: null },
   }
   // $.store, per account: in memory, survives a clear, and open to the test (another process's writes).
@@ -80,10 +81,12 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     if (e.argv[0] === 'sh' && e.argv[2] === 'exit 0') { w.runs.count++; if (!w.shell.value) throw new Error('spawn sh ENOENT'); return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } }
     if (e.argv[0] === 'sh' && !w.shell.value) throw new Error('spawn sh ENOENT')
     w.runs.count++
-    if (e.argv[0] === 'grep') {
+    if (e.argv[0] === 'sh' && e.argv[2]?.includes('custom-title')) {
       w.greps.push([...e.argv])
-      const exitCode = w.grepFails.value ? 2 : w.titled.has(e.argv[e.argv.length - 1] ?? '') ? 0 : 1
-      return { value: { exitCode, stdout: exitCode === 0 ? '1\n' : exitCode === 1 ? '0\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      const title = w.titles.get(e.argv[e.argv.length - 1] ?? '')
+      const exitCode = w.grepFails.value ? 2 : title !== undefined ? 0 : 1
+      const stdout = exitCode === 0 ? `${JSON.stringify({ type: 'custom-title', customTitle: title, sessionId: 'x' })}\n` : ''
+      return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (e.argv[0] === 'sh' && e.argv[2]?.includes('cache_creation')) {
       w.tails.push([...e.argv])
@@ -125,7 +128,11 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     if (e.command === 'clear' && w.clearRefused.value) throw new Error('clear refused')
     if (e.command === 'rename' && w.renameRefused.value) throw new Error('rename refused')
     w.commands.push(e.command)
-    if (e.command === 'rename') w.renames.push(String((e as { args?: string }).args ?? ''))
+    if (e.command === 'rename') {
+      const name = String((e as { args?: string }).args ?? '')
+      w.renames.push(name)
+      if (w.transcript.value !== null) w.titles.set(w.transcript.value, name)   // /rename names the current session (PROBES §15)
+    }
     if (e.command === 'clear' && w.clearHold.held) await new Promise<void>(res => { w.clearHold.release = () => { w.clearHold.held = false; res() } })
     return {}
   })
@@ -142,7 +149,14 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   // PROBES §9: a /clear wipes $.state (every key back to version 0) before any hook sees the new
   // session. The world sits beneath the mod, which calls next() before it reads, so this lands first.
   on('classic.SessionStart', (_$, e) => {
-    if ((e as { source?: string }).source === 'clear') { w.state.clear(); versions.clear() }
+    const { source, transcript_path: tp } = e as { source?: string; transcript_path?: string }
+    if (source === 'clear') { w.state.clear(); versions.clear() }
+    // PROBES §8/§15: /clear carries the outgoing session's name into the new transcript.
+    if (tp !== undefined) {
+      const carried = source === 'clear' && w.transcript.value !== null ? w.titles.get(w.transcript.value) : undefined
+      if (carried !== undefined) w.titles.set(tp, carried)
+      w.transcript.value = tp
+    }
     return {}
   })
   on('classic.FileChanged', () => ({}))

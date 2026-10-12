@@ -74,7 +74,7 @@ Every moment is in exactly one:
 
 The mod registers a `vigil_handover` tool and asks the model to call it. Required fields: `goal`, `state`, `next_step` and `session_name`; optional: `decisions`, `open_questions`, `failed_attempts`. The mod adds a snapshot (cwd, branch, dirty files, files edited, context %) and saves `handovers/<session>-<n>.md`. It then clears (only when the prompt box is empty, the RC rules hold and no limit latch is set; every wait shows a notice), injects the handover into the fresh session and submits the resume prompt. A `/clear` you run yourself picks up a saved handover the same way; the automatic resume is sent only when no turn has run since the handover was written and no usage limit is in force — otherwise the handover is injected and a notice asks you where to pick up.
 
-**Session naming.** After the clear, an **unnamed** session is renamed to the handover's `session_name` (a mod-run `/rename`: prompt border, `/resume`, Remote Control). A session that already has a name (a `/rename` of yours, or an earlier handover) **keeps its name** -- `/clear` carries it. Only a transcript `custom-title` counts as named; Claude Code's own auto title does not. If the check cannot run, no rename is attempted.
+**Session naming.** Just before the mod's own clear, a **named** session is renamed `Archive: <its name>`, so `/resume` tells each old transcript from the session that carries on. A name that already starts with `Archive: ` is left as it is (never `Archive: Archive: ...`). After the clear the new session gets its name back without the prefix: `/clear` carries the archive name across, and a mod-run `/rename` puts the original back. An **unnamed** session is not archived (nothing else bears its name, and a name once given cannot be removed if the clear is then refused); after the clear it is renamed to the handover's `session_name`. All renames are mod-run `/rename`s (prompt border, `/resume`, Remote Control). Only a transcript `custom-title` counts as a name; Claude Code's own auto title does not. A failed archive rename is a notice and the handover goes on; a refused clear puts the original name back; if the name cannot be read, nothing is renamed. A `/clear` you run yourself archives nothing; the new session keeps the carried name.
 
 State that must cross a clear (pending handover, limit latch) lives in `$.store`, because `$.state` is wiped by every `/clear` (PROBES section 9).
 
@@ -133,9 +133,9 @@ The mod stands down (no arming, clearing or bar; one notice) when classic contex
 
 Works on Windows with Claude Code's own shell tools. The config dir is `CLAUDE_CONFIG_DIR`, else `<home>\.claude`, with the home
 taken from `HOME`, else `USERPROFILE`, else `HOMEDRIVE`+`HOMEPATH`; paths keep the separator of the base (`C:\Users\you\.claude\context-vigil-mod\...`).
-Last light and the "is this session named" check read the transcript with `tail` and `grep`; where `sh` does not run (no Git Bash)
+Last light and the session-name check read the transcript with `tail` and `grep`; where `sh` does not run (no Git Bash)
 they read the transcript file directly instead, and a transcript over the engine's 4 MiB read cap reads as "cannot tell": last
-light then stays off (unknown never fires) and the session is left unrenamed. Everything else spawns only `git`.
+light then stays off (unknown never fires) and neither session is renamed. Everything else spawns only `git`.
 
 ## Verify
 
