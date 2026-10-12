@@ -598,8 +598,9 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
 
 
 def _cmd_pane_safe(args: argparse.Namespace) -> int:
-    """Exit 0 when the pane is safe to type into (the detached sender's re-check)."""
-    return 0 if pane.pane_safe(args.target) else 1
+    """Exit 0 when the pane is safe to type into (the detached sender's re-check,
+    after the hook has returned, so a running turn counts as unsafe here)."""
+    return 0 if pane.pane_safe(args.target, busy=True) else 1
 
 
 def _cmd_hook(args: argparse.Namespace) -> int:

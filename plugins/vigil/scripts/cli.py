@@ -245,8 +245,9 @@ def cmd_pane_check_hook(args: argparse.Namespace) -> int:
 
 
 def cmd_pane_safe(args: argparse.Namespace) -> int:
-    """Flag-independent: exit 0 when ``pane`` is an empty prompt with no dialog open."""
-    return 0 if args.pane and pane_mod.pane_hold_reason(args.pane) is None else 1
+    """Flag-independent post-delay re-check: exit 0 when ``pane`` is an empty prompt
+    with no dialog open and no turn running (the hook has returned by now)."""
+    return 0 if args.pane and pane_mod.pane_hold_reason(args.pane, busy=True) is None else 1
 
 
 def cmd_session_start_hook(args: argparse.Namespace) -> int:

@@ -21,11 +21,22 @@ RULE = "─" * 40
 # A idle Claude Code prompt: the placeholder is drawn dim (SGR 2) so it is not "typed".
 SAFE_SCREEN = f"output\n{RULE}\n❯ \x1b[2mTry something\x1b[0m\n{RULE}\n"
 TYPED_SCREEN = f"output\n{RULE}\n❯ half a sentence\n{RULE}\n"
-# A turn is running: the prompt box is empty but the spinner line shows.
-BUSY_SCREEN = (
-    f"output\n✻ Cogitating… (12s · ↓ 1.2k tokens · esc to interrupt)\n\n"
-    f"{RULE}\n❯ \x1b[2mTry something\x1b[0m\n{RULE}\n"
+# Live captures, Claude Code 2.1.296, session named "Great Refactoring probe": the
+# name sits in the upper rule; a running turn shows "esc to interrupt" in the footer
+# under the box, and it is STILL there while the Stop hook runs.
+NAMED_RULE = "\x1b[38;5;244m" + "─" * 94 + " Great Refactoring probe ─"
+LOWER_RULE = "\x1b[38;5;244m" + "─" * 120
+FOOTER = "\x1b[39m  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle){} · ← 1 agent\x1b[39m"
+NAMED_SCREEN = (
+    f"✽ Cerebrating… (1s · thinking)\n{NAMED_RULE}\n\x1b[39m❯\xa0\n{LOWER_RULE}\n"
+    + FOOTER.format("") + "\n"
 )
+BUSY_SCREEN = (
+    f"✽ Cerebrating… (1s · thinking)\n{NAMED_RULE}\n\x1b[38;5;246m❯\xa0\x1b[39m\n{LOWER_RULE}\n"
+    + FOOTER.format(" · esc to interrupt") + "\n"
+)
+# The phrase in transcript text above an idle box is not a running turn.
+TRANSCRIPT_MENTIONS_BUSY = f"BUSY_PATTERN matches esc to interrupt in the footer\n{SAFE_SCREEN}"
 DIALOG_SCREEN = (
     f"Allow this tool?\n❯ 1. Yes\n  2. No\nEnter to select · Esc to cancel\n"
 )
@@ -309,12 +320,35 @@ class TestStopHook:
         result = _run(STOP, {"cwd": str(tmp_path)}, _auto_env(bindir), tmp_path)
         self._assert_held(tmp_path, result, marker, st, "dialog or permission prompt")
 
-    def test_busy_session_holds(self, tmp_path, monkeypatch):
+    def test_busy_during_the_hook_and_idle_after_the_delay_sends_clear(self, tmp_path, monkeypatch):
+        # The in-hook check ignores "esc to interrupt": the footer shows it while
+        # the Stop hook itself runs, so honouring it would hold every handover.
         st = _promote_and_arm(tmp_path, "%9")
         monkeypatch.setenv("TMUX_PANE", "%9")
-        bindir, marker = _fake_tmux(tmp_path, BUSY_SCREEN)
+        bindir, marker = _fake_tmux(tmp_path, BUSY_SCREEN, later_screen=NAMED_SCREEN)
+        env = _auto_env(bindir)
+        env["VIGIL_CLEAR_DELAY"] = "0.3"
+        result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0 and result.stdout.strip() == ""
+        assert _wait_calls(marker, 1) == ["send-keys -t %9 /clear Enter"]
+        assert not st.clear_flag(tmp_path).exists()
+
+    def test_named_session_sends_clear(self, tmp_path, monkeypatch):
+        st = _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")
+        bindir, marker = _fake_tmux(tmp_path, NAMED_SCREEN)
         result = _run(STOP, {"cwd": str(tmp_path)}, _auto_env(bindir), tmp_path)
-        self._assert_held(tmp_path, result, marker, st, "the session is busy")
+        assert result.returncode == 0 and result.stdout.strip() == ""
+        assert _wait_calls(marker, 1) == ["send-keys -t %9 /clear Enter"]
+        assert not st.clear_flag(tmp_path).exists()
+
+    def test_transcript_mentioning_esc_to_interrupt_still_sends(self, tmp_path, monkeypatch):
+        _promote_and_arm(tmp_path, "%9")
+        monkeypatch.setenv("TMUX_PANE", "%9")
+        bindir, marker = _fake_tmux(tmp_path, TRANSCRIPT_MENTIONS_BUSY)
+        result = _run(STOP, {"cwd": str(tmp_path)}, _auto_env(bindir), tmp_path)
+        assert result.returncode == 0 and result.stdout.strip() == ""
+        assert _wait_calls(marker, 1) == ["send-keys -t %9 /clear Enter"]
 
     def test_turn_starting_during_the_delay_holds_and_stays_armed(self, tmp_path, monkeypatch):
         st = _promote_and_arm(tmp_path, "%9")
@@ -615,3 +649,21 @@ class TestNudgeMatcherDocs:
             text = doc.read_text()
             assert "TaskCreate|TaskUpdate" in text
             assert "after every tool call" not in text
+
+
+class TestPaneBusy:
+    """BUSY is checked only post-delay (busy=True) and only under the box."""
+
+    def test_busy_only_when_asked(self):
+        from scripts import pane
+        assert pane.hold_reason(BUSY_SCREEN) is None
+        assert pane.hold_reason(BUSY_SCREEN, busy=True) == "the session is busy (a turn is running)"
+
+    def test_transcript_text_is_not_the_footer(self):
+        from scripts import pane
+        assert pane.hold_reason(TRANSCRIPT_MENTIONS_BUSY, busy=True) is None
+
+    def test_named_rule_is_a_rule(self):
+        from scripts import pane
+        assert pane.hold_reason(NAMED_SCREEN, busy=True) is None
+        assert pane.input_row(f"{'─' * 12} not a rule\n❯ x\n") is None

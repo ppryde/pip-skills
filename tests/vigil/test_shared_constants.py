@@ -101,6 +101,7 @@ def test_resume_prompts_name_their_own_tag_and_the_handover():
 
 
 def test_pane_safety_patterns_are_shared_by_vigil_and_skill():
-    # Both refuse to type into a dialog footer or a running turn; the wording must not drift.
-    for name in ("FOOTER_PATTERN", "BUSY_PATTERN"):
+    # Both find the (possibly named) prompt box and refuse a dialog footer or a running
+    # turn the same way; the wording must not drift.
+    for name in ("RULE_PATTERN", "FOOTER_PATTERN", "BUSY_PATTERN"):
         assert py_const(VIGIL / "pane.py", name) == py_const(SKILL / "pane.py", name), name

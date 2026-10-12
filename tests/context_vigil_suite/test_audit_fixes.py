@@ -21,7 +21,7 @@ from .conftest import read_settings as _settings
 from .conftest import write_settings as _write
 from .test_context_window import _ingest
 from .test_hooks import DIALOG_SCREEN, _payload, fake_tmux  # noqa: F401  (fixture)
-from .test_pane import IDLE
+from .test_pane import BUSY, IDLE
 
 
 def _over(repo: Path, pct: float) -> None:
@@ -39,6 +39,33 @@ def test_stop_does_not_send_when_dialog_opens_during_the_delay(
     assert hooks.stop(_payload(repo)) is None            # idle now: dispatch armed
     (iso / "idle-shot.txt").write_text(DIALOG_SCREEN)    # a dialog opens before the keys fly
     time.sleep(3)
+    assert not fake_tmux.exists() or "send-keys" not in fake_tmux.read_text()
+
+
+def test_stop_busy_in_the_hook_and_idle_after_the_delay_sends_clear(
+        repo: Path, fake_tmux: Path, iso: Path,  # noqa: F811
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    # While the Stop hook runs the footer still reads "esc to interrupt" (live,
+    # 2.1.296): the in-hook check must not hold on it, the re-check sees it idle.
+    monkeypatch.setenv("CONTEXT_VIGIL_CLEAR_DELAY", "1")
+    (iso / "idle-shot.txt").write_text(BUSY)
+    state.request_clear(paths.scope_dir(repo), "doc")
+    assert hooks.stop(_payload(repo)) is None
+    (iso / "idle-shot.txt").write_text(IDLE)
+    deadline = time.time() + 5
+    while time.time() < deadline and not (fake_tmux.exists() and "/clear" in fake_tmux.read_text()):
+        time.sleep(0.05)
+    assert "send-keys -t %7 /clear Enter" in fake_tmux.read_text()
+
+
+def test_stop_does_not_send_when_a_turn_starts_during_the_delay(
+        repo: Path, fake_tmux: Path, iso: Path,  # noqa: F811
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONTEXT_VIGIL_CLEAR_DELAY", "1")
+    state.request_clear(paths.scope_dir(repo), "doc")
+    assert hooks.stop(_payload(repo)) is None            # idle now: dispatch armed
+    (iso / "idle-shot.txt").write_text(BUSY)             # the person submits a prompt
+    time.sleep(2.5)
     assert not fake_tmux.exists() or "send-keys" not in fake_tmux.read_text()
 
 
