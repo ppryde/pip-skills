@@ -67,6 +67,16 @@ def test_is_lan_client():
     assert not _is_lan_client("not-an-ip")
 
 
+def test_is_lan_client_ipv6_allows_only_loopback_linklocal_ula():
+    for ok in ("::1", "fe80::1", "fd00::1", "fc00::1"):
+        assert _is_lan_client(ok), ok
+    for bad in ("2001:0:4136:e378:8000:63bf:3fff:fdd2",   # Teredo
+                "2001:db8::1", "2001:10::1",
+                "64:ff9b::808:808",                        # NAT64
+                "2606:4700::1"):
+        assert not _is_lan_client(bad), bad
+
+
 def test_is_lan_client_checks_the_ipv4_inside_a_6to4_address():
     # 2002::/16 is "private" to ipaddress, but the address embeds an IPv4.
     assert not _is_lan_client("2002:0808:0808::1")   # 8.8.8.8

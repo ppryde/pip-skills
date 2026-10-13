@@ -82,7 +82,7 @@ report-hook
 - `dashboard-refresh-hook`: SessionStart: restart a running dashboard that is older than the installed overseer (WF-053)
 - `handover`: hand the ledger rollup to vigil (handoff | vigil handover), no pipe
 - `help`: one-line usage for a verb (or every verb)
-- `merge-boards`: fold this repo's other boards into the active one
+- `merge-boards`: fold this repo's other boards into the active one (the absorbed account then watches the target, account-wide)
 - `next`: one line: stage, what to dispatch next, the verdict state
 - `pretool-hook`: PreToolUse: orchestrator no-work/no-fork guard and agent Read limit (WF-113)
 - `report-hook`: SubagentStop: record an overseer agent's reply and real usage (WF-113)

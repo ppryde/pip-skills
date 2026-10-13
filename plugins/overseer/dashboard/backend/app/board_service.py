@@ -40,6 +40,9 @@ class ExecResult(BaseModel):
     returncode: int
 
 
+_IPV6_ULA = ipaddress.ip_network("fc00::/7")
+
+
 def _is_lan_client(host: str | None) -> bool:
     """True only for a private/loopback/link-local source address.
 
@@ -52,9 +55,13 @@ def _is_lan_client(host: str | None) -> bool:
         ip = ipaddress.ip_address(host)
     except ValueError:
         return False
-    # A 6to4 (2002::/16) or IPv4-mapped address is judged by the IPv4 inside it.
+    # 6to4 (2002::/16) and IPv4-mapped addresses are judged by the IPv4 inside.
     if isinstance(ip, ipaddress.IPv6Address):
         ip = ip.sixtofour or ip.ipv4_mapped or ip
+    if isinstance(ip, ipaddress.IPv6Address):
+        # Only loopback, link-local and ULA: `is_private` also covers Teredo,
+        # documentation and NAT64-adjacent ranges.
+        return ip.is_loopback or ip.is_link_local or ip in _IPV6_ULA
     return ip.is_private or ip.is_loopback or ip.is_link_local
 
 

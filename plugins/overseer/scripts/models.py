@@ -57,20 +57,33 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
     return meta, match.group(2)
 
 
-def find_section(lines: list[str], header: str) -> tuple[int, int] | None:
-    """(start, end) line indexes of the `## ` section `header`, or None. Lines
-    inside a ``` or ~~~ code fence are never headings."""
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def unfenced_lines(lines: list[str]):
+    """Yield (index, line) for every line outside a CommonMark code fence: an
+    opener is 3+ backticks or tildes (up to 3 spaces of indent, info string
+    allowed); the closer is the same character, at least as long, with no
+    info string."""
     fence: str | None = None
-    start: int | None = None
     for i, line in enumerate(lines):
-        marker = line.lstrip()[:3]
+        m = _FENCE_RE.match(line)
         if fence is not None:
-            if marker == fence:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
                 fence = None
             continue
-        if marker in ("```", "~~~"):
-            fence = marker
-        elif start is None:
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            fence = m.group(1)
+            continue
+        yield i, line
+
+
+def find_section(lines: list[str], header: str) -> tuple[int, int] | None:
+    """(start, end) line indexes of the `## ` section `header`, or None.
+    Headings inside code fences are ignored."""
+    start: int | None = None
+    for i, line in unfenced_lines(lines):
+        if start is None:
             if line == header:
                 start = i
         elif line.startswith("## "):
@@ -458,7 +471,7 @@ class Card:
         sections: dict[str, str] = {}
         header = ""
         start = 0
-        for i, line in enumerate(lines):
+        for i, line in unfenced_lines(lines):
             if line.startswith("## "):
                 content = "\n".join(lines[start:i]).strip()
                 if header or content:

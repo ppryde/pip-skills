@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import sqlite3
 from pathlib import Path
 
@@ -125,23 +126,37 @@ def add_claude_dir(path: Path) -> list[str]:
     return _update_claude_dirs(lambda listed: listed if entry in listed else [*listed, entry])
 
 
-def watch_from(source_config_dir: Path, target_config_dir: Path) -> None:
+def watch_from(source_config_dir: Path, target_config_dir: Path) -> Path | None:
     """Make `source_config_dir`'s machine config watch `target_config_dir`
-    (`add_claude_dir`, but into another account's file)."""
+    (`add_claude_dir`, but into another account's file). Returns the file
+    written, or None when nothing was (same dir, already listed, or an unusable
+    file — which is reported on stderr and left untouched). Watching is
+    account-wide: every repo that account sees is affected."""
+    if source_config_dir.resolve() == target_config_dir.resolve():
+        return None
     path = source_config_dir.joinpath(*MACHINE_CONFIG_RELPATH)
+    cfg: object = {}
     try:
-        cfg = json.loads(path.read_text() or "{}") if path.exists() else {}
+        if path.exists():
+            cfg = json.loads(path.read_text() or "{}")
     except json.JSONDecodeError:
-        return  # a malformed file is for `overseer claude-dirs` to report
-    if not isinstance(cfg, dict):
-        return
-    listed = [str(p) for p in (cfg.get("claude_dirs") or []) if p]
+        cfg = None
+    listed = cfg.get("claude_dirs", []) if isinstance(cfg, dict) else None
+    if not isinstance(cfg, dict) or not isinstance(listed, list):
+        print(f"overseer: {path} is not a usable machine config; "
+              f"not adding {target_config_dir} to claude_dirs", file=sys.stderr)
+        return None
     entry = str(target_config_dir.expanduser().resolve())
-    if entry not in listed:
-        cfg["claude_dirs"] = [*listed, entry]
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(cfg, indent=2) + "\n")
-        store.memo_reset()
+    listed = [str(p) for p in listed if p]
+    if entry in listed:
+        return None
+    cfg["claude_dirs"] = [*listed, entry]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(cfg, indent=2) + "\n")
+    os.replace(tmp, path)
+    store.memo_reset()
+    return path
 
 
 def remove_claude_dir(path: Path) -> list[str]:
