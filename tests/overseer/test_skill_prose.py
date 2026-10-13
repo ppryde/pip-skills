@@ -22,7 +22,7 @@ def test_retired_instructions_gone():
 
 
 def test_version_bumped():
-    assert json.loads((OVERSEER / ".claude-plugin" / "plugin.json").read_text())["version"] == "0.29.2"
+    assert json.loads((OVERSEER / ".claude-plugin" / "plugin.json").read_text())["version"] == "0.29.3"
 
 
 def test_cli_location_and_cheat_sheet_present():
@@ -88,3 +88,24 @@ def test_ledger_skill_qualifies_manual_logging_verbs():
     assert "log-review" in reviews_bullet
     assert "report hook" in reviews_bullet
     assert "automatically" in reviews_bullet
+
+
+def _frontmatter(name):
+    text = (OVERSEER / "agents" / f"{name}.md").read_text()
+    head = text.split("---", 2)[1]
+    return dict(line.split(":", 1) for line in head.strip().splitlines() if ":" in line)
+
+
+def test_omit_claude_md_on_reviewer_only():
+    # The reviewer reads its bundle, not repo conventions (pip-agents H, risk R5):
+    # implementer, fixer, verifier and planner keep CLAUDE.md.
+    assert _frontmatter("overseer-reviewer")["omitClaudeMd"].strip() == "true"
+    for name in ("overseer-implementer", "overseer-fixer", "overseer-verifier", "overseer-planner"):
+        assert "omitClaudeMd" not in _frontmatter(name), name
+
+
+def test_skill_tool_kept_on_builders():
+    # Skill-vs-preload is measured, not switched (overseer-h-skill-measure.md).
+    for name in ("overseer-implementer", "overseer-fixer"):
+        assert "Skill" in _frontmatter(name)["tools"]
+        assert "skills" not in _frontmatter(name)
