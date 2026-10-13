@@ -435,13 +435,23 @@ class TestBootstrapBrief:
     def test_m_brief_is_refused_before_any_side_effect(self, proj, tmp_path, capsys):
         assert main(["--root", str(proj), "bootstrap", "--title", "T", "--complexity", "M",
                      "--brief", "do the thing"]) == 3
-        assert "GATE: plan-review has no reviewer evidence" in capsys.readouterr().err
+        assert "GATE: --brief is for S cards only" in capsys.readouterr().err
         conn = db.connect(proj, migrate=False)
         assert db.load_card(conn, "WF-001") is None  # no orphan card
         assert not (tmp_path / "wt").exists()
         branches = subprocess.run(["git", "branch", "--list", "feat/*"], cwd=proj,
                                   capture_output=True, text=True).stdout
         assert branches.strip() == ""
+
+    def test_m_brief_refusal_names_the_right_path(self, proj, capsys):
+        """WF-289: the refusal says --brief is S-only and what M uses, instead of
+        listing plan-review problems the orchestrator cannot act on."""
+        assert main(["--root", str(proj), "bootstrap", "--title", "T", "--complexity", "M",
+                     "--brief", "do the thing"]) == 3
+        err = capsys.readouterr().err
+        assert "--brief is for S cards only" in err
+        assert "bootstrap" in err and "--role planner" in err
+        assert "no reviewer evidence" not in err
 
     def test_refuse_then_force_on_same_title_works(self, proj):
         argv = ["--root", str(proj), "bootstrap", "--title", "T", "--complexity", "M",

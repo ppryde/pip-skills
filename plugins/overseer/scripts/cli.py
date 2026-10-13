@@ -652,7 +652,13 @@ def _brief_gate_problems(args: argparse.Namespace) -> "list[str]":
     probe.set_section("## Plan", args.brief, _now())
     brief = gates.Evidence(0, "planning", "brief", None, "", "brief", None, None, None, "")
     problems = gates.check_transition(probe, "implementation", [brief])
-    return problems if problems and _card_gated(conn, probe) else []
+    if not (problems and _card_gated(conn, probe)):
+        return []
+    if probe.complexity not in (None, "S"):
+        return [f"GATE: --brief is for S cards only (this one is {probe.complexity}); for M/L "
+                "run bootstrap without --brief, then dispatch-prep <card> --stage planning "
+                "--role planner --advance and the plan-review loop"]
+    return problems
 
 
 def cmd_bootstrap(args: argparse.Namespace) -> int:
