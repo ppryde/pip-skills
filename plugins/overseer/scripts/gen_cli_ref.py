@@ -26,17 +26,18 @@ BEGIN, END = "<!-- cli:begin -->", "<!-- cli:end -->"
 # The rest (block, park, release, show, conflicts, ...) appear in SKILL prose by their exact
 # shape where a rule needs them, and in full in cli.md and `help <verb>`.
 INLINE = (
-    "resume", "bootstrap", "dispatch-prep", "set-stage", "set-section", "set-field",
+    "resume", "next", "bootstrap", "dispatch-prep", "set-stage", "set-section", "set-field",
     "facts", "accept-fact", "reject-fact", "handover", "vigil", "help",
 )
 # Rarely-used optional flags left out of the inline lines (they end in `[...]`); cli.md has all.
 ELIDE = {
-    "bootstrap": {"jira", "linear", "type", "slug", "labels", "goal", "force_gate"},
-    "set-field": {"order", "repo", "sprint", "body", "touches", "labels", "priority", "estimate",
+    "bootstrap": {"jira", "linear", "type", "slug", "labels", "goal", "force_gate", "brief_file"},
+    "set-field": {"branch", "worktree", "order", "repo", "sprint", "body", "touches", "labels", "priority", "estimate",
                   "title", "complexity"},
-    "dispatch-prep": {"force_gate"},
+    "dispatch-prep": {"force_gate", "lens", "slot"},
+    "resume": {"json"},
     "set-stage": {"force_gate"},
-    "facts": {"tag", "stale", "json"},
+    "facts": {"tag", "stale", "json", "count"},
     "show": {"json"},
 }
 # Verbs that are hook backends, never typed by a model.

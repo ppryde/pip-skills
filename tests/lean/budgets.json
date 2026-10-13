@@ -25,7 +25,7 @@
     "plugins/email-absolution/skills/visitation/SKILL.md": 3761,
     "plugins/overseer/commands/dashboard.md": 1629,
     "plugins/overseer/skills/ledger/SKILL.md": 5766,
-    "plugins/overseer/skills/orchestrate/SKILL.md": 11034,
+    "plugins/overseer/skills/orchestrate/SKILL.md": 11030,
     "plugins/puritan/skills/covenant/SKILL.md": 6000,
     "plugins/puritan/skills/inquisition/SKILL.md": 8132,
     "plugins/puritan/skills/scriptorium/SKILL.md": 8700,
@@ -41,7 +41,7 @@
     "skills/context-vigil/SKILL.md": 5836
   },
   "exemptions": {
-    "plugins/overseer/skills/orchestrate/SKILL.md": "own stream (overseer redesign, WF-265): 22317 -> 12760 -> 11034 in PR B (lean; owner: under 11 KB). Over the 10 KB default because the generated CLI signature block (hot verbs only, ~0.8 KB) and the S/M driver (stages, review loop, dispatch, watchdogs) are inline so an S/M card reads no reference; only ratchets down",
+    "plugins/overseer/skills/orchestrate/SKILL.md": "own stream (overseer redesign, WF-265): 22317 -> 12760 -> 11034 in PR B -> 11030 in the context-trim PR, WF-280..284 (lean; owner: under 11 KB). Over the 10 KB default because the generated CLI signature block (hot verbs only, ~0.8 KB) and the S/M driver (stages, review loop, dispatch, watchdogs) are inline so an S/M card reads no reference; only ratchets down",
     "plugins/test-crucible/skills/test-suite-health/SKILL.md": "Q3 (ratified): 12 KB, not 10 KB. The only measured skill (28 runs, iteration-3 pass rates); every deferred phase keeps its one-line rule in SKILL.md and a hard read instruction."
   }
 }

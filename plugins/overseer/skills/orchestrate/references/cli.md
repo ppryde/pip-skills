@@ -14,7 +14,7 @@ add-fact --statement <statement> [--tags <tags>] [--source <source>] [--body <bo
 append-body <card-id> <section> (--text <text> | --text-file <text-file>)
 backup [--dir <dir>] [--print-dir]
 block <card-id> --reason <reason>
-board [--json]
+board [--json] [--full]
 boards [--json]
 bootstrap [--card <card>] [--title <title>] [--jira <jira> | --linear <linear>] [--complexity S|M|L|XL] [--labels <labels>] [--goal <goal>] [--type <type>] [--slug <slug>] [--brief <brief>] [--brief-file <brief-file>] [--force-gate REASON]
 calibration [--json]
@@ -22,11 +22,11 @@ checklist <card-id> --task <task> [--subject <subject>] --status pending|in_prog
 claim <card-id> --session <session> [--force]
 claude-dirs [list|add|remove] [<path>] [--json]
 clear [--scope cards|repo] [--yes] [--no-backup] [--json]
-conflicts [--sprint <sprint>] [--json]
+conflicts [--sprint <sprint>] [--card <card>] [--count] [--json]
 depends <card-id> [--on <on>] [--off <off>]
-dispatch-prep <card-id> --stage <stage> --role planner|implementer|reviewer|fixer|verifier [--round <round>] [--slot <slot>] [--chunk <chunk>] [--lens <lens>] [--var <var>] [--advance] [--force-gate REASON]
+dispatch-prep <card-id> --stage <stage> --role planner|implementer|reviewer|fixer|verifier [--round <round>] [--slot <slot>] [--chunk <chunk>] [--lens <lens>] [--var <var>] [--advance] [--panel] [--force-gate REASON]
 done <card-id>
-facts [--tag <tag>] [--stale] [--json] [--pending] [--card <card>]
+facts [--tag <tag>] [--stale] [--json] [--pending] [--card <card>] [--count]
 handoff [--json]
 handover [--notes <notes>]
 help [<verb>]
@@ -38,6 +38,7 @@ log-usage <card-id> --role planner|worker|reviewer|fixer|orchestrator --tokens <
 merge-boards [--dry-run] [--json]
 new-card --title <title> [--jira <jira> | --linear <linear>] [--complexity S|M|L|XL] [--sprint <sprint>] [--estimate <estimate>] [--goal <goal>] [--repo <repo>] [--labels <labels>]
 new-sprint <sprint-id> [--estimate <estimate>] [--goal <goal>]
+next <card-id>
 park <card-id>
 pull-children <card-id>
 rebuild-index
@@ -53,7 +54,7 @@ set-field <card-id> [--branch <branch>] [--worktree <worktree>] [--pr <pr>] [--t
 set-section <card-id> --section Plan|Verification|Decisions (--text-file <file> | --text <text>)
 set-sprint-status <sprint-id> active|closed|planned
 set-stage <card-id> <stage> [--force-gate REASON]
-show <id> [--json] [--section <section>]
+show <id> [--json] [--section <section>] [--full]
 unblock <card-id>
 unclaim <card-id>
 unpark <card-id>
@@ -82,6 +83,7 @@ report-hook
 - `handover`: hand the ledger rollup to vigil (handoff | vigil handover), no pipe
 - `help`: one-line usage for a verb (or every verb)
 - `merge-boards`: fold this repo's other boards into the active one
+- `next`: one line: stage, what to dispatch next, the verdict state
 - `pretool-hook`: PreToolUse: orchestrator no-work/no-fork guard and agent Read limit (WF-113)
 - `report-hook`: SubagentStop: record an overseer agent's reply and real usage (WF-113)
 - `vigil`: passthrough to the vigil plugin's CLI

@@ -177,3 +177,15 @@ class TestReviewLoop:
 def test_the_line_is_one_line():
     for st in ("planning", "plan-review", "implementation", "impl-review", "verification"):
         assert "\n" not in line(card(st))
+
+
+def test_the_orchestrate_skill_teaches_next_panel_and_the_short_form():
+    from pathlib import Path
+
+    skill = (Path(__file__).resolve().parents[2] / "plugins" / "overseer" / "skills"
+             / "orchestrate" / "SKILL.md").read_text()
+    flat = " ".join(skill.split())
+    block = skill.split("<!-- cli:begin -->", 1)[1].split("<!-- cli:end -->", 1)[0]
+    assert "\nnext <card-id>" in block and "[--panel]" in block
+    assert "**`next <id>`**" in flat and "`--panel`: `agent model path` per slot" in flat
+    assert "short form: <path>" in flat
