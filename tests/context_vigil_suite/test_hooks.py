@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -452,3 +453,58 @@ def test_kick_skipped_when_a_dialog_is_open(repo: Path, screen_tmux) -> None:
     assert out is not None and "additionalContext" in out   # handover still injected
     time.sleep(0.3)
     assert not log.exists() or "resume from the injected handover" not in log.read_text()
+
+
+# --- stale census after a handover's /clear ----------------------------------
+#
+# The cooldown (60 s) ends before census's stale horizon (90 s), so the last
+# pre-clear reading is still "fresh" by age when the cooldown lapses. What should
+# keep the skill quiet is the transcript-freshness check
+# (context._census_unchanged): census is trusted only while the transcript has
+# not been written since census last heard from the session.
+
+def _after_clear_with_stale_census(repo: Path, monkeypatch: pytest.MonkeyPatch,
+                                   elapsed: float, transcript_written_after_census: bool) -> Path:
+    """Handover + /clear at T; census last reported 72% one second before T."""
+    t0 = time.time()
+    scope = paths.scope_dir(repo)
+    _ingest(repo, "s1", 72, now=t0 - 1)               # pre-clear reading, above threshold
+    transcript = repo / "transcript.jsonl"
+    transcript.write_text("")
+    stamp = t0 + 5 if transcript_written_after_census else t0 - 1
+    os.utime(transcript, (stamp, stamp))
+    state.request_clear(scope, "DOC")
+    assert hooks.session_start(_payload(repo, source="clear")) is not None   # starts the cooldown
+    assert state.cooldown_active(scope, 60)
+    monkeypatch.setattr(time, "time", lambda: t0 + elapsed)   # past the cooldown, inside 90 s
+    assert not state.cooldown_active(scope, 60)
+    return transcript
+
+
+@pytest.mark.parametrize("elapsed", [61, 75, 89])
+def test_no_renudge_on_stale_census_once_transcript_moved_on(
+        repo: Path, monkeypatch: pytest.MonkeyPatch, elapsed: float) -> None:
+    transcript = _after_clear_with_stale_census(repo, monkeypatch, elapsed, True)
+    payload = _payload(repo, hook_event_name="UserPromptSubmit", transcript_path=str(transcript))
+    assert hooks.nudge(payload) is None
+
+
+@pytest.mark.parametrize("elapsed", [61, 75, 89])
+def test_same_session_unchanged_transcript_trusts_census_and_nudges(
+        repo: Path, monkeypatch: pytest.MonkeyPatch, elapsed: float) -> None:
+    # same session, transcript untouched since census's reading: the 72% is still
+    # accurate and inside the horizon, so it is trusted and nudging is correct
+    transcript = _after_clear_with_stale_census(repo, monkeypatch, elapsed, False)
+    payload = _payload(repo, hook_event_name="UserPromptSubmit", transcript_path=str(transcript))
+    assert hooks.nudge(payload) is not None
+
+
+@pytest.mark.parametrize("elapsed", [61, 75, 89])
+# Evidence that /clear changes the session id: plugins/context-vigil-mod/plugin/PROBES.md:23
+def test_no_renudge_after_clear_into_a_new_session_id(
+        repo: Path, monkeypatch: pytest.MonkeyPatch, elapsed: float) -> None:
+    # /clear starts a new session id: the old id's 72% census entry is not its reading
+    transcript = _after_clear_with_stale_census(repo, monkeypatch, elapsed, False)
+    payload = {"cwd": str(repo), "session_id": "s2", "hook_event_name": "UserPromptSubmit",
+               "transcript_path": str(repo / "new-transcript.jsonl")}
+    assert hooks.nudge(payload) is None
