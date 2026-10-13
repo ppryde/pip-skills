@@ -452,6 +452,21 @@ class TestBootstrapBrief:
         assert "--brief is for S cards only" in err
         assert "bootstrap" in err and "--role planner" in err
         assert "no reviewer evidence" not in err
+        # Forcing --brief onto an M card is the wrong answer: no override hint.
+        assert "--force-gate" not in err
+        # A new card has no id yet, so the first step is a plain bootstrap.
+        assert "run bootstrap without --brief, then dispatch-prep" in err
+
+    def test_m_brief_refusal_on_an_existing_card_goes_straight_to_the_planner(
+            self, proj, capsys):
+        assert main(["--root", str(proj), "new-card", "--title", "T", "--complexity", "M"]) == 0
+        capsys.readouterr()
+        assert main(["--root", str(proj), "bootstrap", "--card", "WF-001",
+                     "--brief", "do the thing"]) == 3
+        err = capsys.readouterr().err
+        assert "bootstrap without" not in err
+        assert "dispatch-prep WF-001 --stage planning --role planner --advance" in err
+        assert "--force-gate" not in err
 
     def test_refuse_then_force_on_same_title_works(self, proj):
         argv = ["--root", str(proj), "bootstrap", "--title", "T", "--complexity", "M",

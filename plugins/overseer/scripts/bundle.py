@@ -194,8 +194,11 @@ def prepare(
         # The reviewers read a snapshot taken from the card's ## Plan at dispatch time,
         # so a fix applied to the snapshot file never reaches the next round (WF-288).
         values["plan_fix"] = (
-            "- Plan fixes: the plan is the card's `## Plan` section; `plan.snapshot.md` in the "
+            "\n- Plan fixes: the plan is the card's `## Plan` section; `plan.snapshot.md` in the "
             "dispatch folder is a read-only view for reviewers and editing it fixes nothing. "
+            "Read the CURRENT plan first with "
+            f"`{values['cli']} show {card.id} --section Plan` (it may have been edited since "
+            "dispatch; never build on the snapshot) and apply your fixes on top of it. "
             "Write the corrected full plan to a temp file, then run "
             f"`{values['cli']} set-section {card.id} --section Plan --text-file <file>`; "
             "the next round's snapshot is taken from it."
