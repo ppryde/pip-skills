@@ -1776,6 +1776,16 @@ def cmd_conflicts(args: argparse.Namespace) -> int:
     if args.sprint:
         cards = [c for c in cards if c.sprint == args.sprint]
     conflicts = find_conflicts(cards)
+    if args.card:
+        conflicts = [(a, b, paths) for a, b, paths in conflicts if args.card in (a, b)]
+    if args.count:
+        others = sorted({c for a, b, _ in conflicts for c in (a, b)} - {args.card}) if args.card else []
+        if args.json:
+            print(json.dumps({"count": len(conflicts), **({"with": others} if args.card else {})}))
+        else:
+            noun = "conflict" if len(conflicts) == 1 else "conflicts"
+            print(f"{len(conflicts)} {noun}" + (f" with {', '.join(others)}" if others else ""))
+        return 0
     if args.json:
         print(json.dumps([[a, b, paths] for a, b, paths in conflicts], indent=2))
         return 0
@@ -1843,7 +1853,7 @@ def cmd_handoff(args: argparse.Namespace) -> int:
 
 def cmd_board(args: argparse.Namespace) -> int:
     from scripts.board import board_data
-    data = board_data(args.root)
+    data = board_data(args.root, full=args.full)
     _report_quarantined([Path(p) for p in data["quarantined"]])
     if args.json:
         print(json.dumps(data, indent=2))
@@ -2064,9 +2074,10 @@ def cmd_show(args: argparse.Namespace) -> int:
         "claimed_at": card.claimed_at,
         "claim_acked": card.claim_acked,
         "sections": card.sections,
-        "body": card.body,
     }
     if args.json:
+        if args.full:  # the body is the sections joined: only on request
+            data["body"] = card.body
         print(json.dumps(data, indent=2))
         return 0
     print(f"{card.id} — {card.title} [{card.status}/{card.stage or '-'}]")
@@ -2233,6 +2244,19 @@ def cmd_facts(args: argparse.Namespace) -> int:
             "verified": f.verified,
             "status": effective,
         })
+    if args.count:
+        tags: dict[str, int] = {}
+        for r in rows:
+            for t in r["tags"]:
+                tags[t] = tags.get(t, 0) + 1
+        ordered = dict(sorted(tags.items(), key=lambda kv: (-kv[1], kv[0])))
+        stale = sum(1 for r in rows if r["status"] == "stale")
+        if args.json:
+            print(json.dumps({"count": len(rows), "stale": stale, "tags": ordered}))
+        else:
+            noun = "fact" if len(rows) == 1 else "facts"
+            print(" · ".join([f"{len(rows)} {noun}", *(f"{t} {n}" for t, n in ordered.items())]))
+        return 0
     if args.json:
         print(json.dumps(rows, indent=2))
         return 0
@@ -2565,6 +2589,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("conflicts")
     p.add_argument("--sprint")
+    p.add_argument("--card", help="only conflicts that involve this card")
+    p.add_argument("--count", action="store_true", help="print only how many")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_conflicts)
 
@@ -2584,6 +2610,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("board")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--full", action="store_true",
+                   help="with --json: keep each card's body and checklist (the dashboard's form)")
     p.set_defaults(func=cmd_board)
 
     p = sub.add_parser("show")
@@ -2591,6 +2619,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.add_argument("--section", help="print only this section (Plan, Verification, Decisions, "
                                      "'Review log', ...)")
+    p.add_argument("--full", action="store_true",
+                   help="with --json: also emit `body` (it duplicates `sections`)")
     p.set_defaults(func=cmd_show)
 
     p = sub.add_parser("help", help="one-line usage for a verb (or every verb)")
@@ -2660,6 +2690,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.add_argument("--pending", action="store_true")
     p.add_argument("--card")
+    p.add_argument("--count", action="store_true",
+                   help="print only the count and a tag histogram, then pick a --tag")
     p.set_defaults(func=cmd_facts)
 
     p = sub.add_parser("set-section")
