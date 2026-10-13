@@ -189,6 +189,30 @@ def make_require_token(token: str | None) -> Callable[..., None]:
     return require_token
 
 
+def make_require_exec_token(token: str | None) -> Callable[..., None]:
+    """Build the FastAPI dependency that gates ``POST /api/exec``.
+
+    UNLIKE ``make_require_token``, this has NO inert mode. The dashboard's gate
+    is deliberately inactive when no token is configured, because loopback board
+    reads are meant to be open. ``/api/exec`` runs arbitrary overseer verbs on
+    the host, so "no token configured" must mean "refuse everyone". A served app
+    always has an exec token; ``None`` here means misconfiguration, and the
+    endpoint takes itself out of service (503) rather than opening up.
+    """
+    def require_exec_token(x_overseer_token: str | None = Header(default=None)) -> None:
+        if token is None:
+            raise HTTPException(
+                status_code=503,
+                detail="exec unavailable: no exec token configured",
+            )
+        supplied = x_overseer_token or ""
+        # bytes, not str: compare_digest raises TypeError on a non-ASCII str (a 500).
+        if not hmac.compare_digest(supplied.encode(), token.encode()):
+            raise HTTPException(status_code=401, detail="missing or invalid exec token")
+
+    return require_exec_token
+
+
 def _context_pct(root: Path) -> int | None:
     """`vigil context` has no --json; parse `ctx NN%` out of its one-line stdout."""
     try:
