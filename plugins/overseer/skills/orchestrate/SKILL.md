@@ -83,8 +83,8 @@ cards (`depends <id> --on <other>`), never a `block`.
 ## Stage playbook
 - **S, fully specified** (exact behaviour known, 1–2 files, an existing house
   pattern, or prose-only): `bootstrap ... --brief "<task brief>"` skips
-  planning, plan-review and the PLAN GATE, landing at `implementation`. Use
-  it unless the card is genuinely M/L.
+  planning, plan-review and the PLAN GATE, landing at `implementation`.
+  S only; M/L is refused.
 - **M, or ambiguous:** planning, proportionate to the undecided.
 - **L, novel architecture, or cross-plugin:** every stage, full weight. Read
   `policy.md` now (split-first, lens set, re-grade valve).

@@ -666,17 +666,18 @@ def worktree_path(main_root: Path, card_id: str, cfg: dict) -> Path:
     return parent / f"{main_root.name}-{card_id.lower()}"
 
 
-def _brief_gate_problems(args: argparse.Namespace) -> "list[str]":
+def _brief_gate_problems(args: argparse.Namespace) -> "tuple[list[str], bool]":
     """Dry run of ``bootstrap --brief``'s move to `implementation`, so a refusal
     happens before the card, worktree and branch are created. Only the refusing
-    case returns problems (hard mode, a card the gates bind)."""
+    case returns problems (hard mode, a card the gates bind), with whether the
+    --force-gate override hint applies (not for an M/L card: --brief is wrong there)."""
     if _gate_mode(args.root) != "hard":
-        return []
+        return [], True
     conn = _conn(args.root)
     if args.card:
         card = db.load_card(conn, args.card)
         if card is None:
-            return []  # _load reports it
+            return [], True  # _load reports it
         probe = Card(id=card.id, title=card.title, status=card.status, stage="bootstrap",
                      complexity=card.complexity, body=card.body, created=card.created)
     else:
@@ -685,7 +686,14 @@ def _brief_gate_problems(args: argparse.Namespace) -> "list[str]":
     probe.set_section("## Plan", args.brief, _now())
     brief = gates.Evidence(0, "planning", "brief", None, "", "brief", None, None, None, "")
     problems = gates.check_transition(probe, "implementation", [brief])
-    return problems if problems and _card_gated(conn, probe) else []
+    if not (problems and _card_gated(conn, probe)):
+        return [], True
+    if probe.complexity not in (None, "S"):
+        step = ("run bootstrap without --brief, then " if not args.card else "")
+        return [f"GATE: --brief is for S cards only (this one is {probe.complexity}); for M/L "
+                f"{step}dispatch-prep {args.card or '<card>'} --stage planning "
+                "--role planner --advance and the plan-review loop"], False
+    return problems, True
 
 
 def cmd_bootstrap(args: argparse.Namespace) -> int:
@@ -711,9 +719,9 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     elif args.brief == "-":
         args.brief = sys.stdin.read().rstrip("\n")
     if args.brief and force is None:
-        refused = _brief_gate_problems(args)
+        refused, offer_override = _brief_gate_problems(args)
         if refused:
-            raise gates.GateRefused(refused)  # before any card, worktree or branch exists
+            raise gates.GateRefused(refused, offer_override=offer_override)  # before any card, worktree or branch exists
     try:
         card = _load(args.root, args.card) if args.card else _create_card(args)
     except sqlite3.IntegrityError:
@@ -2847,9 +2855,10 @@ def main(argv: list[str] | None = None) -> int:
     except gates.GateRefused as exc:
         for line in exc.problems:
             print(line, file=sys.stderr)
-        print("(override, recorded in the card's Decisions: --force-gate \"user: <why>\"; "
-              "or gates: warn|off in .overseer/config.json, OVERSEER_GATES=warn|off)",
-              file=sys.stderr)
+        if exc.offer_override:
+            print("(override, recorded in the card's Decisions: --force-gate \"user: <why>\"; "
+                  "or gates: warn|off in .overseer/config.json, OVERSEER_GATES=warn|off)",
+                  file=sys.stderr)
         return 3
     except (CardParseError, FactParseError, FileNotFoundError, ValueError, db.MigrationError) as exc:
         # ValueError covers backup.restore_board's designed refusals (no

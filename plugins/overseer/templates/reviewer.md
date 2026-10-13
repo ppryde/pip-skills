@@ -5,7 +5,7 @@
 ## Inputs
 - Card: {{card_id}} — {{title}}
 - Goal: {{goal}}
-- Review target: {{target_path}}
+- Review target: {{target_path}}{{target_note}}
 - Your lens (priority, not a blinker): {{lens}}
 - Binding constraints: {{constraints}}
 - Prior rounds' verdicts and fix reports — read them; answer every DISPUTED finding (withdraw, or maintain with new evidence); never re-raise an adjudicated finding verbatim:

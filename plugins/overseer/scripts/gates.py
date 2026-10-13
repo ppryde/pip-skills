@@ -55,9 +55,10 @@ class GateRefused(Exception):
     """Raised inside the card's transaction to roll it back; the CLI prints one
     ``GATE:`` line per problem and exits 3."""
 
-    def __init__(self, problems: "list[str]"):
+    def __init__(self, problems: "list[str]", *, offer_override: bool = True):
         super().__init__("; ".join(problems))
         self.problems = problems
+        self.offer_override = offer_override  # False: forcing is the wrong answer here
 
 
 def cap_for(card: Card) -> int:

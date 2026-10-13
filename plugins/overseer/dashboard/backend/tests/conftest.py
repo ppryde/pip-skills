@@ -9,6 +9,9 @@ from fastapi.testclient import TestClient
 from app.cli_client import run_overseer
 from app.main import create_app
 
+# <repo>/plugins/census/scripts/cli.py: backend/tests -> backend -> dashboard -> overseer -> plugins
+_CENSUS_CLI = Path(__file__).resolve().parents[4] / "census" / "scripts" / "cli.py"
+
 
 @pytest.fixture(autouse=True)
 def _isolate_overseer_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -32,6 +35,12 @@ def _isolate_overseer_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / "state"))
     monkeypatch.delenv("CLAUDE_CODE_TASK_LIST_ID", raising=False)
     monkeypatch.delenv("CENSUS_STORE", raising=False)
+    # Hermetic census lookup (WF-286): vigil and overseer's liveness probe find
+    # census via CENSUS_CLI, else the cli.path pointer under the (pinned, empty)
+    # config dir or CENSUS_STORE, else `census` on PATH. Left to that chain these
+    # tests only passed on a machine with a pointer or a PATH entry; pin the
+    # repo's own CLI, as tests/overseer/conftest.py and tests/vigil/conftest.py do.
+    monkeypatch.setenv("CENSUS_CLI", str(_CENSUS_CLI))
     # Multi-account: the extra-config-dirs list `config.claude_dirs()` reads
     # (and the CLI subprocesses inherit). Left ambient, `central_root` could
     # land a test's board in the developer's real second account's tree.
