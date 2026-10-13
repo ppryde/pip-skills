@@ -58,6 +58,13 @@ def _isolate_overseer_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("CHRONICLE_NO_REMOTES", "1")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_board_discovery() -> None:
+    """`boards.discover` caches for a few seconds; no test may see another's."""
+    from scripts import boards
+    boards._discover_cache_clear()
+
+
 @pytest.fixture()
 def root(_isolate_overseer_state: None, tmp_path: Path) -> Path:
     """A tmp repo root with `.workflow/` initialised.

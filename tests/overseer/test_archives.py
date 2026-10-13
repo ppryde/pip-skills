@@ -5,14 +5,12 @@ never shadow a live board, never be adopted by the CLI, and never receive
 writes. `boards.discover()` flags it; consumers filter.
 """
 import json
-import os
 from pathlib import Path
 
 import pytest
-
+from factories import git_init
 from scripts import boards, config, db
 from scripts.cli import main
-from factories import git_init
 
 
 @pytest.fixture
@@ -207,3 +205,41 @@ class TestReposVerb:
         out = capsys.readouterr().out
         assert "old-r [archived]:" in out
         assert "live-r [nick]:" in out
+
+
+class TestReadOnlyOpen:
+    """OVERSEER_READONLY=1: `connect_at` opens `mode=ro&immutable=1` and
+    touches nothing (no WAL pragma, no -wal/-shm, no migrate, no stamp)."""
+
+    def test_readonly_connect_reads_and_creates_no_files(self, tmp_path, monkeypatch):
+        repo = tmp_path / "r"
+        repo.mkdir()
+        git_init(repo)
+        folder = tmp_path / "central"
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(folder))
+        monkeypatch.delenv("OVERSEER_DB")
+        conn = db.connect(repo, migrate=False)
+        conn.execute("INSERT INTO label_colors(name, color_key) VALUES ('a', 'sky')")
+        conn.commit()
+        conn.close()
+        before = sorted(p.name for p in folder.iterdir())
+        monkeypatch.setenv("OVERSEER_READONLY", "1")
+
+        ro = db.connect(repo)
+        assert db.load_label_colors(ro) == {"a": "sky"}
+        with pytest.raises(Exception, match="readonly"):
+            ro.execute("INSERT INTO label_colors(name, color_key) VALUES ('b', 'sky')")
+        ro.close()
+
+        assert sorted(p.name for p in folder.iterdir()) == before
+
+    def test_readonly_refuses_an_unupgraded_board_instead_of_writing(self, tmp_path, monkeypatch):
+        import sqlite3
+        folder = tmp_path / "central"
+        folder.mkdir()
+        sqlite3.connect(folder / "board.db").close()  # user_version 0
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(folder))
+        monkeypatch.delenv("OVERSEER_DB")
+        monkeypatch.setenv("OVERSEER_READONLY", "1")
+        with pytest.raises(sqlite3.OperationalError, match="read-only"):
+            db.connect(tmp_path)

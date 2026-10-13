@@ -37,7 +37,7 @@ from scripts.store import derive_repo_label, derive_repo_root, slugify
 SIDECARS = ("knowledge", "usage.jsonl")
 
 
-def _read_repo_root_meta(db_path: Path) -> "str | None":
+def _read_repo_root_meta(db_path: Path) -> str | None:
     """Best-effort read-only peek at a board.db's ``meta['repo_root']`` for
     the ``repos`` discovery verb. Opened read-only (``mode=ro``) so
     discovery never creates, locks, or schema-touches a board it's merely
@@ -82,7 +82,7 @@ def _aliases_by_root() -> dict[Path, list[str]]:
     return out
 
 
-def discover(dirs: "list[Path] | None" = None) -> list[dict[str, Any]]:
+def discover(dirs: list[Path] | None = None) -> list[dict[str, Any]]:
     """Every discoverable board across the watched Claude config dirs, one
     entry per repo root: ``{label, root, board_dir, archived, aliases}``.
 

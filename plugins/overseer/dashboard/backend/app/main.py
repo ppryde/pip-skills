@@ -39,6 +39,7 @@ from app.cli_client import (
     run_chronicle,
     run_overseer,
     run_vigil,
+    set_archived_boards,
     watched_account_profiles,
 )
 
@@ -51,6 +52,7 @@ if str(_OVERSEER_ROOT) not in sys.path:
     sys.path.insert(0, str(_OVERSEER_ROOT))
 
 # Both must follow the sys.path setup above.
+from scripts import config as overseer_config
 from scripts.dashboard_record import plugin_version
 from scripts.store import derive_repo_label, derive_repo_root
 
@@ -468,7 +470,14 @@ def _discover_roots(launch_root: Path) -> list[dict[str, Any]]:
         data = run_overseer(launch_root, "repos", "--json", json_out=True)
     except CliError:
         return []
-    return data if isinstance(data, list) else []
+    if not isinstance(data, list):
+        return []
+    set_archived_boards({
+        Path(e["root"]).resolve(): e["board_dir"]
+        for e in data
+        if isinstance(e, dict) and e.get("archived") and e.get("root") and e.get("board_dir")
+    })
+    return data
 
 
 # The last non-empty answer from `_chronicle_roots`, reused when a later call
@@ -539,7 +548,7 @@ def _accounts() -> list[dict[str, Any]]:
 
 
 def _resolve_root(launch_root: Path, default_root: Path, requested: str | None,
-                  also_allowed: set[Path] | None = None) -> Path:
+                  also_allowed: set[Path] | None = None, *, mutating: bool = False) -> Path:
     """Resolve the effective repo root for a request, VALIDATING a
     client-supplied ``root`` against the ``repos`` discovery allowlist
     before it is ever used to shell the CLI.
@@ -564,18 +573,30 @@ def _resolve_root(launch_root: Path, default_root: Path, requested: str | None,
     the allowlist check entirely. Client-supplied roots always go through
     validation above; only the omitted-root default changes here.
     """
+    entries: list[dict[str, Any]] = []
     if requested is None:
-        return default_root
-    candidate = Path(requested).resolve()
-    allowed = {
-        Path(entry["root"]).resolve()
-        for entry in _discover_roots(launch_root)
-        if isinstance(entry, dict) and entry.get("root")
-    }
-    allowed |= also_allowed or set()
-    if candidate not in allowed:
-        raise HTTPException(status_code=400, detail=f"unknown root: {requested!r}")
-    return candidate
+        effective = default_root
+    else:
+        candidate = Path(requested).resolve()
+        entries = [e for e in _discover_roots(launch_root) if isinstance(e, dict) and e.get("root")]
+        allowed = {Path(entry["root"]).resolve() for entry in entries}
+        allowed |= also_allowed or set()
+        if candidate not in allowed:
+            raise HTTPException(status_code=400, detail=f"unknown root: {requested!r}")
+        effective = candidate
+    if mutating:
+        # Decide on the EFFECTIVE board, not just the entry flag: a launch root
+        # (the omitted-root default bypasses the allowlist) whose `central_dir`
+        # points into an archive is read-only too.
+        entry = next((e for e in entries if Path(e["root"]).resolve() == effective), None)
+        central = (
+            os.environ.get("OVERSEER_CENTRAL")
+            or (entry or {}).get("board_dir")
+            or str(overseer_config.central_root(effective))
+        )
+        if (entry and entry.get("archived")) or overseer_config.is_archived_path(Path(central)):
+            raise HTTPException(status_code=403, detail="archived board is read-only")
+    return effective
 
 
 def _board_response(root: Path) -> dict[str, Any]:
@@ -727,6 +748,10 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
                 continue
             root = Path(entry["root"]).resolve()
             item = dict(entry)
+            if item.get("archived"):
+                # The frontend shows `label` verbatim and keys on `root`, so the
+                # mark rides in the label: no frontend change.
+                item["label"] = f"{item['label']} [archived]"
             item["current"] = root == _derived_launch_root
             item["has_board"] = True
             item["live_sessions"] = int(census.get(root, {}).get("live", 0))
@@ -799,7 +824,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     def create_card(body: CreateBody, root: str | None = None) -> dict[str, Any]:
         if not body.title.strip():
             raise HTTPException(status_code=400, detail="title cannot be empty")
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
         args = ["new-card", "--title", body.title]
         if body.complexity:
             args += ["--complexity", body.complexity]
@@ -829,7 +854,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             raise HTTPException(status_code=400, detail="title or body required")
         if body.title is not None and not body.title.strip():
             raise HTTPException(status_code=400, detail="title cannot be empty")
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -844,7 +869,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/order", dependencies=[Depends(require_token)])
     def set_order(card_id: str, body: OrderBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -863,7 +888,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         leaves `updated` alone, since ordering records a preference rather
         than work (see `cmd_reorder`).
         """
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             if not body.ids:
@@ -876,7 +901,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/priority", dependencies=[Depends(require_token)])
     def set_priority(card_id: str, body: PriorityBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -890,7 +915,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         sent = body.model_fields_set
         if not sent:
             raise HTTPException(status_code=400, detail="nothing to set")
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -907,7 +932,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/labels", dependencies=[Depends(require_token)])
     def set_labels(card_id: str, body: LabelsBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -917,7 +942,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/parent", dependencies=[Depends(require_token)])
     def set_parent(card_id: str, body: ParentBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -932,7 +957,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     def set_depends(card_id: str, body: DependsBody, root: str | None = None) -> dict[str, Any]:
         if body.on is None and body.off is None:
             raise HTTPException(status_code=400, detail="on or off required")
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -949,7 +974,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/park", dependencies=[Depends(require_token)])
     def park_card(card_id: str, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -959,7 +984,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/pull-children", dependencies=[Depends(require_token)])
     def pull_children(card_id: str, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -969,7 +994,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/unpark", dependencies=[Depends(require_token)])
     def unpark_card(card_id: str, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -982,7 +1007,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         session_id = body.session_id
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id required")
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -992,7 +1017,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/unclaim", dependencies=[Depends(require_token)])
     def unclaim_card(card_id: str, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -1013,7 +1038,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         ACTUAL resulting status; it does not fake-honor a requested
         planned-vs-in-flight distinction.
         """
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         if body.stage is not None:
             force: list[str] = []
@@ -1052,7 +1077,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/config/threshold", dependencies=[Depends(require_token)])
     def set_threshold(body: ThresholdBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             run_vigil(effective, "config", "set", "context.threshold", str(body.value))
@@ -1064,7 +1089,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         name = body.name.strip()
         if not name:
             raise HTTPException(status_code=400, detail="label name required")
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             if body.color:
@@ -1085,7 +1110,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
                 detail=("destructive clear is disabled on a non-loopback bind; relaunch with "
                         "--host 127.0.0.1 or set OVERSEER_DASHBOARD_ALLOW_REMOTE_DESTRUCTIVE=1"),
             )
-        effective = _resolve_root(launch_root, _derived_launch_root, body.root)
+        effective = _resolve_root(launch_root, _derived_launch_root, body.root, mutating=True)
         try:
             return run_overseer(
                 effective, "clear", "--scope", body.scope, "--yes", "--json",
