@@ -8,8 +8,11 @@ from scripts.relations import epic_rollup, is_epic, is_ready
 from scripts.sprints import load_sprints
 
 
-def board_data(repo_root: Path) -> dict:
+def board_data(repo_root: Path, full: bool = True) -> dict:
     """Export the complete board state as a single JSON-serializable dict.
+
+    ``full=False`` is the slim form the CLI prints by default: each card drops
+    ``body`` and ``checklist`` (the bulk of the payload; ~900 B per card).
 
     Returns:
         {
@@ -70,7 +73,7 @@ def board_data(repo_root: Path) -> dict:
     for card in sorted(pool, key=lambda c: c.id):
         epic = is_epic(pool, card.id)
         rollup = epic_rollup(pool, card.id) if epic else None
-        cards_data.append(
+        row = (
             {
                 "id": card.id,
                 "title": card.title,
@@ -102,6 +105,9 @@ def board_data(repo_root: Path) -> dict:
                 "claim_acked": card.claim_acked,
             }
         )
+        if not full:
+            del row["body"], row["checklist"]
+        cards_data.append(row)
 
     # Export sprints
     sprints_data = [

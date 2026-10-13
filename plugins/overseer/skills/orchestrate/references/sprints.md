@@ -11,5 +11,5 @@ Before `set-sprint-status <id> active`, run one pre-review pass:
 4. **SPRINT GATE:** present the reviewed sprint to the user. Only on approval:
    `set-sprint-status <id> active`.
 
-Also run `conflicts` at each plan gate (a new plan's touch-list versus everything
+Also run `conflicts --card <id>` at each plan gate (a new plan's touch-list versus everything
 in flight) and record any serialisation via `block <id> --reason "card: <id>"`.

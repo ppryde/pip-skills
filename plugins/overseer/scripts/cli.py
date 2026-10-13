@@ -40,6 +40,7 @@ from scripts import (
     liveness,
     marker,
     migrate,
+    nextstep,
     report_hook,
     store,
     views,
@@ -1610,18 +1611,34 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
     ``Card.set_stage`` raises on an unknown stage, though ``--stage``'s own
     ``choices=STAGES`` already rules that out here) so each stage playbook
     entry is one Bash call instead of set-stage-then-dispatch-prep. Prints
-    only the bundle path either way."""
+    only the bundle path either way.
+
+    ``--panel`` (reviewer role, a review stage) preps every slot of the round's
+    panel (``nextstep.panel``: slots, lenses, model tiers) in one call and prints
+    one ``<agent> <model> <path>`` line per slot instead of the bare path."""
     force = _force_reason(args)
     chunk = args.chunk
     if chunk is None and args.role == "implementer":
         chunk = 1
+    if args.panel:
+        refusal = (
+            "--panel is for --role reviewer" if args.role != "reviewer"
+            else "--panel needs a review stage (plan-review or impl-review)"
+            if args.stage not in gates.REVIEW_STAGES
+            else "--panel picks the slots and lenses: drop --slot" if args.slot
+            else "--panel picks the slots and lenses: drop --lens" if args.lens else None)
+        if refusal:
+            print(f"error: {refusal}", file=sys.stderr)
+            return 1
     try:  # bad --slot/--chunk/--role fails BEFORE a forced gate or dispatch row is written
-        bundle.reply_name(args.role, round_no=args.round, slot=args.slot, chunk=chunk)
+        bundle.reply_name(args.role, round_no=args.round,
+                          slot="A" if args.panel else args.slot, chunk=chunk)
     except bundle.BundleError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     notes: list[str] = []
     dispatched: list[int] = []
+    slots: list[nextstep.Slot] = []
 
     def prep(c: Card) -> None:
         if args.advance:
@@ -1629,33 +1646,43 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
         problems = gates.check_dispatch(
             c, args.stage, args.role, args.round, db.evidence_for(_conn(args.root), c.id))
         _settle_gates(args.root, c, args.stage, f"{args.role} round {args.round}", problems, force, notes)
+        if args.panel:
+            slots.extend(nextstep.panel(c, args.round))
+        else:
+            slots.append(nextstep.Slot(args.slot or "", args.lens, ""))
         if args.role in ("reviewer", "verifier"):
             # Completeness (OR-2): a dispatched slot that never reports blocks
             # its gate, so a crashed reviewer is not an approval.
-            rid = db.record_evidence_once(
-                _conn(args.root), c.id, args.stage, "dispatch", round_no=args.round,
-                slot=args.slot or "", status="dispatched", detail=args.role, ts=_now())
-            if rid is not None:
-                dispatched.append(rid)
+            for slot in slots:
+                rid = db.record_evidence_once(
+                    _conn(args.root), c.id, args.stage, "dispatch", round_no=args.round,
+                    slot=slot.slot, status="dispatched", detail=args.role, ts=_now())
+                if rid is not None:
+                    dispatched.append(rid)
 
     card = _edit(args.root, args.card_id, prep, ack=args.advance)
     _flush_notes(notes)
+    cfg = config.load_config(args.root)
+    lines: list[str] = []
     try:
-        path = bundle.prepare(
-            args.root,
-            card,
-            stage=args.stage,
-            role=args.role,
-            round_no=args.round,
-            slot=args.slot,
-            chunk=chunk,
-            lens=args.lens,
-            variables=bundle.parse_vars(args.var or []),
-            verbosity=str(config.load_config(args.root).get("verbosity", "terse")),
-            knowledge_max=_knowledge_max(config.load_config(args.root)),
-            archived=db.load_archived_cards(_conn(args.root)),
-            today=_today(),
-        )
+        for slot in slots:
+            path = bundle.prepare(
+                args.root,
+                card,
+                stage=args.stage,
+                role=args.role,
+                round_no=args.round,
+                slot=slot.slot or None,
+                chunk=chunk,
+                lens=slot.lens,
+                variables=bundle.parse_vars(args.var or []),
+                verbosity=str(cfg.get("verbosity", "terse")),
+                knowledge_max=_knowledge_max(cfg),
+                archived=db.load_archived_cards(_conn(args.root)),
+                today=_today(),
+            )
+            lines.append(f"{nextstep.AGENT_PREFIX}{args.role} {slot.model} {path}" if args.panel
+                         else str(path))
     except bundle.BundleError as exc:
         for rid in dispatched:  # nothing was dispatched: do not leave a phantom slot
             with db.txn(_conn(args.root)):
@@ -1663,7 +1690,13 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     _stamp_orchestrator(args.root, card.id)
-    print(path)
+    print("\n".join(lines))
+    return 0
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    card = _load(args.root, args.card_id)
+    print(nextstep.next_step(card, db.evidence_for(_conn(args.root), card.id)))
     return 0
 
 
@@ -1750,6 +1783,19 @@ def cmd_conflicts(args: argparse.Namespace) -> int:
     if args.sprint:
         cards = [c for c in cards if c.sprint == args.sprint]
     conflicts = find_conflicts(cards)
+    if args.card:
+        if not any(c.id == args.card for c in cards):
+            print(f"error: no such card {args.card}", file=sys.stderr)
+            return 1
+        conflicts = [(a, b, paths) for a, b, paths in conflicts if args.card in (a, b)]
+    if args.count:
+        others = sorted({c for a, b, _ in conflicts for c in (a, b)} - {args.card}) if args.card else []
+        if args.json:
+            print(json.dumps({"count": len(conflicts), **({"with": others} if args.card else {})}))
+        else:
+            noun = "conflict" if len(conflicts) == 1 else "conflicts"
+            print(f"{len(conflicts)} {noun}" + (f" with {', '.join(others)}" if others else ""))
+        return 0
     if args.json:
         print(json.dumps([[a, b, paths] for a, b, paths in conflicts], indent=2))
         return 0
@@ -1817,7 +1863,7 @@ def cmd_handoff(args: argparse.Namespace) -> int:
 
 def cmd_board(args: argparse.Namespace) -> int:
     from scripts.board import board_data
-    data = board_data(args.root)
+    data = board_data(args.root, full=args.full)
     _report_quarantined([Path(p) for p in data["quarantined"]])
     if args.json:
         print(json.dumps(data, indent=2))
@@ -2038,9 +2084,10 @@ def cmd_show(args: argparse.Namespace) -> int:
         "claimed_at": card.claimed_at,
         "claim_acked": card.claim_acked,
         "sections": card.sections,
-        "body": card.body,
     }
     if args.json:
+        if args.full:  # the body is the sections joined: only on request
+            data["body"] = card.body
         print(json.dumps(data, indent=2))
         return 0
     print(f"{card.id} — {card.title} [{card.status}/{card.stage or '-'}]")
@@ -2181,6 +2228,10 @@ def cmd_facts(args: argparse.Namespace) -> int:
             p for p in load_pending(conn)
             if p.status == "pending" and (not args.card or p.card == args.card)
         ]
+        if args.count:
+            print(json.dumps({"count": len(pending_rows)}) if args.json
+                  else f"{len(pending_rows)} pending")
+            return 0
         if args.json:
             print(json.dumps([asdict(p) for p in pending_rows], indent=2))
             return 0
@@ -2207,6 +2258,19 @@ def cmd_facts(args: argparse.Namespace) -> int:
             "verified": f.verified,
             "status": effective,
         })
+    if args.count:
+        histogram: dict[str, int] = {}
+        for r in rows:
+            for t in r["tags"]:
+                histogram[t] = histogram.get(t, 0) + 1
+        ordered = dict(sorted(histogram.items(), key=lambda kv: (-kv[1], kv[0])))
+        stale = sum(1 for r in rows if r["status"] == "stale")
+        if args.json:
+            print(json.dumps({"count": len(rows), "stale": stale, "tags": ordered}))
+        else:
+            noun = "fact" if len(rows) == 1 else "facts"
+            print(" · ".join([f"{len(rows)} {noun}", *(f"{t} {n}" for t, n in ordered.items())]))
+        return 0
     if args.json:
         print(json.dumps(rows, indent=2))
         return 0
@@ -2512,9 +2576,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--var", action="append", help=f"key=value, value ≤ {bundle.VAR_CAP} chars")
     p.add_argument("--advance", action="store_true",
                     help="set-stage to --stage first, then prep the bundle, in one call")
+    p.add_argument("--panel", action="store_true",
+                   help="reviewer role: prep every slot of this round's panel and print "
+                        "`agent model path` per line")
     p.add_argument("--force-gate", dest="force_gate", metavar="REASON",
                    help="override a refused stage or round-cap gate (see set-stage)")
     p.set_defaults(func=cmd_dispatch_prep)
+
+    p = sub.add_parser("next", help="one line: stage, what to dispatch next, the verdict state")
+    p.add_argument("card_id")
+    p.set_defaults(func=cmd_next)
 
     p = sub.add_parser("new-sprint")
     p.add_argument("sprint_id")
@@ -2539,6 +2610,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("conflicts")
     p.add_argument("--sprint")
+    p.add_argument("--card", help="only conflicts that involve this card")
+    p.add_argument("--count", action="store_true", help="print only how many")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_conflicts)
 
@@ -2558,6 +2631,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("board")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--full", action="store_true",
+                   help="with --json: keep each card's body and checklist (the dashboard's form)")
     p.set_defaults(func=cmd_board)
 
     p = sub.add_parser("show")
@@ -2565,6 +2640,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.add_argument("--section", help="print only this section (Plan, Verification, Decisions, "
                                      "'Review log', ...)")
+    p.add_argument("--full", action="store_true",
+                   help="with --json: also emit `body` (it duplicates `sections`)")
     p.set_defaults(func=cmd_show)
 
     p = sub.add_parser("help", help="one-line usage for a verb (or every verb)")
@@ -2634,6 +2711,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.add_argument("--pending", action="store_true")
     p.add_argument("--card")
+    p.add_argument("--count", action="store_true",
+                   help="print only the count and a tag histogram, then pick a --tag")
     p.set_defaults(func=cmd_facts)
 
     p = sub.add_parser("set-section")

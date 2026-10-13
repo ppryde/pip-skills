@@ -15,7 +15,7 @@ def _new_card(root: Path, title: str = "T") -> str:
 
 
 def _show(root: Path, card_id: str) -> dict:
-    return run_overseer(root, "show", card_id, "--json", json_out=True)  # type: ignore[no-any-return]
+    return run_overseer(root, "show", card_id, "--json", "--full", json_out=True)  # type: ignore[no-any-return]
 
 
 def _gated_client(root: Path, token: str = "s3cret") -> TestClient:

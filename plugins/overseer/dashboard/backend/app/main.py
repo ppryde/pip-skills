@@ -561,7 +561,7 @@ def _board_response(root: Path) -> dict[str, Any]:
     vigil CliError degrades pct/threshold to None, and census is a soft
     dependency that degrades to {} / None.
     """
-    board = run_overseer(root, "board", "--json", json_out=True)
+    board = run_overseer(root, "board", "--json", "--full", json_out=True)
     entry = run_census(root)
     context: dict[str, Any] = {
         "pct": _context_pct(root),
@@ -795,7 +795,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         effective = _resolve_root(launch_root, _derived_launch_root, root)
         try:
             check_id(card_id)
-            return run_overseer(effective, "show", card_id, "--json", json_out=True)
+            return run_overseer(effective, "show", card_id, "--json", "--full", json_out=True)
         except CliError as exc:
             raise _show_error(exc) from exc
 

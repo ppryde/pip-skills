@@ -270,6 +270,18 @@ interpreter missing), the hook fails open for every tool.
   (`scripts/gen_cli_ref.py`, drift fails a test); `cli.py help <verb>` prints one
   verb's line, `show <id> --section Plan` one section.
 
+Context-trim verbs (WF-280..284): `next <id>` prints one line, the stage, the review
+verdict state and the exact next call with agent and model tier (the S/M/L tiers,
+panels and round caps live in `scripts/nextstep.py`); `dispatch-prep ... --panel`
+preps every reviewer slot of a round and prints `agent model path` per line.
+`show --json` no longer repeats the body (`--full` restores it) and `board --json`
+drops each card's `body` and `checklist` unless `--full` (the dashboard asks for
+`--full`); `conflicts` takes `--card`/`--count`, `facts` takes `--count`.
+The `overseer-report` block is `status`, `counts`/`tests`/`commits`, `detail`
+and `learned`: card, stage, round, slot and chunk are read off the `detail` path (the
+long form still parses). The guard denies `run_in_background: true` for `overseer:*`
+agents.
+
 The `overseer-reviewer` agent sets `omitClaudeMd: true`: it reviews from its bundle,
 not repo conventions, so it no longer loads CLAUDE.md (Claude Code 2.1.271+; ignored
 on older versions). The implementer, fixer, verifier and planner still load it.

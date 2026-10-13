@@ -30,7 +30,7 @@ Findings tiered Critical / Important / Minor (file:line, what is wrong, why it m
 Your final message ends with exactly one fenced block and nothing after it:
 
 ```overseer-report
-{"schema": "overseer.reviewer/1", "card": "WF-12", "stage": "impl-review", "round": 1, "slot": "A", "status": "found wanting", "counts": {"critical": 1, "important": 2, "minor": 0}, "detail": "/abs/state/dispatch/WF-12/impl-review/r1-A.md", "learned": [{"statement": "a durable, falsifiable fact", "tags": ["a", "b"]}]}
+{"status": "found wanting", "counts": {"critical": 1, "important": 2, "minor": 0}, "detail": "/abs/state/dispatch/WF-12/impl-review/r1-A.md", "learned": [{"statement": "a durable, falsifiable fact", "tags": ["a", "b"]}]}
 ```
 
-`status` is `approved` or `found wanting` (your real counts); `detail` is your bundle's reply path; `learned` is zero or more durable facts, or `[]`. No narration before or after the block.
+`status` is `approved` or `found wanting` (your real counts); `detail` is your bundle's reply path; `learned` is zero or more durable facts, or `[]`. The card, stage, round and slot are read from `detail`: do not repeat them. No narration before or after the block.

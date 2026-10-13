@@ -27,7 +27,7 @@ Concerns or blockers, if any, in prose. Status, test counts, commits and Learned
 Your final message ends with exactly one fenced block and nothing after it:
 
 ```overseer-report
-{"schema": "overseer.implementer/1", "card": "WF-12", "stage": "implementation", "chunk": 2, "status": "DONE", "tests": {"passed": 41, "total": 41}, "commits": ["abc1234"], "detail": "/abs/state/dispatch/WF-12/implementation/c2.md", "learned": []}
+{"status": "DONE", "tests": {"passed": 41, "total": 41}, "commits": ["abc1234"], "detail": "/abs/state/dispatch/WF-12/implementation/c2.md", "learned": []}
 ```
 
-`status` is `DONE`, `DONE_WITH_CONCERNS`, `BLOCKED` or `NEEDS_CONTEXT`; `commits` is `[]` if none; `detail` is your bundle's reply path; `learned` is zero or more durable facts, or `[]`. No narration before or after the block.
+`status` is `DONE`, `DONE_WITH_CONCERNS`, `BLOCKED` or `NEEDS_CONTEXT`; `commits` is `[]` if none; `detail` is your bundle's reply path; `learned` is zero or more durable facts, or `[]`. The card, stage, round and slot are read from `detail`: do not repeat them. No narration before or after the block.

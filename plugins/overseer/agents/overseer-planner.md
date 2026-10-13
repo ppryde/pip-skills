@@ -32,7 +32,7 @@ This file becomes the card's `## Plan` verbatim — status and Learned facts go 
 Your final message ends with exactly one fenced block and nothing after it:
 
 ```overseer-report
-{"schema": "overseer.planner/1", "card": "WF-12", "stage": "planning", "status": "DONE", "detail": "/abs/state/dispatch/WF-12/planning/plan.md", "learned": []}
+{"status": "DONE", "detail": "/abs/state/dispatch/WF-12/planning/plan.md", "learned": []}
 ```
 
-`status` is `DONE` or `NEEDS_CONTEXT`; `detail` is your bundle's reply path; `learned` is zero or more durable facts, or `[]`. No narration before or after the block.
+`status` is `DONE` or `NEEDS_CONTEXT`; `detail` is your bundle's reply path; `learned` is zero or more durable facts, or `[]`. The card, stage, round and slot are read from `detail`: do not repeat them. No narration before or after the block.

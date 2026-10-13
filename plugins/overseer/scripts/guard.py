@@ -614,6 +614,16 @@ def _hub_denial(
                 f"against an estimate of {format_tokens(breached.budget_estimate)} — stop the "
                 "card and escalate to the user."
             )
+        agent_type = tool_input.get("subagent_type")
+        if (
+            isinstance(agent_type, str) and agent_type.startswith("overseer:")
+            and tool_input.get("run_in_background") is True
+        ):
+            return (
+                f"{card.id} in flight: dispatch overseer:* agents in the foreground "
+                "(run_in_background: false); a background one costs two extra turns "
+                "(launch stub + notification) and tempts you to poll."
+            )
     if tool in _HARD_DENY_WRITE_TOOLS or tool.startswith("mcp__"):
         return work
     if tool == "Write":

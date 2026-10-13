@@ -42,6 +42,14 @@ _BLOCK_RE = re.compile(
     r"```overseer-report\b[^\n]*\n(?P<body>.*?)```", re.DOTALL,
 )
 _DISPATCH_RE = re.compile(r"/dispatch/(?P<card>[^/]+)/(?P<stage>[^/]+)/")
+# The reply file name (``bundle.reply_name``) carries the rest of a report's
+# identity, so the short block need not repeat it: r<round>-<slot>.md (reviewer),
+# r<round>-fix.md (fixer), c<chunk>.md (implementer).
+_REPLY_FILE: dict[str, re.Pattern[str]] = {
+    "reviewer": re.compile(r"\Ar(?P<round>\d+)-(?P<slot>[^/]+)\.md\Z"),
+    "fixer": re.compile(r"\Ar(?P<round>\d+)-fix\.md\Z"),
+    "implementer": re.compile(r"\Ac(?P<chunk>\d+)\.md\Z"),
+}
 
 
 class ReportError(ValueError):
@@ -180,6 +188,30 @@ def _check_unknown(obj: dict, allowed: set[str], errors: list[str], *, where: st
         errors.append(f"{where} has unknown field(s): {', '.join(sorted(extra))}")
 
 
+def _with_identity(obj: dict, role: str) -> dict:
+    """``obj`` with ``schema``, ``card``, ``stage``, ``round``, ``slot`` and
+    ``chunk`` filled in from the detail path where the block left them out (the
+    short form). An explicit value is never overwritten, so the long form
+    parses exactly as before; a detail path that yields nothing leaves the gaps
+    for the field checks to report."""
+    detail = obj.get("detail")
+    if not isinstance(detail, str):
+        return obj
+    filled = dict(obj)
+    filled.setdefault("schema", f"overseer.{role}/{SCHEMA_VERSION}")
+    match = _DISPATCH_RE.search(detail)
+    if match is None:
+        return filled
+    filled.setdefault("card", match["card"])
+    filled.setdefault("stage", match["stage"])
+    pattern = _REPLY_FILE.get(role)
+    named = pattern.match(Path(detail).name) if pattern else None
+    if named:
+        for key, value in named.groupdict().items():
+            filled.setdefault(key, int(value) if key in ("round", "chunk") else value)
+    return filled
+
+
 def _check_detail(obj: dict, card: str | None, stage: str | None, errors: list[str]) -> Path | None:
     value = _check_str(obj, "detail", errors)
     if value is None:
@@ -267,6 +299,7 @@ def _check_learned(obj: dict, errors: list[str]) -> tuple[LearnedFact, ...]:
 
 def _parse_reviewer(obj: dict) -> ReviewerReport:
     errors: list[str] = []
+    obj = _with_identity(obj, "reviewer")
     allowed = {"schema", "card", "stage", "round", "slot", "status", "counts", "detail", "learned"}
     _check_unknown(obj, allowed, errors)
     _check_schema(obj, "reviewer", errors)
@@ -274,6 +307,8 @@ def _parse_reviewer(obj: dict) -> ReviewerReport:
     stage = _check_str(obj, "stage", errors)
     round_no = _check_int(obj, "round", errors)
     slot = _check_str(obj, "slot", errors)
+    if slot == "fix":  # the fixer's reply file (r<N>-fix.md), reserved by bundle.reply_name
+        errors.append("field 'slot' cannot be 'fix': that is the fixer's reply file, not a reviewer's")
     status = _check_str(obj, "status", errors)
     _check_enum(status, "status", _STATUS["reviewer"], errors)
     counts = _check_counts(obj, ("critical", "important", "minor"), errors)
@@ -291,6 +326,7 @@ def _parse_reviewer(obj: dict) -> ReviewerReport:
 
 def _parse_implementer(obj: dict) -> ImplementerReport:
     errors: list[str] = []
+    obj = _with_identity(obj, "implementer")
     allowed = {"schema", "card", "stage", "chunk", "status", "tests", "commits", "detail", "learned"}
     _check_unknown(obj, allowed, errors)
     _check_schema(obj, "implementer", errors)
@@ -318,6 +354,7 @@ def _parse_implementer(obj: dict) -> ImplementerReport:
 
 def _parse_fixer(obj: dict) -> FixerReport:
     errors: list[str] = []
+    obj = _with_identity(obj, "fixer")
     allowed = {"schema", "card", "stage", "round", "status", "counts", "commits", "detail", "learned"}
     _check_unknown(obj, allowed, errors)
     _check_schema(obj, "fixer", errors)
@@ -342,6 +379,7 @@ def _parse_fixer(obj: dict) -> FixerReport:
 
 def _parse_planner(obj: dict) -> PlannerReport:
     errors: list[str] = []
+    obj = _with_identity(obj, "planner")
     allowed = {"schema", "card", "stage", "status", "detail", "learned"}
     _check_unknown(obj, allowed, errors)
     _check_schema(obj, "planner", errors)
@@ -362,6 +400,7 @@ def _parse_planner(obj: dict) -> PlannerReport:
 
 def _parse_verifier(obj: dict) -> VerifierReport:
     errors: list[str] = []
+    obj = _with_identity(obj, "verifier")
     allowed = {"schema", "card", "stage", "status", "detail", "learned"}
     _check_unknown(obj, allowed, errors)
     _check_schema(obj, "verifier", errors)
@@ -448,7 +487,7 @@ def _base(role: str) -> dict:
         "schema": {"const": f"overseer.{role}/{SCHEMA_VERSION}"},
         "card": {"type": "string", "minLength": 1},
         "stage": {"type": "string", "minLength": 1},
-        "detail": {"type": "string", "minLength": 1, "description": "absolute path inside the card's dispatch directory"},
+        "detail": {"type": "string", "minLength": 1, "description": "absolute path inside the card's dispatch directory; schema, card, stage, round, slot and chunk are read off it when the block omits them"},
         "learned": _learned_schema(),
     }
 
@@ -481,7 +520,7 @@ def _reviewer_schema() -> dict:
         "status": {"enum": list(_STATUS["reviewer"])},
         "counts": _counts_schema("critical", "important", "minor"),
     }
-    required = ["schema", "card", "stage", "round", "slot", "status", "counts", "detail", "learned"]
+    required = ["status", "counts", "detail", "learned"]
     return _object_schema("reviewer", props, required)
 
 
@@ -493,7 +532,7 @@ def _implementer_schema() -> dict:
         "tests": _counts_schema("passed", "total"),
         "commits": {"type": "array", "items": {"type": "string", "minLength": 1}},
     }
-    required = ["schema", "card", "stage", "chunk", "status", "tests", "commits", "detail", "learned"]
+    required = ["status", "tests", "commits", "detail", "learned"]
     return _object_schema("implementer", props, required)
 
 
@@ -505,19 +544,19 @@ def _fixer_schema() -> dict:
         "counts": _counts_schema("fixed", "disputed"),
         "commits": {"type": "array", "items": {"type": "string", "minLength": 1}},
     }
-    required = ["schema", "card", "stage", "round", "status", "counts", "commits", "detail", "learned"]
+    required = ["status", "counts", "commits", "detail", "learned"]
     return _object_schema("fixer", props, required)
 
 
 def _planner_schema() -> dict:
     props = {**_base("planner"), "status": {"enum": list(_STATUS["planner"])}}
-    required = ["schema", "card", "stage", "status", "detail", "learned"]
+    required = ["status", "detail", "learned"]
     return _object_schema("planner", props, required)
 
 
 def _verifier_schema() -> dict:
     props = {**_base("verifier"), "status": {"enum": list(_STATUS["verifier"])}}
-    required = ["schema", "card", "stage", "status", "detail", "learned"]
+    required = ["status", "detail", "learned"]
     return _object_schema("verifier", props, required)
 
 

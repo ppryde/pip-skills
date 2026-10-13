@@ -58,7 +58,9 @@ class TestShowCommand:
         assert data["title"] == "Fix the thing"
         assert "## Goal" in data["sections"]
         assert "Fix it good" in data["sections"]["## Goal"]
-        assert "## Goal" in data["body"]
+        assert "body" not in data  # the sections already carry it (WF-281); --full adds it
+        assert run(repo, "show", "WF-001", "--json", "--full") == 0
+        assert "## Goal" in json.loads(capsys.readouterr().out)["body"]
 
     def test_show_archived_card_json(self, repo, capsys):
         run(repo, "new-card", "--title", "Archive me")

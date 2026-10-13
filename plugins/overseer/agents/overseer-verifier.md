@@ -25,7 +25,7 @@ One entry per gate (command → result) and per end-to-end check (action → obs
 Your final message ends with exactly one fenced block and nothing after it:
 
 ```overseer-report
-{"schema": "overseer.verifier/1", "card": "WF-12", "stage": "verification", "status": "PASS", "detail": "/abs/state/dispatch/WF-12/verification/verification.md", "learned": []}
+{"status": "PASS", "detail": "/abs/state/dispatch/WF-12/verification/verification.md", "learned": []}
 ```
 
-`status` is `PASS` or `FAIL`; `detail` is your bundle's reply path; `learned` is zero or more durable facts, or `[]`. No narration before or after the block.
+`status` is `PASS` or `FAIL`; `detail` is your bundle's reply path; `learned` is zero or more durable facts, or `[]`. The card, stage, round and slot are read from `detail`: do not repeat them. No narration before or after the block.
