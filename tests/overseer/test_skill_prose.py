@@ -109,3 +109,9 @@ def test_skill_tool_kept_on_builders():
     for name in ("overseer-implementer", "overseer-fixer"):
         assert "Skill" in _frontmatter(name)["tools"]
         assert "skills" not in _frontmatter(name)
+
+
+def test_readme_documents_omit_claude_md():
+    # The user-visible effect (reviewer no longer loads CLAUDE.md) is recorded in the README.
+    readme = (OVERSEER / "README.md").read_text()
+    assert "omitClaudeMd" in readme and "2.1.271" in readme
