@@ -90,3 +90,7 @@ reconstructible from `eval-repo-template/` plus that run's `final.diff`.
 misattributed — it justifies a 36,000-step loop by citing a ledger bug, but that test
 never calls the real ledger. It caused four broken fixes in iteration 2 and is the most
 productive flaw in the set. Whether to repair it or keep it as a trap is open.
+
+## Dependency
+
+Phase 6's subagent-driven review runs as `pip-agents:reviewer-correctness`; the plugin declares `"dependencies": ["pip-agents"]`, which installs it with test-crucible.
