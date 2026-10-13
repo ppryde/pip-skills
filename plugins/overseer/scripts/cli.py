@@ -40,6 +40,7 @@ from scripts import (
     liveness,
     marker,
     migrate,
+    nextstep,
     report_hook,
     store,
     views,
@@ -1635,18 +1636,34 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
     ``Card.set_stage`` raises on an unknown stage, though ``--stage``'s own
     ``choices=STAGES`` already rules that out here) so each stage playbook
     entry is one Bash call instead of set-stage-then-dispatch-prep. Prints
-    only the bundle path either way."""
+    only the bundle path either way.
+
+    ``--panel`` (reviewer role, a review stage) preps every slot of the round's
+    panel (``nextstep.panel``: slots, lenses, model tiers) in one call and prints
+    one ``<agent> <model> <path>`` line per slot instead of the bare path."""
     force = _force_reason(args)
     chunk = args.chunk
     if chunk is None and args.role == "implementer":
         chunk = 1
+    if args.panel:
+        refusal = (
+            "--panel is for --role reviewer" if args.role != "reviewer"
+            else "--panel needs a review stage (plan-review or impl-review)"
+            if args.stage not in gates.REVIEW_STAGES
+            else "--panel picks the slots and lenses: drop --slot" if args.slot
+            else "--panel picks the slots and lenses: drop --lens" if args.lens else None)
+        if refusal:
+            print(f"error: {refusal}", file=sys.stderr)
+            return 1
     try:  # bad --slot/--chunk/--role fails BEFORE a forced gate or dispatch row is written
-        bundle.reply_name(args.role, round_no=args.round, slot=args.slot, chunk=chunk)
+        bundle.reply_name(args.role, round_no=args.round,
+                          slot="A" if args.panel else args.slot, chunk=chunk)
     except bundle.BundleError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     notes: list[str] = []
     dispatched: list[int] = []
+    slots: list[nextstep.Slot] = []
 
     def prep(c: Card) -> None:
         if args.advance:
@@ -1654,33 +1671,43 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
         problems = gates.check_dispatch(
             c, args.stage, args.role, args.round, db.evidence_for(_conn(args.root), c.id))
         _settle_gates(args.root, c, args.stage, f"{args.role} round {args.round}", problems, force, notes)
+        if args.panel:
+            slots.extend(nextstep.panel(c, args.round))
+        else:
+            slots.append(nextstep.Slot(args.slot or "", args.lens, ""))
         if args.role in ("reviewer", "verifier"):
             # Completeness (OR-2): a dispatched slot that never reports blocks
             # its gate, so a crashed reviewer is not an approval.
-            rid = db.record_evidence_once(
-                _conn(args.root), c.id, args.stage, "dispatch", round_no=args.round,
-                slot=args.slot or "", status="dispatched", detail=args.role, ts=_now())
-            if rid is not None:
-                dispatched.append(rid)
+            for slot in slots:
+                rid = db.record_evidence_once(
+                    _conn(args.root), c.id, args.stage, "dispatch", round_no=args.round,
+                    slot=slot.slot, status="dispatched", detail=args.role, ts=_now())
+                if rid is not None:
+                    dispatched.append(rid)
 
     card = _edit(args.root, args.card_id, prep, ack=args.advance)
     _flush_notes(notes)
+    cfg = config.load_config(args.root)
+    lines: list[str] = []
     try:
-        path = bundle.prepare(
-            args.root,
-            card,
-            stage=args.stage,
-            role=args.role,
-            round_no=args.round,
-            slot=args.slot,
-            chunk=chunk,
-            lens=args.lens,
-            variables=bundle.parse_vars(args.var or []),
-            verbosity=str(config.load_config(args.root).get("verbosity", "terse")),
-            knowledge_max=_knowledge_max(config.load_config(args.root)),
-            archived=db.load_archived_cards(_conn(args.root)),
-            today=_today(),
-        )
+        for slot in slots:
+            path = bundle.prepare(
+                args.root,
+                card,
+                stage=args.stage,
+                role=args.role,
+                round_no=args.round,
+                slot=slot.slot or None,
+                chunk=chunk,
+                lens=slot.lens,
+                variables=bundle.parse_vars(args.var or []),
+                verbosity=str(cfg.get("verbosity", "terse")),
+                knowledge_max=_knowledge_max(cfg),
+                archived=db.load_archived_cards(_conn(args.root)),
+                today=_today(),
+            )
+            lines.append(f"{nextstep.AGENT_PREFIX}{args.role} {slot.model} {path}" if args.panel
+                         else str(path))
     except bundle.BundleError as exc:
         for rid in dispatched:  # nothing was dispatched: do not leave a phantom slot
             with db.txn(_conn(args.root)):
@@ -1688,7 +1715,13 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     _stamp_orchestrator(args.root, card.id)
-    print(path)
+    print("\n".join(lines))
+    return 0
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    card = _load(args.root, args.card_id)
+    print(nextstep.next_step(card, db.evidence_for(_conn(args.root), card.id)))
     return 0
 
 
@@ -2562,9 +2595,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--var", action="append", help=f"key=value, value ≤ {bundle.VAR_CAP} chars")
     p.add_argument("--advance", action="store_true",
                     help="set-stage to --stage first, then prep the bundle, in one call")
+    p.add_argument("--panel", action="store_true",
+                   help="reviewer role: prep every slot of this round's panel and print "
+                        "`agent model path` per line")
     p.add_argument("--force-gate", dest="force_gate", metavar="REASON",
                    help="override a refused stage or round-cap gate (see set-stage)")
     p.set_defaults(func=cmd_dispatch_prep)
+
+    p = sub.add_parser("next", help="one line: stage, what to dispatch next, the verdict state")
+    p.add_argument("card_id")
+    p.set_defaults(func=cmd_next)
 
     p = sub.add_parser("new-sprint")
     p.add_argument("sprint_id")
