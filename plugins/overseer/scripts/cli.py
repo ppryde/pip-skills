@@ -1874,26 +1874,6 @@ def cmd_board(args: argparse.Namespace) -> int:
     return 0
 
 
-def _read_repo_root_meta(db_path: Path) -> "str | None":
-    """Best-effort read-only peek at a board.db's ``meta['repo_root']`` for
-    the ``repos`` discovery verb. Opened read-only (``mode=ro``) so
-    discovery never creates, locks, or schema-touches a board it's merely
-    listing. Never raises — a corrupt, mid-write, or otherwise unreadable
-    board.db is simply skipped, same quarantine-safe spirit as the rest of
-    this module's report-building verbs.
-    """
-    try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
-    except sqlite3.Error:
-        return None
-    try:
-        return db.get_meta(conn, "repo_root")
-    except sqlite3.Error:
-        return None
-    finally:
-        conn.close()
-
-
 def cmd_repos(args: argparse.Namespace) -> int:
     """`overseer repos --json` — enumerate every discoverable board at
     `<config dir>/overseer/*/board.db` (one per repo, per the per-repo
@@ -1905,41 +1885,20 @@ def cmd_repos(args: argparse.Namespace) -> int:
     older board, or one whose repo_root was never derivable — e.g. no git)
     or when that recorded root no longer exists on disk (repo deleted or
     moved since the board was written). The same repo raised under two
-    accounts lists once, from the first dir that has it (primary wins).
-    Output is a JSON list of `{"label": ..., "root": ...}`, sorted by label.
+    accounts lists once, from the first LIVE dir that has it (primary wins);
+    archived dirs (`config.is_archived`) list only repos with no live board,
+    flagged `"archived": true`. Output is a JSON list of `{"label", "root",
+    "board_dir", "archived", "aliases"}`, sorted by label (see `boards.discover`).
     """
-    results: list[dict[str, str]] = []
-    seen_roots: set[str] = set()
-    for config_dir in config.claude_dirs():
-        overseer_dir = config_dir / "overseer"
-        if not overseer_dir.is_dir():
-            continue
-        for label_dir in overseer_dir.iterdir():
-            if not label_dir.is_dir():
-                continue
-            db_path = label_dir / "board.db"
-            if not db_path.is_file():
-                continue
-            root_str = _read_repo_root_meta(db_path)
-            if not root_str:
-                continue
-            if not Path(root_str).exists():
-                continue
-            canonical = str(Path(root_str).resolve())
-            if canonical in seen_roots:
-                continue
-            seen_roots.add(canonical)
-            # Display label comes from the repo root, never the folder name —
-            # the default folder is now `<label>-<hash>` (see
-            # config.central_root), so `label_dir.name` would leak the hash.
-            label = derive_repo_label(Path(root_str)) or Path(root_str).name
-            results.append({"label": label, "root": root_str})
-    results.sort(key=lambda r: r["label"])
+    from scripts import boards as boards_mod
+    results = boards_mod.discover()
     if args.json:
         print(json.dumps(results))
     else:
         for r in results:
-            print(f"{r['label']}: {r['root']}")
+            tags = ["archived"] if r["archived"] else r["aliases"]
+            mark = f" [{', '.join(tags)}]" if tags else ""
+            print(f"{r['label']}{mark}: {r['root']}")
     return 0
 
 
