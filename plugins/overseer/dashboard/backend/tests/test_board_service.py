@@ -10,8 +10,10 @@ from app.board_service import (
     _invoked_verb,
     _is_lan_client,
     _strip_root_flags,
-    create_service_app,
 )
+from app.main import create_app
+
+EXEC_TOKEN = "t"
 
 
 class _SyncASGIBridge(httpx.BaseTransport):
@@ -49,7 +51,7 @@ class _SyncASGIBridge(httpx.BaseTransport):
         )
 
 
-def _client(app, *, client_ip="172.17.0.2", token=None):
+def _client(app, *, client_ip="172.17.0.2", token=EXEC_TOKEN):
     """httpx client that spoofs the source IP via ASGITransport."""
     async_transport = httpx.ASGITransport(app=app, client=(client_ip, 40000))
     transport = _SyncASGIBridge(async_transport)
@@ -134,7 +136,7 @@ def test_invoked_verb_skips_every_value_taking_global_option():
 
 
 def test_exec_runs_verb_end_to_end(root: Path):
-    app = create_service_app(root, token=None)
+    app = create_app(root, exec_token=EXEC_TOKEN)
     with _client(app) as c:
         r = c.post("/api/exec", json={"argv": ["new-card", "--title", "Hi"], "stdin": None})
     assert r.status_code == 200
@@ -144,7 +146,7 @@ def test_exec_runs_verb_end_to_end(root: Path):
 
 
 def test_exec_relays_nonzero_exit_as_http_200(root: Path):
-    app = create_service_app(root, token=None)
+    app = create_app(root, exec_token=EXEC_TOKEN)
     with _client(app) as c:
         # show on a missing card exits non-zero; still an HTTP 200 with the code in the body.
         r = c.post("/api/exec", json={"argv": ["show", "WF-999", "--json"], "stdin": None})
@@ -153,7 +155,7 @@ def test_exec_relays_nonzero_exit_as_http_200(root: Path):
 
 
 def test_exec_ignores_incoming_root(root: Path, tmp_path: Path):
-    app = create_service_app(root, token=None)
+    app = create_app(root, exec_token=EXEC_TOKEN)
     bogus = str(tmp_path / "somewhere-else")
     with _client(app) as c:
         r = c.post("/api/exec", json={"argv": ["--root", bogus, "new-card", "--title", "T"], "stdin": None})
@@ -162,21 +164,21 @@ def test_exec_ignores_incoming_root(root: Path, tmp_path: Path):
 
 
 def test_lan_guard_refuses_public_caller_even_with_token(root: Path):
-    app = create_service_app(root, token="secret")
+    app = create_app(root, exec_token="secret")
     with _client(app, client_ip="8.8.8.8", token="secret") as c:
         r = c.post("/api/exec", json={"argv": ["board"], "stdin": None})
     assert r.status_code == 403          # guard runs before auth
 
 
 def test_token_gate_rejects_missing_token(root: Path):
-    app = create_service_app(root, token="secret")
+    app = create_app(root, exec_token="secret")
     with _client(app, client_ip="172.17.0.2", token=None) as c:
         r = c.post("/api/exec", json={"argv": ["board"], "stdin": None})
     assert r.status_code == 401
 
 
 def test_token_gate_allows_matching_token(root: Path):
-    app = create_service_app(root, token="secret")
+    app = create_app(root, exec_token="secret")
     with _client(app, client_ip="172.17.0.2", token="secret") as c:
         r = c.post("/api/exec", json={"argv": ["new-card", "--title", "Ok"], "stdin": None})
     assert r.status_code == 200
@@ -185,7 +187,7 @@ def test_token_gate_allows_matching_token(root: Path):
 def test_denied_verbs_return_403_without_running_subprocess(root: Path, monkeypatch):
     # If the denylist ever let a call through, this would blow up loudly instead
     # of silently running the destructive verb.
-    app = create_service_app(root, token=None)  # build BEFORE patching (app init shells git)
+    app = create_app(root, exec_token=EXEC_TOKEN)  # build BEFORE patching (app init shells git)
 
     def _explode(*a, **k):  # pragma: no cover - must never be reached
         raise AssertionError("subprocess.run must not be called for a denied verb")
@@ -206,7 +208,7 @@ def test_denied_verbs_return_403_without_running_subprocess(root: Path, monkeypa
 
 def test_denied_clear_leaves_board_intact(root: Path):
     # End-to-end: a card exists, `clear` is refused (403), the card survives.
-    app = create_service_app(root, token=None)
+    app = create_app(root, exec_token=EXEC_TOKEN)
     with _client(app) as c:
         made = c.post("/api/exec", json={"argv": ["new-card", "--title", "Keep"], "stdin": None})
         assert made.status_code == 200 and made.json()["returncode"] == 0
@@ -223,7 +225,7 @@ def test_abbreviated_root_flag_does_not_override_pinned_root(root: Path, tmp_pat
     # root (the pinned root is used / the abbreviation never resolved to --root).
     bogus = tmp_path / "evil-root"
     bogus.mkdir()
-    app = create_service_app(root, token=None)
+    app = create_app(root, exec_token=EXEC_TOKEN)
     with _client(app) as c:
         r = c.post(
             "/api/exec",
@@ -235,7 +237,7 @@ def test_abbreviated_root_flag_does_not_override_pinned_root(root: Path, tmp_pat
 
 
 def test_exec_timeout_maps_to_504(root: Path, monkeypatch):
-    app = create_service_app(root, token=None)  # build BEFORE patching (app init shells git)
+    app = create_app(root, exec_token=EXEC_TOKEN)  # build BEFORE patching (app init shells git)
 
     def _timeout(*a, **k):
         raise subprocess.TimeoutExpired(cmd="overseer", timeout=30)
@@ -247,7 +249,7 @@ def test_exec_timeout_maps_to_504(root: Path, monkeypatch):
 
 
 def test_exec_oserror_maps_to_500(root: Path, monkeypatch):
-    app = create_service_app(root, token=None)  # build BEFORE patching (app init shells git)
+    app = create_app(root, exec_token=EXEC_TOKEN)  # build BEFORE patching (app init shells git)
 
     def _oserror(*a, **k):
         raise OSError("no such interpreter")
@@ -262,7 +264,7 @@ def test_exec_does_not_inherit_overseer_remote(root: Path, monkeypatch):
     # An exported OVERSEER_REMOTE would re-supply the --remote the strip removed.
     monkeypatch.setenv("OVERSEER_REMOTE", "http://127.0.0.1:1")
     monkeypatch.setenv("OVERSEER_REMOTE_TOKEN", "t")
-    app = create_service_app(root, token=None)
+    app = create_app(root, exec_token=EXEC_TOKEN)
     with _client(app) as c:
         r = c.post("/api/exec", json={"argv": ["new-card", "--title", "Local"], "stdin": None})
     assert r.json()["returncode"] == 0

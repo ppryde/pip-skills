@@ -12,14 +12,13 @@ directly below to compute the launch root's OWN main-repo root, matching how
 from __future__ import annotations
 
 import hmac
-import ipaddress
 import math
 import os
 import re
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -28,7 +27,9 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
+from starlette.responses import Response
 
+from app.board_service import ExecRequest, ExecResult, _is_lan_client, run_cli
 from app.cli_client import (
     CliError,
     almoner_installed,
@@ -655,37 +656,13 @@ def _mutation_error(exc: CliError) -> HTTPException:
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
-_IPV6_ULA = ipaddress.ip_network("fc00::/7")
-
-
-def _is_lan_client(host: str | None) -> bool:
-    """True only for a private/loopback/link-local source address.
-
-    Guarantees the service never answers a remote, non-LAN caller even when
-    bound to 0.0.0.0. An absent/unparseable client is rejected (safe default).
-    """
-    if not host:
-        return False
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    # 6to4 (2002::/16) and IPv4-mapped addresses are judged by the IPv4 inside.
-    if isinstance(ip, ipaddress.IPv6Address):
-        ip = ip.sixtofour or ip.ipv4_mapped or ip
-    if isinstance(ip, ipaddress.IPv6Address):
-        # Only loopback, link-local and ULA: `is_private` also covers Teredo,
-        # documentation and NAT64-adjacent ranges.
-        return ip.is_loopback or ip.is_link_local or ip in _IPV6_ULA
-    return ip.is_private or ip.is_loopback or ip.is_link_local
-
-
 def _is_loopback(host: str) -> bool:
     return host in LOOPBACK_HOSTS
 
 
 def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = None,
-               token: str | None = None, mount_frontend: bool = True) -> FastAPI:
+               token: str | None = None, mount_frontend: bool = True,
+               exec_token: str | None = None) -> FastAPI:
     app = FastAPI(title="overseer dashboard")
     launch_root = root
     launch_host = host
@@ -713,7 +690,9 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         return response
 
     @app.middleware("http")
-    async def _lan_only(request: Request, call_next):
+    async def _lan_only(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """Never answer a non-LAN caller, on ANY route, before auth or routing.
 
         Registered last, so it is the outermost layer. A missing client address
@@ -724,6 +703,13 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         return await call_next(request)
 
     require_token = make_require_token(token)
+    require_exec_token = make_require_exec_token(exec_token)
+    # The board `/api/exec` runs against, fixed ONCE at start: a later edit to
+    # the repo's `.overseer/config.json` (a container can write it) cannot move
+    # it, and the child is handed this path as OVERSEER_CENTRAL on every call.
+    _pinned_root = launch_root.resolve()
+    _pinned_central = overseer_config.central_root(_pinned_root)
+    _pinned_archive = overseer_config.archive_root_of(_pinned_central)
     # The dashboard is normally launched from inside a worktree (e.g.
     # `.claude/worktrees/<name>`), whose path differs from the main-repo
     # root `board.db` records as `meta['repo_root']`. Derive the MAIN repo
@@ -1155,6 +1141,22 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             )
         except CliError as exc:
             raise _mutation_error(exc) from exc
+
+    @app.post("/api/exec", dependencies=[Depends(require_exec_token)])
+    def exec_cli(req: ExecRequest) -> ExecResult:
+        """Token-gated passthrough: run the real overseer CLI on this host
+        against the pinned board and relay stdout/stderr/exit code.
+
+        Gated by make_require_exec_token, NOT make_require_token — the latter is
+        inert when unconfigured and would open this to everyone.
+        """
+        if _pinned_archive is not None:
+            raise HTTPException(
+                status_code=503,
+                detail=(f"pinned board is in archive dir {_pinned_archive}; "
+                        "exec without a repo label is disabled"),
+            )
+        return run_cli(_pinned_root, _pinned_central, req)
 
     # One chronicle sync at a time per server process (see chronicle_sync);
     # on `app.state` so tests can hold it.

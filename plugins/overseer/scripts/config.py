@@ -159,20 +159,27 @@ def is_archived(config_dir: Path) -> bool:
     return hit
 
 
-def is_archived_path(path: Path) -> bool:
-    """True when `path` lies under an `archive_dirs` entry, or under a claude
-    dir for which `is_archived` is true. A path outside every claude dir (a
-    repo-local `central_dir` under a `backups` segment, say) is never archived."""
+def archive_root_of(path: Path) -> Path | None:
+    """The archive dir `path` lies under: an `archive_dirs` entry, or a claude
+    dir for which `is_archived` is true; None for anything else. A path outside
+    every claude dir (a repo-local `central_dir` under a `backups` segment,
+    say) is never archived."""
     resolved = _resolved(path)
     if resolved is None:
-        return False
-    if any(resolved.is_relative_to(a) for a in archive_dirs()):
-        return True
+        return None
+    for a in archive_dirs():
+        if resolved.is_relative_to(a):
+            return a
     for d in claude_dirs():
         r = _resolved(d)
         if r is not None and resolved.is_relative_to(r):
-            return is_archived(d)
-    return False
+            return r if is_archived(d) else None
+    return None
+
+
+def is_archived_path(path: Path) -> bool:
+    """True when `path` lies under an archive dir (see `archive_root_of`)."""
+    return archive_root_of(path) is not None
 
 
 def live_claude_dirs() -> list[Path]:

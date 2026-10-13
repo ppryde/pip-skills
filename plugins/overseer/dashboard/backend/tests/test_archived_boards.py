@@ -202,3 +202,32 @@ def test_readonly_env_keys_on_the_effective_central(archive: dict[str, Any], tmp
     live.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=live, check=True)
     assert cli_client._readonly_env(live) is None  # an ordinary live board is untouched
+
+
+def test_pinned_board_in_an_archive_disables_unlabelled_exec_only(
+    archive: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R4-4: the server still starts (one process, the dashboard must live);
+    only exec without a repo label answers 503, and the child is never spawned."""
+    from app import board_service
+
+    launch = tmp_path / "launch"
+    launch.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=launch, check=True)
+    (launch / ".overseer").mkdir()
+    (launch / ".overseer" / "config.json").write_text(json.dumps({"central_dir": str(archive["folder"])}))
+    app = create_app(launch, exec_token="t")
+    spawned: list[Any] = []
+    real_run = board_service.subprocess.run
+    monkeypatch.setattr(board_service.subprocess, "run", lambda *a, **k: spawned.append(a))
+    client = TestClient(app)
+    before = _tree_hash(archive["folder"])
+
+    resp = client.post("/api/exec", json={"argv": ["board"]}, headers={"X-Overseer-Token": "t"})
+
+    assert resp.status_code == 503
+    assert "archive" in resp.json()["detail"] and "disabled" in resp.json()["detail"]
+    assert spawned == []
+    monkeypatch.setattr(board_service.subprocess, "run", real_run)
+    assert client.get("/api/board").status_code == 200  # the dashboard is up and read-only
+    assert _tree_hash(archive["folder"]) == before

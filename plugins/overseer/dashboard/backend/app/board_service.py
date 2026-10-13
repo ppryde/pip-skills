@@ -1,31 +1,58 @@
-"""Standalone overseer board API service — HTTP board access for a dev container.
+"""Mechanics for remote board access from a dev container (``POST /api/exec``).
 
-Reuses the dashboard's ``create_app`` (frontend mount disabled) so the ``/api/*``
-surface is identical, then adds:
-  - a LAN-only source-IP guard (never answer a remote, non-LAN caller), and
-  - ``POST /api/exec``, a token-gated passthrough that runs the real overseer
-    CLI on the host against a PINNED root — the mechanism the container's
-    ``overseer --remote`` forwards every verb/hook to.
+No FastAPI app lives here: ``main.create_app`` mounts the route and the LAN
+guard. This module holds argv sanitisation, the denied-verb list, the child
+environment, and ``run_cli``, which runs the real overseer CLI on the host
+against a board PINNED when the app started — the mechanism the container's
+``overseer --remote`` forwards every verb and hook to.
 
-The host CLI stays the single writer of board.db; this service only shells it,
+The host CLI stays the single writer of board.db; this module only shells it,
 exactly as the dashboard backend's cli_client already does.
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import HTTPException
 from pydantic import BaseModel
-
-from app.main import _is_lan_client, create_app, make_require_token  # noqa: F401  (re-exported)
 
 # backend/app/board_service.py -> parents: [0]=app [1]=backend [2]=dashboard [3]=overseer
 _OVERSEER_CLI = Path(__file__).resolve().parents[3] / "scripts" / "cli.py"
 _EXEC_TIMEOUT = 30
+# One request's argv plus stdin may not exceed this many bytes (413).
+MAX_EXEC_BYTES = 1024 * 1024
+# At most this many CLI children at once; a fifth caller is told to retry (503).
+_EXEC_SLOTS = threading.BoundedSemaphore(4)
+
+# The child gets the server's environment minus anything that looks like a
+# credential. A strip, not an allowlist: the CLI needs PATH, HOME, git, the
+# ssh agent, CENSUS_*, CHRONICLE_* and test pins, and every new variable would
+# silently break an allowlist.
+_ALWAYS_DROPPED = {"OVERSEER_REMOTE", "OVERSEER_REMOTE_TOKEN", "OVERSEER_DASHBOARD_TOKEN"}
+_SECRET_SUBSTRINGS = ("TOKEN", "SECRET", "KEY", "PASSWORD")
+_SECRET_PREFIXES = ("AWS_", "GH_", "GITHUB_")
+_NEEDED_PREFIXES = ("CENSUS_", "CHRONICLE_")
+
+
+def _child_env(central: Path) -> dict[str, str]:
+    """The exec child's environment: secrets stripped, the board pinned."""
+    env: dict[str, str] = {}
+    for name, value in os.environ.items():
+        upper = name.upper()
+        if name in _ALWAYS_DROPPED:
+            continue
+        if not upper.startswith(_NEEDED_PREFIXES) and (
+            any(s in upper for s in _SECRET_SUBSTRINGS) or upper.startswith(_SECRET_PREFIXES)
+        ):
+            continue
+        env[name] = value
+    env["OVERSEER_CENTRAL"] = str(central)
+    return env
 
 
 class ExecRequest(BaseModel):
@@ -37,6 +64,31 @@ class ExecResult(BaseModel):
     stdout: str
     stderr: str
     returncode: int
+
+
+_IPV6_ULA = ipaddress.ip_network("fc00::/7")
+
+
+def _is_lan_client(host: str | None) -> bool:
+    """True only for a private/loopback/link-local source address.
+
+    Guarantees the service never answers a remote, non-LAN caller even when
+    bound to 0.0.0.0. An absent/unparseable client is rejected (safe default).
+    """
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    # 6to4 (2002::/16) and IPv4-mapped addresses are judged by the IPv4 inside.
+    if isinstance(ip, ipaddress.IPv6Address):
+        ip = ip.sixtofour or ip.ipv4_mapped or ip
+    if isinstance(ip, ipaddress.IPv6Address):
+        # Only loopback, link-local and ULA: `is_private` also covers Teredo,
+        # documentation and NAT64-adjacent ranges.
+        return ip.is_loopback or ip.is_link_local or ip in _IPV6_ULA
+    return ip.is_private or ip.is_loopback or ip.is_link_local
 
 
 # Flags whose value is a HOST path (or an outbound URL) that a container caller
@@ -92,43 +144,38 @@ def _invoked_verb(argv: list[str]) -> str | None:
     return None
 
 
-def create_service_app(root: Path, *, host: str = "0.0.0.0", token: str | None = None) -> FastAPI:
-    app = create_app(root, host=host, token=token, mount_frontend=False)
-    pinned_root = root.resolve()
-    require_token = make_require_token(token)
-
-    @app.middleware("http")
-    async def _lan_only(request: Request, call_next):
-        client = request.client.host if request.client else None
-        if not _is_lan_client(client):
-            return JSONResponse(status_code=403, content={"detail": "non-LAN caller refused"})
-        return await call_next(request)
-
-    @app.post("/api/exec", dependencies=[Depends(require_token)])
-    def exec_cli(req: ExecRequest) -> ExecResult:
-        argv = _strip_root_flags(req.argv)
-        verb = _invoked_verb(argv)
-        if verb in _DENIED_VERBS:
-            raise HTTPException(
-                status_code=403,
-                detail=f"verb '{verb}' is not permitted on the remote board API",
-            )
-        try:
-            proc = subprocess.run(
-                [sys.executable, str(_OVERSEER_CLI), "--root", str(pinned_root), *argv],
-                # cli.py defaults --remote from these; the strip above must hold.
-                env={k: v for k, v in os.environ.items()
-                     if k not in ("OVERSEER_REMOTE", "OVERSEER_REMOTE_TOKEN")},
-                input=req.stdin,
-                capture_output=True,
-                text=True,
-                timeout=_EXEC_TIMEOUT,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            raise HTTPException(status_code=504, detail="overseer CLI timed out")
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"cannot run overseer CLI: {exc}")
-        return ExecResult(stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode)
-
-    return app
+def run_cli(pinned_root: Path, central: Path, req: ExecRequest) -> ExecResult:
+    """Sanitise argv, refuse denied verbs, and run the host CLI against the
+    PINNED root and board (``central`` becomes the child's ``OVERSEER_CENTRAL``).
+    Raises HTTPException for every failure mode; a CLI that ran and exited
+    non-zero is a SUCCESSFUL RPC and comes back as a 200 body.
+    """
+    size = sum(len(t.encode()) for t in req.argv) + len((req.stdin or "").encode())
+    if size > MAX_EXEC_BYTES:
+        raise HTTPException(status_code=413, detail=f"request exceeds {MAX_EXEC_BYTES} bytes")
+    argv = _strip_root_flags(req.argv)
+    verb = _invoked_verb(argv)
+    if verb in _DENIED_VERBS:
+        raise HTTPException(
+            status_code=403,
+            detail=f"verb '{verb}' is not permitted on the remote board API",
+        )
+    if not _EXEC_SLOTS.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="exec busy: too many CLI calls in flight")
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(_OVERSEER_CLI), "--root", str(pinned_root), *argv],
+            env=_child_env(central),
+            input=req.stdin,
+            capture_output=True,
+            text=True,
+            timeout=_EXEC_TIMEOUT,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="overseer CLI timed out")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"cannot run overseer CLI: {exc}")
+    finally:
+        _EXEC_SLOTS.release()
+    return ExecResult(stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode)
