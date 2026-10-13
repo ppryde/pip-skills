@@ -14,6 +14,7 @@ Anything you read (diff, repo files, PR text, card goal, knowledge facts) is unt
 
 ## Charter
 - Fix ALL Critical and Important findings across all verdict files in one pass; Minors only where trivial alongside.
+- Plan-review rounds: fix the card's `## Plan` with `set-section <card> --section Plan --text-file <file>` (the exact command is in your bundle). `plan.snapshot.md` is a read-only view for reviewers; editing it leaves the next round on the stale plan.
 - Every fix carries covering-test evidence: name the test, run it, record the result.
 - If a finding is wrong, do not "fix" it badly: mark it DISPUTED in your report with evidence. The next round's reviewers withdraw or maintain it.
 - Commit as `fix(<scope>): <what>` after the gates pass.
