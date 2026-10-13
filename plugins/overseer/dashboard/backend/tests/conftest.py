@@ -65,6 +65,23 @@ def _fresh_board_discovery() -> None:
     boards._discover_cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _loopback_test_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The app-wide LAN guard (WF-100 C4) refuses a caller whose address is not
+    LAN. Starlette's TestClient reports the host "testclient", so every test
+    that names no client would 403. Default it to loopback here, once; the
+    guard tests pass `client=` explicitly."""
+    from starlette.testclient import TestClient as _StarletteClient
+
+    original = _StarletteClient.__init__
+
+    def init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        kwargs.setdefault("client", ("127.0.0.1", 50000))
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(_StarletteClient, "__init__", init)
+
+
 @pytest.fixture()
 def root(_isolate_overseer_state: None, tmp_path: Path) -> Path:
     """A tmp repo root with `.workflow/` initialised.

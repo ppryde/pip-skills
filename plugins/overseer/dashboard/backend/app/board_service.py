@@ -12,7 +12,6 @@ exactly as the dashboard backend's cli_client already does.
 """
 from __future__ import annotations
 
-import ipaddress
 import os
 import subprocess
 import sys
@@ -22,7 +21,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.main import create_app, make_require_token
+from app.main import _is_lan_client, create_app, make_require_token  # noqa: F401  (re-exported)
 
 # backend/app/board_service.py -> parents: [0]=app [1]=backend [2]=dashboard [3]=overseer
 _OVERSEER_CLI = Path(__file__).resolve().parents[3] / "scripts" / "cli.py"
@@ -38,31 +37,6 @@ class ExecResult(BaseModel):
     stdout: str
     stderr: str
     returncode: int
-
-
-_IPV6_ULA = ipaddress.ip_network("fc00::/7")
-
-
-def _is_lan_client(host: str | None) -> bool:
-    """True only for a private/loopback/link-local source address.
-
-    Guarantees the service never answers a remote, non-LAN caller even when
-    bound to 0.0.0.0. An absent/unparseable client is rejected (safe default).
-    """
-    if not host:
-        return False
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    # 6to4 (2002::/16) and IPv4-mapped addresses are judged by the IPv4 inside.
-    if isinstance(ip, ipaddress.IPv6Address):
-        ip = ip.sixtofour or ip.ipv4_mapped or ip
-    if isinstance(ip, ipaddress.IPv6Address):
-        # Only loopback, link-local and ULA: `is_private` also covers Teredo,
-        # documentation and NAT64-adjacent ranges.
-        return ip.is_loopback or ip.is_link_local or ip in _IPV6_ULA
-    return ip.is_private or ip.is_loopback or ip.is_link_local
 
 
 # Flags whose value is a HOST path (or an outbound URL) that a container caller

@@ -12,6 +12,7 @@ directly below to compute the launch root's OWN main-repo root, matching how
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import math
 import os
 import re
@@ -23,8 +24,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
@@ -654,6 +655,31 @@ def _mutation_error(exc: CliError) -> HTTPException:
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
+_IPV6_ULA = ipaddress.ip_network("fc00::/7")
+
+
+def _is_lan_client(host: str | None) -> bool:
+    """True only for a private/loopback/link-local source address.
+
+    Guarantees the service never answers a remote, non-LAN caller even when
+    bound to 0.0.0.0. An absent/unparseable client is rejected (safe default).
+    """
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    # 6to4 (2002::/16) and IPv4-mapped addresses are judged by the IPv4 inside.
+    if isinstance(ip, ipaddress.IPv6Address):
+        ip = ip.sixtofour or ip.ipv4_mapped or ip
+    if isinstance(ip, ipaddress.IPv6Address):
+        # Only loopback, link-local and ULA: `is_private` also covers Teredo,
+        # documentation and NAT64-adjacent ranges.
+        return ip.is_loopback or ip.is_link_local or ip in _IPV6_ULA
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
 def _is_loopback(host: str) -> bool:
     return host in LOOPBACK_HOSTS
 
@@ -685,6 +711,17 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         elif request.url.path.startswith("/assets/"):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
+
+    @app.middleware("http")
+    async def _lan_only(request: Request, call_next):
+        """Never answer a non-LAN caller, on ANY route, before auth or routing.
+
+        Registered last, so it is the outermost layer. A missing client address
+        is refused too (`_is_lan_client(None)` is False)."""
+        client = request.client.host if request.client else None
+        if not _is_lan_client(client):
+            return JSONResponse(status_code=403, content={"detail": "non-LAN caller refused"})
+        return await call_next(request)
 
     require_token = make_require_token(token)
     # The dashboard is normally launched from inside a worktree (e.g.
