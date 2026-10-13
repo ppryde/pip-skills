@@ -2,6 +2,8 @@
 account's config dir, or the legacy plain folder), folded into the resolved
 one with the newer card winning and nothing deleted."""
 import json
+
+import pytest
 from pathlib import Path
 
 from factories import git_init, make_card
@@ -345,3 +347,50 @@ class TestMergeFactIdCollision:
         assert rows["mine"]["id"] == "KB-001"
         assert len({r["id"] for r in rows.values()}) == 3
         assert rows["theirs"]["superseded_by"] == rows["theirs two"]["id"]
+
+
+class TestMergeMakesWatchingMutual:
+    def test_absorbed_account_resolves_to_the_merged_board(self, tmp_path, monkeypatch):
+        primary, personal, repo = _setup(tmp_path, monkeypatch)
+        _board_under(personal, repo, monkeypatch, [make_card("WF-2")])
+        active = _board_under(primary, repo, monkeypatch, [make_card("WF-1")])
+        config.add_claude_dir(personal)  # one-way: primary watches personal
+        boards.merge_boards(repo)
+
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(personal))
+        assert config.central_root(repo) == active
+        assert len(boards.find_boards(repo)) == 1
+
+
+class TestWatchFrom:
+    def test_same_dir_is_skipped(self, tmp_path):
+        assert config.watch_from(tmp_path, tmp_path) is None
+        assert not (tmp_path / "overseer" / "config.json").exists()
+
+    @pytest.mark.parametrize("text", ["{not json", "[]", '{"claude_dirs": "abc"}'])
+    def test_unusable_config_warns_and_is_left_alone(self, tmp_path, capsys, text):
+        src, dst = tmp_path / "a", tmp_path / "b"
+        (src / "overseer").mkdir(parents=True)
+        dst.mkdir()
+        path = src / "overseer" / "config.json"
+        path.write_text(text)
+        assert config.watch_from(src, dst) is None
+        assert str(path) in capsys.readouterr().err
+        assert path.read_text() == text
+
+    def test_write_is_atomic_and_reported(self, tmp_path):
+        src, dst = tmp_path / "a", tmp_path / "b"
+        src.mkdir()
+        dst.mkdir()
+        path = config.watch_from(src, dst)
+        assert path == src / "overseer" / "config.json"
+        assert json.loads(path.read_text())["claude_dirs"] == [str(dst.resolve())]
+        assert [p.name for p in path.parent.iterdir()] == ["config.json"]  # no temp left
+
+    def test_merge_reports_the_config_write(self, tmp_path, monkeypatch):
+        primary, personal, repo = _setup(tmp_path, monkeypatch)
+        _board_under(personal, repo, monkeypatch, [make_card("WF-2")])
+        _board_under(primary, repo, monkeypatch, [make_card("WF-1")])
+        config.add_claude_dir(personal)
+        result = boards.merge_boards(repo)
+        assert result["absorbed"][0]["watch_config"] == str(personal / "overseer" / "config.json")

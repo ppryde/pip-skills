@@ -2011,6 +2011,8 @@ def cmd_merge_boards(args: argparse.Namespace) -> int:
         left = f"; left behind in the absorbed folder: {', '.join(a['left_behind'])}" if a["left_behind"] else ""
         print(f"{verb} {a['from']}: +{a['added']} cards, {a['updated']} newer, {a['kept']} kept, "
               f"+{a['label_colors']} colours -> {a['renamed_to']}{moved}{left}")
+        if a["watch_config"]:
+            print(f"  now watching the target: wrote claude_dirs in {a['watch_config']}")
         if a["conflicts"]:
             print(f"  kept the active board's copy of {len(a['conflicts'])} id(s) that name a DIFFERENT "
                   f"card in the absorbed board (created stamps differ): {' '.join(a['conflicts'])}")
@@ -2381,6 +2383,8 @@ def build_parser() -> argparse.ArgumentParser:
     # (SSRF + token exfil). Rejecting abbreviations fails loud instead. argparse
     # never abbreviates subcommand NAMES, so verb matching is unaffected.
     parser = argparse.ArgumentParser(prog="overseer", description=__doc__, allow_abbrev=False)
+    # A new global option that takes a value must also be skipped by
+    # dashboard/backend/app/board_service.py `_invoked_verb` (guarded by its test).
     parser.add_argument("--root", type=Path, default=Path("."))
     parser.add_argument(
         "--session-id", dest="session_id", default=None,
@@ -2656,7 +2660,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_boards)
 
-    p = sub.add_parser("merge-boards", help="fold this repo's other boards into the active one")
+    p = sub.add_parser("merge-boards", help="fold this repo's other boards into the active one (the absorbed account then watches the target, account-wide)")
     p.add_argument("--dry-run", action="store_true", help="report what would happen; touch nothing")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_merge_boards)

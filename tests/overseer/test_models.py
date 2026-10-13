@@ -206,6 +206,49 @@ class TestAppendToSection:
         out = append_to_section("## Goal\nhi", "## Progress log", "- new")
         assert "## Progress log\n- new" in out
 
+    def test_heading_inside_a_code_fence_is_not_a_section(self):
+        body = "## Goal\n```\n## Progress log\n- fenced\n```\n\n## Progress log\n- real"
+        out = append_to_section(body, "## Progress log", "- new")
+        assert out.endswith("- real\n- new")
+        assert out.count("- new") == 1
+
+    def test_fenced_heading_does_not_end_the_section(self):
+        body = "## Progress log\n- old\n~~~\n## Not a heading\n~~~\n- later\n\n## Verification\nx"
+        out = append_to_section(body, "## Progress log", "- new")
+        assert out.index("- later") < out.index("- new") < out.index("## Verification")
+
+    def test_header_only_in_a_fence_is_created(self):
+        out = append_to_section("```\n## Progress log\n```", "## Progress log", "- new")
+        assert out.endswith("\n\n## Progress log\n- new")
+
+    def test_set_section_ignores_a_fenced_heading(self):
+        card = Card.from_text("---\nid: WF-1\ntitle: t\nstatus: planned\n---\n"
+                              "## Plan\n```\n## Decisions\n```\n\n## Decisions\nold\n")
+        card.set_section("## Decisions", "fresh", "2026-01-01")
+        assert "```\n## Decisions\n```" in card.body
+        assert "fresh" in card.body and "old" not in card.body
+
+    @pytest.mark.parametrize("fenced", [
+        "````\n```\n## Progress log\n````",           # shorter inner fence does not close
+        "```python\n## Progress log\n```",              # info string on the opener is fine
+        "   ```\n## Progress log\n   ```",              # up to 3 spaces of indent
+        "~~~\n```\n## Progress log\n~~~",              # other char does not close
+        "```\n```x\n## Progress log\n```",             # closer has no info string
+    ])
+    def test_commonmark_fences_hide_headings(self, fenced):
+        out = append_to_section(fenced, "## Progress log", "- new")
+        assert out.endswith("\n\n## Progress log\n- new")
+
+    def test_four_space_indent_is_not_a_fence(self):
+        body = "    ```\n## Progress log\n- old"
+        out = append_to_section(body, "## Progress log", "- new")
+        assert out.endswith("- old\n- new")
+
+    def test_sections_ignores_fenced_headings(self):
+        card = Card.from_text("---\nid: WF-1\ntitle: t\nstatus: planned\n---\n"
+                              "## Plan\n```\n## Fake\n```\n\n## Real\nx\n")
+        assert list(card.sections) == ["## Plan", "## Real"]
+
 
 class TestNormalizeSectionHeader:
     def test_bare_name(self):

@@ -335,11 +335,19 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
                 with db.txn(target_conn):
                     migrate.import_state(target_conn, target_folder)
             renamed = folder.with_name(f"{folder.name}.absorbed-{stamp}")
+            watch_config = None
             if not dry_run:
+                # Watching becomes mutual — written BEFORE the rename so a
+                # failure leaves the folder in place: the account the folder
+                # lived under must resolve to the merged board, not an empty one.
+                if folder.parent.name == target_folder.parent.name == "overseer":
+                    written = config.watch_from(folder.parent.parent, target_folder.parent.parent)
+                    watch_config = str(written) if written else None
                 folder.rename(renamed)
             result["absorbed"].append({
                 "from": str(folder),
                 "renamed_to": str(renamed),
+                "watch_config": watch_config,
                 **stats,
                 "label_colors": colours,
                 "sprints": sprints_added,

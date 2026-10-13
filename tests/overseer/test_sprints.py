@@ -123,3 +123,10 @@ class TestLoadSprints:
         sprints, quarantined = load_sprints(board_conn)
         assert [s.id for s in sprints] == ["2026-07-S1", "2026-07-S2"]
         assert quarantined == []
+
+
+def test_replace_section_ignores_a_fenced_heading():
+    body = "## Goal\n```\n## Cards\n```\n\n## Cards\nold\n\n## Notes\nn"
+    out = replace_section(body, "## Cards", "new")
+    assert "```\n## Cards\n```" in out
+    assert "old" not in out and "new" in out and "## Notes\nn" in out

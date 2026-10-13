@@ -13,6 +13,7 @@ exactly as the dashboard backend's cli_client already does.
 from __future__ import annotations
 
 import ipaddress
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -39,6 +40,9 @@ class ExecResult(BaseModel):
     returncode: int
 
 
+_IPV6_ULA = ipaddress.ip_network("fc00::/7")
+
+
 def _is_lan_client(host: str | None) -> bool:
     """True only for a private/loopback/link-local source address.
 
@@ -51,6 +55,13 @@ def _is_lan_client(host: str | None) -> bool:
         ip = ipaddress.ip_address(host)
     except ValueError:
         return False
+    # 6to4 (2002::/16) and IPv4-mapped addresses are judged by the IPv4 inside.
+    if isinstance(ip, ipaddress.IPv6Address):
+        ip = ip.sixtofour or ip.ipv4_mapped or ip
+    if isinstance(ip, ipaddress.IPv6Address):
+        # Only loopback, link-local and ULA: `is_private` also covers Teredo,
+        # documentation and NAT64-adjacent ranges.
+        return ip.is_loopback or ip.is_link_local or ip in _IPV6_ULA
     return ip.is_private or ip.is_loopback or ip.is_link_local
 
 
@@ -131,6 +142,9 @@ def create_service_app(root: Path, *, host: str = "0.0.0.0", token: str | None =
         try:
             proc = subprocess.run(
                 [sys.executable, str(_OVERSEER_CLI), "--root", str(pinned_root), *argv],
+                # cli.py defaults --remote from these; the strip above must hold.
+                env={k: v for k, v in os.environ.items()
+                     if k not in ("OVERSEER_REMOTE", "OVERSEER_REMOTE_TOKEN")},
                 input=req.stdin,
                 capture_output=True,
                 text=True,

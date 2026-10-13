@@ -11,6 +11,7 @@ import yaml
 from scripts.models import (
     Card,
     CardParseError,
+    find_section,
     format_tokens,
     parse_tokens,
     split_frontmatter,
@@ -66,14 +67,10 @@ class Sprint:
 def replace_section(body: str, header: str, content: str) -> str:
     """Replace the content of the named `## ` section, creating it if absent."""
     lines = body.split("\n")
-    if header not in lines:
+    found = find_section(lines, header)
+    if found is None:
         return f"{body.rstrip()}\n\n{header}\n{content}"
-    start = lines.index(header)
-    end = len(lines)
-    for i in range(start + 1, len(lines)):
-        if lines[i].startswith("## "):
-            end = i
-            break
+    start, end = found
     return "\n".join(lines[: start + 1] + [content, ""] + lines[end:]).rstrip()
 
 

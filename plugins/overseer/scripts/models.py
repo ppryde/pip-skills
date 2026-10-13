@@ -57,17 +57,47 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
     return meta, match.group(2)
 
 
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def unfenced_lines(lines: list[str]):
+    """Yield (index, line) for every line outside a CommonMark code fence: an
+    opener is 3+ backticks or tildes (up to 3 spaces of indent, info string
+    allowed); the closer is the same character, at least as long, with no
+    info string."""
+    fence: str | None = None
+    for i, line in enumerate(lines):
+        m = _FENCE_RE.match(line)
+        if fence is not None:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
+                fence = None
+            continue
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            fence = m.group(1)
+            continue
+        yield i, line
+
+
+def find_section(lines: list[str], header: str) -> tuple[int, int] | None:
+    """(start, end) line indexes of the `## ` section `header`, or None.
+    Headings inside code fences are ignored."""
+    start: int | None = None
+    for i, line in unfenced_lines(lines):
+        if start is None:
+            if line == header:
+                start = i
+        elif line.startswith("## "):
+            return start, i
+    return None if start is None else (start, len(lines))
+
+
 def append_to_section(body: str, header: str, content: str) -> str:
     """Insert content at the end of the named `## ` section, creating it if absent."""
     lines = body.split("\n")
-    if header not in lines:
+    found = find_section(lines, header)
+    if found is None:
         return f"{body.rstrip()}\n\n{header}\n{content}"
-    start = lines.index(header)
-    end = len(lines)
-    for i in range(start + 1, len(lines)):
-        if lines[i].startswith("## "):
-            end = i
-            break
+    start, end = found
     while end - 1 > start and lines[end - 1].strip() == "":
         end -= 1
     lines.insert(end, content)
@@ -400,13 +430,11 @@ class Card:
             demoted.append(text)
         new = "\n".join(demoted)
         lines = self.body.split("\n")
-        if header not in lines:
+        found = find_section(lines, header)
+        if found is None:
             self.body = f"{self.body.rstrip()}\n\n{header}\n{new}".lstrip("\n")
         else:
-            start = lines.index(header)
-            end = start + 1
-            while end < len(lines) and not lines[end].startswith("## "):
-                end += 1
+            start, end = found
             tail = lines[end:]
             self.body = "\n".join([*lines[: start + 1], new, *([""] if tail else []), *tail])
         self.updated = now
@@ -443,7 +471,7 @@ class Card:
         sections: dict[str, str] = {}
         header = ""
         start = 0
-        for i, line in enumerate(lines):
+        for i, line in unfenced_lines(lines):
             if line.startswith("## "):
                 content = "\n".join(lines[start:i]).strip()
                 if header or content:
