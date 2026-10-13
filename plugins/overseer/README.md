@@ -270,6 +270,10 @@ interpreter missing), the hook fails open for every tool.
   (`scripts/gen_cli_ref.py`, drift fails a test); `cli.py help <verb>` prints one
   verb's line, `show <id> --section Plan` one section.
 
+The `overseer-reviewer` agent sets `omitClaudeMd: true`: it reviews from its bundle,
+not repo conventions, so it no longer loads CLAUDE.md (Claude Code 2.1.271+; ignored
+on older versions). The implementer, fixer, verifier and planner still load it.
+
 A `SessionStart` hook (`hooks/session-start.sh`, matcher `startup|resume|clear`)
 prints one line naming the cards in flight (`overseer: 2 in-flight (WF-261
 impl-review, WF-263 planning). /overseer:ledger to resume.`) in a repo that ran

@@ -4,6 +4,7 @@ description: Adversarial reviewer for one overseer card stage (plan or implement
 tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 effort: medium
+omitClaudeMd: true
 ---
 You are an ADVERSARIAL reviewer. Your charter is to REFUTE the work named in your bundle.
 
