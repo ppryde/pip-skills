@@ -489,22 +489,18 @@ def test_no_renudge_on_stale_census_once_transcript_moved_on(
     assert hooks.nudge(payload) is None
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: same session id + transcript untouched since census's last reading, so "
-    "_census_unchanged() trusts the pre-clear 72% inside the 90 s horizon after the "
-    "60 s cooldown ends and nudge() fires. Unreachable if /clear always mints a new "
-    "session id/transcript (see the new-session test); owner ruled: test first, no fix."))
 @pytest.mark.parametrize("elapsed", [61, 75, 89])
-def test_no_renudge_on_stale_census_when_transcript_unchanged(
+def test_same_session_unchanged_transcript_trusts_census_and_nudges(
         repo: Path, monkeypatch: pytest.MonkeyPatch, elapsed: float) -> None:
-    # the transcript has NOT been written since census's reading, so the freshness
-    # check still trusts census and the stale 72% would be believed
+    # same session, transcript untouched since census's reading: the 72% is still
+    # accurate and inside the horizon, so it is trusted and nudging is correct
     transcript = _after_clear_with_stale_census(repo, monkeypatch, elapsed, False)
     payload = _payload(repo, hook_event_name="UserPromptSubmit", transcript_path=str(transcript))
-    assert hooks.nudge(payload) is None
+    assert hooks.nudge(payload) is not None
 
 
 @pytest.mark.parametrize("elapsed", [61, 75, 89])
+# Evidence that /clear changes the session id: plugins/context-vigil-mod/plugin/PROBES.md:23
 def test_no_renudge_after_clear_into_a_new_session_id(
         repo: Path, monkeypatch: pytest.MonkeyPatch, elapsed: float) -> None:
     # /clear starts a new session id: the old id's 72% census entry is not its reading
