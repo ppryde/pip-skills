@@ -21,6 +21,9 @@ def rebuild_index(repo_root: Path, project: str, now: str) -> list[Path]:
     sites and the public ``rebuild-index`` CLI verb."""
     root = state_root(repo_root)
     conn = db.connect(repo_root)
-    _cards, quarantined = db.load_live_cards(conn)
+    try:
+        _cards, quarantined = db.load_live_cards(conn)
+    finally:
+        conn.close()  # not left to refcounting: the loaded cards keep a cycle alive, and the open WAL with it
     (root / "ledger.md").unlink(missing_ok=True)
     return quarantined
