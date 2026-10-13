@@ -7,7 +7,7 @@
       "type": "string"
     },
     "detail": {
-      "description": "absolute path inside the card's dispatch directory",
+      "description": "absolute path inside the card's dispatch directory; schema, card, stage, round, slot and chunk are read off it when the block omits them",
       "minLength": 1,
       "type": "string"
     },
@@ -48,9 +48,6 @@
     }
   },
   "required": [
-    "schema",
-    "card",
-    "stage",
     "status",
     "detail",
     "learned"

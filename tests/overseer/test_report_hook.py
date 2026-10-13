@@ -287,3 +287,35 @@ def test_hooks_json_registers_subagent_stop():
     hooks = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text())["hooks"]
     commands = [h["command"] for entry in hooks["SubagentStop"] for h in entry["hooks"]]
     assert commands == ["${CLAUDE_PLUGIN_ROOT}/hooks/report.sh"]
+
+
+def test_short_form_implementer_block_is_recorded_like_the_long_form(repo, tmp_path, monkeypatch, capsys):
+    """WF-283: card, stage and chunk are read off the detail path."""
+    path = _detail(repo, "implementation", "c2.md", "done")
+    obj = {"status": "DONE", "tests": {"passed": 5, "total": 5}, "commits": ["abc1234"],
+           "detail": str(path), "learned": [{"statement": "x is y", "tags": ["t"]}]}
+    out = _hook(repo, monkeypatch, {
+        "agent_type": "overseer:overseer-implementer", "agent_id": "a2",
+        "agent_transcript_path": str(_transcript(tmp_path)),
+        "last_assistant_message": _block(obj),
+    }, capsys)
+    assert out.out == ""  # no bounce
+    card = _card(repo)
+    assert card.budget_actual == 542
+    assert "chunk 2 — DONE tests 5/5 abc1234" in card.sections["## Progress log"]
+    [entry], _ = load_usage(state_root(repo))
+    assert (entry["card"], entry["stage"]) == ("WF-001", "implementation")
+    assert [f.statement for f in load_pending(db.connect(repo, migrate=False))] == ["x is y"]
+
+
+def test_short_form_reviewer_block_logs_round_and_slot(repo, tmp_path, monkeypatch, capsys):
+    path = _detail(repo, "impl-review", "r2-B.md", "findings")
+    obj = {"status": "approved", "counts": {"critical": 0, "important": 0, "minor": 1},
+           "detail": str(path), "learned": []}
+    _hook(repo, monkeypatch, {
+        "agent_type": "overseer:overseer-reviewer", "agent_id": "a1",
+        "agent_transcript_path": str(_transcript(tmp_path)),
+        "last_assistant_message": _block(obj),
+    }, capsys)
+    log = _card(repo).sections["## Review log"]
+    assert "### impl-review — round 2" in log and "- B: approved 0C 0I 1M" in log

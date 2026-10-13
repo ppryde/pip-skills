@@ -38,30 +38,25 @@ from scripts.usage import append_usage
 
 EXPECTED_SHAPE = {
     "reviewer": (
-        '{"schema": "overseer.reviewer/1", "card": "...", "stage": "...", '
-        '"round": 1, "slot": "A", "status": "approved|found wanting", '
+        '{"status": "approved|found wanting", '
         '"counts": {"critical": 0, "important": 0, "minor": 0}, '
-        '"detail": "/abs/path", "learned": [{"statement": "...", "tags": []}]}'
+        '"detail": "/abs/path/rN-SLOT.md", "learned": [{"statement": "...", "tags": []}]}'
     ),
     "implementer": (
-        '{"schema": "overseer.implementer/1", "card": "...", "stage": "...", '
-        '"chunk": 1, "status": "DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT", '
+        '{"status": "DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT", '
         '"tests": {"passed": 0, "total": 0}, "commits": ["sha"], '
-        '"detail": "/abs/path", "learned": []}'
+        '"detail": "/abs/path/cN.md", "learned": []}'
     ),
     "fixer": (
-        '{"schema": "overseer.fixer/1", "card": "...", "stage": "...", '
-        '"round": 1, "status": "DONE|DISPUTED|BLOCKED", '
+        '{"status": "DONE|DISPUTED|BLOCKED", '
         '"counts": {"fixed": 0, "disputed": 0}, "commits": ["sha"], '
-        '"detail": "/abs/path", "learned": []}'
+        '"detail": "/abs/path/rN-fix.md", "learned": []}'
     ),
     "planner": (
-        '{"schema": "overseer.planner/1", "card": "...", "stage": "planning", '
-        '"status": "DONE|NEEDS_CONTEXT", "detail": "/abs/path", "learned": []}'
+        '{"status": "DONE|NEEDS_CONTEXT", "detail": "/abs/path/plan.md", "learned": []}'
     ),
     "verifier": (
-        '{"schema": "overseer.verifier/1", "card": "...", "stage": "verification", '
-        '"status": "PASS|FAIL", "detail": "/abs/path", "learned": []}'
+        '{"status": "PASS|FAIL", "detail": "/abs/path/verification.md", "learned": []}'
     ),
 }
 

@@ -50,7 +50,7 @@ class TestReviewer:
         assert r.learned == (LearnedFact("x is y", ("a", "b")),)
 
     def test_missing_field(self):
-        obj = self.valid()
+        obj = self.valid(detail=f"{D}/verdict.md")  # a name the short form cannot read round from
         del obj["round"]
         with pytest.raises(ReportError, match="missing field 'round'"):
             parse_report("reviewer", obj)

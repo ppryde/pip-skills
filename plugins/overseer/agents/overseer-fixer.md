@@ -26,7 +26,7 @@ Per finding: `<verdict file>#<finding> — fixed (test: …)` or `— DISPUTED: 
 Your final message ends with exactly one fenced block and nothing after it:
 
 ```overseer-report
-{"schema": "overseer.fixer/1", "card": "WF-12", "stage": "impl-review", "round": 1, "status": "DONE", "counts": {"fixed": 3, "disputed": 0}, "commits": ["abc1234"], "detail": "/abs/state/dispatch/WF-12/impl-review/r1-fix.md", "learned": []}
+{"status": "DONE", "counts": {"fixed": 3, "disputed": 0}, "commits": ["abc1234"], "detail": "/abs/state/dispatch/WF-12/impl-review/r1-fix.md", "learned": []}
 ```
 
-`status` is `DONE`, `DISPUTED` (when any finding is disputed) or `BLOCKED`; `commits` is `[]` if none; `detail` is your bundle's reply path; `learned` is zero or more durable facts, or `[]`. No narration before or after the block.
+`status` is `DONE`, `DISPUTED` (when any finding is disputed) or `BLOCKED`; `commits` is `[]` if none; `detail` is your bundle's reply path; `learned` is zero or more durable facts, or `[]`. The card, stage, round and slot are read from `detail`: do not repeat them. No narration before or after the block.
