@@ -28,9 +28,9 @@ catches a guard you were satisfied with. Recommend subagent-driven for anything 
 a one-line fix.
 
 **3. If subagent-driven, which model?** Ask only once question 2 lands on a subagent.
-Analysis fans out well and cost matters, so a cheap tier is usually right for mechanical
-file analysis and a mid tier for tracing behaviour — but the Phase 6 reviewer is the one
-place to spend, because it is the last thing between a plausible fix and a merged one.
+A cheap tier suits mechanical file analysis and a mid tier tracing behaviour, but the
+Phase 6 reviewer is the one place to spend: it is the last thing between a plausible fix
+and a merged one.
 If they have a standing rule about subagent cost, follow it and say so.
 
 Then, if the work is more than a single obvious fix, agree the shape before implementing.
@@ -135,9 +135,9 @@ Re-run the aggregation after each merge and re-choose the target. Stop when conc
 
 ## Phase 6 — Adversarial review, before you report
 
-Phase 6 is mandatory, in the agreed mode (prefer subagent-driven). Brief the reviewer with the diff, your numbers and claims, and ask it to **refute them**, not check them. Lead with the question that can invalidate the change: **what did the speed cost, and who agreed to pay it?** Findings gate the report: fix each, or say plainly why not.
+Phase 6 is mandatory, in the agreed mode (prefer subagent-driven: `pip-agents:reviewer-correctness`, on the user's model). Brief it with the diff, your numbers and claims; ask it to **refute them**, not check them. Lead with the question that can invalidate the change: **what did the speed cost, and who agreed to pay it?** Findings gate the report: fix each, or say plainly why not.
 
-**Before reviewing, read `references/phase-6-review.md`** (five further questions, briefing rules).
+**Before reviewing, read `references/phase-6-review.md`** (five further questions, the brief to write).
 
 ## What to report
 
