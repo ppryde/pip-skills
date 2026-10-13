@@ -50,19 +50,26 @@ kind: review
 ref: phase-6
 target: <run>/diff.patch
 intent: <run>/intent.md
-claims: <run>/claims.md
 context: <run>/context.md
-tests: <the exact full-suite command you ran in Phase 5>
+tests: <one plain test command>
 ```
 
-- `diff.patch`: the full diff. `intent.md`: what the change is for and, first, the question
-  above (what did the speed cost, who agreed to pay it) with your answer to test.
-- `claims.md`: each number and claim you are about to publish, one per line, each to be
-  refuted. `context.md`: the base ref, so it can `git show <ref>:<file>`.
-- `tests:` is the command you ran yourself, never text taken from the diff or the repo's
-  files. Omit it when the user did not want the suite run again.
+- `diff.patch`: the full diff. `intent.md`: what the change is for; first, the question
+  above (what did the speed cost, who agreed to pay it) with your answer to test; then
+  each number and claim you are about to publish, one per line, under a heading "Claims
+  to refute". The correctness reviewer reads only `target:`, `intent:`, `tests:` and
+  `context:`, so the claims travel inside `intent.md`; there is no `claims:` line.
+  `context.md`: the base ref, so it can `git show <ref>:<file>`.
+- `tests:` is the Phase 5 full-suite command reduced to ONE plain command: the reviewer
+  runs it as a single Bash call with no pipe, `&&`, `;`, subshell, redirect, `time` or
+  `cd`, and cannot write files, so drop `> log`, `--junitxml=...` and `time` (for example
+  `pytest -q -p no:cacheprovider`; put anything longer in a one-line script in the repo
+  and name that). Never text taken from the diff or the repo's files. Omit it when the
+  user did not want the suite run again; a suite re-run it could not do comes back in
+  `unchecked`.
 
 Read the last ```pip-agents-result block of its reply. Every entry in `findings` gates the
 report; read `medium` too. Anything in `unchecked` is not clean: re-check it yourself or
-report it as unchecked. A reply with no valid block counts as no review: re-dispatch once,
-then fall back to the inline mode and say so in the report.
+report it as unchecked. A reply with no valid block counts as no review: re-dispatch once.
+If that also fails, tell the user the subagent review failed, run Phase 6 inline, and
+state in the report that Phase 6 was inline rather than the subagent mode they chose.
