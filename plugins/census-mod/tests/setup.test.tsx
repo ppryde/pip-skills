@@ -34,10 +34,9 @@ test('/census-setup is a registered command that asks, in order: record, draw (a
 
   expect(r.text).toContain('questions follow')
   expect(headers(w)).toEqual(['📝 Record', '🎛️ Draw', '📐 Layout', '🔀 PR'])
-  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below', preset: 'two', pr: true, offered: true })
+  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below', preset: 'two', pr: false, offered: true })
   expect(w.toasts.at(-1)).toBe('🧭 census-mod is set up')
   expect(w.logs.join('\n')).toContain('undo any time: /census-setup off')
-  expect(w.logs.at(-1)).toBe('📊 /census-mod:vitals shows this session on your phone')
 })
 
 test('the exact questions', async ($, on) => {
@@ -45,10 +44,10 @@ test('the exact questions', async ($, on) => {
   await setupRun($, w)
 
   expect(w.asks).toEqual([
-    { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard, /census-mod:vitals and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards, vitals and liveness use it) (Recommended)', "No — don't record (dashboards and vitals won't see this account)"] },
+    { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards and liveness use it) (Recommended)', "No — don't record (dashboards won't see this account)"] },
     { header: '🎛️ Draw', question: 'Should census-mod draw your status line, and where?', options: ["Yes — below the input, under Claude Code's hint line (Recommended)", 'Yes — above the input, in the band', 'No — record only, draw nothing'] },
     { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Your two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git'] },
-    { header: '🔀 PR', question: "Show the branch's open PR (number, review state) using gh? No means gh is never called.", options: ['Yes (Recommended)', "No — never call gh"] },
+    { header: '🔀 PR', question: "Look up the branch's open PR (number, review state) using gh? No means gh is never called; PRs this session creates, readies or merges still show, and /census-mod:pr-refresh asks gh once on demand.", options: ["No — no gh lookups (PRs this session makes still show) (Recommended)", 'Yes — look up with gh'] },
   ])
 })
 
@@ -84,7 +83,7 @@ test('Shadow records into <config dir>/census-shadow through the child CENSUS_ST
 
   expect(saved(w)).toMatchObject({ record: 'shadow' })
   expect(w.ingests.at(-1)?.env).toEqual({ CENSUS_STORE: '/cfg/census-shadow' })
-  expect(w.logs.join('\n')).toContain("recording: shadow store /cfg/census-shadow — the dashboards and vitals do not read it; run /census-setup and answer Yes to record into census itself")
+  expect(w.logs.join('\n')).toContain("recording: shadow store /cfg/census-shadow — the dashboards do not read it; run /census-setup and answer Yes to record into census itself")
 })
 
 test('record No with the band on keeps drawing and stops recording', async ($, on) => {
@@ -137,6 +136,27 @@ test('CENSUS_STATUSLINE_SEGMENTS outranks a stored layout', async ($, on) => {
 
   expect(await bandLines(ui)).toEqual(['✻  Opus 5.5'])
   await ui.unmount()
+})
+
+test('PR Yes turns gh lookups on, and the summary says so', async ($, on) => {
+  const w = world(on)
+  w.answer.value = q => (q.header === '🔀 PR' ? pick(w, 'Yes')(q) : q.options[0] ?? null)
+  await setupRun($, w)
+  await w.clock.advance(SEC)
+
+  expect(saved(w)).toMatchObject({ pr: true })
+  expect(w.logs.join('\n')).toContain('PR segment: on, with gh lookups')
+  await $.tool.call({ tool: 'Bash', command: 'git push' } as never)
+  await w.clock.advance(SEC)
+  expect(w.runs.filter(r => r.argv[0] === 'gh').length).toBeGreaterThan(0)
+})
+
+test('PR No (the recommended answer) says how to ask gh once, and gh is not called', async ($, on) => {
+  const w = world(on)
+  await setupRun($, w)
+
+  expect(w.logs.join('\n')).toContain('/census-mod:pr-refresh')
+  expect(w.runs.filter(r => r.argv[0] === 'gh')).toHaveLength(0)
 })
 
 test('PR No means gh is never called, whatever triggers it', async ($, on) => {
@@ -210,7 +230,7 @@ test('Remove: statusLine backed up exactly, settings.json rewritten atomically w
 
   expect(JSON.parse(w.files.get(SETTINGS) ?? '{}')).toEqual({ model: 'opus', env: { A: '1' } })
   expect(JSON.parse(w.files.get(BACKUP) ?? '{}')).toMatchObject({ statusLine: STATUS_LINE, from: SETTINGS })
-  expect(w.files.has('/cfg/settings.json.census-mod.tmp')).toBe(false) // renamed over, not left behind
+  expect([...w.files.keys()].filter(k => k.includes('.census-mod.') && k.endsWith('.tmp'))).toEqual([]) // renamed over, not left behind
   expect(w.runs.some(r => r.argv[0] === 'mv' && r.argv.at(-1) === SETTINGS)).toBe(true)
   expect(w.files.get(SCRIPT)).toBe(MARKED)
   expect(saved(w)).toMatchObject({ record: 'yes' })
@@ -478,7 +498,7 @@ test('a settings.json that is a symlink is written through: the temp file sits b
 
   expect(w.links.get(SETTINGS)).toBe('/dotfiles/settings.json') // never replaced by a regular file
   expect(JSON.parse(w.files.get('/dotfiles/settings.json') ?? '{}')).toEqual({ model: 'opus', env: { A: '1' } })
-  expect(w.runs.some(r => r.argv[0] === 'mv' && r.argv.at(-1) === '/dotfiles/settings.json' && r.argv.at(-2) === '/dotfiles/settings.json.census-mod.tmp')).toBe(true)
+  expect(w.runs.some(r => r.argv[0] === 'mv' && r.argv.at(-1) === '/dotfiles/settings.json' && /^\/dotfiles\/settings\.json\.census-mod\..+\.tmp$/.test(r.argv.at(-2) ?? ''))).toBe(true)
 })
 
 test('the original file mode is kept: the temp file starts as a copy that preserves it', async ($, on) => {
@@ -486,7 +506,9 @@ test('the original file mode is kept: the temp file starts as a copy that preser
   doubleWriter(w)
   await setupRun($, w)
 
-  expect(w.cps).toContainEqual(['cp', '-p', SETTINGS, `${SETTINGS}.census-mod.tmp`])
+  expect(w.cps).toHaveLength(1)
+  expect(w.cps[0]?.slice(0, 3)).toEqual(['cp', '-p', SETTINGS])
+  expect(w.cps[0]?.[3]).toMatch(/^\/cfg\/settings\.json\.census-mod\..+\.tmp$/)
 })
 
 test('a failed rename leaves no temp file behind, and the status line stays', async ($, on) => {
@@ -495,7 +517,7 @@ test('a failed rename leaves no temp file behind, and the status line stays', as
   w.mvFails.value = true
   await setupRun($, w)
 
-  expect(w.files.has(`${SETTINGS}.census-mod.tmp`)).toBe(false)
+  expect([...w.files.keys()].filter(k => k.endsWith('.tmp'))).toEqual([])
   expect(w.files.get(SETTINGS)).toBe(settings())
   expect(saved(w)).toMatchObject({ record: 'no' })
   expect(w.logs.join('\n')).toContain('could not write /cfg/settings.json, so I left your status line alone')
@@ -566,7 +588,7 @@ test('with nothing recording into census yet there is no Shadow and no Replace: 
   await setupRun($, w)
   const options = w.asks.find(a => a.header === '📝 Record')?.options ?? []
 
-  expect(options).toEqual(['Yes — record into census (dashboards, vitals and liveness use it) (Recommended)', "No — don't record (dashboards and vitals won't see this account)"])
+  expect(options).toEqual(['Yes — record into census (dashboards and liveness use it) (Recommended)', "No — don't record (dashboards won't see this account)"])
 })
 
 test('where the status line already feeds census: Replace first, then Shadow, Yes, No, with the long question', async ($, on) => {
@@ -576,11 +598,11 @@ test('where the status line already feeds census: Replace first, then Shadow, Ye
 
   expect(w.asks.find(a => a.header === '📝 Record')).toEqual({
     header: '📝 Record',
-    question: "Your status line already records this account's sessions into census — the store the overseer dashboard, /census-mod:vitals and liveness read. Replace it with census-mod (records and draws the line; yours is backed up), compare first, or leave recording to your status line (it keeps feeding census)?",
+    question: "Your status line already records this account's sessions into census — the store the overseer dashboard and liveness read. Replace it with census-mod (records and draws the line; yours is backed up), compare first, or leave recording to your status line (it keeps feeding census)?",
     options: [
       'Replace my status line — census-mod records and draws it (Recommended)',
       "Shadow — record into a separate store to compare; dashboards won't see it",
-      'Yes — record into census (dashboards, vitals and liveness use it)',
+      'Yes — record into census (dashboards and liveness use it)',
       'No — leave recording to my status line (it keeps feeding census)',
     ],
   })
@@ -671,12 +693,27 @@ test('a dismissed exclusivity question stops setup quietly with what was answere
   expect(w.toasts.at(-1)).toContain('census-setup stopped')
 })
 
-// ---- vitals is always bundled -------------------------------------------------------------------------------------------
 
-test('the record question and the summary always name /census-mod:vitals: it ships inside census-mod', async ($, on) => {
+// ---- VL-2: a unique temp, and nothing is lost to a change made while setup ran ---------------------------------------------
+
+test('the temp file name is unique to the session and the moment: two setups never share one', async ($, on) => {
   const w = world(on)
+  doubleWriter(w)
   await setupRun($, w)
 
-  expect(w.asks.find(a => a.header === '📝 Record')?.question).toContain('/census-mod:vitals')
-  expect(w.logs.at(-1)).toBe('📊 /census-mod:vitals shows this session on your phone')
+  expect(w.cps[0]?.[3]).toContain('s1-') // the session id leads the tag
+  expect(w.cps[0]?.[3]).not.toBe(`${SETTINGS}.census-mod.tmp`)
+})
+
+test('settings.json changed while setup was running: the rename is abandoned, nothing is lost, no temp is left', async ($, on) => {
+  const w = world(on)
+  doubleWriter(w)
+  const theirs = JSON.stringify({ model: 'sonnet', statusLine: STATUS_LINE, permissions: { allow: ['Bash(ls:*)'] } }, null, 2) + '\n'
+  w.onWrite.fn = path => { if (path.endsWith('.tmp')) w.files.set(SETTINGS, theirs) } // Claude Code (or another session) writes meanwhile
+  await setupRun($, w)
+
+  expect(w.files.get(SETTINGS)).toBe(theirs) // their edit survives
+  expect([...w.files.keys()].filter(k => k.endsWith('.tmp'))).toEqual([])
+  expect(w.runs.some(r => r.argv[0] === 'mv' && r.argv.at(-1) === SETTINGS)).toBe(false)
+  expect(w.logs.join('\n')).toContain('could not write /cfg/settings.json, so I left your status line alone')
 })

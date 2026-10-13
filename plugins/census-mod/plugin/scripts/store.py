@@ -100,6 +100,38 @@ def census_dir() -> Path:
     return config_dir() / "census"
 
 
+def census_dir_is_config() -> bool:
+    """Is census's folder the Claude config dir itself? Only a mis-set ``CENSUS_STORE`` gets there (the legacy
+    ``<dir>/x.json`` spelling names ``<dir>``), and then census's ``sessions/`` would be Claude Code's own pid
+    registry, which a sweep or a purge must never touch."""
+    try:
+        return os.path.realpath(census_dir()) == os.path.realpath(config_dir())
+    except OSError:
+        return False
+
+
+def census_dir_is_config_message() -> str:
+    return (
+        f"the census dir is the Claude config dir ({census_dir()}): census would share sessions/ with Claude Code's "
+        "own session registry. Point CENSUS_STORE at a folder of its own (or unset it); nothing is recorded, "
+        "installed or purged here until then"
+    )
+
+
+def is_session_record(entry: Any) -> bool:
+    """Does this parsed file look like a census session record (and not, say, Claude Code's ``sessions/<pid>.json``)?"""
+    return (
+        isinstance(entry, dict)
+        and isinstance(entry.get("payload"), dict)
+        and _number(entry.get("updated_at")) is not None
+    )
+
+
+def is_limits_record(entry: Any) -> bool:
+    """Does this parsed file look like a census ``limits/<account>.json``?"""
+    return isinstance(entry, dict) and "version" in entry and "account" in entry
+
+
 def pointer_path() -> Path:
     """Where census publishes its own CLI location, for other tools to find."""
     return census_dir() / "cli.path"
@@ -157,7 +189,8 @@ _ACCOUNTS: dict[str, dict[str, Any]] = {}
 
 
 def reset_account_cache() -> None:
-    """Forget resolved accounts (tests; a process normally resolves once)."""
+    """Forget resolved accounts and the migration check (tests; a process normally resolves once)."""
+    _MIGRATION_CHECKED.clear()
     _ACCOUNTS.clear()
 
 
@@ -624,6 +657,28 @@ def _mod_git(payload: dict[str, Any]) -> dict[str, Any] | None:
     return {k: block[k] for k in _NO_GIT} if ok else None
 
 
+def _status_line_pr(
+    previous: Any, payload: dict[str, Any], branch: str | None, now: float
+) -> dict[str, Any] | None:
+    """The PR the engine's own status-line payload carried (``pr``), kept apart from ``payload`` so a census mod's
+    write (which draws its own ``pr``) does not lose it: a status-line command's ingest sets it from ``payload.pr``
+    (and drops it when the payload has none); a mod's ingest (it sends ``census_mod``) carries it forward untouched.
+    It names the ``branch`` the ingest saw, so a reader on another branch (after a checkout) can refuse it; with no
+    branch (detached HEAD, no git) there is nothing to match, so nothing is kept."""
+    if isinstance(payload.get("census_mod"), dict):
+        kept = previous.get("status_line_pr") if isinstance(previous, dict) else None
+        return kept if isinstance(kept, dict) else None
+    pr = payload.get("pr")
+    number = pr.get("number") if isinstance(pr, dict) else None
+    if not isinstance(number, int) or isinstance(number, bool) or number <= 0 or not branch:
+        return None
+    out: dict[str, Any] = {"number": number, "branch": branch, "at": now}
+    for key in ("url", "review_state"):
+        if isinstance(pr.get(key), str) and pr[key]:
+            out[key] = pr[key]
+    return out
+
+
 def build_entry(
     previous: Any,
     payload: dict[str, Any],
@@ -649,6 +704,9 @@ def build_entry(
         "git": git_block,
         "payload": payload,
     }
+    status_line_pr = _status_line_pr(previous, payload, entry["branch"], now)
+    if status_line_pr is not None:
+        entry["status_line_pr"] = status_line_pr
     # Replaced wholesale each ingest: a session that left tmux must not keep a pane.
     if tmux_pane is not None:
         entry["tmux_pane"] = tmux_pane
@@ -927,6 +985,10 @@ def _session_files() -> list[Path]:
 _STRAY_TMP_SECONDS = 3600
 
 
+# census dirs whose migration this process has already settled (nothing left to migrate, or migrated):
+# the status line asks several times per render (ingest, then the draw's limits read), and a process lives one render.
+_MIGRATION_CHECKED: set[tuple[str, str]] = set()
+
 MIGRATED_SUFFIX = ".v1-migrated"
 MIGRATED_KEEP_SECONDS = 7 * 24 * 3600
 _MIGRATE_LOCK = ".migrate.lock"
@@ -943,6 +1005,9 @@ def migrate(now: float | None = None) -> bool:
     if now is None:
         now = time.time()
     lock: Path | None = None
+    checked = (str(census_dir()), str(store_path()))
+    if checked in _MIGRATION_CHECKED:
+        return False
     try:
         _migrate_limits_json(now)
     except Exception:  # noqa: BLE001, S110 - a reader must never fail on migration
@@ -950,6 +1015,7 @@ def migrate(now: float | None = None) -> bool:
     try:
         legacy = store_path()
         if not legacy.exists():
+            _MIGRATION_CHECKED.add(checked)
             return False
         lock = census_dir() / _MIGRATE_LOCK
         # Lock age is wall-clock time.time() on purpose (mtime is wall-clock), unlike `now`.
@@ -978,6 +1044,7 @@ def migrate(now: float | None = None) -> bool:
         _unlink(legacy.with_name(legacy.name + ".lock"))
         for stray in census_dir().glob(".status.*.tmp"):
             _unlink(stray)
+        _MIGRATION_CHECKED.add(checked)
         return True
     except Exception:  # noqa: BLE001 - never raise from a reader
         return False
@@ -985,10 +1052,29 @@ def migrate(now: float | None = None) -> bool:
         _unlink(lock)
 
 
+SWEEP_MARKER = ".sweep"
+SWEEP_INTERVAL_SECONDS = 300   # the sweep parses every session file: not on every render
+
+
+def _sweep_due() -> bool:
+    """True when the marker is missing, older than the interval, or from the future (a clock that went back)."""
+    try:
+        age = time.time() - (census_dir() / SWEEP_MARKER).stat().st_mtime
+    except OSError:
+        return True
+    return age < 0 or age >= SWEEP_INTERVAL_SECONDS
+
+
 def _sweep(now: float) -> None:
-    """Ingest-side housekeeping: prune session files past the TTL (by their own
-    ``updated_at`` against this ingest's ``now``, as v1 did) and delete stray temp
-    files older than an hour (by mtime)."""
+    """Ingest-side housekeeping, at most once per ``SWEEP_INTERVAL_SECONDS`` (the marker's mtime says when it last
+    ran): prune session files past the TTL (by their own ``updated_at`` against this ingest's ``now``, as v1 did) and
+    delete stray temp files older than an hour (by mtime)."""
+    if not _sweep_due():
+        return
+    try:
+        (census_dir() / SWEEP_MARKER).write_bytes(b"")   # first: concurrent renders skip while this one works
+    except OSError:
+        pass
     for path in _session_files():
         entry = _read_json(path)
         if entry is None:
@@ -999,6 +1085,8 @@ def _sweep(now: float) -> None:
             except OSError:
                 pass
             continue
+        if not is_session_record(entry):
+            continue   # not ours to age out (a file census did not write)
         if now - (_number(entry.get("updated_at")) or 0.0) > SESSION_TTL_SECONDS:
             _unlink(path)
     wall = time.time()
@@ -1036,6 +1124,8 @@ def ingest(raw: str, now: float | None = None) -> None:
 
 
 def _ingest(raw: str, now: float) -> None:
+    if census_dir_is_config():
+        return   # see census_dir_is_config: recording here would mingle with Claude Code's own registry
     migrate(now)
     payload = json.loads(raw)
     if not isinstance(payload, dict):
@@ -1202,7 +1292,7 @@ def read_view(
     *, session: str | None = None, worktree: str | None = None, limits_only: bool = False, every_account: bool = False
 ) -> Any:
     """What ``census read`` prints (before it is JSON): the one place that picks the view, shared by the CLI and by
-    vitals, which reads census in-process instead of running it. ``limits_only`` wins, then ``session``, then
+    in-process readers. ``limits_only`` wins, then ``session``, then
     ``worktree``, else the whole store."""
     if limits_only:
         return all_limits() if every_account else limits()

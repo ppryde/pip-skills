@@ -6,6 +6,8 @@ import { GH_TIMEOUT_MS, ghArgv, ghKey, parsePrList, shouldRefresh, touchesPr } f
 import type { GhEntry, Why } from '../core/gh'
 import { COALESCE_MS as GIT_COALESCE_MS, GIT_DIR_ARGV, GIT_STATUS_ARGV, parseStatus, touchesGit, watchPaths, worktreeOf } from '../core/git'
 import { homeOf, joinPath } from '../core/home'
+import { HINT_CONFIRM_MS, applyPatch, gitOperationOf, hasDraftFlag, hintPrNumber, markStale, patchFor, payloadPrOf, prKey, prPrefix, repoOf, toPr } from '../core/prstate'
+import type { PrRecord } from '../core/prstate'
 import { configRoot, transcriptPathFor } from '../core/name'
 import { PYTHON_CANDIDATES, cacheLinesFromText, copyModeArgv, moveArgv, pickPython, removeArgv, titleLinesFromText } from '../core/portable'
 import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
@@ -23,7 +25,7 @@ import type { Counters, RateLimit, Snap } from '../core/types'
 // session.start (which re-fires on a reload) rebuilds them. Nothing is kept in $.state, so a /clear
 // has nothing to wipe and classic.SessionStart(clear) simply binds the new session.
 
-type Env = CensusEnv & RenderEnv & { USERPROFILE?: string; CENSUS_MOD_PLACEMENT?: string }
+type Env = CensusEnv & RenderEnv & { USERPROFILE?: string; CENSUS_MOD_PLACEMENT?: string; CENSUS_MOD_PR_HINT?: string }
 
 let env: Env = {} // what the mod runs on: the environment, then the answers laid over it
 let rawEnv: Env = {} // the environment alone: it outranks an answer
@@ -50,9 +52,10 @@ let gitTimer: Timer | null = null
 let lastGitAt: number | null = null
 let cli: string | null | undefined // census-mod's own bundled recorder, once found there
 let saidNoCli = false
-let python: string[] | null | undefined // the launcher that ran --version, once; null = none found
+let python: string[] | null | undefined // the launcher that passed the Python 3.9+ probe, once; null = none found
 let shell: boolean | undefined // whether `sh` runs here (it does not on Windows)
 let saidNoGh = false
+const repoByDir = new Map<string, string | null>() // working dir -> owner/name of origin (null = none), asked once per dir
 
 const TICK_MS = 30_000
 
@@ -71,6 +74,7 @@ async function loadEnv($: EngineInterface): Promise<Env> {
     HOMEPATH: await $.env.get('HOMEPATH'),
     CENSUS_STATUSLINE_SEGMENTS: await $.env.get('CENSUS_STATUSLINE_SEGMENTS'),
     CENSUS_MOD_PLACEMENT: await $.env.get('CENSUS_MOD_PLACEMENT'),
+    CENSUS_MOD_PR_HINT: await $.env.get('CENSUS_MOD_PR_HINT'),
     CENSUS_STATUSLINE_MASCOT: await $.env.get('CENSUS_STATUSLINE_MASCOT'),
     CLAUDE_COST_BUDGET: await $.env.get('CLAUDE_COST_BUDGET'),
     CLAUDE_PROFILE: await $.env.get('CLAUDE_PROFILE'),
@@ -208,7 +212,7 @@ async function discover($: EngineInterface): Promise<string | null> {
   return null
 }
 
-/** `python3`, `python` or `py -3`, the first that runs `--version`; asked once per process. null: none, said once in the log. */
+/** `python3`, `python` or `py -3`, the first that passes the Python 3.9+ probe; asked once per process. null: none, said once in the log. */
 async function pythonLauncher($: EngineInterface, budgetMs = INGEST_TIMEOUT_MS): Promise<string[] | null> {
   if (python !== undefined) return python
   // Three probes share the hook's budget (a session.end has little): too little left, and the probe waits for a later ingest.
@@ -317,7 +321,7 @@ async function runGit($: EngineInterface) {
   const before = snap.git
   snap.git = r && r.exitCode === 0 ? parseStatus(r.stdout) : null
   if (before?.branch !== snap.git?.branch) {
-    snap.pr = null
+    snap.pr = await prFromEvents($) // a PR the mod saw on this branch (any session) draws at once; else none until gh says
     // The first sight of a branch is not a change of it.
     if (before !== null) record($, 'branch')
     scheduleGh($, before === null ? 'start' : 'branch')
@@ -330,22 +334,31 @@ function scheduleGh($: EngineInterface, why: Why) {
   $.clock.after(0, () => void refreshGh($, why).catch(() => undefined))
 }
 
-async function refreshGh($: EngineInterface, why: Why) {
-  if (!eff.pr) return // answered No: gh is never called
+/** What a lookup came to: `answered` = gh spoke (a PR or none), `failed` = it did not and nothing changed, `skipped` = not asked. */
+type GhOutcome = 'answered' | 'failed' | 'skipped' | 'no-branch'
+
+/** `manual` (/census-mod:pr-refresh) asks once whatever the PR answer is; every other trigger needs it Yes. */
+async function refreshGh($: EngineInterface, why: Why): Promise<GhOutcome> {
+  if (!eff.pr && why !== 'manual') return 'skipped' // the PR answer is No (the default): gh is never called on its own
   await hydrating // the worktree path gh runs in is read there
-  if (!snap?.git?.branch || snap.git.detached) return
+  if (!snap?.git?.branch || snap.git.detached) return 'no-branch'
   const key = ghKey(snap.worktreePath ?? snap.cwd, snap.git.branch)
   const branch = snap.git.branch
   const now = await nowMs($)
   const cached = (await $.store.get(key).catch(() => undefined)) as GhEntry | undefined
-  if (cached) snap.pr = cached.pr
-  if (!shouldRefresh(why, cached, now, lastActiveAt)) return
+  if (cached) {
+    const recorded = await recordedPr($)
+    snap.pr = recorded === undefined ? cached.pr : recorded
+  } // a record that says "not open" (null) beats the gh cache; no record (undefined) falls back to it
+  if (!shouldRefresh(why, cached, now, lastActiveAt)) return 'skipped'
   const before = snap.pr
   let entry: GhEntry
+  let answered = false
   try {
     const r = await $.process.run(ghArgv(branch), { cwd: snap.worktreePath ?? snap.cwd, timeoutMs: GH_TIMEOUT_MS })
     const pr = r.exitCode === 0 ? parsePrList(r.stdout) : undefined
     entry = pr === undefined ? { at: cached?.at ?? 0, pr: cached?.pr ?? null, failedAt: now } : { at: now, pr }
+    answered = pr !== undefined
   } catch {
     if (!saidNoGh) {
       saidNoGh = true
@@ -354,14 +367,170 @@ async function refreshGh($: EngineInterface, why: Why) {
     entry = { at: cached?.at ?? 0, pr: cached?.pr ?? null, failedAt: now }
   }
   await $.store.set(key, entry).catch(() => undefined)
-  if (!snap || snap.git?.branch !== branch) return
-  snap.pr = entry.pr
-  if (before?.number !== entry.pr?.number || before?.reviewState !== entry.pr?.reviewState) record($, 'pr')
+  if (!snap || snap.git?.branch !== branch) return answered ? 'answered' : 'failed'
+  // Only an answer is a word about the PR: a failed or backed-off gh must not reopen or refresh a record.
+  if (answered) await recordGhAnswer($, branch, entry, now)
+  // One precedence decides every draw (events > status-line pr > gh), as on the tick; no record falls back to the cache.
+  const recorded = await recordedPr($)
+  if (!snap) return answered ? 'answered' : 'failed'
+  snap.pr = recorded === undefined ? entry.pr : recorded
+  if (before?.number !== snap.pr?.number || before?.reviewState !== snap.pr?.reviewState) record($, 'pr')
   repaint($)
+
+  return answered ? 'answered' : 'failed'
 }
+
+// ---- PR state from tool events (WF-269) ---------------------------------------------------------
+// The engine reports `gitOperation` on a Bash result: a created, readied, closed or merged PR and a push. That is
+// kept per repo+branch in $.store (shared by every session of the account), so the PR segment needs no gh call and
+// works with the PR setting off. gh, where it is on, only adds the review state and what happened outside the session.
+
+/** `owner/name` of the origin of the directory the session works in; null when there is none. Asked once per directory. */
+async function repoName($: EngineInterface): Promise<string | null> {
+  if (!snap) return null
+  const dir = snap.worktreePath ?? snap.cwd
+  if (repoByDir.has(dir)) return repoByDir.get(dir) ?? null
+  const r = await $.process.run(['git', 'remote', 'get-url', 'origin'], { cwd: dir, timeoutMs: 5000 }).catch(() => undefined)
+  const repo = r && r.exitCode === 0 ? repoOf(r.stdout) : null
+  repoByDir.set(dir, repo)
+
+  return repo
+}
+
+const currentBranch = (): string | null => (snap?.git?.branch && !snap.git.detached ? snap.git.branch : null)
+
+async function readRecord($: EngineInterface, key: string): Promise<PrRecord | undefined> {
+  const got = (await $.store.get(key).catch(() => undefined)) as PrRecord | undefined
+
+  return got && typeof got === 'object' && typeof got.number === 'number' ? got : undefined
+}
+
+/** The drawn PR of the current branch from its record; null when the record says none; undefined when there is no record. */
+async function recordedPr($: EngineInterface): Promise<Snap['pr'] | undefined> {
+  const branch = currentBranch()
+  if (!branch) return undefined
+  const repo = await repoName($)
+  const rec = repo ? await readRecord($, prKey(repo, branch)) : undefined
+  const now = await nowMs($)
+  // The session's own events outrank the status-line payload's pr, which outranks gh.
+  if (rec?.source === 'event') return toPr(rec, now)
+  const line = await payloadPr($, branch, now)
+  if (line) return line
+
+  return rec ? toPr(rec, now) : undefined
+}
+
+/** The pr a status-line COMMAND wrote into this session's census record (census's ingest keeps it as `status_line_pr`). */
+async function payloadPr($: EngineInterface, branch: string, now: number): Promise<Snap['pr']> {
+  const sid = snap?.sessionId
+  const dir = censusDir(rawEnv)
+  if (!sid || !dir || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(sid)) return null
+  const text = await $.fs.read(joinPath(dir, 'sessions', `${sid}.json`)).catch(() => undefined)
+
+  return typeof text === 'string' ? payloadPrOf(text, now, branch) : null
+}
+
+/** The drawn PR of the current branch from its record; null when the record says none (or there is none). */
+async function prFromEvents($: EngineInterface): Promise<Snap['pr']> {
+  return (await recordedPr($)) ?? null
+}
+
+/** Every record of the repo, so a PR can be found by number whatever branch the command ran on. */
+async function recordsOf($: EngineInterface, repo: string): Promise<{ key: string; rec: PrRecord }[]> {
+  const keys = ((await $.store.keys().catch(() => [])) as string[]).filter(k => k.startsWith(prPrefix(repo)))
+  const out: { key: string; rec: PrRecord }[] = []
+  for (const key of keys) {
+    const rec = await readRecord($, key)
+    if (rec) out.push({ key, rec })
+  }
+
+  return out
+}
+
+/** Re-derive the snapshot's PR after a record moved, and record the change. */
+async function pushPrToSnap($: EngineInterface, always = true) {
+  if (!snap) return
+  const before = snap.pr
+  const after = await prFromEvents($)
+  if (!snap) return
+  snap.pr = after
+  const changed = before?.number !== after?.number || before?.reviewState !== after?.reviewState || before?.stale !== after?.stale
+  if (changed) record($, 'pr')
+  if (always || changed) repaint($)
+}
+
+/** One Bash result's `gitOperation`: a PR action updates (or, when created, starts) the record; a push marks it stale. */
+async function applyGitOperation($: EngineInterface, result: unknown, command: string) {
+  const op = gitOperationOf(result)
+  if (!op || !snap) return
+  const repo = await repoName($)
+  if (!repo || !snap) return
+  const now = await nowMs($)
+  const ctx = { sessionId: snap.sessionId, worktree: snap.worktreePath ?? snap.cwd }
+  if (op.pr) {
+    const all = await recordsOf($, repo)
+    const byNumber = all.filter(r => r.rec.number === op.pr!.number).sort((a, b) => b.rec.at - a.rec.at)[0]
+    const branch = currentBranch()
+    // By number first; the current branch only for a creation (`gh pr close N` can run from any branch).
+    const key = byNumber?.key ?? (op.pr.action === 'created' && branch ? prKey(repo, branch) : null)
+    if (key) {
+      const next = applyPatch(byNumber?.rec, patchFor(op.pr, hasDraftFlag(command)), now, ctx)
+      if (next) await $.store.set(key, next).catch(() => undefined)
+    }
+  }
+  if (op.push) {
+    const key = prKey(repo, op.push.branch)
+    const old = await readRecord($, key)
+    if (old) await $.store.set(key, markStale(old)).catch(() => undefined)
+  }
+  await pushPrToSnap($)
+}
+
+/** gh's answer for the branch, as the newest word in its record. An empty answer closes an event record only once it has had time to be listed. */
+async function recordGhAnswer($: EngineInterface, branch: string, entry: GhEntry, now: number): Promise<void> {
+  const repo = await repoName($)
+  if (!repo) return
+  const key = prKey(repo, branch)
+  const old = await readRecord($, key)
+  const ctx = { sessionId: snap?.sessionId ?? '', worktree: snap?.worktreePath ?? snap?.cwd ?? '', source: 'gh' as const }
+  let next: PrRecord | undefined = old
+  if (entry.pr) {
+    next = applyPatch(old, { number: entry.pr.number, ...(entry.pr.url ? { url: entry.pr.url } : {}), state: 'open', ...(entry.pr.reviewState ? { review: entry.pr.reviewState } : old?.review === 'draft' || old?.review === 'pending' ? { review: null } : {}), lastAction: 'gh' }, now, ctx)
+  } else if (old && old.state === 'open' && !(old.source === 'event' && now - old.at < GH_LISTING_GRACE_MS)) {
+    next = applyPatch(old, { number: old.number, state: 'closed', lastAction: 'gh' }, now, ctx)
+  }
+  if (next && next !== old) await $.store.set(key, next).catch(() => undefined)
+}
+
+const GH_LISTING_GRACE_MS = 2 * 60_000
 
 async function readGitDir($: EngineInterface, cwd: string) {
   return $.process.run(GIT_DIR_ARGV, { cwd }).then(r => ({ exitCode: r.exitCode, stdout: r.stdout })).catch(() => ({ exitCode: 1, stdout: '' }))
+}
+
+/**
+ * Opt-in (CENSUS_MOD_PR_HINT): the engine's prompt hint names the branch's open PR as `PR #N`. That is the engine's own
+ * word, so it confirms an OPEN record of that number (clears "unconfirmed", keeps the record's own source) and nothing
+ * else: it never closes or reopens one (the hint lags a close by seconds), and never starts one (it carries no url).
+ */
+let hintConfirmedAt = 0
+async function confirmFromHint($: EngineInterface, hint: unknown) {
+  const number = hintPrNumber(hint)
+  const branch = currentBranch()
+  if (number === null || !branch || !snap) return
+  const now = await nowMs($)
+  if (now - hintConfirmedAt < HINT_CONFIRM_MS) return
+  const repo = await repoName($)
+  if (!repo || !snap) return
+  const key = prKey(repo, branch)
+  const old = await readRecord($, key)
+  if (!old || old.number !== number || old.state !== 'open') return
+  hintConfirmedAt = now
+  if (!old.stale && now - old.at < HINT_CONFIRM_MS) return
+  const ctx = { sessionId: snap.sessionId, worktree: snap.worktreePath ?? snap.cwd, source: old.source }
+  const next = applyPatch(old, { number, state: 'open', lastAction: 'hint' }, now, ctx)
+  if (next) await $.store.set(key, next).catch(() => undefined)
+  await pushPrToSnap($)
 }
 
 // ---- lifecycle -----------------------------------------------------------------------------
@@ -394,6 +563,7 @@ function armTimers($: EngineInterface) {
   tickTimer = $.clock.every(TICK_MS, () => {
     repaint($)
     scheduleGh($, 'age')
+    void pushPrToSnap($, false).catch(() => undefined) // a status-line command may have written a pr since
   })
   armCold($)
 }
@@ -558,21 +728,37 @@ const readBackup = async ($: EngineInterface, path: string): Promise<string | nu
   return typeof text === 'string' && text.trim() ? text : null
 }
 
-const writeSettings = async ($: EngineInterface, path: string, text: string): Promise<boolean> => {
-  // Through a symlink to its target (a dotfiles repo), never replacing the link; a temp file beside the
-  // target, started as a copy so the mode survives, then renamed over it: a reader never sees half a file.
+/**
+ * Write `text` over `path`, which `expected` is the text it was derived from. Nothing is written when the file no
+ * longer holds `expected` (Claude Code or another session changed it since we read it): their edit is never lost.
+ * POSIX: a unique temp file beside the target (started as a copy so the mode survives), re-checked, then renamed
+ * over it, so a reader never sees half a file. Windows has no rename to call (cmd would parse the path), so the
+ * file is written in place, read back, and put back as it was if what is there is not what we wrote.
+ */
+const writeSettings = async ($: EngineInterface, path: string, text: string, expected: string): Promise<boolean> => {
+  // Through a symlink to its target (a dotfiles repo), never replacing the link.
   const target = (await $.fs.stat(path, { resolve: true }).catch(() => undefined))?.realPath ?? path
-  const tmp = settingsTmp(target)
-  if (!moveArgv(tmp, target)) {
-    // Windows: no shell to rename with (cmd would parse the path), so the file is written in place.
-    return $.fs.write(target, text).then(() => true, () => false)
+  const unchanged = async (): Promise<boolean> => (await $.fs.read(target).catch(() => undefined)) === expected
+  if (!moveArgv(path, target)) {
+    if (!(await unchanged())) return false
+    try {
+      await $.fs.write(target, text)
+      if ((await $.fs.read(target).catch(() => undefined)) === text) return true
+    } catch {
+      // fall through to the put-back
+    }
+    await $.fs.write(target, expected).catch(() => undefined) // a torn write: the file as it was
+    return false
   }
+  const tmp = settingsTmp(target, `${(await $.session.id().catch(() => 'x')).slice(0, 8)}-${await nowMs($)}`)
   try {
     const copy = copyModeArgv(target, tmp) // keeps the mode on POSIX; a Windows file has none
     if (copy) await $.process.run(copy).catch(() => undefined)
     await $.fs.write(tmp, text)
-    const mv = await $.process.run(moveArgv(tmp, target)!)
-    if (mv.exitCode === 0) return true
+    if (await unchanged()) {
+      const mv = await $.process.run(moveArgv(tmp, target)!)
+      if (mv.exitCode === 0) return true
+    }
   } catch {
     // fall through to the cleanup
   }
@@ -604,7 +790,7 @@ async function removeOwnStatusLine($: EngineInterface): Promise<{ done: boolean;
     say($, `🧭 census-setup: could not write the backup ${backup}, so I left your status line alone`)
     return { done: false }
   }
-  if (!(await writeSettings($, path, r.text))) {
+  if (!(await writeSettings($, path, r.text, text))) {
     say($, `🧭 census-setup: could not write ${path}, so I left your status line alone`)
     return { done: false }
   }
@@ -623,7 +809,7 @@ async function turnOff($: EngineInterface) {
     const text = await $.fs.read(path).catch(() => undefined)
     const r = restoreStatusLine(typeof text === 'string' ? text : '', backup)
     if (r.done === 'restored') {
-      if (await writeSettings($, path, r.text)) {
+      if (await writeSettings($, path, r.text, typeof text === 'string' ? text : '')) {
         await removeFile($, backupPath)
         lines.push(`your status line is back in ${path}`)
       } else lines.push(`could not write ${path}: your status line is still backed up in ${backupPath}`)
@@ -736,13 +922,12 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   if (setupRun !== run) return
   setupRun = null
   say($, '🧭 census-mod is set up', [
-    `recording: ${eff.record === 'yes' ? 'into census (the real store)' : eff.record === 'shadow' ? `shadow store ${eff.shadowDir ?? ''} — the dashboards and vitals do not read it; run /census-setup and answer Yes to record into census itself` : 'off'}`,
+    `recording: ${eff.record === 'yes' ? 'into census (the real store)' : eff.record === 'shadow' ? `shadow store ${eff.shadowDir ?? ''} — the dashboards do not read it; run /census-setup and answer Yes to record into census itself` : 'off'}`,
     `band: ${drawOn ? `on, ${eff.placement === 'below' ? 'below the input' : 'above the input'}, ${PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
-    `PR segment (gh): ${saved.pr === false ? 'off, gh is never called' : 'on'}`,
+    `PR segment: ${eff.pr ? 'on, with gh lookups' : 'gh is never called (run /census-mod:pr-refresh to ask it once); PRs this session creates, readies or merges still show'}`,
     ...(removed ? [`your status line was removed from settings.json; it is backed up in ${removed}`] : []),
     ...(keptForShadow ? ['your status line was kept: CENSUS_MOD_STORE makes census-mod record to a shadow store, so the status line is still the real store\'s writer. Unset it and run /census-setup again to replace it'] : []),
     'undo any time: /census-setup off (it restores a removed status line exactly), or /census-setup to answer again',
-    '📊 /census-mod:vitals shows this session on your phone',
   ])
 }
 
@@ -819,6 +1004,7 @@ export const register: Register = on => {
     if (!interactive) return r
     await quietly(async () => {
       await $.command.register({ name: 'census-setup', description: 'Guided census-mod setup: record, draw, layout, gh. `off` stops it.', argumentHint: '[off]' }).catch(() => undefined)
+      await $.command.register({ name: 'pr-refresh', description: "Ask gh once for this branch's open PR (number, review state) and record it." }).catch(() => undefined)
       rawEnv = await loadEnv($)
       env = { ...rawEnv }
       await bind($, await $.session.id(), e.cwd, null, 'session.start')
@@ -958,12 +1144,30 @@ export const register: Register = on => {
       const call = e as unknown as { tool: string; command?: unknown }
       lastActiveAt = await nowMs($)
       if (touchesGit(call.tool)) scheduleGit($)
-      if (call.tool === 'Bash' && typeof call.command === 'string' && touchesPr(call.command)) scheduleGh($, 'push')
+      if (call.tool === 'Bash' && typeof call.command === 'string') {
+        await applyGitOperation($, (r as { result?: unknown }).result, call.command)
+        if (touchesPr(call.command)) scheduleGh($, 'push')
+      }
     })
     return r
   })
 
-  // The ending session's last word: runs under the chain's shared budget, so it carries its own timeout.
+  // One gh lookup on demand, whatever the PR answer is; a failure changes nothing (refreshGh's rules).
+  on('command.run', { command: 'pr-refresh' }, async $ => {
+    if (!interactive || !snap) return { text: 'census-mod: no session to look up a PR for.' }
+    const branch = currentBranch()
+    const got: { outcome: GhOutcome } = { outcome: 'failed' }
+    await quietly(async () => {
+      if (Object.keys(rawEnv).length === 0) { rawEnv = await loadEnv($); env = { ...rawEnv } }
+      got.outcome = await refreshGh($, 'manual')
+    })
+    const pr = snap?.pr
+    if (got.outcome === 'no-branch') return { text: 'census-mod: this session is not on a branch (detached or no git), so there is no PR to look up.' }
+    if (got.outcome !== 'answered') return { text: `census-mod: gh did not answer (is it installed and logged in?), so nothing changed${pr ? `; still showing PR #${pr.number}` : ''}.` }
+
+    return { text: pr ? `census-mod: PR #${pr.number}${pr.reviewState ? ` (${pr.reviewState})` : ''} is open on ${branch ?? 'this branch'}.` : `census-mod: no open PR on ${branch ?? 'this branch'}.` }
+  })
+
   on('command.run', { command: 'census-setup' }, async ($, e) => {
     const args = ((e as unknown as { args?: string }).args ?? '').trim()
     if (args === 'off') {
@@ -977,6 +1181,7 @@ export const register: Register = on => {
     return { text: '🧭 census-setup: a few questions follow.' }
   })
 
+  // The ending session's last word: runs under the chain's shared budget, so it carries its own timeout.
   on('session.end', async ($, e, next) => {
     await quietly(async () => {
       if (interactive && snap && snap.sessionId === e.sessionId) {
@@ -1012,6 +1217,7 @@ export const register: Register = on => {
   // lines; a tree without `inner` would put row one on the pill's line. Drawn while typing and while working too.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
     const inner = await next(e)
+    if (eff.prHint && interactive && snap) await quietly(() => confirmFromHint($, (e.props as { hint?: unknown }).hint))
     if (!interactive || !snap || !eff.draw || eff.placement !== 'below') return inner
     const columns = e.viewport?.columns ?? DEFAULT_COLUMNS
     const lines = (await statusLines($)).map(l => fit(l, columns))

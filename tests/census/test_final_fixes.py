@@ -19,7 +19,7 @@ CLI = Path("/opt/plugins/census/scripts/cli.py")
 
 def _census_files(data: Path) -> None:
     (data / "sessions").mkdir(parents=True)
-    (data / "sessions" / "s1.json").write_text("{}")
+    (data / "sessions" / "s1.json").write_text('{"version": 2, "updated_at": 1.0, "payload": {}}')
     for name in ("limits.json", "status.json", "status.json.lock", "status.json.v1-migrated",
                  ".migrate.lock", ".limits.abc.tmp"):
         (data / name).write_text("")

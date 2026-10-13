@@ -95,6 +95,8 @@ def report(active: bool = True) -> dict[str, Any]:
             "census-mod is installed — use /census-setup instead; install one or the other "
             "(census and census-mod are alternatives)."
         )
+    if st.census_dir_is_config():
+        notes.append(st.census_dir_is_config_message())
     return {
         "notes": notes,
         "config_dir": str(config),
@@ -104,8 +106,6 @@ def report(active: bool = True) -> dict[str, Any]:
         "settings_valid": valid,
         "status_line": command if isinstance(command, str) else None,
         "plugin_root": str(plugin_root),
-        # whether THIS census ships /census:vitals: asked of the census a caller found, not guessed from a path
-        "vitals": (Path(__file__).resolve().parent / "vitals.py").is_file(),
         "census_installs": _installs(cache, "census", "scripts/cli.py"),
         "enabled_census": {k: v for k, v in enabled.items() if isinstance(k, str) and k.startswith("census@")},
         "census_mod": {

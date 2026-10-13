@@ -105,12 +105,13 @@ export function writerActive(entries: { updatedAt: number; hasCensusMod: boolean
 
 // ---- settings: env > $.store > defaults ----------------------------------------------------------
 
-export type SetupEnv = HomeEnv & { CENSUS_MOD_STORE?: string; CENSUS_STATUSLINE_SEGMENTS?: string; CENSUS_MOD_PLACEMENT?: string }
-export type Effective = { record: RecordMode; shadowDir: string | null; draw: boolean; placement: Placement; segments: string | undefined; pr: boolean }
+export type SetupEnv = HomeEnv & { CENSUS_MOD_STORE?: string; CENSUS_STATUSLINE_SEGMENTS?: string; CENSUS_MOD_PLACEMENT?: string; CENSUS_MOD_PR_HINT?: string }
+export type Effective = { record: RecordMode; shadowDir: string | null; draw: boolean; placement: Placement; segments: string | undefined; pr: boolean; prHint: boolean }
 
 /**
  * Before any answer: record to the real store ONLY if this account's status line does not carry the
- * census ingest block (else a second writer would share the store), draw yes, gh yes. An answer replaces
+ * census ingest block (else a second writer would share the store), draw yes, gh NO (opt-in; an install that
+ * answered Yes keeps it). An answer replaces
  * the default; an environment variable replaces both.
  */
 export function effective(saved: Saved, env: SetupEnv, det: Detection, configRoot: string | null): Effective {
@@ -131,7 +132,8 @@ export function effective(saved: Saved, env: SetupEnv, det: Detection, configRoo
     // An install that never answered stays where it was (above); the question recommends below for new ones.
     placement: ((p: string | undefined): Placement | null => (p === 'above' || p === 'below' ? p : null))(env.CENSUS_MOD_PLACEMENT?.trim().toLowerCase()) ?? saved.placement ?? 'above',
     segments: envSegments || (saved.preset ? PRESETS[saved.preset] : undefined),
-    pr: saved.pr ?? true,
+    pr: saved.pr ?? false,
+    prHint: /^(1|true|on|yes)$/i.test(env.CENSUS_MOD_PR_HINT?.trim() ?? ''),
   }
 }
 
@@ -146,9 +148,9 @@ export const L = {
   exStop: "Stop — I'll disable census first",
   exGo: 'Continue anyway (two writers)',
   recReplace: 'Replace my status line — census-mod records and draws it',
-  recYes: 'Yes — record into census (dashboards, vitals and liveness use it)',
+  recYes: 'Yes — record into census (dashboards and liveness use it)',
   recShadow: "Shadow — record into a separate store to compare; dashboards won't see it",
-  recNo: "No — don't record (dashboards and vitals won't see this account)",
+  recNo: "No — don't record (dashboards won't see this account)",
   recNoFed: 'No — leave recording to my status line (it keeps feeding census)',
   recNoOther: "No — don't record (whatever else writes keeps feeding census)",
   drawBelow: "Yes — below the input, under Claude Code's hint line",
@@ -160,8 +162,8 @@ export const L = {
   presetTwo: 'Your two lines',
   presetCompact: 'Compact — one line',
   presetMinimal: 'Minimal — context, limits / git',
-  prYes: 'Yes',
-  prNo: "No — never call gh",
+  prYes: 'Yes — look up with gh',
+  prNo: "No — no gh lookups (PRs this session makes still show)",
 } as const
 
 const rec = (s: string, on: boolean) => (on ? `${s}${REC}` : s)
@@ -184,8 +186,8 @@ export const Q = {
    * records into the real store.
    */
   record: (det: Detection, shadowByEnv = false): Question => {
-    const readers = 'the overseer dashboard, /census-mod:vitals and session liveness'
-    const OVERSEER = 'the overseer dashboard, /census-mod:vitals and liveness'
+    const readers = 'the overseer dashboard and session liveness'
+    const OVERSEER = 'the overseer dashboard and liveness'
     if (det.ingestBlock && shadowByEnv) {
       return {
         header: '📝 Record',
@@ -235,8 +237,8 @@ export const Q = {
   }),
   pr: (): Question => ({
     header: '🔀 PR',
-    question: "Show the branch's open PR (number, review state) using gh? No means gh is never called.",
-    options: [rec(L.prYes, true), L.prNo],
+    question: "Look up the branch's open PR (number, review state) using gh? No means gh is never called; PRs this session creates, readies or merges still show, and /census-mod:pr-refresh asks gh once on demand.",
+    options: [rec(L.prNo, true), L.prYes],
   }),
 }
 
@@ -315,7 +317,8 @@ export function restoreStatusLine(text: string, backupText: string | null): Rest
   return { done: 'restored', text: serialise({ ...p.data, statusLine: backup.statusLine }, text) }
 }
 
-export const settingsTmp = (path: string): string => `${path}.census-mod.tmp`
+/** A temp name no other setup shares: the session and the moment are in it (two sessions can run /census-setup at once). */
+export const settingsTmp = (path: string, tag: string): string => `${path}.census-mod.${tag}.tmp`
 
 /** An existing backup holding a DIFFERENT status line than the one about to be removed: keep it, refuse the removal. */
 export function backupBlocks(existing: string | null, newBackup: string): boolean {
