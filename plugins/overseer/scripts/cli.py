@@ -362,38 +362,6 @@ def _flush_notes(notes: "list[str]") -> None:
         print(line, file=sys.stderr)
 
 
-def _ensure_wrapper(repo_root: Path) -> "Path | None":
-    """Write ``<state>/ov``, the short wrapper for this repo's CLI (WF-283), and
-    return its path; None when the state root does not exist yet or a path cannot
-    be quoted into it. Rewritten when it differs from the generated text, so a
-    plugin update or a hand edit never leaves a stale or forged copy in place
-    (the guard accepts only the generated shape)."""
-    try:
-        state = state_root(repo_root)
-        if not state.is_dir():
-            return None
-        text = guard.wrapper_text(
-            Path(sys.executable), Path(__file__).resolve(),
-            (derive_repo_root(repo_root) or repo_root).resolve())
-        path = state / guard.WRAPPER_NAME
-        if not path.is_symlink() and path.is_file() and path.read_text() == text \
-                and os.access(path, os.X_OK):
-            return path
-        tmp = state / f".{guard.WRAPPER_NAME}.tmp"
-        tmp.write_text(text)
-        tmp.chmod(0o755)
-        tmp.replace(path)
-        return path
-    except (OSError, ValueError):
-        return None
-
-
-def _announce_wrapper(repo_root: Path) -> None:
-    path = _ensure_wrapper(repo_root)
-    if path is not None:
-        print(f"short form: {path} <verb> [flags]", file=sys.stderr)
-
-
 def _views(repo_root: Path) -> None:
     """Refresh the sprint/knowledge file views after a write (best effort)."""
     views.export(_conn(repo_root), state_root(repo_root))
@@ -761,7 +729,6 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     _flush_notes(notes)
     _stamp_orchestrator(args.root, card.id)
     print(f"{card.id} {card.stage} · {branch} · {path} (base {base})")
-    _announce_wrapper(args.root)
     return 0
 
 
@@ -1807,7 +1774,6 @@ def cmd_resume(args: argparse.Namespace) -> int:
         print(json.dumps(entries, indent=2))
     else:
         print(format_report(entries, session_id=args.session_id) + _context_footer(args.root))
-        _announce_wrapper(args.root)
     return 0
 
 
@@ -1818,6 +1784,9 @@ def cmd_conflicts(args: argparse.Namespace) -> int:
         cards = [c for c in cards if c.sprint == args.sprint]
     conflicts = find_conflicts(cards)
     if args.card:
+        if not any(c.id == args.card for c in cards):
+            print(f"error: no such card {args.card}", file=sys.stderr)
+            return 1
         conflicts = [(a, b, paths) for a, b, paths in conflicts if args.card in (a, b)]
     if args.count:
         others = sorted({c for a, b, _ in conflicts for c in (a, b)} - {args.card}) if args.card else []
@@ -2259,6 +2228,10 @@ def cmd_facts(args: argparse.Namespace) -> int:
             p for p in load_pending(conn)
             if p.status == "pending" and (not args.card or p.card == args.card)
         ]
+        if args.count:
+            print(json.dumps({"count": len(pending_rows)}) if args.json
+                  else f"{len(pending_rows)} pending")
+            return 0
         if args.json:
             print(json.dumps([asdict(p) for p in pending_rows], indent=2))
             return 0

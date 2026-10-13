@@ -130,7 +130,7 @@ class TestReviewLoop:
                    review(self.S, 1, "A", "approved"), review(self.S, 1, "B", "approved", m=2))
         assert "impl-review r1: A approved, B approved 0C/0I" not in out  # no noise for approvals
         assert "impl-review r1: A approved, B approved" in out
-        assert "--stage verification --role verifier --advance" in out
+        assert '--stage verification --role verifier --var gate_commands="…" --advance' in out
 
     def test_found_wanting_sends_a_fixer(self):
         out = line(card(self.S), sent(self.S, 1, "A"), sent(self.S, 1, "B"),
@@ -174,12 +174,35 @@ class TestReviewLoop:
         assert "--role fixer --round 1" in out
 
 
+class TestReviewFollowUps:
+    def test_gate_commands_ride_on_implementer_verifier_and_fixer_calls(self):
+        var = '--var gate_commands="…"'
+        assert var in line(card("implementation"))
+        assert var in line(card("verification"))
+        wanting = line(card("impl-review"), sent("impl-review", 1, "A"),
+                       review("impl-review", 1, "A", "found wanting", i=1))
+        assert var in wanting
+        assert var not in line(card("planning"))  # planner and reviewers take none
+
+    def test_rework_after_a_failed_verification_is_a_fresh_chunk(self):
+        body = "## Progress log\n- t — chunk 1 — DONE tests 1/1 a (~1k tokens)\n- t — chunk 2 — DONE tests 1/1 b (~1k tokens)"
+        out = line(card("verification", body=body), ev("verification", "verify", status="FAIL"))
+        assert "--role implementer --chunk 3" in out
+
+    def test_every_pending_reviewer_is_named_and_re_run(self):
+        s = "impl-review"
+        out = line(card(s, "L"), sent(s, 1, "A"), sent(s, 1, "B"), sent(s, 1, "C"))
+        assert "3 pending: A, B, C" in out
+        for slot in "ABC":
+            assert f"--role reviewer --slot {slot} --round 1" in out
+
+
 def test_the_line_is_one_line():
     for st in ("planning", "plan-review", "implementation", "impl-review", "verification"):
         assert "\n" not in line(card(st))
 
 
-def test_the_orchestrate_skill_teaches_next_panel_and_the_short_form():
+def test_the_orchestrate_skill_teaches_next_panel():
     from pathlib import Path
 
     skill = (Path(__file__).resolve().parents[2] / "plugins" / "overseer" / "skills"
@@ -188,4 +211,3 @@ def test_the_orchestrate_skill_teaches_next_panel_and_the_short_form():
     block = skill.split("<!-- cli:begin -->", 1)[1].split("<!-- cli:end -->", 1)[0]
     assert "\nnext <card-id>" in block and "[--panel]" in block
     assert "**`next <id>`**" in flat and "`--panel`: `agent model path` per slot" in flat
-    assert "short form: <path>" in flat

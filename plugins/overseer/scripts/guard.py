@@ -57,16 +57,6 @@ _SCRATCH_WRITE_HEADS = {"cat", "echo", "printf", "tee"}
 # Interpreter flags that take no argument and do not change which file runs.
 _PY_FLAGS = {"-I", "-u", "-B", "-E", "-s", "-S", "-O", "-OO", "-q"}
 _CLI_MANIFEST_NAMES = {"overseer", "vigil"}
-# The short wrapper ``bootstrap`` writes into the state root (``<state>/ov``): it
-# saves the orchestrator the ``python3 .../cli.py --root .`` prefix on every call.
-# The state root is writable by the orchestrator (scratch writes), so the guard
-# approves the file only when its text is EXACTLY the generated shape and it
-# execs a ledger CLI the guard already trusts.
-WRAPPER_NAME = "ov"
-_WRAPPER_RE = re.compile(
-    r"""\A#!/bin/sh\nexec '(?P<py>/[^'\n]*)' '(?P<cli>/[^'\n]*)' --root '(?P<root>/[^'\n]*)' "\$@"\n\Z"""
-)
-_MAX_WRAPPER_BYTES = 2048
 _MSG_SUBSTITUTION = (
     "GUARD: live command substitution ($(...), backticks, <(...)) — put the text in a file "
     "and pass --text-file / --brief-file, pipe it with --text - / --brief - and a quoted "
@@ -207,39 +197,6 @@ def find_sibling_cli(name: str) -> Path | None:
     if not found:
         return None
     return max(found, key=lambda item: item[0])[1]
-
-
-def wrapper_text(python: Path, cli: Path, repo_root: Path) -> str:
-    """The wrapper script's text; ``is_wrapper`` accepts only this shape."""
-    for part in (python, cli, repo_root):
-        if "'" in str(part) or "\n" in str(part) or not str(part).startswith("/"):
-            raise ValueError(f"cannot quote {part!r} into the {WRAPPER_NAME} wrapper")
-    return f"#!/bin/sh\nexec '{python}' '{cli}' --root '{repo_root}' \"$@\"\n"
-
-
-def is_wrapper(word: str, cwd: object, state: Path) -> bool:
-    """Is ``word`` the generated ``<state>/ov`` wrapper: that exact path (no
-    symlink, no relative trick), a regular file, in the exact generated shape,
-    exec'ing an interpreter-named binary and a ledger CLI ``is_cli`` trusts."""
-    path = expand_user(word)
-    if path is None:
-        return False
-    if not path.is_absolute():
-        if not isinstance(cwd, str) or not cwd:
-            return False
-        path = Path(cwd) / path
-    expected = state / WRAPPER_NAME
-    if os.path.normpath(str(path)) != str(expected) or expected.is_symlink():
-        return False
-    try:
-        if not expected.is_file() or expected.stat().st_size > _MAX_WRAPPER_BYTES:
-            return False
-        match = _WRAPPER_RE.match(expected.read_text())
-    except (OSError, UnicodeDecodeError):
-        return False
-    if match is None or not Path(match["py"]).name.startswith("python"):
-        return False
-    return is_cli(Path(os.path.realpath(match["cli"])))
 
 
 def tilde_ok(word: str) -> bool:
@@ -557,8 +514,6 @@ def bash_check(
                 # unknowable and relative CLI paths are denied.
                 trusted = before in (";", "\n") and cmd.sep in (";", "\n", "&&", "")
                 cur_cwd = _cd_target(words, globs, cur_cwd) if trusted else None
-            continue
-        if head == WRAPPER_NAME and roots and is_wrapper(words[0], cur_cwd, roots[0]):
             continue
         if head == "git":
             rest = words[1:]

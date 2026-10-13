@@ -20,6 +20,7 @@ from scripts.gates import PLAN_PENDING, Evidence, cap_for
 from scripts.models import Card
 
 AGENT_PREFIX = "overseer:overseer-"
+GATE_ROLES = ("implementer", "verifier", "fixer")
 LENSES = ("correctness", "spec-compliance", "maintainability/security")
 _CHUNK_RE = re.compile(r"— chunk (\d+) —")
 
@@ -75,6 +76,8 @@ def _prep(card: Card, stage: str, role: str, *, round_no: "int | None" = None,
         parts.append(f"--lens {slot.lens}")
     if chunk is not None:
         parts.append(f"--chunk {chunk}")
+    if role in GATE_ROLES:
+        parts.append('--var gate_commands="…"')  # the repo's gates, as SKILL.md says to pass
     if advance:
         parts.append("--advance")
     target = f"{AGENT_PREFIX}{role}"
@@ -148,10 +151,10 @@ def _review_loop(card: Card, stage: str, ev: "Sequence[Evidence]") -> "tuple[str
         return state, _prep(card, stage, "reviewer", round_no=1, panel_=True)
     state = f" r{r.number}: {_verdicts(r)}"
     if r.pending:
-        slot = next((s for s in panel(card, r.number) if s.slot == r.pending[0]), None) \
-            or Slot(r.pending[0], None, "sonnet")
-        return (f"{state} (cap {cap})",
-                _prep(card, stage, "reviewer", round_no=r.number, slot=slot))
+        known = {s.slot: s for s in panel(card, r.number)}
+        calls = [_prep(card, stage, "reviewer", round_no=r.number,
+                       slot=known.get(p) or Slot(p, None, "sonnet")) for p in r.pending]
+        return f"{state} ({len(r.pending)} pending: {', '.join(r.pending)}; cap {cap})", "; ".join(calls)
     if r.open_findings:
         if r.number >= cap:
             return (f"{state} (cap {cap} reached)",
@@ -183,7 +186,8 @@ def _verification(card: Card, ev: "Sequence[Evidence]") -> "tuple[str, str]":
     if status == "PASS":
         return "verification: PASS", f"set-stage {card.id} awaiting-merge"
     return f"verification: {status or 'not PASS'}", (
-        "rework: " + _prep(card, "implementation", "implementer", chunk=1, advance=True))
+        "rework: " + _prep(card, "implementation", "implementer", chunk=_chunks_done(card) + 1,
+                           advance=True))
 
 
 def _chunks_done(card: Card) -> int:

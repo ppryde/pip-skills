@@ -113,3 +113,15 @@ def test_agent_definitions_show_the_short_form(role):
 def test_the_bounce_message_shows_the_short_shape(role):
     shape = json.loads(EXPECTED_SHAPE[role].replace("|", "/"))
     assert not IDENTITY & set(shape)
+
+
+def test_a_numeric_slot_stays_a_string():
+    _, short = CASES["reviewer"]
+    report = parse_report("reviewer", {**short, "detail": f"{D}/impl-review/r1-2.md"})
+    assert report.slot == "2" and report.round == 1
+
+
+def test_a_reviewer_report_on_the_fixers_reply_file_is_rejected():
+    _, short = CASES["reviewer"]
+    with pytest.raises(ReportError, match="fixer's reply file"):
+        parse_report("reviewer", {**short, "detail": f"{D}/impl-review/r1-fix.md"})

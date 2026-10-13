@@ -22,8 +22,7 @@ python3 "<base directory>/../../scripts/cli.py" --root . <verb> [flags]
 ```
 
 Never `find`, `locate` or `which` it (a `find /` once cost 120 s). The guard accepts this
-exact form. No `VAR=value` prefixes, no `$var` words. `bootstrap` and `resume`
-print `short form: <path>`: use `<path> <verb> [flags]` from then on.
+exact form. No `VAR=value` prefixes, no `$var` words.
 
 **Free text** with backticks or `$(...)` never goes in a double-quoted
 argument (denied as live substitution): use `--brief-file` / `--text-file`, or

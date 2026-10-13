@@ -208,7 +208,7 @@ def _with_identity(obj: dict, role: str) -> dict:
     named = pattern.match(Path(detail).name) if pattern else None
     if named:
         for key, value in named.groupdict().items():
-            filled.setdefault(key, int(value) if value.isdigit() else value)
+            filled.setdefault(key, int(value) if key in ("round", "chunk") else value)
     return filled
 
 
@@ -307,6 +307,8 @@ def _parse_reviewer(obj: dict) -> ReviewerReport:
     stage = _check_str(obj, "stage", errors)
     round_no = _check_int(obj, "round", errors)
     slot = _check_str(obj, "slot", errors)
+    if slot == "fix":  # the fixer's reply file (r<N>-fix.md), reserved by bundle.reply_name
+        errors.append("field 'slot' cannot be 'fix': that is the fixer's reply file, not a reviewer's")
     status = _check_str(obj, "status", errors)
     _check_enum(status, "status", _STATUS["reviewer"], errors)
     counts = _check_counts(obj, ("critical", "important", "minor"), errors)

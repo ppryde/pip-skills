@@ -277,9 +277,7 @@ preps every reviewer slot of a round and prints `agent model path` per line.
 `show --json` no longer repeats the body (`--full` restores it) and `board --json`
 drops each card's `body` and `checklist` unless `--full` (the dashboard asks for
 `--full`); `conflicts` takes `--card`/`--count`, `facts` takes `--count`.
-`bootstrap` and `resume` write `<state>/ov`, a two-line wrapper the guard approves
-only in its exact generated shape, so each call drops the `python3 .../cli.py --root .`
-prefix. The `overseer-report` block is `status`, `counts`/`tests`/`commits`, `detail`
+The `overseer-report` block is `status`, `counts`/`tests`/`commits`, `detail`
 and `learned`: card, stage, round, slot and chunk are read off the `detail` path (the
 long form still parses). The guard denies `run_in_background: true` for `overseer:*`
 agents.

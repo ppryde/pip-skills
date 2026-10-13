@@ -125,6 +125,10 @@ class TestConflictsSlim:
         run(crowd, "conflicts", "--count", "--card", "WF-001", "--json")
         assert json.loads(out(capsys)) == {"count": 2, "with": ["WF-002", "WF-003"]}
 
+    def test_unknown_card_is_an_error(self, crowd, capsys):
+        assert run(crowd, "conflicts", "--card", "WF-404") == 1
+        assert "no such card WF-404" in capsys.readouterr().err
+
     def test_default_output_is_unchanged(self, crowd, capsys):
         run(crowd, "conflicts")
         assert len(out(capsys).strip().splitlines()) == 2
@@ -150,6 +154,12 @@ class TestFactsCount:
     def test_count_json(self, facts, capsys):
         run(facts, "facts", "--count", "--json")
         assert json.loads(out(capsys)) == {"count": 3, "stale": 0, "tags": {"a": 2, "b": 1}}
+
+    def test_count_of_no_pending_facts_is_zero(self, repo, capsys):
+        assert run(repo, "facts", "--pending", "--count") == 0
+        assert capsys.readouterr().out.strip() == "0 pending"
+        run(repo, "facts", "--pending", "--count", "--json")
+        assert json.loads(capsys.readouterr().out) == {"count": 0}
 
     def test_default_listing_is_unchanged(self, facts, capsys):
         run(facts, "facts")

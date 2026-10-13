@@ -57,7 +57,7 @@ class TestNextVerb:
         run(repo, "next", "WF-001")
         text = capsys.readouterr().out
         assert "plan-review r1: A approved, B found wanting 0C/2I (cap 3)" in text
-        assert "--role fixer --round 1 → overseer:overseer-fixer sonnet" in text
+        assert '--role fixer --round 1 --var gate_commands="…" → overseer:overseer-fixer sonnet' in text
 
     def test_unknown_card(self, repo, capsys):
         assert run(repo, "next", "WF-404") == 1
