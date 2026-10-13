@@ -2278,11 +2278,11 @@ def cmd_facts(args: argparse.Namespace) -> int:
             "status": effective,
         })
     if args.count:
-        tags: dict[str, int] = {}
+        histogram: dict[str, int] = {}
         for r in rows:
             for t in r["tags"]:
-                tags[t] = tags.get(t, 0) + 1
-        ordered = dict(sorted(tags.items(), key=lambda kv: (-kv[1], kv[0])))
+                histogram[t] = histogram.get(t, 0) + 1
+        ordered = dict(sorted(histogram.items(), key=lambda kv: (-kv[1], kv[0])))
         stale = sum(1 for r in rows if r["status"] == "stale")
         if args.json:
             print(json.dumps({"count": len(rows), "stale": stale, "tags": ordered}))

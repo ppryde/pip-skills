@@ -38,7 +38,7 @@ def test_bootstrap_writes_an_executable_wrapper_the_guard_accepts(repo, capsys):
 def test_the_wrapper_runs_a_verb_against_that_repo(repo):
     main(["--root", str(repo), "bootstrap", "--title", "T", "--complexity", "S"])
     done = subprocess.run([str(_wrapper(repo)), "show", "WF-001"], capture_output=True, text=True,
-                          cwd="/", env=os.environ.copy())
+                          cwd="/", env=os.environ.copy(), check=False)
     assert done.returncode == 0, done.stderr
     assert done.stdout.startswith("WF-001")
 
