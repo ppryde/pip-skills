@@ -107,10 +107,10 @@ def _conn(repo_root: Path) -> sqlite3.Connection:
     (``scripts.board``, ``scripts.index``, ``scripts.resume``) each open
     their own short-lived ``db.connect(repo_root)`` connection by design —
     they're read-mostly report builders, not part of the single-writer card
-    path this cache exists for. Those connections are plain locals with no
-    explicit ``close()``; CPython's refcounting closes them (via
-    ``sqlite3.Connection.__del__``) as soon as the enclosing function
-    returns and the reference drops.
+    path this cache exists for. ``scripts.index`` closes its connection
+    explicitly. ``scripts.board`` and ``scripts.resume`` leave theirs to
+    refcounting (``sqlite3.Connection.__del__``), which is acceptable because
+    each runs in a short-lived, read-only CLI process.
     """
     key = str(repo_root.resolve())
     conn = _CONN_CACHE.get(key)
