@@ -6,6 +6,7 @@
 - Card: {{card_id}} — {{title}}
 - This round's verdict files — fix ALL Critical and Important findings across all of them:
 {{verdict_paths}}
+{{plan_fix}}
 - Worktree: {{worktree}}
 - Gate commands: {{gate_commands}}
 - Binding constraints: {{constraints}}

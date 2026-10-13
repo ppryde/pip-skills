@@ -50,3 +50,9 @@ def test_reply_example_parses(role):
     example_message = f"```overseer-report\n{match.group(1)}\n```"
     report = parse_report_message(role, example_message)
     assert report.card and report.stage
+
+
+def test_fixer_definition_routes_plan_fixes_through_set_section():
+    """WF-288: plan.snapshot.md is read-only; plan fixes go to the card via set-section."""
+    _, body = _load("fixer")
+    assert "set-section" in body and "plan.snapshot.md" in body and "read-only" in body

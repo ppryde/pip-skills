@@ -217,3 +217,25 @@ def test_calibration_only_computed_for_the_planner(repo, capsys, monkeypatch):
     assert calls == []
     _prep(repo, capsys, "--stage", "planning", "--role", "planner")
     assert calls == [1]
+
+
+def test_plan_review_fixer_bundle_says_to_set_the_plan_section(repo, capsys):
+    """WF-288: a plan-stage fix must land in the card's ## Plan (set-section);
+    plan.snapshot.md is a read-only view, so editing it leaves reviewers on a stale plan."""
+    _prep(repo, capsys, "--stage", "plan-review", "--role", "fixer", "--round", "1")
+    d = dispatch_dir(repo, "WF-001", "plan-review")
+    text = (d / "bundle-fixer-r1.md").read_text()
+    assert "set-section WF-001 --section Plan --text-file" in text
+    assert "plan.snapshot.md" in text and "read-only" in text
+
+
+def test_impl_review_fixer_bundle_has_no_plan_instruction(repo, capsys):
+    _prep(repo, capsys, "--stage", "impl-review", "--role", "fixer", "--round", "1")
+    text = (dispatch_dir(repo, "WF-001", "impl-review") / "bundle-fixer-r1.md").read_text()
+    assert "set-section" not in text
+
+
+def test_plan_review_reviewer_bundle_calls_the_snapshot_read_only(repo, capsys):
+    _prep(repo, capsys, "--stage", "plan-review", "--role", "reviewer", "--slot", "A")
+    text = (dispatch_dir(repo, "WF-001", "plan-review") / "bundle-reviewer-A-r1.md").read_text()
+    assert "read-only" in text

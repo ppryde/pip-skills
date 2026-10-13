@@ -32,7 +32,7 @@ KNOWN_PLACEHOLDERS = (
     "card_id", "title", "stage", "round_no", "slot", "chunk_no", "goal", "complexity",
     "worktree", "reply_path", "cli", "knowledge", "calibration", "charter", "lens",
     "target_path", "prior_findings", "verdict_paths", "gate_commands", "constraints",
-    "repo_context",
+    "repo_context", "target_note", "plan_fix",
 )
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 _VAR_KEY = re.compile(r"\A\w+\Z")
@@ -171,12 +171,15 @@ def prepare(
         "prior_findings": _bullets(
             _files_for_rounds(directory, set(range(1, round_no)), include_fix=True)
         ),
+        "target_note": "",
+        "plan_fix": "",
         "verdict_paths": _bullets(_files_for_rounds(directory, {round_no}, include_fix=False)),
     }
     if role == "reviewer":
         if stage == "plan-review":
             target = directory / "plan.snapshot.md"
             target.write_text(sections.get("## Plan", ""))
+            values["target_note"] = " (a read-only snapshot of the card's ## Plan; do not edit it)"
         else:
             target = directory / "diff.patch"
             try:
@@ -187,6 +190,16 @@ def prepare(
             except gitops.GitError as exc:
                 raise BundleError(f"could not write the diff: {exc}") from exc
         values["target_path"] = str(target)
+    if role == "fixer" and stage == "plan-review":
+        # The reviewers read a snapshot taken from the card's ## Plan at dispatch time,
+        # so a fix applied to the snapshot file never reaches the next round (WF-288).
+        values["plan_fix"] = (
+            "- Plan fixes: the plan is the card's `## Plan` section; `plan.snapshot.md` in the "
+            "dispatch folder is a read-only view for reviewers and editing it fixes nothing. "
+            "Write the corrected full plan to a temp file, then run "
+            f"`{values['cli']} set-section {card.id} --section Plan --text-file <file>`; "
+            "the next round's snapshot is taken from it."
+        )
     if role in KNOWLEDGE_ON_REQUEST:
         # Opt in with `--var knowledge=1`; otherwise the bundle carries no facts.
         if variables.pop("knowledge", "") != "1":
