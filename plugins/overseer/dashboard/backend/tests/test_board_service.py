@@ -67,6 +67,12 @@ def test_is_lan_client():
     assert not _is_lan_client("not-an-ip")
 
 
+def test_is_lan_client_checks_the_ipv4_inside_a_6to4_address():
+    # 2002::/16 is "private" to ipaddress, but the address embeds an IPv4.
+    assert not _is_lan_client("2002:0808:0808::1")   # 8.8.8.8
+    assert _is_lan_client("2002:c0a8:0105::1")       # 192.168.1.5
+
+
 def test_strip_root_flags():
     assert _strip_root_flags(["--root", "/x", "board"]) == ["board"]
     assert _strip_root_flags(["--root=/x", "board"]) == ["board"]
@@ -90,6 +96,31 @@ def test_invoked_verb():
     assert _invoked_verb(["--session-id", "s", "claim", "WF-1"]) == "claim"
     assert _invoked_verb(["--session-id=s", "board"]) == "board"
     assert _invoked_verb([]) is None
+
+
+def test_invoked_verb_skips_every_value_taking_global_option():
+    # Guard the coupling with cli.py: a new global option that takes a value
+    # must be skipped by _invoked_verb, or its value reads as the verb and a
+    # denied verb slips past. --root/--remote never get this far (stripped).
+    import importlib.util
+    import sys
+
+    cli_path = board_service._OVERSEER_CLI
+    sys.path.insert(0, str(cli_path.parents[1]))
+    try:
+        spec = importlib.util.spec_from_file_location("overseer_cli_for_guard", cli_path)
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+    finally:
+        sys.path.pop(0)
+    parser = cli.build_parser()
+    for action in parser._actions:
+        if not action.option_strings or action.nargs == 0:
+            continue  # positional, or a flag with no value (-h)
+        opt = action.option_strings[0]
+        if opt in board_service._STRIPPED_FLAGS:
+            continue
+        assert _invoked_verb([opt, "x", "clear"]) == "clear", opt
 
 
 def test_exec_runs_verb_end_to_end(root: Path):
@@ -215,3 +246,17 @@ def test_exec_oserror_maps_to_500(root: Path, monkeypatch):
     with _client(app) as c:
         r = c.post("/api/exec", json={"argv": ["board"], "stdin": None})
     assert r.status_code == 500
+
+
+def test_exec_does_not_inherit_overseer_remote(root: Path, monkeypatch):
+    # An exported OVERSEER_REMOTE would re-supply the --remote the strip removed.
+    monkeypatch.setenv("OVERSEER_REMOTE", "http://127.0.0.1:1")
+    monkeypatch.setenv("OVERSEER_REMOTE_TOKEN", "t")
+    app = create_service_app(root, token=None)
+    with _client(app) as c:
+        r = c.post("/api/exec", json={"argv": ["new-card", "--title", "Local"], "stdin": None})
+    assert r.json()["returncode"] == 0
+    assert "WF-001" in r.json()["stdout"]
+    with _client(app) as c:
+        shown = c.post("/api/exec", json={"argv": ["show", "WF-001", "--json"], "stdin": None})
+    assert "Local" in shown.json()["stdout"]   # the LOCAL board was mutated

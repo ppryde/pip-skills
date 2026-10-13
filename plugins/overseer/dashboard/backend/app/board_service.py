@@ -13,6 +13,7 @@ exactly as the dashboard backend's cli_client already does.
 from __future__ import annotations
 
 import ipaddress
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -51,6 +52,9 @@ def _is_lan_client(host: str | None) -> bool:
         ip = ipaddress.ip_address(host)
     except ValueError:
         return False
+    # A 6to4 (2002::/16) or IPv4-mapped address is judged by the IPv4 inside it.
+    if isinstance(ip, ipaddress.IPv6Address):
+        ip = ip.sixtofour or ip.ipv4_mapped or ip
     return ip.is_private or ip.is_loopback or ip.is_link_local
 
 
@@ -131,6 +135,9 @@ def create_service_app(root: Path, *, host: str = "0.0.0.0", token: str | None =
         try:
             proc = subprocess.run(
                 [sys.executable, str(_OVERSEER_CLI), "--root", str(pinned_root), *argv],
+                # cli.py defaults --remote from these; the strip above must hold.
+                env={k: v for k, v in os.environ.items()
+                     if k not in ("OVERSEER_REMOTE", "OVERSEER_REMOTE_TOKEN")},
                 input=req.stdin,
                 capture_output=True,
                 text=True,

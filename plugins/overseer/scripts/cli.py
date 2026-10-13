@@ -2381,6 +2381,8 @@ def build_parser() -> argparse.ArgumentParser:
     # (SSRF + token exfil). Rejecting abbreviations fails loud instead. argparse
     # never abbreviates subcommand NAMES, so verb matching is unaffected.
     parser = argparse.ArgumentParser(prog="overseer", description=__doc__, allow_abbrev=False)
+    # A new global option that takes a value must also be skipped by
+    # dashboard/backend/app/board_service.py `_invoked_verb` (guarded by its test).
     parser.add_argument("--root", type=Path, default=Path("."))
     parser.add_argument(
         "--session-id", dest="session_id", default=None,

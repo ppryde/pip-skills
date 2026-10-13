@@ -125,6 +125,25 @@ def add_claude_dir(path: Path) -> list[str]:
     return _update_claude_dirs(lambda listed: listed if entry in listed else [*listed, entry])
 
 
+def watch_from(source_config_dir: Path, target_config_dir: Path) -> None:
+    """Make `source_config_dir`'s machine config watch `target_config_dir`
+    (`add_claude_dir`, but into another account's file)."""
+    path = source_config_dir.joinpath(*MACHINE_CONFIG_RELPATH)
+    try:
+        cfg = json.loads(path.read_text() or "{}") if path.exists() else {}
+    except json.JSONDecodeError:
+        return  # a malformed file is for `overseer claude-dirs` to report
+    if not isinstance(cfg, dict):
+        return
+    listed = [str(p) for p in (cfg.get("claude_dirs") or []) if p]
+    entry = str(target_config_dir.expanduser().resolve())
+    if entry not in listed:
+        cfg["claude_dirs"] = [*listed, entry]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(cfg, indent=2) + "\n")
+        store.memo_reset()
+
+
 def remove_claude_dir(path: Path) -> list[str]:
     target = path.expanduser().resolve()
     return _update_claude_dirs(

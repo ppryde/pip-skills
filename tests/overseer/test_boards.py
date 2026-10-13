@@ -345,3 +345,16 @@ class TestMergeFactIdCollision:
         assert rows["mine"]["id"] == "KB-001"
         assert len({r["id"] for r in rows.values()}) == 3
         assert rows["theirs"]["superseded_by"] == rows["theirs two"]["id"]
+
+
+class TestMergeMakesWatchingMutual:
+    def test_absorbed_account_resolves_to_the_merged_board(self, tmp_path, monkeypatch):
+        primary, personal, repo = _setup(tmp_path, monkeypatch)
+        _board_under(personal, repo, monkeypatch, [make_card("WF-2")])
+        active = _board_under(primary, repo, monkeypatch, [make_card("WF-1")])
+        config.add_claude_dir(personal)  # one-way: primary watches personal
+        boards.merge_boards(repo)
+
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(personal))
+        assert config.central_root(repo) == active
+        assert len(boards.find_boards(repo)) == 1

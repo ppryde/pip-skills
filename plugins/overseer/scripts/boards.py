@@ -337,6 +337,10 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
             renamed = folder.with_name(f"{folder.name}.absorbed-{stamp}")
             if not dry_run:
                 folder.rename(renamed)
+                # Watching becomes mutual: the account the folder lived under
+                # must now resolve to the merged board, not a fresh empty one.
+                if folder.parent.name == target_folder.parent.name == "overseer":
+                    config.watch_from(folder.parent.parent, target_folder.parent.parent)
             result["absorbed"].append({
                 "from": str(folder),
                 "renamed_to": str(renamed),

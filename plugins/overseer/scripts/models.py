@@ -57,17 +57,34 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
     return meta, match.group(2)
 
 
+def find_section(lines: list[str], header: str) -> tuple[int, int] | None:
+    """(start, end) line indexes of the `## ` section `header`, or None. Lines
+    inside a ``` or ~~~ code fence are never headings."""
+    fence: str | None = None
+    start: int | None = None
+    for i, line in enumerate(lines):
+        marker = line.lstrip()[:3]
+        if fence is not None:
+            if marker == fence:
+                fence = None
+            continue
+        if marker in ("```", "~~~"):
+            fence = marker
+        elif start is None:
+            if line == header:
+                start = i
+        elif line.startswith("## "):
+            return start, i
+    return None if start is None else (start, len(lines))
+
+
 def append_to_section(body: str, header: str, content: str) -> str:
     """Insert content at the end of the named `## ` section, creating it if absent."""
     lines = body.split("\n")
-    if header not in lines:
+    found = find_section(lines, header)
+    if found is None:
         return f"{body.rstrip()}\n\n{header}\n{content}"
-    start = lines.index(header)
-    end = len(lines)
-    for i in range(start + 1, len(lines)):
-        if lines[i].startswith("## "):
-            end = i
-            break
+    start, end = found
     while end - 1 > start and lines[end - 1].strip() == "":
         end -= 1
     lines.insert(end, content)
@@ -400,13 +417,11 @@ class Card:
             demoted.append(text)
         new = "\n".join(demoted)
         lines = self.body.split("\n")
-        if header not in lines:
+        found = find_section(lines, header)
+        if found is None:
             self.body = f"{self.body.rstrip()}\n\n{header}\n{new}".lstrip("\n")
         else:
-            start = lines.index(header)
-            end = start + 1
-            while end < len(lines) and not lines[end].startswith("## "):
-                end += 1
+            start, end = found
             tail = lines[end:]
             self.body = "\n".join([*lines[: start + 1], new, *([""] if tail else []), *tail])
         self.updated = now
