@@ -117,7 +117,7 @@ test('another writer alone brings Shadow (recommended) but not Replace', async (
 test('answers map back to values, recommendation marker or not', async () => {
   for (const o of Q.record(NO_DETECTION).options) expect(recordFrom(o)).not.toBeNull()
   expect(Q.record(NO_DETECTION).options.map(recordFrom)).toEqual(['yes', 'no'])
-  expect(Q.preset().options.map(presetFrom)).toEqual(['two', 'compact', 'minimal'])
+  expect(Q.preset().options.map(presetFrom)).toEqual(['two', 'compact', 'minimal', 'clean'])
   expect(Q.writers(true, false).options.map(writersFrom)).toEqual(['remove', 'keep', 'both'])
   expect(Q.writers(false, false).options.map(writersFrom)).toEqual(['keep', 'both']) // no band to replace it: no removal on offer
   expect(recordFrom('something else')).toBeNull()
@@ -279,4 +279,11 @@ test('the budget: the environment, then the saved answer, then $20', async () =>
   expect(effective({ budget: 50 }, { CLAUDE_COST_BUDGET: '75' }, NO_DETECTION, CFG).budget).toBe(75)
   expect(effective({ budget: 50 }, { CLAUDE_COST_BUDGET: '5oops' }, NO_DETECTION, CFG).budget).toBe(50) // not a budget: falls through
   expect(effective({}, { CLAUDE_COST_BUDGET: '' }, NO_DETECTION, CFG).budget).toBe(20)
+})
+
+test('the Clean layout preset: its label, its id and its segment spec; Full stays the recommended default', async () => {
+  expect(Q.preset().options).toEqual(['Full — two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git', 'Clean — one plain line'])
+  expect(presetFrom('Clean — one plain line')).toBe('clean')
+  expect(PRESETS.clean).toBe('clean')
+  expect(effective({ preset: 'clean' }, {}, NO_DETECTION, CFG).segments).toBe('clean')
 })

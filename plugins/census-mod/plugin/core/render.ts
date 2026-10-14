@@ -26,6 +26,8 @@ export type RenderInput = {
   ctxPct: number | null
   cache: { hitRatio: number | null; requests: number; warm: boolean; expiresAt: number | null; misses: number }
   limits: Record<string, { used_percentage: number; resets_at: number } | undefined>
+  /** The context window's size in tokens, when known (the Clean preset shows used/size). */
+  ctxWindow?: number | null
   costUsd: number | null
   durationMs: number | null
   modelName: string | null
@@ -175,8 +177,47 @@ function segPr(i: RenderInput): Line[] {
   return [line]
 }
 
+// ---- Clean: one plain line, `🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x` ----------------
+
+/** 85000 -> 85k, 1000000 -> 1M, 1250000 -> 1.3M. */
+export function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${String(Math.round((n / 1_000_000) * 10) / 10)}M`
+  if (n >= 1000) return `${Math.round(n / 1000)}k`
+  return String(Math.round(n))
+}
+
+/** used% over the share of the window gone (resets_at is when it ends); null when under 1% has gone or the reset is not inside the window. */
+export function paceMultiplier(usedPct: number, resetsAt: number, windowSec: number, now: number): number | null {
+  const elapsed = 1 - (resetsAt - now) / windowSec
+  if (!(elapsed >= 0.01) || elapsed > 1) return null
+  return usedPct / (elapsed * 100)
+}
+
+const CLEAN_SEPARATOR: Run = { t: ' | ', tone: 'grey' }
+
+function cleanWindow(i: RenderInput, key: 'five_hour' | 'seven_day', emoji: string, label: string, windowSec: number): Run[] | null {
+  const w = i.limits[key]
+  if (!w || w.resets_at <= i.now) return null // absent, or an expired window: a fossil
+  const shown = roundHalfEven(w.used_percentage)
+  const pace = paceMultiplier(w.used_percentage, w.resets_at, windowSec, i.now)
+  return [{ t: `${emoji} ${label} ` }, { t: `${shown}%`, tone: levelTone(shown) }, ...(pace === null ? [] : [{ t: ` ${pace.toFixed(1)}x` }])]
+}
+
+function segClean(i: RenderInput): Line[] {
+  const parts: Run[][] = [[{ t: '🤖 ' }, { t: i.modelName || 'Claude', tone: 'cyan' }]]
+  if (i.ctxPct !== null) {
+    const shown = roundHalfEven(i.ctxPct)
+    const size = i.ctxWindow && i.ctxWindow > 0 ? i.ctxWindow : null
+    // The engine reports a percentage and the window, not a token count: used is their product.
+    parts.push([{ t: `🧠 ${size ? `${fmtTokens((i.ctxPct / 100) * size)}/${fmtTokens(size)} ` : ''}` }, { t: `${shown}%`, tone: levelTone(shown) }])
+  }
+  if (i.costUsd !== null) parts.push([{ t: `💵 $${i.costUsd.toFixed(2)}` }])
+  for (const w of [cleanWindow(i, 'five_hour', '🕔', '5h', 5 * 3600), cleanWindow(i, 'seven_day', '🗓️', '7d', 7 * 86400)]) if (w) parts.push(w)
+  return [parts.flatMap((p, k) => (k === 0 ? p : [CLEAN_SEPARATOR, ...p]))]
+}
+
 export const SEGMENTS: Record<string, (i: RenderInput) => Line[]> = {
-  context: segContext, cache: segCache, limits: segLimits, cost: segCost, model: segModel, git: segGit, dir: segDir, changes: segChanges, pr: segPr,
+  context: segContext, cache: segCache, limits: segLimits, cost: segCost, model: segModel, clean: segClean, git: segGit, dir: segDir, changes: segChanges, pr: segPr,
 }
 
 /** The configured segments as lines of names; `/` starts a new line, unknown names are dropped. */
@@ -223,10 +264,17 @@ export const lineWidth = (line: Line): number => displayWidth(plain(line))
 /** Drop whole trailing parts until the line fits `columns`; a lone part is kept (the surface truncates it). */
 export function fit(line: Line, columns: number): Line {
   const parts: Line[] = [[]]
+  const seps: Run[] = []
   for (const r of line) {
-    if (r === SEPARATOR) parts.push([])
-    else parts[parts.length - 1]?.push(r)
+    if (r === SEPARATOR || r === CLEAN_SEPARATOR) {
+      parts.push([])
+      seps.push(r)
+    } else parts[parts.length - 1]?.push(r)
   }
-  while (parts.length > 1 && lineWidth(parts.flatMap((p, k) => (k === 0 ? p : [SEPARATOR, ...p]))) > columns) parts.pop()
-  return parts.flatMap((p, k) => (k === 0 ? p : [SEPARATOR, ...p]))
+  const join = () => parts.flatMap((p, k) => (k === 0 ? p : [seps[k - 1] ?? SEPARATOR, ...p]))
+  while (parts.length > 1 && lineWidth(join()) > columns) {
+    parts.pop()
+    seps.pop()
+  }
+  return join()
 }

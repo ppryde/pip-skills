@@ -4,7 +4,7 @@ import type { HomeEnv } from './home'
 import { DEFAULT_BUDGET, DEFAULT_SEGMENTS, parseBudget } from './render'
 
 export type RecordMode = 'yes' | 'shadow' | 'no'
-export type Preset = 'two' | 'compact' | 'minimal'
+export type Preset = 'two' | 'compact' | 'minimal' | 'clean'
 export type Placement = 'above' | 'below'
 
 /** What the person answered, in $.store. Absent = not answered; the defaults below apply. */
@@ -28,6 +28,7 @@ export const PRESETS: Record<Preset, string> = {
   two: DEFAULT_SEGMENTS,
   compact: 'context,cache,limits,cost,model,git',
   minimal: 'context,limits/git',
+  clean: 'clean',
 }
 
 // ---- what is on this machine ------------------------------------------------------------------
@@ -166,6 +167,7 @@ export const L = {
   presetTwo: 'Full — two lines',
   presetCompact: 'Compact — one line',
   presetMinimal: 'Minimal — context, limits / git',
+  presetClean: 'Clean — one plain line',
   budget10: '$10',
   budget20: '$20',
   budget50: '$50',
@@ -241,7 +243,7 @@ export const Q = {
   preset: (): Question => ({
     header: '📐 Layout',
     question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)',
-    options: [rec(L.presetTwo, true), L.presetCompact, L.presetMinimal],
+    options: [rec(L.presetTwo, true), L.presetCompact, L.presetMinimal, L.presetClean],
   }),
   budget: (retry = false): Question => ({
     header: '💸 Budget',
@@ -276,6 +278,7 @@ export function presetFrom(answer: string): Preset | null {
   if (is(answer, L.presetTwo)) return 'two'
   if (is(answer, L.presetCompact)) return 'compact'
   if (is(answer, L.presetMinimal)) return 'minimal'
+  if (is(answer, L.presetClean)) return 'clean'
   return null
 }
 /** A budget answer: an option or Other text, an optional leading $, decimals allowed; null unless positive. */

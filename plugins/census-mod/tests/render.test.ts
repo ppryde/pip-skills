@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { TONE_COLOR, draw, displayWidth, fit, fmtReset, layout, levelTone, levelToneInv, lineWidth, pacBar, plain, roundHalfEven } from '../plugin/core/render'
+import { TONE_COLOR, draw, fmtTokens, paceMultiplier, displayWidth, fit, fmtReset, layout, levelTone, levelToneInv, lineWidth, pacBar, plain, roundHalfEven } from '../plugin/core/render'
 import type { RenderInput } from '../plugin/core/render'
 
 // The goldens below are census's own render.py output (NO_COLOR) for the same inputs.
@@ -143,4 +143,59 @@ test('the PR segment ends line two by default: 🔀 #N and the review state, gre
 test('the ✻ slot is two columns wide, so the model name lines up under emoji-led segments', async () => {
   expect(displayWidth('✻ ')).toBe(2)
   expect(displayWidth('✻  Opus')).toBe(displayWidth('🦾 Opus'))
+})
+
+// ---- the Clean preset: one plain line, " | " between segments ---------------------------------------------
+
+const CLEAN: RenderInput = {
+  ...FULL,
+  ctxPct: 42.5,
+  ctxWindow: 200_000,
+  costUsd: 1.37,
+  limits: {
+    five_hour: { used_percentage: 38, resets_at: NOW + 9450 }, // 47.5% of the window gone: 38 / 47.5 = 0.8x
+    seven_day: { used_percentage: 12, resets_at: NOW + 507_200 }, // about 16% gone: 0.7x
+  },
+  env: { CENSUS_STATUSLINE_SEGMENTS: 'clean' },
+}
+
+test('Clean draws the owner\'s example: model | context | cost | 5h pace | 7d pace, on one line', async () => {
+  expect(draw(CLEAN)).toHaveLength(1)
+  expect(text(CLEAN)).toBe('🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x')
+})
+
+test('token counts are k below a million and M from it', async () => {
+  expect(fmtTokens(85_000)).toBe('85k')
+  expect(fmtTokens(200_000)).toBe('200k')
+  expect(fmtTokens(412_300)).toBe('412k')
+  expect(fmtTokens(1_000_000)).toBe('1M')
+  expect(fmtTokens(1_250_000)).toBe('1.3M')
+  expect(fmtTokens(640)).toBe('640')
+  expect(text({ ...CLEAN, ctxPct: 41.2, ctxWindow: 1_000_000 })).toContain('🧠 412k/1M 41%')
+})
+
+test('the pace multiplier is used% over the share of the window gone', async () => {
+  expect(paceMultiplier(38, NOW + 2 * 3600, 5 * 3600, NOW)).toBe(0.6333333333333333) // 3 h of 5 gone: 38 / 60
+  expect(text({ ...CLEAN, limits: { five_hour: { used_percentage: 38, resets_at: NOW + 2 * 3600 } } })).toContain('🕔 5h 38% 0.6x')
+  expect(text({ ...CLEAN, limits: { five_hour: { used_percentage: 90, resets_at: NOW + 2 * 3600 } } })).toContain('🕔 5h 90% 1.5x')
+})
+
+test('no multiplier when under 1% of the window has gone or the reset is not inside the window', async () => {
+  const at = (resets_at: number) => text({ ...CLEAN, limits: { five_hour: { used_percentage: 5, resets_at } } })
+  expect(at(NOW + 5 * 3600 - 60)).toContain('🕔 5h 5%') // 1 minute in: under 1%
+  expect(at(NOW + 5 * 3600 - 60)).not.toContain('x')
+  expect(at(NOW + 6 * 3600)).not.toContain('x') // further out than the window is long
+  expect(paceMultiplier(5, NOW + 6 * 3600, 5 * 3600, NOW)).toBeNull()
+})
+
+test('a segment with no data is omitted with its separator; an account with no windows shows model | context | cost', async () => {
+  expect(text({ ...CLEAN, limits: {} })).toBe('🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37')
+  expect(text({ ...CLEAN, limits: { seven_day: CLEAN.limits.seven_day } })).toBe('🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 | 🗓️ 7d 12% 0.7x')
+  expect(text({ ...CLEAN, costUsd: null, ctxPct: null })).toBe('🤖 Opus 5.5 | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x')
+  expect(text({ ...CLEAN, ctxWindow: null })).toContain('🧠 42%') // no window size: the percentage alone
+  expect(text({ ...CLEAN, limits: { five_hour: { used_percentage: 38, resets_at: NOW - 5 } } })).not.toContain('5h') // an expired window is a fossil
+})
+
+test('Clean has no Pac-Man bars', async () => {
+  expect(text(CLEAN)).not.toMatch(/[ᗧ•$]{3}/)
 })

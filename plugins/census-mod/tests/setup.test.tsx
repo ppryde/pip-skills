@@ -47,7 +47,7 @@ test('the exact questions', async ($, on) => {
   expect(w.asks).toEqual([
     { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards and liveness use it) (Recommended)', "No — don't record (dashboards won't see this account)"] },
     { header: '🎛️ Draw', question: 'Should census-mod draw your status line, and where?', options: ["Yes — below the input, under Claude Code's hint line (Recommended)", 'Yes — above the input, in the band', 'No — record only, draw nothing'] },
-    { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Full — two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git'] },
+    { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Full — two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git', 'Clean — one plain line'] },
     { header: '💸 Budget', question: BUDGET_Q, options: ['$10', '$20 (Recommended)', '$50', '$100'] },
     { header: '🔀 PR', question: "Look up the branch's open PR (number, review state) using gh? No means gh is never called; PRs this session creates, readies or merges still show, and /census-mod:pr-refresh asks gh once on demand.", options: ["No — no gh lookups (PRs this session makes still show) (Recommended)", 'Yes — look up with gh'] },
   ])

@@ -991,6 +991,7 @@ async function statusLines($: EngineInterface): Promise<Line[]> {
   const input: RenderInput = {
     now,
     ctxPct: snap.ctxPct,
+    ctxWindow: snap.ctxWindow,
     cache: { hitRatio: c.lastRatio, requests: c.requests, warm: isWarm(c, snap.ttl, now * 1000), expiresAt: expires === null ? null : expires / 1000, misses: 0 },
     limits: rateLimitsOf(snap.rateLimits),
     costUsd: snap.costUsd,
