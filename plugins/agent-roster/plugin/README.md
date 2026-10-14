@@ -1,4 +1,6 @@
-# agent-roster
+# agent-roster (beta)
+
+> **Beta.** Works day to day, but expect rough edges and changes between versions.
 
 `/roster` opens a live pane of every Claude Code session on this machine: its tmux name, repo and branch, status and last prompt. You can open or kill a session from it.
 
