@@ -74,6 +74,7 @@ export type Pending = {
   followUp: string | null
   createdAt: number
   unattended?: boolean   // R3-06: the clear that follows is the mod's own; a reload offers it, never runs it
+  held?: string[]        // agent/notification prompts held for this handover's clear; released to the live session if the clear parks
   sent?: string[]        // WF-303: prompts the person sent while this handover was being written, verbatim
   archived?: string      // PROBES §15: the name the mod renamed `Archive: <it>` just before its clear
 }
@@ -101,7 +102,7 @@ export type EventKind =
   | 'arm' | 'disarm' | 'threshold' | 'bar' | 'handover.requested' | 'handover.written'
   | 'guard.wait' | 'guard.baseline' | 'clear.skipped' | 'clear' | 'resume' | 'resume.sent' | 'last_light.fired' | 'last_light.choice'
   | 'limit.latched' | 'limit.cleared' | 'limit.early_stop' | 'rc.answer' | 'setup'
-  | 'standdown' | 'rename' | 'archive' | 'last_light.skip' | 'last_light.off' | 'last_light.on' | 'last_light.dropped' | 'prompt.held' | 'unrequested.choice'
+  | 'standdown' | 'rename' | 'archive' | 'last_light.skip' | 'last_light.off' | 'last_light.on' | 'last_light.dropped' | 'prompt.held' | 'prompt.released' | 'unrequested.choice'
 
 export type EventRecord = { ts: string; session: string; kind: EventKind } & Record<string, unknown>
 

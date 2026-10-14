@@ -222,6 +222,17 @@ async function recordSent($: EngineInterface, text: string) {
   }
 }
 
+// Prompts held for a clear that then parked never reach the next session soon: give them back to this one.
+async function releaseHeld($: EngineInterface) {
+  const pending = await read($, pendingA)
+  if (!pending?.held?.length) return
+  const held = pending.held
+  const { held: _spent, ...rest } = pending
+  await savePending($, rest)
+  await log($, 'prompt.released', { count: held.length })
+  void submitWithRetry($, { text: held.join('\n\n') }, 500).catch(() => undefined)
+}
+
 function resumeSoon($: EngineInterface, prompt: { text: string; asUser?: true }, path: string | null, held: string | null) {
   void submitWithRetry($, prompt, 500)
     .then(outcome => (outcome === 'failed' ? resumeFailed($, path, held) : undefined))
@@ -292,6 +303,7 @@ async function dropParkedClear($: EngineInterface, pending: Pending, cause: 'hum
   lastWait = null
   await notify($, V.pendingOffer(pending.path))
   await log($, 'guard.wait', { reason: 'parked-dropped', cause })
+  await releaseHeld($)
 }
 
 // Setup asks through $.ui.ask, one step at a time: no prompt is submitted and nothing
@@ -728,6 +740,7 @@ async function tryClear($: EngineInterface) {
     lastWait = null
     await notify($, V.clearRejected)
     await log($, 'guard.wait', { reason: 'clear-error', error: String(err) }).catch(() => {})
+    await releaseHeld($).catch(() => {})
   }
 }
 
@@ -746,6 +759,7 @@ async function tryClearInner($: EngineInterface) {
     clearParked = true
     await notify($, autoOff ? V.clearSkippedAutoOff : V.clearSkippedAttended)
     await log($, 'clear.skipped', { reason: autoOff ? 'auto-off' : 'attended' })
+    await releaseHeld($)
     return
   }
   const gate = clearGate({
@@ -771,6 +785,7 @@ async function tryClearInner($: EngineInterface) {
       clearParked = true
       await notify($, V.clearRejected)
       await log($, 'guard.wait', { reason: 'clear-rejected' })
+      await releaseHeld($)
     } finally {
       clearInFlight = false
     }
@@ -782,7 +797,7 @@ async function tryClearInner($: EngineInterface) {
     await log($, 'guard.wait', { reason: gate.reason, recheckMs: gate.recheckMs })
   }
   if (gate.reason === 'countdown-start') await setCountdown($, now + (gate.recheckMs ?? 0))
-  if (gate.recheckMs === null) { clearParked = true; return }
+  if (gate.recheckMs === null) { clearParked = true; await releaseHeld($); return }
   retryTimer = $.clock.after(gate.recheckMs, () => { void tryClear($) })
 }
 
@@ -895,6 +910,7 @@ async function cancelCountdown($: EngineInterface) {
   lastWait = null
   await notify($, V.countdownCancelled)
   await log($, 'guard.wait', { reason: 'countdown-cancelled' })
+  await releaseHeld($)
 }
 
 async function showNudge($: EngineInterface, pct: number) {
@@ -1380,7 +1396,7 @@ export const register: Register = on => {
     let stale = false
     let noResume = false
     let sentCarried = false   // the resume message holds the prompts sent during the handover
-    const sentBlock = sentSection(pending.sent)
+    const sentBlock = sentSection([...(pending.sent ?? []), ...(pending.held ?? [])])
     // What happened after the handover was written rides with it; up to the cap it keeps the handover fresh.
     const msgs = oldTranscript === undefined ? null : await transcriptTail($, oldTranscript)
     const tail = msgs === null ? null : renderTail(msgs)
@@ -1446,8 +1462,8 @@ export const register: Register = on => {
     // A clear is on its way: an agent's or a notification's prompt would start a turn the clear then waits
     // behind. Hold it; it rides into the resume as a prompt sent during the handover (never lost: a full list lets it run).
     if (HOLD_ORIGINS.has(e.origin.kind) && !clearParked && pending && pending.resume && (pending.reason === 'threshold' || pending.reason === 'request')
-      && (pending.sent?.length ?? 0) < SENT_MAX && e.text.trim() && !e.text.trimStart().startsWith('/')) {
-      await recordSent($, e.text)
+      && (pending.sent?.length ?? 0) + (pending.held?.length ?? 0) < SENT_MAX && e.text.trim() && !e.text.trimStart().startsWith('/')) {
+      await savePending($, { ...pending, held: [...(pending.held ?? []), e.text] })
       await log($, 'prompt.held', { origin: e.origin.kind })
       return { drop: V.heldForClear }
     }

@@ -1514,13 +1514,14 @@ test('a notification during a pending clear is held, recorded, and carried into 
   await clearQueued($, w)
   const r = await $.prompt.submit(agent('agent X finished'))
   expect(r).toMatchObject({ drop: V.heldForClear })
-  expect(w.state.get(PENDING)).toMatchObject({ sent: ['agent X finished'] })
+  expect(w.state.get(PENDING)).toMatchObject({ held: ['agent X finished'] })
   w.clearHold.release()
   await w.clock.settle()
   w.sessionId.value = 's2'
   await $.classic.SessionStart({ source: 'clear' } as never)
   await w.clock.advance(500)
   expect(w.submits.at(-1)?.text).toContain('agent X finished')
+  expect(w.submits.filter(s => s.text.includes('agent X finished')).length).toBe(1)   // in the resume only, not re-submitted
 })
 
 test('the mod\'s own prompts, and any prompt with no clear-bound handover pending, pass', async ($, on) => {
