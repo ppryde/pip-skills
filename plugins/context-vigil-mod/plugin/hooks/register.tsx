@@ -230,7 +230,11 @@ async function releaseHeld($: EngineInterface) {
   const { held: _spent, ...rest } = pending
   await savePending($, rest)
   await log($, 'prompt.released', { count: held.length })
-  void submitWithRetry($, { text: held.join('\n\n') }, 500).catch(() => undefined)
+  // Never silently: a refused or overtaken submit shows the held text instead.
+  const text = held.join('\n\n')
+  void submitWithRetry($, { text }, 500)
+    .then(outcome => (outcome === 'sent' ? undefined : notify($, V.heldNotSent(text))))
+    .catch(err => timerFailed($, 'held-release', err))
 }
 
 function resumeSoon($: EngineInterface, prompt: { text: string; asUser?: true }, path: string | null, held: string | null) {
