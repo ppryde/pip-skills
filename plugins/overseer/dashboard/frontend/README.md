@@ -21,7 +21,7 @@ npm ci
 npm run dev       # Vite dev server with HMR — proxies /api/* to a running
                    # FastAPI backend on http://127.0.0.1:8770 (serve.py's
                    # default). Backend on another port? Set OVERSEER_API:
-                   #   OVERSEER_API=http://127.0.0.1:8771 npm run dev
+                   #   OVERSEER_API=http://127.0.0.1:9000 npm run dev
 ```
 
 So the hot-reload loop is: start the backend once

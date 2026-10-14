@@ -4,7 +4,7 @@ board API's ``--remote`` transport.
 httpx 0.28.1's ``ASGITransport`` is async-only and cannot be driven by the
 synchronous ``httpx.Client`` that ``exec_remote`` uses (see Task 2's sync
 bridge for the same wall). So these tests do not spin up a real
-``create_service_app`` and hit it over ASGI transport; instead they use
+served app and hit it over ASGI transport; instead they use
 ``httpx.MockTransport`` — a synchronous transport — to intercept the outgoing
 ``httpx.Request`` and return canned responses. This gives a thorough unit
 test of request-building (URL, headers, JSON body) and response/error

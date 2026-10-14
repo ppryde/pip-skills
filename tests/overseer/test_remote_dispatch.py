@@ -15,10 +15,10 @@ def test_remote_forwards_argv_and_relays(monkeypatch, capsys):
     monkeypatch.setenv("OVERSEER_REMOTE_TOKEN", "tok")
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)  # no stdin to read
 
-    rc = main(["--remote", "http://host.docker.internal:8771", "board"])
+    rc = main(["--remote", "http://host.docker.internal:8770", "board"])
 
     assert rc == 0
-    assert seen["url"] == "http://host.docker.internal:8771"
+    assert seen["url"] == "http://host.docker.internal:8770"
     assert seen["token"] == "tok"
     assert seen["argv"] == ["board"]          # --remote stripped, verb forwarded
     assert "WF-001" in capsys.readouterr().out

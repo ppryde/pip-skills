@@ -80,8 +80,8 @@ state root to serve, builds the FastAPI app via
 `backend/app/main.py::create_app`, opens `http://127.0.0.1:8770/` in your
 browser, and serves until you Ctrl-C it.
 
-For a dev container that needs to reach a board living on the host, run the
-LAN-only board API service instead — see `BOARD_API.md`.
+For a dev container that needs to reach a board living on the host, use the
+same server bound to `0.0.0.0` — see "Remote access from a dev container".
 
 Options:
 
@@ -117,6 +117,136 @@ transcripts already say. Reads (`GET /api/chronicle/{status,summary,sessions,ses
 take the same validated `root` as `/api/board`, or `scope=all` for the whole
 account. Every route degrades to an "unavailable" shape when the plugin is
 absent, and the button is simply not rendered. See `../../chronicle/README.md`.
+
+## Remote access from a dev container
+
+An `overseer` CLI running **inside a Docker dev container** can read and write
+the board (`board.db`) that lives on the **host** by pointing at this same
+server bound to `0.0.0.0`. There is one server and one port (8770): the
+dashboard and a token-gated `POST /api/exec` passthrough that runs the real
+host CLI and relays its output.
+
+> **BREAKING (overseer 0.30.0).** The separate board API service
+> (`serve_board_api.py`, port **8771**) is gone, and `OVERSEER_DASHBOARD_TOKEN`
+> no longer opens exec. Re-point containers at `:8770` and give them the exec
+> token (below). `BOARD_API.md` is deleted; this section replaces it.
+
+### Run on the host
+
+```bash
+.venv/bin/python plugins/overseer/dashboard/serve.py --root /path/to/host/repo --host 0.0.0.0
+# prints: exec token: /path/to/host/repo/.overseer/remote-token
+```
+
+The exec token is minted on every bind (loopback too), persisted `0600` at
+`<root>/.overseer/remote-token`, and **never printed**: the launcher prints the
+file's path or `exec token: from OVERSEER_REMOTE_TOKEN`, and the dashboard log
+(`<CLAUDE_CONFIG_DIR>/overseer/dashboard.log`, `0600`) holds neither token.
+To choose it yourself, set **`OVERSEER_REMOTE_TOKEN`** (at least 16 characters;
+shorter is refused at launch) in the server's environment. Precedence: that
+variable, then the token file, then a freshly minted one. The file is only
+trusted if it is a regular file owned by the server's uid with no group/other
+bits and `.overseer` is not a symlink; otherwise it is replaced. Env-pinned
+tokens do not survive the SessionStart auto-restart's inherited environment
+reliably, so rely on the file for long-lived servers.
+
+A dashboard recorded as `127.0.0.1` stays unreachable from containers: relaunch
+once with `--host 0.0.0.0 --replace`.
+
+### Point the container at it
+
+```bash
+export OVERSEER_REMOTE=http://host.docker.internal:8770
+export OVERSEER_REMOTE_TOKEN=<contents of .overseer/remote-token>
+```
+
+A container that mounts the repo needs no `OVERSEER_REMOTE_TOKEN`: the CLI
+reads `.overseer/remote-token` itself. On Linux, run the container with
+`--add-host=host.docker.internal:host-gateway`. The container's `overseer`
+needs `httpx` (imported only on the `--remote` path). Verify with
+`overseer --remote http://host.docker.internal:8770 board`; the same against
+`:8771` must now fail to connect.
+
+With the two variables set, `overseer` verbs and hook invocations in the
+container forward to the host board. Interactive verbs (`clear`) must pass
+`--yes`. `--file` / `--text-file` are read in the container and sent as
+`--text -` stdin.
+
+### Migration from the old service
+
+| Before | After |
+|---|---|
+| `OVERSEER_REMOTE=http://host:8771` | `http://host:8770`; port 8771 is retired |
+| `OVERSEER_DASHBOARD_TOKEN` opened exec | it never does; exec uses `OVERSEER_REMOTE_TOKEN` or `.overseer/remote-token` |
+| token printed at launch | never printed; read the file |
+| Tailscale reachable | refused (the guard is LAN-only, see below) |
+| archived board copies reachable | `archive_dirs` (and `backup`/`archive` path segments) are never exec targets; the dashboard shows them as `[archived]`, read-only |
+| a repo with boards in two live accounts | the first-listed account's board wins; `overseer merge-boards` on the host is the cure |
+| `bootstrap`, `dispatch-prep` over `--remote` | refused (403, follow-up WF-300); run them on the host, or do `new-card`, a local `git worktree add`, `set-field ID --worktree <path> --branch <branch>`, `set-stage`. A host-side `dispatch-prep` cannot see a container worktree path |
+| a value starting `--file`, `--text-file`, `--brief-file` (e.g. `--filename`) | refused with 403 by design |
+
+**Archive dirs.** A config dir is archived if it is listed in `archive_dirs`
+(machine config) or any resolved path segment is `backup`, `backups`,
+`archive` or `archives` (case-insensitive). The primary dir
+(`CLAUDE_CONFIG_DIR`) is never archived. Misfire: a *live* dir whose path has
+such a segment is wrongly treated as archived; rename or move it.
+
+### Security and threat table
+
+Two guards apply to every route: the **app-wide LAN source guard** (any caller
+that is not private, loopback or link-local gets `403` before auth, regardless
+of bind; no override) and, for `/api/exec`, the **exec token**. GET routes are
+not token-gated, so on a `0.0.0.0` bind any LAN device can read boards. The
+dashboard's own mutation gate is separate from the exec token: unarmed on a
+loopback bind, armed on any other bind or whenever `OVERSEER_DASHBOARD_TOKEN`
+is set, with its **own** token (the browser UI asks for it and stores it).
+`OVERSEER_REMOTE_TOKEN` never arms it, and the dashboard token never opens
+exec. If you bind off loopback, set `OVERSEER_DASHBOARD_TOKEN` yourself: a
+generated one is not shown. `/api/repo/clear` stays refused off loopback
+without `OVERSEER_DASHBOARD_ALLOW_REMOTE_DESTRUCTIVE=1`, and exec denies
+`clear`. Never expose this server beyond your LAN.
+
+| What | Allowed or refused | Notes |
+|---|---|---|
+| Exec verbs | Denylist (`_DENIED_VERBS`); a parity test classifies every parser verb as allowed or denied, so a new verb fails the suite until it is classified | `--root`, `--remote`, `--dir`, `--central`, `--backup-dir` are stripped; abbreviations are off on every sub-parser |
+| Denied verbs | `init`, `backup`, `restore`, `clear`, `claude-dirs`, `merge-boards`, the `*-hook` verbs except `pretool-hook` (whose `cwd` is pinned to the served root), `bootstrap`, `dispatch-prep` | the two git-running verbs answer 403 naming the verb and WF-300 |
+| Host path options | `--file`, `--text-file`, `--brief-file` (prefix, and `=` forms): 403 | the client inlines `--file`/`--text-file` as stdin before sending |
+| Git | No git in container-writable trees except the hardened lookups (`rev-parse --git-common-dir`, `rev-parse --verify`: hooks and fsmonitor off, `GIT_CONFIG_*`/`GIT_SSH*` dropped, never touching index or worktree) | an AST scan pins which files may call git |
+| Child process | Board pinned to the one the host chose (`OVERSEER_CENTRAL`); env stripped of `OVERSEER_REMOTE*`, `OVERSEER_DASHBOARD_TOKEN` and anything named `*TOKEN*`/`*SECRET*`/`*KEY*`/`*PASSWORD*`, `AWS_`/`GH_`/`GITHUB_` (keeping `CENSUS_`/`CHRONICLE_`) | 1 MiB body cap, 4 concurrent children (busy 503), 30 s timeout, NUL in argv or stdin 400 |
+| Token | Fail-closed: no token configured means `503` for everyone; a wrong or non-ASCII header is `401`; env token at least 16 chars and non-empty | independent of the dashboard token |
+| LAN guard | Private, loopback, link-local (IPv6: ULA, mapped and 6to4 judged by the embedded IPv4) pass | **CGNAT `100.64.0.0/10` and Tailscale addresses are refused, on purpose**; use a Tailscale-reachable bind behind your own ACLs, or change the guard deliberately |
+| Archives | Never an exec target, never adopted by the CLI; the dashboard opens them read-only (`mode=ro&immutable=1`) and every POST on one is `403` | see residual 3 |
+| Browser tab, DNS rebinding | A cross-site POST to exec needs the custom header (preflight) and the token; DNS rebinding can still read boards and use tokenless loopback mutations | pre-existing; a Host allowlist is a follow-up |
+
+**The token holder is the master key.** Whoever holds the exec token (and any
+container mounting the repo already does) can run the allowed verbs on **every
+live board on the machine**, across accounts, by owner decision.
+
+Residuals, accepted and documented:
+
+1. **`.git` file redirect.** A container that rewrites the served root's `.git`
+   into a `gitdir:` file pointing at a repo with a `commondir` file controls
+   the output of `rev-parse --git-common-dir`, which feeds repo identity,
+   labelling and the `.workflow/` migration: host files under an arbitrary
+   directory's `.workflow/` could be imported into the shared board and a board
+   mislabelled. No code runs. Worktrees use `.git` files legitimately, so it is
+   not blocked.
+2. **Writable plugin dir.** If the host's installed overseer (or a dev
+   `--plugin-dir` checkout) is container-writable, the container can edit code
+   the host runs. Only a dev checkout *inside the served repo* is detected
+   (exec answers 503); an install under another mounted path is not. Run the
+   dashboard from the marketplace cache, outside any mount.
+3. **Stale archive read.** Archives are opened `immutable=1`, which ignores the
+   `-wal`: a copied archive with an uncheckpointed WAL reads stale.
+4. **Environment and config.** The child inherits the dashboard's non-secret
+   looking environment (launch from a clean env); a rw-mounted container can
+   edit `.overseer/config.json` (`worktree_dir`, `backup_dir`) and the token
+   file; `set-field --worktree/--branch` store container-supplied strings.
+5. **Git-scan blind spots.** The test that pins which files may call git is
+   coarse by design and does not see an asyncio subprocess, `os` imported under
+   another name, `pty` / `pexpect`, a bytes-literal `b"git"` or a concatenated
+   `"gi" + "t"`. None is accidental: each needs deliberate code in this repo,
+   which review catches.
 
 ## Clear data
 
@@ -197,8 +327,9 @@ It never starts a dashboard that was not running and never downgrades.
 Several sessions starting together are debounced by a short-lived lock (the
 worker's, released when it finishes, and taken over atomically if it goes
 stale), so one of them does the restart. A LAN-bound server comes back
-LAN-bound; note that its auto-generated token changes on restart unless
-`OVERSEER_DASHBOARD_TOKEN` is set in the environment the hook runs in. Output
+LAN-bound; note that its generated dashboard token changes on restart unless
+`OVERSEER_DASHBOARD_TOKEN` is set in the environment the hook runs in. The exec
+token does not change: it is read back from `.overseer/remote-token`. Output
 of the relaunched server goes to `<CLAUDE_CONFIG_DIR>/overseer/dashboard.log`.
 
 ## Hot reload (dev)
@@ -212,7 +343,7 @@ port). Edits under `src/` appear in the browser instantly.
 .venv/bin/python plugins/overseer/dashboard/serve.py --no-browser   # backend, once
 cd plugins/overseer/dashboard/frontend && npm run dev               # HMR at :5173
 # backend on a non-default port?
-OVERSEER_API=http://127.0.0.1:8771 npm run dev
+OVERSEER_API=http://127.0.0.1:9000 npm run dev
 ```
 
 Dev mode never touches the committed `dist/` — the committed-dist policy
