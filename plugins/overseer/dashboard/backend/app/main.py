@@ -30,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 from starlette.responses import Response
 
-from app.board_service import ExecRequest, ExecResult, _is_lan_client, run_cli
+from app.board_service import _OVERSEER_CLI, ExecRequest, ExecResult, _is_lan_client, run_cli
 from app.cli_client import (
     CliError,
     almoner_installed,
@@ -718,6 +718,19 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         logging.getLogger(__name__).warning("malformed repo config; exec disabled: %s", exc)
         _pinned_central = None
     _pinned_archive = overseer_config.archive_root_of(_pinned_central) if _pinned_central else None
+    # The exec child runs `<plugin>/scripts/cli.py` (and the sibling vigil CLI). If
+    # that code lives inside the repo a container can write, the container could
+    # edit it and have the host run the edit: exec is off in that layout.
+    _exec_code_in_repo: str | None = None
+    for _repo in {_pinned_root, (derive_repo_root(_pinned_root) or _pinned_root).resolve()}:
+        if _OVERSEER_CLI.resolve().is_relative_to(_repo):
+            _exec_code_in_repo = (
+                f"the overseer plugin ({_OVERSEER_CLI.resolve().parents[1]}) lies inside the pinned repo "
+                f"{_repo}, which a container may be able to write; run the dashboard from an installed "
+                "plugin outside the repo to enable exec"
+            )
+            logging.getLogger(__name__).warning("exec disabled: %s", _exec_code_in_repo)
+            break
     # The dashboard is normally launched from inside a worktree (e.g.
     # `.claude/worktrees/<name>`), whose path differs from the main-repo
     # root `board.db` records as `meta['repo_root']`. Derive the MAIN repo
@@ -1160,6 +1173,8 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         """
         if _pinned_central is None:
             raise HTTPException(status_code=503, detail="exec unavailable: pinned board could not be resolved")
+        if _exec_code_in_repo is not None:
+            raise HTTPException(status_code=503, detail=f"exec unavailable: {_exec_code_in_repo}")
         if _pinned_archive is not None:
             raise HTTPException(
                 status_code=503,

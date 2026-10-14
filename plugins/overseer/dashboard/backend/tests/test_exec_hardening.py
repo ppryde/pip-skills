@@ -260,3 +260,32 @@ def test_nothing_fires_when_exec_reaches_the_lookup_verbs_in_a_trapped_repo(root
                  ["set-field", "WF-001", "--branch", "main", "--worktree", "wt"], ["resume", "--json"]):
         assert _exec(client, argv).status_code == 200, argv
     assert not fired.exists(), fired.read_text()
+
+
+# --- the plugin code must not live in a tree the container can write ------------------------
+
+def test_exec_is_off_when_the_overseer_cli_lives_inside_the_pinned_repo(
+    root: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from app import main as app_main
+
+    def never(*a: Any, **kw: Any) -> None:
+        raise AssertionError("the exec child must not be spawned")
+
+    monkeypatch.setattr(app_main, "run_cli", never)
+
+    inside = root / "plugins" / "overseer" / "scripts" / "cli.py"
+    inside.parent.mkdir(parents=True)
+    inside.write_text("")
+    monkeypatch.setattr(app_main, "_OVERSEER_CLI", inside)
+    with caplog.at_level("WARNING"):
+        client = TestClient(create_app(root, exec_token="t"))
+    assert "exec disabled" in caplog.text
+    res = _exec(client, ["board"])
+    assert res.status_code == 503
+    assert "lies inside the pinned repo" in res.json()["detail"]
+    assert client.get("/api/board").status_code == 200  # the dashboard still starts
+
+
+def test_exec_stays_on_when_the_cli_is_outside_the_pinned_repo(client: TestClient, spy: _Spy) -> None:
+    assert _exec(client, ["board"]).status_code == 200
