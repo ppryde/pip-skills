@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import { DEFAULT_SEGMENTS, draw, plain } from '../plugin/core/render'
 import {
-  CLEAN_PRESETS, NO_DETECTION, PRESETS, SAMPLE, budgetFrom, isShowMe, styleFrom, styleSamples, placementFrom, Q, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
+  CLEAN_PRESETS, NO_DETECTION, PRESETS, SAMPLE, budgetFrom, hasCostBar, isShowMe, styleFrom, styleSamples, placementFrom, Q, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
   backupBlocks, removeStatusLine, restoreStatusLine, scriptCandidates, statusLineCommand, writerActive, writersFrom,
 } from '../plugin/core/setup'
 
@@ -271,7 +271,7 @@ test('the budget question: four options, $20 recommended, and the env override i
 
 test('budgetFrom: the options and Other ("$35", "35", "12.5") parse; junk, zero and negatives do not', async () => {
   for (const [a, n] of [['$10', 10], ['$20 (Recommended)', 20], ['$100', 100], ['$35', 35], ['35', 35], ['12.5', 12.5], [' $ 7.25 ', 7.25]] as const) expect(budgetFrom(a)).toBe(n)
-  for (const a of ['abc', '0', '-5', '$0', '', '5oops', '$-5', '1e3', 'Infinity']) expect(budgetFrom(a)).toBeNull()
+  for (const a of ['abc', '0', '-5', '$0', '', '5oops', '$-5', '1e3', 'Infinity', '1e999', '9'.repeat(400)]) expect(budgetFrom(a)).toBeNull()
 })
 
 test('the budget: the environment, then the saved answer, then $20', async () => {
@@ -325,4 +325,12 @@ test('style: no saved style is Pac-Man, so existing installs are unchanged; the 
   expect(effective({}, {}, NO_DETECTION, CFG).segments).toBeUndefined()
   expect(effective({ preset: 'minimal' }, {}, NO_DETECTION, CFG).segments).toBe(PRESETS.minimal)
   expect(effective({ style: 'clean', preset: 'compact' }, { CENSUS_STATUSLINE_SEGMENTS: 'model' }, NO_DETECTION, CFG).segments).toBe('model')
+})
+
+test('hasCostBar reads the effective segments: the style default, a preset, or the environment', async () => {
+  expect(hasCostBar(effective({}, {}, NO_DETECTION, CFG))).toBe(true)
+  expect(hasCostBar(effective({ style: 'clean' }, {}, NO_DETECTION, CFG))).toBe(false)
+  expect(hasCostBar(effective({ style: 'clean' }, { CENSUS_STATUSLINE_SEGMENTS: 'clean,cost' }, NO_DETECTION, CFG))).toBe(true)
+  expect(hasCostBar(effective({}, { CENSUS_STATUSLINE_SEGMENTS: 'context,model' }, NO_DETECTION, CFG))).toBe(false)
+  expect(hasCostBar(effective({ preset: 'minimal' }, {}, NO_DETECTION, CFG))).toBe(PRESETS.minimal.includes('cost'))
 })
