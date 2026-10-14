@@ -45,9 +45,9 @@ Answers from `/census-setup` are stored per account. An environment variable bea
 | Setting | Default | What it changes |
 |---|---|---|
 | Record (setup answer) | Yes if your status line does not already record | Records sessions into the census store. |
-| Budget (setup answer) | `$20` (recommended) | Main-session cost budget the 💸 bar fills to. Asked only when the status line is drawn. Options: `$10`, `$20` (recommended), `$50`, `$100` or any amount. |
+| 💸 Budget (setup answer) | `$20` | Main-session cost budget the 💸 bar fills to. Asked only when the status line is drawn. Options: `$10`, `$20` (recommended), `$50`, `$100` or any amount. |
 | Draw (setup answer) | above the input | Draws the status line: `above`, `below`, or off. |
-| Layout (setup answer) | Full, two lines | `compact` (one line) or `minimal`. |
+| Layout (setup answer) | Full — two lines | `compact` (one line) or `minimal`. |
 | PR lookup (setup answer) | No | Lets the mod call `gh pr list`. PRs the session itself opens still show. |
 | `CENSUS_MOD_STORE` | unset | Records to this census dir instead (shadow mode). Forces shadow. |
 | `CENSUS_STORE` | `<config dir>/census` | Census dir for the recorder. `~` expands. |
@@ -55,7 +55,7 @@ Answers from `/census-setup` are stored per account. An environment variable bea
 | `CENSUS_MOD_PR_HINT` | unset | `1` confirms a grey PR from the prompt hint. |
 | `CENSUS_STATUSLINE_SEGMENTS` | `context,cache,limits,cost/model,git,dir,changes,pr` | Segments. `,` joins on a line, `/` starts the next. |
 | `CENSUS_STATUSLINE_MASCOT` | bold `✻` in `#D97757` | Mascot string, drawn as given. |
-| `CLAUDE_COST_BUDGET` | unset | Cost budget. Overrides the Budget answer. |
+| `CLAUDE_COST_BUDGET` | unset | Cost budget. Overrides the saved Budget answer, which overrides the `$20` default. |
 | `CLAUDE_PROFILE` | unset | `personal`, `home` or `p` means a personal account; any other value means work. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | The account's config dir. |
 
