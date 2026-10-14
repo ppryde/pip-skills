@@ -211,7 +211,7 @@ async function recordSent($: EngineInterface, text: string) {
     return
   }
   const pending = await read($, pendingA)
-  if (pending?.resume && (pending.reason === 'threshold' || pending.reason === 'request') && (pending.sent?.length ?? 0) < SENT_MAX) {
+  if (pending && (pending.sent?.length ?? 0) < SENT_MAX) {
     await savePending($, { ...pending, sent: [...(pending.sent ?? []), text] })
   }
 }
