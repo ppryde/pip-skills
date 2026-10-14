@@ -6,7 +6,7 @@ import { COMMANDS, NAME, TOOL_FULL, classicSessionPath, configRoot, eventsPath, 
 test('names', () => {
   expect(NAME).toBe('context-vigil-mod')
   expect(TOOL_FULL).toBe('mcp__context-vigil-mod__vigil_handover')
-  expect(COMMANDS).toEqual({ handover: 'vigil-handover', handoverShort: 'vho', setup: 'vigil-setup', overrides: 'vigil-overrides' })
+  expect(COMMANDS).toEqual({ handover: 'vigil-handover', handoverShort: 'vho', setup: 'vigil-setup', overrides: 'vigil-overrides', pause: 'vigil-pause', resume: 'vigil-resume' })
 })
 test('config root prefers CLAUDE_CONFIG_DIR, falls back to HOME/.claude', () => {
   expect(configRoot({ CLAUDE_CONFIG_DIR: '/cfg/', HOME: '/h' })).toBe('/cfg')

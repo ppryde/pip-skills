@@ -4,7 +4,7 @@ import type { HomeEnv } from './home'
 export const NAME = 'context-vigil-mod'
 export const TOOL = 'vigil_handover'
 export const TOOL_FULL = `mcp__${NAME}__${TOOL}`
-export const COMMANDS = { handover: 'vigil-handover', handoverShort: 'vho', setup: 'vigil-setup', overrides: 'vigil-overrides' } as const
+export const COMMANDS = { handover: 'vigil-handover', handoverShort: 'vho', setup: 'vigil-setup', overrides: 'vigil-overrides', pause: 'vigil-pause', resume: 'vigil-resume' } as const
 
 // null when no home can be told (CLAUDE_CONFIG_DIR, HOME, USERPROFILE, HOMEDRIVE+HOMEPATH): a relative `.claude`
 // would land under the session's cwd, so callers write nothing.
