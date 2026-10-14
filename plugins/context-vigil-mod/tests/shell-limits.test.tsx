@@ -513,3 +513,22 @@ test('limit events log which window they are about, not just the event kind (R2-
   expect(lines.find(l => l.kind === 'limit.early_stop')?.window).toBe('seven_day')
   expect(lines.find(l => l.kind === 'limit.latched')?.window).toBe('seven_day')
 })
+
+test('a prompt sent after a limit handover is saved is carried into a later manual /clear', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + HOUR) }]))
+  await w.clock.settle()
+  await $.tool.call(write)
+  await w.clock.advance(1000)
+  await $.prompt.submit(human('one more thing'))
+  await $.prompt.submit(human('/help'))
+  w.sessionId.value = 's2'
+  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(1000)
+  const ctx = ss.additionalContext?.join('\n') ?? ''
+  expect(ctx).toContain('## Sent during handover')
+  expect(ctx).toContain('> one more thing')
+  expect(ctx).not.toContain('/help')
+})
