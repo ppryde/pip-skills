@@ -33,9 +33,9 @@ It is a mod, so it acts on events and costs about nothing when idle. It is stand
 
 | Command | What it does | Example |
 |---|---|---|
-| `/census-setup [off\|style\|budget]` | Guided setup: record, draw, style, layout, PR lookup, budget. Dialogs only; nothing goes to the model. | `/census-setup` |
-| `/census-setup style` | Jumps straight to the Style question. Needs drawing on. | `/census-setup style` |
-| `/census-setup budget` | Jumps straight to the Budget question. Needs drawing on. | `/census-setup budget` |
+| `/census-setup [off\|style\|budget]` | Guided setup: record, draw, style, layout, budget, PR lookup. Dialogs only; nothing goes to the model. | `/census-setup` |
+| `/census-setup style` | Jumps straight to the Style question only; the saved Layout is kept. Needs drawing on. | `/census-setup style` |
+| `/census-setup budget` | Jumps straight to the Budget question. Needs drawing on and a cost bar in the effective segments. | `/census-setup budget` |
 | `/census-setup off` | Stops recording and drawing. Puts a removed status line back if settings still have none. | `/census-setup off` |
 | `/census-mod:pr-refresh` | Asks `gh` once for this branch's open PR and records it. Does not turn `gh` on. | `/census-mod:pr-refresh` |
 
@@ -46,7 +46,7 @@ Answers from `/census-setup` are stored per account. An environment variable bea
 | Setting | Default | What it changes |
 |---|---|---|
 | Record (setup answer) | Yes if your status line does not already record | Records sessions into the census store. |
-| 💸 Budget (setup answer) | `$20` | Main-session cost budget the 💸 bar fills to. Asked only when drawing in Pac-Man style (Clean has no cost bar). Options: `$10`, `$20` (recommended), `$50`, `$100` or any amount. |
+| 💸 Budget (setup answer) | `$20` | Main-session cost budget the 💸 bar fills to. Asked only when the effective segments include `cost` (the Pac-Man layouts do; the Clean layouts do not, unless `CENSUS_STATUSLINE_SEGMENTS` adds it). Options: `$10`, `$20` (recommended), `$50`, `$100` or any amount. |
 | Draw (setup answer) | above the input | Draws the status line: `above`, `below`, or off. |
 | 🎨 Style (`style`) | `pacman` | `pacman` (the bars) or `clean` (plain text, ` | ` separators). A missing value means `pacman`. |
 | 📐 Layout (setup answer) | Full — two lines | Full, Compact (one line) or Minimal. Applies to both styles. |
