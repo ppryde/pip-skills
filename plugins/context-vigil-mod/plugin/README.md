@@ -107,7 +107,7 @@ Every moment is in one of three states.
 - **`/vigil-setup` is not found.** The mod is not loaded. Start a new session after install, and run `bash plugins/context-vigil-mod/plugin/scripts/install.sh status`.
 - **Install script refuses.** Classic `context-vigil` hooks are present. Uninstall classic first.
 - **Nothing happens at the threshold.** The mod stands down when classic is active. Check overrides with `/vigil-overrides check`.
-- **Auto mode does not clear.** Auto is Off until you turn it on in `/vigil-setup auto`. It also never clears once you are back or while the prompt box holds a draft.
+- **Auto mode does not clear.** Auto is Off until you turn it on in `/vigil-setup auto`. It also never clears once you are back or while the prompt box holds a draft. A clear paused by a draft says so on the band and asks once whether to clear now or postpone.
 - **Handover saved but not cleared.** The model wrote it without being asked. Answer the dialog: update it, clear now, or leave it.
 - **"Couldn't write a handover".** The model did not call the tool after a retry. Nothing cleared; run `/vho` again.
 - **Nothing is written anywhere.** No config dir could be found. Set `CLAUDE_CONFIG_DIR` or `HOME`.

@@ -25,7 +25,7 @@ test('the last-light choices are emoji-led too', () => {
 })
 test('waiting explains every guard reason by name', () => {
   const why: Record<Parameters<typeof V.waiting>[0], RegExp> = {
-    'draft': /draft in your prompt box/,
+    'draft': /paused while you/,
     'latched': /usage limit is in force/,
     'classic': /classic context-vigil is active/,
     'rc-declined': /auto-clear is off for Remote Control/,
