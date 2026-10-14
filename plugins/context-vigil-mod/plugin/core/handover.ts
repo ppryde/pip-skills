@@ -109,7 +109,7 @@ export function mergeStanding(prev: string[], added: string, retire: string): { 
     retired.push(items[at]!)
     items.splice(at, 1)
   }
-  const bytes = items.join('\n').length
+  const bytes = new TextEncoder().encode(items.join('\n')).length
   const warning = items.length > STANDING_MAX_ITEMS || bytes > STANDING_MAX_BYTES
     ? `Standing orders are over the cap (${STANDING_MAX_ITEMS} items or ${STANDING_MAX_BYTES} bytes; now ${items.length} items, ${bytes} bytes): retire what no longer holds.`
     : null

@@ -185,3 +185,11 @@ describe('standing orders in the handover', () => {
     expect(instructionText('request')).toContain('new standing orders')
   })
 })
+
+describe('standing orders size is counted in UTF-8 bytes', () => {
+  test('multibyte text over the cap warns even when its UTF-16 length is under it', () => {
+    const wide = '日'.repeat(Math.floor(STANDING_MAX_BYTES / 3) + 10)   // < 4096 units, > 4096 bytes
+    expect(wide.length).toBeLessThan(STANDING_MAX_BYTES)
+    expect(mergeStanding([wide], '', '').warning).not.toBeNull()
+  })
+})
