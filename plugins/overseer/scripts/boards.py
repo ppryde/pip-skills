@@ -23,6 +23,7 @@ Idempotent in effect: a second run finds nothing to absorb.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import sqlite3
 import time
@@ -148,6 +149,58 @@ def discover(dirs: list[Path] | None = None) -> list[dict[str, Any]]:
     results.sort(key=lambda r: r["label"])
     _discover_cache[key] = (now, results)
     return [dict(e, aliases=list(e["aliases"])) for e in results]
+
+
+LABEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+
+
+def valid_label(name: object) -> bool:
+    """A repo label as exec accepts it: the charset, and not ``.`` or ``..``."""
+    return isinstance(name, str) and name not in (".", "..") and LABEL_RE.fullmatch(name) is not None
+
+
+def resolve_aliases(
+    entries: list[dict[str, Any]], aliases: object
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Map each machine-config alias name to the ONE live entry it names.
+
+    ``entries`` are the LIVE discovered boards. Nothing here is fatal; every
+    alias that cannot be honoured is dropped with a warning line:
+
+    - a name that is not a valid label;
+    - a target that is not the root of a live entry (undiscovered, archived,
+      gone, or not a path at all);
+    - an alias equal to a discovered bare label is KEPT and wins (the alias is
+      owner config, the label is derived from a container-writable ``.git``),
+      with one warning that the label is shadowed.
+    """
+    if not isinstance(aliases, dict):
+        return {}, []
+    by_root: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        try:
+            by_root.setdefault(str(Path(entry["root"]).resolve()), entry)
+        except OSError:
+            continue
+    out: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+    for name, target in aliases.items():
+        if not valid_label(name):
+            warnings.append(f"alias {name!r} ignored: not a valid label")
+            continue
+        hit: dict[str, Any] | None = None
+        if isinstance(target, str) and target:
+            try:
+                hit = by_root.get(str(Path(target).expanduser().resolve()))
+            except (OSError, RuntimeError):
+                hit = None
+        if hit is None:
+            warnings.append(f"alias {name!r} ignored: {target!r} is not a live discovered board")
+            continue
+        if any(e["label"] == name and e is not hit for e in entries):
+            warnings.append(f"alias {name!r} shadows a discovered repo label of the same name")
+        out[name] = hit
+    return out, warnings
 
 
 def _read_only(path: Path) -> sqlite3.Connection | None:

@@ -13,16 +13,20 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import os
 import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel
+from scripts import boards
 from scripts.gitenv import hardened_git_env
 
+_log = logging.getLogger(__name__)
 # backend/app/board_service.py -> parents: [0]=app [1]=backend [2]=dashboard [3]=overseer
 _OVERSEER_CLI = Path(__file__).resolve().parents[3] / "scripts" / "cli.py"
 _EXEC_TIMEOUT = 30
@@ -60,6 +64,9 @@ def _child_env(central: Path) -> dict[str, str]:
 class ExecRequest(BaseModel):
     argv: list[str]
     stdin: str | None = None
+    # A repo label (never a path). Absent or null = the board pinned at start;
+    # anything present is resolved by `resolve_exec_board` and never falls back.
+    repo: str | None = None
 
 
 class ExecResult(BaseModel):
@@ -198,6 +205,46 @@ def _pin_hook_cwd(stdin: str | None, pinned_root: Path) -> str:
         raise HTTPException(status_code=400, detail="pretool-hook needs a JSON object on stdin")
     payload["cwd"] = str(pinned_root)
     return json.dumps(payload)
+
+
+def resolve_exec_board(
+    repo: str, entries: list[dict[str, Any]], aliases: object = None
+) -> tuple[Path, Path]:
+    """Turn a repo LABEL into ``(root, board_dir)`` of a live discovered board.
+
+    Pure: ``entries`` are the LIVE (non-archived) ``boards.discover()`` entries,
+    ``aliases`` the machine config's alias map. The label is only compared with
+    labels the host already derived, never joined into a path. 400 for a
+    malformed label, 404 for an unknown one (listing the valid ones; there is no
+    fallback to the pinned board), 409 when two live boards share it.
+    """
+    if not boards.valid_label(repo):
+        raise HTTPException(
+            status_code=400,
+            detail="repo must be a label like 'pip-skills' (letters, digits, '.', '_', '-'; up to 100)",
+        )
+    by_alias, warnings = boards.resolve_aliases(entries, aliases)
+    for line in warnings:
+        _log.warning("%s", line)
+    if repo in by_alias:
+        matches = [by_alias[repo]]
+    else:
+        matches = [e for e in entries if e["label"] == repo]
+    if not matches or not Path(matches[0]["root"]).is_dir():
+        valid = sorted({e["label"] for e in entries} | set(by_alias))
+        raise HTTPException(
+            status_code=404,
+            detail=f"unknown repo {repo!r}; valid: {', '.join(valid) or '(none)'}",
+        )
+    if len(matches) > 1:
+        cands = ", ".join(f"{e['label']} ({e['root']})" for e in matches)
+        raise HTTPException(
+            status_code=409,
+            detail=(f"ambiguous repo {repo!r}: {cands}; add an alias in the overseer machine "
+                    'config: "aliases": {"<name>": "<root>"}'),
+        )
+    entry = matches[0]
+    return Path(entry["root"]).resolve(), Path(entry["board_dir"])
 
 
 def run_cli(pinned_root: Path, central: Path, req: ExecRequest) -> ExecResult:
