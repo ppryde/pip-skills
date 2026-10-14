@@ -83,6 +83,10 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     if (e.argv[0] === 'sh' && e.argv[2] === 'exit 0') { w.runs.count++; if (!w.shell.value) throw new Error('spawn sh ENOENT'); return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } }
     if (e.argv[0] === 'sh' && !w.shell.value) throw new Error('spawn sh ENOENT')
     w.runs.count++
+    if (e.argv[0] === 'sh' && e.argv[2]?.startsWith('tail -c "$2"')) {
+      const t = w.files.get(e.argv[4] ?? '')
+      return { value: { exitCode: t === undefined ? 1 : 0, stdout: t === undefined ? '' : t.slice(-Number(e.argv[5])), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv[0] === 'sh' && e.argv[2]?.includes('custom-title')) {
       w.greps.push([...e.argv])
       const title = w.titles.get(e.argv[e.argv.length - 1] ?? '')

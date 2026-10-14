@@ -502,3 +502,40 @@ test('pressing a bar button is presence: the idle window restarts, no unattended
   expect(await ui.find({ key: 'handover' })).toBeDefined()    // still a nudge for the person who is here
   await ui.unmount()
 })
+
+test('RC countdown: a held notification does not cancel it', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
+  await countdownSession($, w)
+  await $.prompt.submit({ text: 'agent finished', wait: false, origin: { kind: 'task-notification' } as never })
+  await w.clock.advance(31_000)
+  expect(w.commands).toContain('clear')
+})
+
+const NOTE = { text: 'agent finished', wait: false, origin: { kind: 'task-notification' } as never }
+
+test('a held notification goes back to the live session when the countdown is cancelled, and is not in the later resume', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
+  await countdownSession($, w)
+  await $.prompt.submit(NOTE)
+  expect(w.state.get('context-vigil-mod.pending')).toMatchObject({ held: ['agent finished'] })
+  w.submits.length = 0
+  await $.prompt.submit(human('wait!', 'bridge'))   // cancels the countdown
+  await w.clock.advance(1000)
+  expect(w.submits.some(s => s.text === 'agent finished' && s.origin !== 'task-notification')).toBe(true)
+  expect(w.state.get('context-vigil-mod.pending')).not.toHaveProperty('held')
+  w.submits.length = 0
+  w.sessionId.value = 's2'
+  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(500)
+  expect(ss.additionalContext?.join('\n')).not.toContain('agent finished')
+})
+
+test('a held notification goes back to the live session when the clear is rejected', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
+  await countdownSession($, w)
+  await $.prompt.submit(NOTE)
+  w.clearRefused.value = true
+  w.submits.length = 0
+  await w.clock.advance(35_000)
+  expect(w.submits.some(s => s.text === 'agent finished')).toBe(true)
+})

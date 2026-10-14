@@ -1413,3 +1413,128 @@ test('a manual /clear of a handover with a later turn is still stale, even after
   expect(w.submits.some(s => s.text.includes('Resume from the handover'))).toBe(false)
   expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(true)
 })
+
+// A handover's old transcript: the handover call, then `after` lines.
+const tjson = (type: string, content: unknown) => JSON.stringify({ type, message: { role: type, content } })
+const transcript = (after: string[]) => [tjson('assistant', [{ type: 'tool_use', id: 'h1', name: TOOL, input: {} }]), ...after].join('\n') + '\n'
+const msgs = (n: number) => Array.from({ length: n }, (_, i) => tjson('user', `later ${i}`))
+
+async function handedOver($: Engine, w: World, tr: string | null) {
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  if (tr !== null) w.files.set('/t/s1.jsonl', tr)
+  await w.clock.advance(2 * MIN)
+  await $.turn.complete(turn('later'))   // last API turn is past createdAt + 60 s
+  w.sessionId.value = 's2'
+  w.submits.length = 0
+  w.notices.length = 0
+  return $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+}
+
+test('a tail of 3 messages: the section is injected and the resume is sent though a later turn ran', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  const ss = await handedOver($, w, transcript([tjson('user', 'hello'), tjson('assistant', [{ type: 'text', text: 'on it' }]), tjson('assistant', [{ type: 'tool_use', id: 'b', name: 'Bash', input: { command: 'ls' } }])]))
+  await w.clock.advance(500)
+  const inj = ss.additionalContext?.join('\n') ?? ''
+  expect(inj).toContain('## Since this handover was written')
+  expect(inj).toContain('User: hello\nAssistant: on it\n→ Bash: ls')
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+  expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(false)
+  expect([...w.files.values()].join('')).toContain('"tail":3')
+})
+
+test('a tail of 25 messages: stale notice, no resume, the newest 20 injected', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  const ss = await handedOver($, w, transcript(msgs(25)))
+  await w.clock.advance(500)
+  const inj = ss.additionalContext?.join('\n') ?? ''
+  expect(inj).toContain('User: later 24')
+  expect(inj).toContain('User: later 5')
+  expect(inj).not.toContain('User: later 4\n')
+  expect(inj).toContain('earlier messages left out')
+  expect(w.submits.some(s => s.text.includes('Resume from the handover'))).toBe(false)
+  expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(true)
+  expect([...w.files.values()].join('')).toContain('"tail":"over"')
+})
+
+test('an unreadable transcript falls back to the freshness rule, logged as unreadable', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  const ss = await handedOver($, w, null)
+  await w.clock.advance(500)
+  expect(ss.additionalContext?.join('\n')).not.toContain('## Since this handover was written')
+  expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(true)
+  expect([...w.files.values()].join('')).toContain('"tail":"unreadable"')
+})
+
+test('nothing after the handover: no section, today\'s rule (stale after a later turn)', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  const ss = await handedOver($, w, transcript([]))
+  expect(ss.additionalContext?.join('\n')).not.toContain('## Since this handover was written')
+  expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(true)
+  expect([...w.files.values()].join('')).toContain('"tail":"none"')
+})
+
+test('the save result tells the model to stop when a clear follows', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  const requested = await $.tool.call(call() as never)
+  expect(String((requested as { result?: unknown }).result)).toContain('Stop now: end your turn with no further tool calls or work')
+})
+
+test('a volunteered save result carries no stop line: nothing is cleared', async ($, on) => {
+  world(on)
+  await $.session.start(START)
+  const volunteered = await $.tool.call(call({ tool_use_id: 'v1' }) as never)
+  expect(String((volunteered as { result?: unknown }).result)).not.toContain('Stop now')
+})
+
+const agent = (text: string, kind = 'task-notification') => ({ text, wait: false, origin: { kind } as never })
+
+// A requested handover saved, its clear queued behind the running turn.
+async function clearQueued($: Engine, w: World) {
+  w.clearHold.held = true
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+}
+
+test('a notification during a pending clear is held, recorded, and carried into the resume', async ($, on) => {
+  const w = world(on)
+  await clearQueued($, w)
+  const r = await $.prompt.submit(agent('agent X finished'))
+  expect(r).toMatchObject({ drop: V.heldForClear })
+  expect(w.state.get(PENDING)).toMatchObject({ held: ['agent X finished'] })
+  w.clearHold.release()
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).toContain('agent X finished')
+  expect(w.submits.filter(s => s.text.includes('agent X finished')).length).toBe(1)   // in the resume only, not re-submitted
+})
+
+test('the mod\'s own prompts, and any prompt with no clear-bound handover pending, pass', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  expect(await $.prompt.submit(agent('before any handover'))).not.toHaveProperty('drop')
+  await clearQueued($, w)
+  expect(await $.prompt.submit(agent('mod', 'plugin'))).not.toHaveProperty('drop')
+})
+
+test('a full sent list lets the notification run rather than lose it', async ($, on) => {
+  const w = world(on)
+  await clearQueued($, w)
+  for (let i = 0; i < 10; i++) await $.prompt.submit(agent(`n${i}`))
+  expect(await $.prompt.submit(agent('eleventh'))).not.toHaveProperty('drop')
+})

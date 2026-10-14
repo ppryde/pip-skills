@@ -10,7 +10,7 @@ import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, recor
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, GIT_DIR_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
-import { INPUT_SCHEMA, SENT_MAX, mergeStanding, sentSection, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
+import { INPUT_SCHEMA, SENT_MAX, mergeStanding, sentSection, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, STOP_NOW, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 import { HOME_VARS_CHECKED } from '../core/home'
 import { TITLE_CMD, archiveName, isArchived, lastTitle } from '../core/title'
 import { TAIL_CMD, type CacheTtl, cacheLinesFromText, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
@@ -19,6 +19,7 @@ import { clearGate, needsRcHint } from '../core/surfaces'
 import { applyAnswers, extractAnswers, isStep, nextCard, questionFor } from '../core/setup'
 import { RESUME_DELAY_MS, earlyStopDue, formatHHMM, latchCleared, latchFromMeasure, latchFromStopFailure, nextHop } from '../core/limits'
 import { classicHooksInstalled } from '../core/interlock'
+import { messagesAfterHandover, renderTail } from '../core/tail'
 import { V } from '../core/voice'
 import type { WaitReason } from '../core/voice'
 
@@ -101,6 +102,8 @@ let retryTimer: { cancel: () => void } | null = null
 // A /clear handed to the engine and not yet run: it is queued until the session is idle (R2-10),
 // so a second one must not follow it. Cleared when the command settles.
 let clearInFlight = false
+// Prompts from other sessions, schedules and background tasks: held while a clear-bound handover waits for its clear.
+const HOLD_ORIGINS = new Set(['task-notification', 'scheduled-trigger', 'peer', 'peer-send-message', 'projects-relay', 'coordinator', 'observer', 'observer-activity'])
 // The last API turn as the mod issued its own clear, for the handover it clears into: the engine queues
 // the clear behind the running turn, and turns that finish meanwhile must not make the handover stale.
 let issuedClear: { path: string; apiAt: number } | null = null
@@ -219,6 +222,21 @@ async function recordSent($: EngineInterface, text: string) {
   }
 }
 
+// Prompts held for a clear that then parked never reach the next session soon: give them back to this one.
+async function releaseHeld($: EngineInterface) {
+  const pending = await read($, pendingA)
+  if (!pending?.held?.length) return
+  const held = pending.held
+  const { held: _spent, ...rest } = pending
+  await savePending($, rest)
+  await log($, 'prompt.released', { count: held.length })
+  // Never silently: a refused or overtaken submit shows the held text instead.
+  const text = held.join('\n\n')
+  void submitWithRetry($, { text }, 500)
+    .then(outcome => (outcome === 'sent' ? undefined : notify($, V.heldNotSent(text))))
+    .catch(err => timerFailed($, 'held-release', err))
+}
+
 function resumeSoon($: EngineInterface, prompt: { text: string; asUser?: true }, path: string | null, held: string | null) {
   void submitWithRetry($, prompt, 500)
     .then(outcome => (outcome === 'failed' ? resumeFailed($, path, held) : undefined))
@@ -289,6 +307,7 @@ async function dropParkedClear($: EngineInterface, pending: Pending, cause: 'hum
   lastWait = null
   await notify($, V.pendingOffer(pending.path))
   await log($, 'guard.wait', { reason: 'parked-dropped', cause })
+  await releaseHeld($)
 }
 
 // Setup asks through $.ui.ask, one step at a time: no prompt is submitted and nothing
@@ -725,6 +744,7 @@ async function tryClear($: EngineInterface) {
     lastWait = null
     await notify($, V.clearRejected)
     await log($, 'guard.wait', { reason: 'clear-error', error: String(err) }).catch(() => {})
+    await releaseHeld($).catch(() => {})
   }
 }
 
@@ -743,6 +763,7 @@ async function tryClearInner($: EngineInterface) {
     clearParked = true
     await notify($, autoOff ? V.clearSkippedAutoOff : V.clearSkippedAttended)
     await log($, 'clear.skipped', { reason: autoOff ? 'auto-off' : 'attended' })
+    await releaseHeld($)
     return
   }
   const gate = clearGate({
@@ -768,6 +789,7 @@ async function tryClearInner($: EngineInterface) {
       clearParked = true
       await notify($, V.clearRejected)
       await log($, 'guard.wait', { reason: 'clear-rejected' })
+      await releaseHeld($)
     } finally {
       clearInFlight = false
     }
@@ -779,7 +801,7 @@ async function tryClearInner($: EngineInterface) {
     await log($, 'guard.wait', { reason: gate.reason, recheckMs: gate.recheckMs })
   }
   if (gate.reason === 'countdown-start') await setCountdown($, now + (gate.recheckMs ?? 0))
-  if (gate.recheckMs === null) { clearParked = true; return }
+  if (gate.recheckMs === null) { clearParked = true; await releaseHeld($); return }
   retryTimer = $.clock.after(gate.recheckMs, () => { void tryClear($) })
 }
 
@@ -892,6 +914,7 @@ async function cancelCountdown($: EngineInterface) {
   lastWait = null
   await notify($, V.countdownCancelled)
   await log($, 'guard.wait', { reason: 'countdown-cancelled' })
+  await releaseHeld($)
 }
 
 async function showNudge($: EngineInterface, pct: number) {
@@ -941,6 +964,25 @@ let shellRuns: boolean | undefined
 async function hasShell($: EngineInterface): Promise<boolean> {
   if (shellRuns === undefined) shellRuns = await $.process.run(['sh', '-c', 'exit 0'], { timeoutMs: 5000 }).then(r => r.exitCode === 0, () => false)
   return shellRuns
+}
+
+// The messages the old session saw after its last handover call: null = could not tell (no file, no call
+// within the last 2 MB, no shell and an unreadable file).
+const TAIL_CHUNKS = [256 * 1024, 1024 * 1024, 2 * 1024 * 1024]
+async function transcriptTail($: EngineInterface, path: string): Promise<string[] | null> {
+  try {
+    if (!(await hasShell($))) {
+      const text = await $.fs.read(path).catch(() => undefined)
+      return typeof text === 'string' ? messagesAfterHandover(text, TOOL_FULL) : null
+    }
+    for (const n of TAIL_CHUNKS) {
+      const r = await $.process.run(['sh', '-c', 'tail -c "$2" "$1"', 'sh', path, String(n)])
+      if (r.exitCode !== 0 || r.isStdoutTruncated) return null
+      const found = messagesAfterHandover(r.stdout, TOOL_FULL)
+      if (found || r.stdout.length < n) return found
+    }
+  } catch { /* unknown */ }
+  return null
 }
 
 // The transcript's last custom title: null = unnamed, undefined = could not tell.
@@ -1358,10 +1400,15 @@ export const register: Register = on => {
     let stale = false
     let noResume = false
     let sentCarried = false   // the resume message holds the prompts sent during the handover
-    const sentBlock = sentSection(pending.sent)
+    const sentBlock = sentSection([...(pending.sent ?? []), ...(pending.held ?? [])])
+    // What happened after the handover was written rides with it; up to the cap it keeps the handover fresh.
+    const msgs = oldTranscript === undefined ? null : await transcriptTail($, oldTranscript)
+    const tail = msgs === null ? null : renderTail(msgs)
+    const tailLog = tail === null ? 'unreadable' : tail.total === 0 ? 'none' : tail.over ? 'over' : tail.total
+    const tailFresh = tail === null || tail.total === 0 ? null : !tail.over
     if (follow) { sentCarried = sentBlock !== ''; resumeSoon($, { text: sentBlock ? `${follow}\n\n${sentBlock}` : follow, asUser: true }, pending.path, follow) }
     else if (pending.resume) {
-      if (!fresh(pending, apiBefore, await nowMs($))) {
+      if (!(tailFresh ?? fresh(pending, apiBefore, await nowMs($)))) {
         stale = true
         await notify($, V.resumeStale(pending.path))
       } else if (await readLatch($)) {
@@ -1374,8 +1421,8 @@ export const register: Register = on => {
       await notify($, V.injectedNoResume(pending.path))
       noResume = true
     }
-    await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null, ...(stale ? { stale: true } : {}), ...(noResume ? { noResume: true } : {}) })
-    return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown) + (sentBlock && !sentCarried ? `\n\n${sentBlock}` : '')] }
+    await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null, tail: tailLog, ...(stale ? { stale: true } : {}), ...(noResume ? { noResume: true } : {}) })
+    return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown) + (tail?.section ? `\n\n${tail.section}` : '') + (sentBlock && !sentCarried ? `\n\n${sentBlock}` : '')] }
   })
 
   on('classic.StopFailure', async ($, e, next) => {
@@ -1416,6 +1463,14 @@ export const register: Register = on => {
     }
     // R1-20: the "last light is off" line goes away with the person's next message (no hotkey: spec §3).
     if (classifyOrigin(e.origin.kind) === 'human' && (await read($, cacheTtlA)) === '5m') await update($, ttlInfoDismissedA, () => true)
+    // A clear is on its way: an agent's or a notification's prompt would start a turn the clear then waits
+    // behind. Hold it; it rides into the resume as a prompt sent during the handover (never lost: a full list lets it run).
+    if (HOLD_ORIGINS.has(e.origin.kind) && !clearParked && pending && pending.resume && (pending.reason === 'threshold' || pending.reason === 'request')
+      && (pending.sent?.length ?? 0) + (pending.held?.length ?? 0) < SENT_MAX && e.text.trim() && !e.text.trimStart().startsWith('/')) {
+      await savePending($, { ...pending, held: [...(pending.held ?? []), e.text] })
+      await log($, 'prompt.held', { origin: e.origin.kind })
+      return { drop: V.heldForClear }
+    }
     if (e.origin.kind !== 'plugin') await cancelCountdown($)
     if (classifyOrigin(e.origin.kind) === 'human') {
       // A short plain request to hand over runs exactly what /vho runs, not whatever the model improvises.
@@ -1683,8 +1738,9 @@ export const register: Register = on => {
       return { result: `Saved handover to ${path} (not requested by context-vigil-mod; nothing was cleared)` } as never
     }
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
-    if (reason === 'threshold' || reason === 'request') scheduleClear($, asked?.unattended ?? false)
-    return { result: `Saved handover to ${path}${standingNote(orders)}` } as never
+    const clears = reason === 'threshold' || reason === 'request'
+    if (clears) scheduleClear($, asked?.unattended ?? false)
+    return { result: `Saved handover to ${path}${standingNote(orders)}${clears ? ` ${STOP_NOW}` : ''}` } as never
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
