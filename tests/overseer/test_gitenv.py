@@ -9,6 +9,7 @@ hardened environment is belt and braces for config-driven execution.
 """
 import ast
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -182,42 +183,48 @@ def test_the_lookups_fire_nothing_in_a_trapped_repo(trapped, tmp_path, monkeypat
 
 GIT_CALLERS = {"scripts/store.py", "scripts/gitops.py", "scripts/resume.py"}
 GITOPS_IMPORTERS = {"cli.py", "bundle.py"}
-_SPAWNERS = {
-    "run", "Popen", "call", "check_call", "check_output", "getoutput", "getstatusoutput",
-    "system", "popen", "execv", "execve", "execvp", "execvpe", "execl", "execle", "execlp",
-    "execlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe", "spawnl", "spawnle", "spawnlp",
-    "spawnlpe", "posix_spawn", "posix_spawnp", "create_subprocess_exec", "create_subprocess_shell",
+_OS_SPAWN = re.compile(r"^(system|popen|exec\w*|spawn\w*|posix_spawnp?)$")
+_GIT_WORD = re.compile(r"\bgit\b")
+# Files that spawn processes AND say "git" in a non-docstring string, with the reason
+# they are not git callers. Justify each entry.
+GIT_SCAN_EXEMPT: dict[str, str] = {
+    "dashboard/backend/app/board_service.py": "the 403 text for the denied git verbs; it spawns only the overseer CLI",
+    "scripts/cli.py": "a help string mentions git; its git work goes through gitops (checked below)",
 }
 
 
-def _is_git_text(value: object) -> bool:
-    return isinstance(value, str) and (
-        value == "git" or value.endswith("/git") or value.startswith("git ")
-    )
+def _docstring_nodes(tree: ast.AST) -> set[int]:
+    ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            first = node.body[0] if node.body else None
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                ids.add(id(first.value))
+    return ids
 
 
 def runs_git(source: str) -> bool:
-    """True when a subprocess/os spawn call has a git string constant, a path ending in
-    /git, or a name bound to one anywhere inside its arguments."""
+    """Deliberately coarse (it guards against ACCIDENTAL new git callers): a file that
+    can spawn a process (imports subprocess, or touches os.system/popen/exec*/spawn*)
+    AND holds any non-docstring string constant with the word `git` is flagged."""
     tree = ast.parse(source)
-    git_names = {
-        t.id
-        for node in ast.walk(tree) if isinstance(node, ast.Assign)
-        and isinstance(node.value, ast.Constant) and _is_git_text(node.value.value)
-        for t in node.targets if isinstance(t, ast.Name)
-    }
-    for call in (n for n in ast.walk(tree) if isinstance(n, ast.Call)):
-        func = call.func
-        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-        if name not in _SPAWNERS:
-            continue
-        for arg in [*call.args, *(k.value for k in call.keywords)]:
-            for node in ast.walk(arg):
-                if isinstance(node, ast.Constant) and _is_git_text(node.value):
-                    return True
-                if isinstance(node, ast.Name) and node.id in git_names:
-                    return True
-    return False
+    spawns = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            spawns |= any(a.name.split(".")[0] == "subprocess" for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            spawns |= (node.module or "").split(".")[0] == "subprocess"
+            spawns |= node.module == "os" and any(_OS_SPAWN.match(a.name) for a in node.names)
+        elif isinstance(node, ast.Attribute) and _OS_SPAWN.match(node.attr):
+            spawns |= isinstance(node.value, ast.Name) and node.value.id == "os"
+    if not spawns:
+        return False
+    docs = _docstring_nodes(tree)
+    return any(
+        isinstance(n, ast.Constant) and isinstance(n.value, str)
+        and id(n) not in docs and _GIT_WORD.search(n.value)
+        for n in ast.walk(tree)
+    )
 
 
 def _py_files(root: Path):
@@ -228,7 +235,10 @@ def _py_files(root: Path):
 
 
 def git_runners(root: Path) -> set[str]:
-    return {p.relative_to(root).as_posix() for p in _py_files(root) if runs_git(p.read_text())}
+    return {
+        p.relative_to(root).as_posix() for p in _py_files(root)
+        if p.relative_to(root).as_posix() not in GIT_SCAN_EXEMPT and runs_git(p.read_text())
+    }
 
 
 def _sources():
@@ -244,6 +254,9 @@ def _sources():
     'import subprocess\nsubprocess.Popen(args=["git", "-C", "x", "diff"])',
     'import os\nos.execvp("git", ["git", "status"])',
     'from subprocess import run\nrun([*base, "git"])',
+    'import subprocess\ncmd = ["git", "x"]\nsubprocess.run(cmd)',
+    'from subprocess import run as r\nr(["git", "x"])',
+    'import subprocess\nsubprocess.run("cd x && git status", shell=True)',
 ])
 def test_the_scanner_catches_every_bypass_form(source):
     assert runs_git(source)
@@ -252,6 +265,8 @@ def test_the_scanner_catches_every_bypass_form(source):
 def test_the_scanner_ignores_git_free_spawns_and_mere_mentions():
     assert not runs_git('import subprocess\nsubprocess.run(["census", "read"])')
     assert not runs_git('words = ["git", "status"]\nprint(words)')
+    assert not runs_git('"""Wraps git for you."""\nimport subprocess\nsubprocess.run(["census"])')
+    assert not runs_git('import subprocess\ndef f():\n    "git notes"\n    subprocess.run(["x"])')
 
 
 def test_the_scanner_finds_a_file_in_a_subdirectory(tmp_path):
