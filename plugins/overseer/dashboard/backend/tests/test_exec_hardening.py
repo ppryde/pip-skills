@@ -1,0 +1,157 @@
+"""WF-100 C5: argv hardening on `POST /api/exec`.
+
+Sub-parsers do not abbreviate, host-path file options are refused (not
+stripped), every verb that takes its root from a hook payload is denied, and
+the one hook that is forwarded (`pretool-hook`) has its `cwd` pinned.
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app import board_service
+from app.main import create_app
+
+TOKEN = {"X-Overseer-Token": "t"}
+
+
+def _exec(client: TestClient, argv: list[str], stdin: str | None = None):
+    return client.post("/api/exec", json={"argv": argv, "stdin": stdin}, headers=TOKEN)
+
+
+class _Spy:
+    """Records (and fakes) the overseer CLI spawns only."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.real = subprocess.run
+
+    def __call__(self, cmd, **kw):
+        if isinstance(cmd, list) and str(board_service._OVERSEER_CLI) in cmd:
+            self.calls.append({"cmd": cmd, **kw})
+            return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+        return self.real(cmd, **kw)
+
+
+@pytest.fixture
+def spy(monkeypatch: pytest.MonkeyPatch) -> _Spy:
+    s = _Spy()
+    monkeypatch.setattr(board_service.subprocess, "run", s)
+    return s
+
+
+@pytest.fixture
+def client(root: Path) -> TestClient:
+    return TestClient(create_app(root, exec_token="t"))
+
+
+# --- host path options are refused, not stripped -----------------------------------
+
+@pytest.mark.parametrize("tok", [
+    "--file", "--file=/etc/hosts", "--text-file", "--text-file=/etc/hosts",
+    "--brief-file", "--brief-file=/etc/hosts", "--filename",
+])
+def test_file_flags_are_403_and_nothing_spawns(client: TestClient, spy: _Spy, tok: str) -> None:
+    argv = ["set-section", "WF-1", "--section", "Plan", tok] + ([] if "=" in tok else ["/etc/hosts"])
+    res = _exec(client, argv)
+    assert res.status_code == 403
+    assert "host path options are not permitted remotely" in res.json()["detail"]
+    assert spy.calls == []
+
+
+def test_file_flag_is_refused_whatever_the_verb(client: TestClient, spy: _Spy) -> None:
+    assert _exec(client, ["append-body", "WF-1", "Decisions", "--text-file", "/etc/hosts"]).status_code == 403
+    assert spy.calls == []
+
+
+def test_text_and_stdin_still_work(client: TestClient, spy: _Spy) -> None:
+    res = _exec(client, ["set-section", "WF-1", "--section", "Plan", "--text", "-"], stdin="body")
+    assert res.status_code == 200
+    assert spy.calls[0]["input"] == "body"
+    assert spy.calls[0]["cmd"][-2:] == ["--text", "-"]
+
+
+# --- hook and admin verbs that escape the pinned root --------------------------------
+
+@pytest.mark.parametrize("verb", [
+    "claude-dirs", "merge-boards", "checklist-sync-hook", "claim-stop-hook",
+    "claim-prompt-hook", "report-hook", "dashboard-refresh-hook",
+])
+def test_root_escaping_verbs_are_denied(client: TestClient, spy: _Spy, verb: str) -> None:
+    res = _exec(client, [verb], stdin=json.dumps({"cwd": "/somewhere/else"}))
+    assert res.status_code == 403
+    assert verb in res.json()["detail"]
+    assert spy.calls == []
+
+
+def test_a_verb_hidden_behind_session_id_is_still_denied(client: TestClient, spy: _Spy) -> None:
+    for argv in (["--session-id", "s", "report-hook"], ["--session-id=s", "report-hook"],
+                 ["--remote", "http://x", "report-hook"], ["--root", "/x", "report-hook"]):
+        assert _exec(client, argv).status_code == 403, argv
+    assert spy.calls == []
+
+
+# --- pretool-hook: cwd is pinned ------------------------------------------------------
+
+def _stdin_of(spy: _Spy) -> dict[str, Any]:
+    return json.loads(spy.calls[-1]["input"])
+
+
+def test_pretool_hook_cwd_is_overwritten_with_the_pinned_root(client: TestClient, spy: _Spy) -> None:
+    payload = {"session_id": "s", "cwd": "/foreign/place", "tool_name": "Read", "tool_input": {"x": 1}}
+    assert _exec(client, ["pretool-hook"], stdin=json.dumps(payload)).status_code == 200
+    cmd = spy.calls[0]["cmd"]
+    pinned = cmd[cmd.index("--root") + 1]
+    sent = _stdin_of(spy)
+    assert sent["cwd"] == pinned
+    assert {k: v for k, v in sent.items() if k != "cwd"} == {k: v for k, v in payload.items() if k != "cwd"}
+
+
+def test_pretool_hook_without_cwd_gets_the_pinned_one_and_same_stdin_as_a_pinned_cwd(
+    client: TestClient, spy: _Spy
+) -> None:
+    base = {"session_id": "s", "tool_name": "Read", "tool_input": {}}
+    _exec(client, ["pretool-hook"], stdin=json.dumps(base))
+    cmd = spy.calls[0]["cmd"]
+    pinned = cmd[cmd.index("--root") + 1]
+    _exec(client, ["pretool-hook"], stdin=json.dumps({**base, "cwd": pinned}))
+    _exec(client, ["pretool-hook"], stdin=json.dumps({**base, "cwd": "/foreign"}))
+    inputs = [json.loads(c["input"]) for c in spy.calls]
+    assert inputs[0] == inputs[1] == inputs[2]
+
+
+@pytest.mark.parametrize("stdin", [None, "", "not json", "[1, 2]", '"str"', "null"])
+def test_pretool_hook_needs_a_json_object_on_stdin(client: TestClient, spy: _Spy, stdin: str | None) -> None:
+    assert _exec(client, ["pretool-hook"], stdin=stdin).status_code == 400
+    assert spy.calls == []
+
+
+# --- end to end through the real parser -------------------------------------------------
+
+def test_abbreviated_path_option_never_reads_the_host_file(root: Path, client: TestClient, tmp_path: Path) -> None:
+    sentinel = tmp_path / "sentinel.txt"
+    sentinel.write_text("TOP-SECRET-SENTINEL")
+    out = _exec(client, ["new-card", "--title", "t"])
+    assert out.status_code == 200
+    card = out.json()["stdout"].split()[0] if out.json()["stdout"].strip() else "WF-001"
+    for opt in ("--fi", "--fil", "--text-f", "--text-fi"):
+        res = _exec(client, ["set-section", card, "--section", "Plan", opt, str(sentinel)])
+        body = res.json()
+        assert body["returncode"] != 0
+        assert "TOP-SECRET-SENTINEL" not in body["stdout"] + body["stderr"]
+        shown = _exec(client, ["show", card, "--section", "Plan"]).json()
+        assert "TOP-SECRET-SENTINEL" not in shown["stdout"]
+
+
+def test_denied_hook_verbs_leave_the_board_untouched(root: Path, client: TestClient, tmp_path: Path) -> None:
+    before = _exec(client, ["board", "--json"]).json()["stdout"]
+    for verb in ("report-hook", "claim-stop-hook", "claim-prompt-hook", "checklist-sync-hook"):
+        payload = json.dumps({"cwd": str(tmp_path / "other"), "session_id": "s"})
+        assert _exec(client, [verb], stdin=payload).status_code == 403
+    assert _exec(client, ["board", "--json"]).json()["stdout"] == before
+    assert not (tmp_path / "other").exists()

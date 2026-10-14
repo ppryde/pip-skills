@@ -12,6 +12,7 @@ exactly as the dashboard backend's cli_client already does.
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import subprocess
 import sys
@@ -101,7 +102,23 @@ _STRIPPED_FLAGS = ("--root", "--remote", "--dir", "--central", "--backup-dir")
 
 # Verbs refused on the remote board API: they wipe, re-bootstrap, or read/write
 # arbitrary host paths, none of which a remote container caller may drive.
-_DENIED_VERBS = {"clear", "init", "backup", "restore"}
+# The hook verbs take their root from the stdin payload's `cwd` in preference to
+# `--root` (cli._hook_root), so any of them escapes the pinned root, and
+# `report-hook` writes; `dashboard-refresh-hook` restarts the host dashboard.
+# `pretool-hook` is the one hook forwarded remotely: its `cwd` is overwritten.
+_DENIED_VERBS = {
+    "clear", "init", "backup", "restore",
+    "claude-dirs", "merge-boards",
+    "checklist-sync-hook", "claim-stop-hook", "claim-prompt-hook", "report-hook",
+    "dashboard-refresh-hook",
+}
+
+# Options that read a HOST file. Refused, not stripped: stripping would turn
+# `set-section --file F` into a call that silently waits on stdin. The client
+# (`cli._run_remote`) inlines the file as stdin before it gets here. Matched by
+# prefix, so `--filename` is refused too (a value starting with one of these is
+# a rare, loud, safe false positive).
+_FILE_FLAGS = ("--file", "--text-file", "--brief-file")
 
 
 def _strip_root_flags(argv: list[str]) -> list[str]:
@@ -144,6 +161,33 @@ def _invoked_verb(argv: list[str]) -> str | None:
     return None
 
 
+def sanitise_argv(argv: list[str]) -> list[str]:
+    """Strip the path-override flags, then refuse a host file option or a denied
+    verb (403). Returns the argv that may be handed to the CLI."""
+    argv = _strip_root_flags(argv)
+    if any(tok.startswith(_FILE_FLAGS) for tok in argv):
+        raise HTTPException(status_code=403, detail="host path options are not permitted remotely")
+    verb = _invoked_verb(argv)
+    if verb in _DENIED_VERBS:
+        raise HTTPException(
+            status_code=403,
+            detail=f"verb '{verb}' is not permitted on the remote board API",
+        )
+    return argv
+
+
+def _pin_hook_cwd(stdin: str | None, pinned_root: Path) -> str:
+    """`pretool-hook` reads its root from the payload's `cwd`: pin it."""
+    try:
+        payload = json.loads(stdin or "")
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="pretool-hook needs a JSON object on stdin")
+    payload["cwd"] = str(pinned_root)
+    return json.dumps(payload)
+
+
 def run_cli(pinned_root: Path, central: Path, req: ExecRequest) -> ExecResult:
     """Sanitise argv, refuse denied verbs, and run the host CLI against the
     PINNED root and board (``central`` becomes the child's ``OVERSEER_CENTRAL``).
@@ -153,20 +197,17 @@ def run_cli(pinned_root: Path, central: Path, req: ExecRequest) -> ExecResult:
     size = sum(len(t.encode()) for t in req.argv) + len((req.stdin or "").encode())
     if size > MAX_EXEC_BYTES:
         raise HTTPException(status_code=413, detail=f"request exceeds {MAX_EXEC_BYTES} bytes")
-    argv = _strip_root_flags(req.argv)
-    verb = _invoked_verb(argv)
-    if verb in _DENIED_VERBS:
-        raise HTTPException(
-            status_code=403,
-            detail=f"verb '{verb}' is not permitted on the remote board API",
-        )
+    argv = sanitise_argv(req.argv)
+    stdin = req.stdin
+    if _invoked_verb(argv) == "pretool-hook":
+        stdin = _pin_hook_cwd(stdin, pinned_root)
     if not _EXEC_SLOTS.acquire(blocking=False):
         raise HTTPException(status_code=503, detail="exec busy: too many CLI calls in flight")
     try:
         proc = subprocess.run(
             [sys.executable, str(_OVERSEER_CLI), "--root", str(pinned_root), *argv],
             env=_child_env(central),
-            input=req.stdin,
+            input=stdin,
             capture_output=True,
             text=True,
             timeout=_EXEC_TIMEOUT,

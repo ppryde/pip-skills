@@ -113,3 +113,67 @@ def test_remote_env_token_wins_over_file(monkeypatch, tmp_path):
                         or remote.RemoteResult("", "", 0))
     assert main(["--root", str(tmp_path), "--remote", "http://h", "board"]) == 0
     assert seen["token"] == "env-tok"
+
+
+# --- WF-100 C5: file options are read on the client and sent as stdin ----------------
+
+def _capture(monkeypatch):
+    seen = {}
+
+    def fake_exec(url, token, argv, stdin, **kw):
+        seen.update(argv=argv, stdin=stdin)
+        return remote.RemoteResult(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(remote, "exec_remote", fake_exec)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    return seen
+
+
+def test_set_section_file_is_inlined_as_stdin(monkeypatch, tmp_path):
+    seen = _capture(monkeypatch)
+    src = tmp_path / "plan.md"
+    src.write_text("the plan\n")
+    assert main(["--remote", "http://h", "set-section", "WF-1", "--section", "Plan",
+                 "--file", str(src)]) == 0
+    assert seen["argv"] == ["set-section", "WF-1", "--section", "Plan", "--text", "-"]
+    assert seen["stdin"] == "the plan\n"
+
+
+def test_text_file_alias_and_equals_form_are_inlined(monkeypatch, tmp_path):
+    seen = _capture(monkeypatch)
+    src = tmp_path / "t.md"
+    src.write_text("body")
+    assert main(["--remote", "http://h", "set-section", "WF-1", "--section", "Plan",
+                 f"--text-file={src}"]) == 0
+    assert seen["argv"] == ["set-section", "WF-1", "--section", "Plan", "--text", "-"]
+    assert seen["stdin"] == "body"
+    assert main(["--remote", "http://h", "append-body", "WF-1", "Decisions",
+                 "--text-file", str(src)]) == 0
+    assert seen["argv"] == ["append-body", "WF-1", "Decisions", "--text", "-"]
+    assert seen["stdin"] == "body"
+
+
+def test_a_missing_local_file_is_a_readable_client_error(monkeypatch, tmp_path, capsys):
+    seen = _capture(monkeypatch)
+    rc = main(["--remote", "http://h", "set-section", "WF-1", "--section", "Plan",
+               "--file", str(tmp_path / "nope.md")])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "nope.md" in err and "Traceback" not in err
+    assert seen == {}  # nothing was sent
+
+
+def test_file_wins_over_piped_stdin(monkeypatch, tmp_path):
+    seen = _capture(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stdin, "read", lambda: "from the pipe")
+    src = tmp_path / "f.md"
+    src.write_text("from the file")
+    main(["--remote", "http://h", "set-section", "WF-1", "--section", "Plan", "--file", str(src)])
+    assert seen["stdin"] == "from the file"
+
+
+def test_other_verbs_forward_untouched(monkeypatch):
+    seen = _capture(monkeypatch)
+    main(["--remote", "http://h", "set-section", "WF-1", "--section", "Plan", "--text", "-"])
+    assert seen["argv"] == ["set-section", "WF-1", "--section", "Plan", "--text", "-"]

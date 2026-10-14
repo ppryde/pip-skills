@@ -40,7 +40,15 @@ def exec_remote(url: str, token: str | None, argv: list[str], stdin: str | None,
     if resp.status_code == 401:
         raise RemoteError("overseer board API rejected the token (401) — check OVERSEER_REMOTE_TOKEN")
     if resp.status_code == 403:
-        raise RemoteError("overseer board API refused this caller (403) — must be on the LAN")
+        detail = ""
+        try:
+            detail = str(resp.json().get("detail") or "")
+        except (ValueError, AttributeError):
+            pass
+        raise RemoteError(
+            "overseer board API refused this request (403)"
+            + (f": {detail}" if detail else " — the caller must be on the LAN")
+        )
     if resp.status_code != 200:
         raise RemoteError(f"overseer board API error {resp.status_code}: {resp.text[:200]}")
     try:

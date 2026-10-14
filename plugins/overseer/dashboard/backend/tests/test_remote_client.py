@@ -114,3 +114,12 @@ def test_exec_remote_transport_error_wrapped():
     bad = httpx.MockTransport(boom)
     with pytest.raises(remote.RemoteError):
         remote.exec_remote("http://svc", None, ["board"], None, transport=bad)
+
+
+def test_exec_remote_403_relays_the_server_reason():
+    def handler(request):
+        return httpx.Response(403, json={"detail": "host path options are not permitted remotely"})
+
+    with pytest.raises(remote.RemoteError) as ei:
+        remote.exec_remote("http://h", "t", ["x"], None, transport=httpx.MockTransport(handler))
+    assert "host path options are not permitted remotely" in str(ei.value)

@@ -2734,7 +2734,19 @@ def build_parser() -> argparse.ArgumentParser:
     lp.add_argument("--json", action="store_true")
     lp.set_defaults(func=cmd_label_color_list)
 
+    _no_abbreviations(parser)
     return parser
+
+
+def _no_abbreviations(parser: argparse.ArgumentParser) -> None:
+    """``allow_abbrev=False`` on every sub-parser too: it is not inherited, and
+    ``set-section --fi PATH`` would otherwise bind ``--file`` past the exact-token
+    checks of ``/api/exec`` (board_service.sanitise_argv)."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for sub in action.choices.values():
+                sub.allow_abbrev = False
+                _no_abbreviations(sub)
 
 
 def _forwardable_argv(raw_argv: list[str]) -> list[str]:
@@ -2756,13 +2768,51 @@ def _forwardable_argv(raw_argv: list[str]) -> list[str]:
     return out
 
 
-def _run_remote(url: str, raw_argv: list[str], root: Path) -> int:
+_FILE_OPTIONS = ("--file", "--text-file")
+
+
+def _inline_file_option(argv: list[str]) -> tuple[list[str], str | None]:
+    """``set-section`` / ``append-body`` read their text from a file. The host
+    refuses file options over exec (it would read ITS filesystem), so read the
+    file here and forward ``--text -`` with the content as stdin. Returns the
+    rewritten argv and the file's text (None when the argv has no file option).
+    Raises ``FileNotFoundError``/``OSError`` for an unreadable file."""
+    out: list[str] = []
+    content: str | None = None
+    it = iter(argv)
+    for tok in it:
+        path: str | None = None
+        if tok in _FILE_OPTIONS:
+            path = next(it, None)
+            if path is None:
+                out.append(tok)  # no value: let the host parser say so
+                continue
+        elif tok.startswith(tuple(f"{o}=" for o in _FILE_OPTIONS)):
+            path = tok.split("=", 1)[1]
+        if path is None:
+            out.append(tok)
+            continue
+        content = Path(path).read_text()
+        out.extend(["--text", "-"])
+    return out, content
+
+
+def _run_remote(url: str, raw_argv: list[str], root: Path, verb: str | None = None) -> int:
     """Forward the whole command to the host board API and relay the result."""
     from scripts import remote  # lazy: httpx only needed on the remote path
     from scripts.remote_token import read_remote_token
     token = os.environ.get("OVERSEER_REMOTE_TOKEN") or read_remote_token(root)
     forward = _forwardable_argv(raw_argv)
-    stdin = None if sys.stdin.isatty() else sys.stdin.read()
+    inlined: str | None = None
+    if verb in ("set-section", "append-body"):
+        try:
+            forward, inlined = _inline_file_option(forward)
+        except OSError as exc:
+            print(f"error: cannot read {exc.filename or 'the file'}: {exc.strerror or exc}",
+                  file=sys.stderr)
+            return 1
+    # A file option wins over piped stdin (the text is the file's).
+    stdin = inlined if inlined is not None else (None if sys.stdin.isatty() else sys.stdin.read())
     try:
         res = remote.exec_remote(url, token, forward, stdin)
     except remote.RemoteError as exc:
@@ -2783,7 +2833,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:  # argparse --help (0) or usage error (2)
         return 0 if not exc.code else 1
     if getattr(args, "remote", None):
-        return _run_remote(args.remote, raw, args.root)
+        return _run_remote(args.remote, raw, args.root, args.command)
     store.memo_begin()
     try:
         result: int = args.func(args)
