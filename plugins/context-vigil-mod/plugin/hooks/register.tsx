@@ -228,6 +228,12 @@ async function resumeFailed($: EngineInterface, path: string | null, held: strin
   await log($, 'guard.wait', { reason: 'resume-rejected', path, held: held !== null })
 }
 
+// An awaited handover that ends without a save: the prompts sent during it go with it.
+async function abandonAwaiting($: EngineInterface) {
+  await update($, awaitingA, () => null)
+  await update($, sentDuringA, () => [])
+}
+
 // PROBES.md §7: a mod never sees its own submit in prompt.submit, so `started` is marked here.
 function submitInstruction($: EngineInterface, reason: PendingReason) {
   submitSoon($, { text: instructionText(reason) }, 0, () => {
@@ -235,7 +241,7 @@ function submitInstruction($: EngineInterface, reason: PendingReason) {
   }, () => {
     // A rejected submit must not leave the handover waiting for a turn that never comes.
     void (async () => {
-      await update($, awaitingA, () => null)
+      await abandonAwaiting($)
       await withdrawConsent($)   // told it failed: a later save is asked about, never cleared silently
       await notify($, V.handoverFailed)
       await log($, 'guard.wait', { reason: 'submit-rejected' })
@@ -662,7 +668,7 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
       await log($, 'guard.wait', { reason: 'handover-in-flight', asked: reason })
       return 'in-flight'
     }
-    await update($, awaitingA, () => null)
+    await abandonAwaiting($)
     await notify($, V.handoverLost)
     await log($, 'guard.wait', { reason: 'awaiting-expired', asked: reason })
   }
@@ -1314,8 +1320,9 @@ export const register: Register = on => {
     // The chain's standing orders follow the handover to the successor session.
     if (pending) {
       try {
-        const orders = await $.store.get(standingKey(before))
-        if (orders !== undefined && orders !== null) { await $.store.set(standingKey(successor ?? session), orders); await $.store.delete(standingKey(before)) }
+        const to = successor ?? session
+        const orders = to === before ? undefined : await $.store.get(standingKey(before))   // a slow start: the id has not moved, nothing to move
+        if (orders !== undefined && orders !== null) { await $.store.set(standingKey(to), orders); await $.store.delete(standingKey(before)) }
       } catch (err) { await log($, 'guard.wait', { reason: 'standing-move-failed', error: String(err) }) }
     }
     // A slow start can leave the engine still answering the old id: this clear's events then land in the
@@ -1352,7 +1359,7 @@ export const register: Register = on => {
       } else if (await readLatch($)) {
         await notify($, V.resumeLatched(pending.path))
         await log($, 'guard.wait', { reason: 'latched', deferred: 'resume' })
-      } else { sentCarried = sentBlock !== ''; resumeSoon($, { text: resumeText(pending.path, pending.sent) }, pending.path, null) }
+      } else { sentCarried = sentBlock !== ''; resumeSoon($, { text: sentBlock ? `${resumeText(pending.path)}\n\n${sentBlock}` : resumeText(pending.path) }, pending.path, null) }
     } else {
       // R2-17: a handover that carries no automatic resume (a limit or last-light one) is still
       // injected on a manual /clear; never silently.
@@ -1460,19 +1467,19 @@ export const register: Register = on => {
     if (awaitingNow?.started && e.agentId === undefined && awaitingNow.turnId !== undefined && e.turnId === awaitingNow.turnId) {
       if (e.isAborted) {
         // The person pressed Esc: that is presence, and no retry (R1-02). It takes back their request too.
-        await update($, awaitingA, () => null)
+        await abandonAwaiting($)
         await withdrawConsent($)
         await observe($, { kind: 'human-command', at: now })
         await notify($, V.handoverInterrupted)
         await log($, 'guard.wait', { reason: 'instruction-interrupted' })
       } else if (standDown) {
         // R2-09: the classic hooks own the session now (spec §7); no second instruction.
-        await update($, awaitingA, () => null)
+        await abandonAwaiting($)
         await notify($, V.handoverFailed)
         await log($, 'guard.wait', { reason: 'standdown', deferred: awaitingNow.reason })
       } else if (awaitingNow.attempts < 2 && (await readLatch($))) {
         // R2-09: the turn died on a limit. Never submit while latched (spec §5): wait for the lift.
-        await update($, awaitingA, () => null)
+        await abandonAwaiting($)
         await update($, deferredA, () => ({ ...awaitingNow, started: false, turnId: undefined }))
         await notify($, V.waiting('latched'))
         await log($, 'guard.wait', { reason: 'latched', deferred: awaitingNow.reason })
@@ -1481,7 +1488,7 @@ export const register: Register = on => {
         submitInstruction($, awaitingNow.reason)
       } else {
         // Told it failed: a later save is the model's own, asked about, never cleared silently.
-        await update($, awaitingA, () => null)
+        await abandonAwaiting($)
         await withdrawConsent($)
         await notify($, V.handoverFailed)
         await log($, 'guard.wait', { reason: 'tool-not-called' })
@@ -1615,12 +1622,20 @@ export const register: Register = on => {
     while (await $.fs.exists(handoverPath(at, session, n)).catch(() => false)) n++
     await update($, handoverCountA, () => n)
     const path = handoverPath(at, session, n)
-    const sent = await read($, sentDuringA)
-    await update($, sentDuringA, () => [])
+    const sent = await read($, sentDuringA)   // cleared once the save succeeds, so a retry keeps them
     const now = await nowMs($)
     // Standing orders: the chain's earlier list is carried forward by the mod; the model only adds and retires.
-    const prevStanding = ((await $.store.get(standingKey(session)).catch(() => null)) as string[] | null | undefined) ?? []
-    const orders = mergeStanding(Array.isArray(prevStanding) ? prevStanding : [], parsed.fields.standing, parsed.fields.standing_retire)
+    // An unreadable list is not an empty one: save the handover with the new items only and leave the stored list alone.
+    let prevStanding: string[] = []
+    let standingReadable = true
+    try {
+      const got = (await $.store.get(standingKey(session))) as unknown
+      if (Array.isArray(got)) prevStanding = got as string[]
+    } catch (err) {
+      standingReadable = false
+      await log($, 'guard.wait', { reason: 'standing-read-failed', error: String(err) })
+    }
+    const orders = mergeStanding(prevStanding, parsed.fields.standing, parsed.fields.standing_retire)
     const retireLog = [...orders.retired.map(r => `- retired: ${r}`), ...orders.unmatched.map(r => `- not found, nothing retired: ${r}`)].join('\n')
     const markdown = renderHandover({ ...parsed.fields, standing: orders.items.map(i => `- ${i}`).join('\n'), standing_retire: retireLog }, {
       session, at: new Date(now).toISOString(), cwd, branch: git.branch, dirty: git.dirty,
@@ -1634,7 +1649,7 @@ export const register: Register = on => {
       return { result: `Handover not saved: writing ${path} failed (${String(err)}). Nothing was cleared; tell the person.` } as never
     }
     try {
-      await $.store.set(standingKey(session), orders.items)
+      if (standingReadable) await $.store.set(standingKey(session), orders.items)
     } catch (err) {
       await log($, 'guard.wait', { reason: 'standing-store-failed', error: String(err) })
     }
@@ -1649,6 +1664,7 @@ export const register: Register = on => {
       await log($, 'guard.wait', { reason: 'store-failed', path, error: String(err) })
       return { result: `Handover not saved to the store (the file is at ${path}): ${String(err)}. Nothing was cleared; tell the person.` } as never
     }
+    await update($, sentDuringA, () => [])
     if (reason === 'limit' && limitResume) limitResume.path = path
     await log($, 'handover.written', { reason, bytes: markdown.length, path, standing: orders.items.length, ...(orders.retired.length ? { retired: orders.retired } : {}), ...(orders.unmatched.length ? { unmatched: orders.unmatched } : {}) })
     if (!requested) {
@@ -1659,7 +1675,7 @@ export const register: Register = on => {
     }
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
     if (reason === 'threshold' || reason === 'request') scheduleClear($, asked?.unattended ?? false)
-    return { result: `Saved handover to ${path}${standingNote(orders)}` } as never
+    return { result: `Saved handover to ${path}${standingNote(orders)}${standingReadable ? '' : ' Your earlier standing orders could not be read, so only the new standing orders were saved in this handover; the stored list is untouched.'}` } as never
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

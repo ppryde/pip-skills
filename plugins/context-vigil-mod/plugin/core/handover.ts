@@ -101,8 +101,9 @@ export function mergeStanding(prev: string[], added: string, retire: string): { 
   for (const a of lines(added, false)) if (!items.some(i => norm(i) === norm(a))) items.push(a)
   const retired: string[] = []
   const unmatched: string[] = []
-  for (const r of lines(retire, true)) {
-    const at = items.findIndex(i => norm(i) === norm(r))
+  for (const r of lines(retire, false)) {
+    const bare = r.replace(QUOTES, '').trim()
+    const at = items.findIndex(i => norm(i) === norm(r) || norm(i) === norm(bare))
     if (at < 0) { unmatched.push(r); continue }
     retired.push(items[at]!)
     items.splice(at, 1)
@@ -146,14 +147,12 @@ export function instructionText(reason: PendingReason): string {
 export const SENT_MAX = 10
 export function sentSection(sent: readonly string[] | undefined): string {
   if (!sent?.length) return ''
-  return `## Sent during handover\n\nThe person sent ${sent.length === 1 ? 'this' : 'these'} while the handover was being written, so the handover does not cover ${sent.length === 1 ? 'it' : 'them'}. Answer ${sent.length === 1 ? 'it' : 'them'} first:\n\n` +
+  return `## Sent during handover\n\nThe person sent ${sent.length === 1 ? 'this' : 'these'} while the handover was being written, so the handover does not cover ${sent.length === 1 ? 'it' : 'them'}. Answer ${sent.length === 1 ? 'it' : 'them'} before the handover's next step:\n\n` +
     sent.map(t => t.split('\n').map(l => `> ${l}`).join('\n')).join('\n\n')
 }
 
-export function resumeText(path: string, sent?: readonly string[]): string {
-  const base = `[context-vigil-mod] Resume from the handover injected above (saved at ${path}). Start with its next step.`
-  const extra = sentSection(sent)
-  return extra ? `[context-vigil-mod] Resume from the handover injected above (saved at ${path}).\n\n${extra}\n\nThen continue with the handover's next step.` : base
+export function resumeText(path: string): string {
+  return `[context-vigil-mod] Resume from the handover injected above (saved at ${path}). Start with its next step.`
 }
 
 export function injectText(markdown: string): string {

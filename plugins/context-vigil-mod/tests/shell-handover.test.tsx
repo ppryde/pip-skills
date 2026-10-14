@@ -1248,3 +1248,68 @@ test('a plugin-origin prompt (the instruction itself) is never "sent during hand
   await w.clock.advance(500)
   expect(w.submits.at(-1)?.text).not.toContain('Sent during handover')
 })
+
+// Review r1.
+test('a slow-start clear (successor id not yet known) keeps the standing orders', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call({ standing: 'Keep me' }) as never)
+  await w.clock.settle()
+  await $.classic.SessionStart({ source: 'clear' } as never)   // engine still answers the old id, no transcript path
+  expect(w.store.get('standing:s1')).toEqual(['Keep me'])
+})
+
+test('an item written with quotes can be retired by naming it with or without them', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await handOver(w, $, { standing: '"Quoted" rule\n`code` rule' }, 's2')
+  await handOver(w, $, { standing_retire: '"Quoted" rule\n`code` rule' }, 's3')
+  const md = w.files.get('/cfg/context-vigil-mod/handovers/s2-1.md') ?? ''
+  expect(md).toContain('- retired: "Quoted" rule')
+  expect(md).toContain('- retired: `code` rule')
+})
+
+test('an unreadable standing list is never overwritten: the handover still saves and the model is told', async ($, on) => {
+  const w = world(on, { store: { 'standing:s1': ['Old rule'] } })
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  w.storeGetRefused.value = true
+  const res = await $.tool.call(call({ standing: 'New rule' }) as never)
+  const r = String((res as { result?: unknown }).result)
+  w.storeGetRefused.value = false
+  expect(r).toContain('Saved handover')
+  expect(r).toContain('standing orders')
+  expect(w.store.get('standing:s1')).toEqual(['Old rule'])
+})
+
+test('a failed save keeps the prompts sent during the handover for the retry', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.prompt.submit(human('please keep me'))
+  w.handoverWriteRefused.value = true
+  await $.tool.call(call() as never)
+  w.handoverWriteRefused.value = false
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).toContain('> please keep me')
+})
+
+test('an abandoned handover forgets the prompts sent during it', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await instructionTurn($, w, 'a')
+  await $.prompt.submit(human('sent then abandoned'))
+  await $.turn.complete({ ...turn('a'), isAborted: true, reason: 'aborted' } as never)
+  await w.clock.settle()
+  expect(w.state.get('context-vigil-mod.sentDuring')).toEqual([])
+})
