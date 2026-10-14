@@ -23,16 +23,73 @@ PATH_DESTS = {
 }
 # stored as a string and read later only as `Path.is_dir()` / `rev-parse --verify`
 WATCH_DESTS = {("set-field", "worktree"), ("set-field", "branch")}
-# everything else: the literal result of enumerating the parser, committed here
+# everything else, keyed by (top-level verb, dest): the literal result of enumerating the
+# parser. A new option that reuses a dest name still has to be listed under its verb.
 SAFE_DESTS = {
-    "action", "advance", "body", "brief", "card", "card_id", "chunk", "color_key", "complexity",
-    "count", "dry_run", "estimate", "fact_id", "force", "force_gate", "full", "goal", "id",
-    "ids", "jira", "json", "labels", "lens", "linear", "name", "no_backup", "note", "notes",
-    "off", "on", "order", "panel", "parent", "pending", "pr", "print_dir", "priority", "reason",
-    "repo", "reviewers", "role", "round", "scope", "section", "session", "session_id", "slot",
-    "slug", "source", "sprint", "sprint_id", "stage", "stale", "statement", "status", "subject",
-    "superseded_by", "tag", "tags", "task", "text", "tier", "title", "tokens", "touches", "type",
-    "var", "verb", "verdict", "vigil_verb", "yes",
+    "<global>": {"session_id"},
+    "abandon": {"card_id"},
+    "accept-fact": {"fact_id"},
+    "add-fact": {"body", "source", "statement", "tags"},
+    "append-body": {"card_id", "section", "text"},
+    "backup": {"print_dir"},
+    "block": {"card_id", "reason"},
+    "board": {"full", "json"},
+    "boards": {"json"},
+    "bootstrap": {
+        "brief", "card", "complexity", "force_gate", "goal", "jira", "labels", "linear", "slug",
+        "title", "type"
+    },
+    "calibration": {"json"},
+    "checklist": {"card_id", "status", "subject", "task"},
+    "claim": {"card_id", "force", "session"},
+    "claim-nudged": {"card_id"},
+    "claude-dirs": {"action", "json"},
+    "clear": {"json", "no_backup", "scope", "yes"},
+    "conflicts": {"card", "count", "json", "sprint"},
+    "depends": {"card_id", "off", "on"},
+    "dispatch-prep": {
+        "advance", "card_id", "chunk", "force_gate", "lens", "panel", "role", "round", "slot",
+        "stage", "var"
+    },
+    "done": {"card_id"},
+    "facts": {"card", "count", "json", "pending", "stale", "tag"},
+    "handoff": {"json"},
+    "handover": {"notes"},
+    "help": {"verb"},
+    "init": {"yes"},
+    "label-color": {"color_key", "json", "name"},
+    "log-progress": {"card_id", "note", "tokens"},
+    "log-review": {"card_id", "reviewers", "stage", "verdict"},
+    "log-usage": {"card_id", "role", "round", "stage", "tier", "tokens"},
+    "merge-boards": {"dry_run", "json"},
+    "new-card": {
+        "complexity", "estimate", "goal", "jira", "labels", "linear", "repo", "sprint", "title"
+    },
+    "new-sprint": {"estimate", "goal", "sprint_id"},
+    "next": {"card_id"},
+    "park": {"card_id"},
+    "pull-children": {"card_id"},
+    "reject-fact": {"fact_id", "reason"},
+    "release": {"card_id"},
+    "reorder": {"ids"},
+    "repos": {"json"},
+    "resume": {"json"},
+    "retire-fact": {"fact_id", "superseded_by"},
+    "rollup-sprint": {"sprint_id"},
+    "set-field": {
+        "body", "card_id", "complexity", "estimate", "labels", "order", "parent", "pr",
+        "priority", "repo", "sprint", "title", "touches"
+    },
+    "set-section": {"card_id", "section", "text"},
+    "set-sprint-status": {"sprint_id", "status"},
+    "set-stage": {"card_id", "force_gate", "stage"},
+    "show": {"full", "id", "json", "section"},
+    "unblock": {"card_id"},
+    "unclaim": {"card_id"},
+    "unpark": {"card_id"},
+    "usage": {"card", "json"},
+    "verify-fact": {"fact_id"},
+    "vigil": {"vigil_verb"},
 }
 
 
@@ -58,25 +115,33 @@ def _top_level_verbs() -> set[str]:
     return set(sub.choices)
 
 
+def _key(path: tuple[str, ...]) -> str:
+    return path[0] if path else "<global>"
+
+
 def test_every_verb_and_dest_is_classified() -> None:
     unclassified = []
     for path, action in _walk(build_parser()):
-        verb = "/".join(path) or "<global>"
-        key = (path[0] if path else "<global>", action.dest)
-        if action.dest in PATH_DESTS or key in WATCH_DESTS or action.dest in SAFE_DESTS:
+        verb = _key(path)
+        if (
+            action.dest in PATH_DESTS
+            or (verb, action.dest) in WATCH_DESTS
+            or action.dest in SAFE_DESTS.get(verb, set())
+        ):
             continue
         unclassified.append((verb, action.dest))
     assert unclassified == [], f"classify these in PATH_DESTS / WATCH_DESTS / SAFE_DESTS: {unclassified}"
 
 
 def test_classification_sets_are_disjoint_and_have_no_stale_entries() -> None:
-    assert not PATH_DESTS & SAFE_DESTS
+    pairs = {(_key(p), a.dest) for p, a in _walk(build_parser())}
+    safe_pairs = {(v, d) for v, ds in SAFE_DESTS.items() for d in ds}
+    assert safe_pairs <= pairs, safe_pairs - pairs
+    assert not {d for _, d in safe_pairs} & PATH_DESTS
+    assert not safe_pairs & WATCH_DESTS
     assert not {d for _, d in WATCH_DESTS} & PATH_DESTS
-    dests = {a.dest for _, a in _walk(build_parser())}
-    assert PATH_DESTS <= dests, PATH_DESTS - dests
-    assert SAFE_DESTS <= dests, SAFE_DESTS - dests
-    pairs = {((p[0] if p else "<global>"), a.dest) for p, a in _walk(build_parser())}
     assert WATCH_DESTS <= pairs
+    assert PATH_DESTS <= {d for _, d in pairs}, PATH_DESTS - {d for _, d in pairs}
 
 
 def test_no_parser_abbreviates_options() -> None:
