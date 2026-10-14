@@ -1668,17 +1668,13 @@ def cmd_log_review(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_dispatch_prep(args: argparse.Namespace) -> int:
-    """``--advance`` folds a set-stage into the same call (same validation:
-    ``Card.set_stage`` raises on an unknown stage, though ``--stage``'s own
-    ``choices=STAGES`` already rules that out here) so each stage playbook
-    entry is one Bash call instead of set-stage-then-dispatch-prep. Prints
-    only the bundle path either way.
+_DISPATCH_REFUSED = -1
 
-    ``--panel`` (reviewer role, a review stage) preps every slot of the round's
-    panel (``nextstep.panel``: slots, lenses, model tiers) in one call and prints
-    one ``<agent> <model> <path>`` line per slot instead of the bare path."""
-    force = _force_reason(args)
+
+def _dispatch_validate(args: argparse.Namespace) -> "int | None":
+    """The side-effect-free pre-checks of ``dispatch-prep`` / ``dispatch-record``
+    (one function so the local and the remote path cannot drift). Returns the
+    effective chunk, or ``-1`` after printing why the call is refused."""
     chunk = args.chunk
     if chunk is None and args.role == "implementer":
         chunk = 1
@@ -1691,13 +1687,22 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
             else "--panel picks the slots and lenses: drop --lens" if args.lens else None)
         if refusal:
             print(f"error: {refusal}", file=sys.stderr)
-            return 1
+            return _DISPATCH_REFUSED
     try:  # bad --slot/--chunk/--role fails BEFORE a forced gate or dispatch row is written
         bundle.reply_name(args.role, round_no=args.round,
                           slot="A" if args.panel else args.slot, chunk=chunk)
     except bundle.BundleError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 1
+        return _DISPATCH_REFUSED
+    return chunk
+
+
+def _dispatch_board(
+    args: argparse.Namespace, chunk: "int | None",
+) -> "tuple[Card, list[nextstep.Slot], list[int]]":
+    """The board half of a dispatch: the optional ``--advance``, the dispatch
+    gates, the panel's slots and the ``dispatched`` evidence rows."""
+    force = _force_reason(args)
     notes: list[str] = []
     dispatched: list[int] = []
     slots: list[nextstep.Slot] = []
@@ -1724,6 +1729,49 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
 
     card = _edit(args.root, args.card_id, prep, ack=args.advance)
     _flush_notes(notes)
+    return card, slots, dispatched
+
+
+def cmd_dispatch_record(args: argparse.Namespace) -> int:
+    """Board half of ``dispatch-prep`` for a ``--remote`` client, which renders the
+    bundle (and takes any diff) in its own container. Prints one JSON record."""
+    chunk = _dispatch_validate(args)
+    if chunk == _DISPATCH_REFUSED:
+        return 1
+    card, slots, _ = _dispatch_board(args, chunk)
+    cfg = config.load_config(args.root)
+    today = _today()
+    record = {
+        "v": 1,
+        "card": {"id": card.id, "title": card.title, "complexity": card.complexity,
+                 "goal": card.sections.get("## Goal"), "plan": card.sections.get("## Plan", ""),
+                 "worktree": card.worktree},
+        "slots": [{"slot": s.slot, "lens": s.lens, "model": s.model} for s in slots],
+        "chunk": chunk,
+        "knowledge": bundle._knowledge(args.root, card, today, _knowledge_max(cfg)),
+        "calibration": (bundle._calibration(db.load_archived_cards(_conn(args.root)))
+                        if args.role == "planner" else ""),
+        "verbosity": str(cfg.get("verbosity", "terse")),
+    }
+    _stamp_orchestrator(args.root, card.id)
+    print(json.dumps(record))
+    return 0
+
+
+def cmd_dispatch_prep(args: argparse.Namespace) -> int:
+    """``--advance`` folds a set-stage into the same call (same validation:
+    ``Card.set_stage`` raises on an unknown stage, though ``--stage``'s own
+    ``choices=STAGES`` already rules that out here) so each stage playbook
+    entry is one Bash call instead of set-stage-then-dispatch-prep. Prints
+    only the bundle path either way.
+
+    ``--panel`` (reviewer role, a review stage) preps every slot of the round's
+    panel (``nextstep.panel``: slots, lenses, model tiers) in one call and prints
+    one ``<agent> <model> <path>`` line per slot instead of the bare path."""
+    chunk = _dispatch_validate(args)
+    if chunk == _DISPATCH_REFUSED:
+        return 1
+    card, slots, dispatched = _dispatch_board(args, chunk)
     cfg = config.load_config(args.root)
     lines: list[str] = []
     try:
@@ -1831,7 +1879,7 @@ def cmd_rebuild_index(args: argparse.Namespace) -> int:
 def cmd_resume(args: argparse.Namespace) -> int:
     _, quarantined = db.load_live_cards(_conn(args.root))
     _report_quarantined(quarantined)
-    entries = resume_entries(args.root, session_id=args.session_id)
+    entries = resume_entries(args.root, session_id=args.session_id, remote_client=args.remote_client)
     if args.json:
         print(json.dumps(entries, indent=2))
     else:
@@ -1899,7 +1947,7 @@ def cmd_vigil(args: argparse.Namespace) -> int:
 def cmd_handover(args: argparse.Namespace) -> int:
     """``handover`` = ``handoff | vigil handover --no-snapshot --content-file -``
     without a shell pipe, so the guard sees one ledger-CLI call."""
-    data = handoff_data(args.root)
+    data = handoff_data(args.root, remote_client=args.remote_client)
     for path in data["quarantined"]:
         print(f"QUARANTINED: {path}", file=sys.stderr)
     if _vigil_cli() is None:
@@ -1913,7 +1961,7 @@ def cmd_handover(args: argparse.Namespace) -> int:
 
 
 def cmd_handoff(args: argparse.Namespace) -> int:
-    data = handoff_data(args.root)
+    data = handoff_data(args.root, remote_client=args.remote_client)
     for path in data["quarantined"]:
         print(f"QUARANTINED: {path}", file=sys.stderr)
     if args.json:
@@ -2396,6 +2444,13 @@ def cmd_label_color_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _remote_client_flag(p: argparse.ArgumentParser) -> None:
+    """Set by `_run_remote` on the verbs that look at git state: the host cannot
+    see the container's worktrees and branches, so it reports them unchecked."""
+    p.add_argument("--remote-client", dest="remote_client", action="store_true",
+                   help=argparse.SUPPRESS)
+
+
 def build_parser() -> argparse.ArgumentParser:
     # allow_abbrev=False: reject abbreviated optionals (e.g. `--roo`, `--rem`).
     # The remote /api/exec strippers match `--root`/`--remote` exactly, so an
@@ -2634,6 +2689,21 @@ def build_parser() -> argparse.ArgumentParser:
                    help="override a refused stage or round-cap gate (see set-stage)")
     p.set_defaults(func=cmd_dispatch_prep)
 
+    # Board half of dispatch-prep for a --remote client (WF-300); no --var: the
+    # client parses and applies those itself when it renders.
+    p = sub.add_parser("dispatch-record")
+    p.add_argument("card_id")
+    p.add_argument("--stage", required=True, choices=STAGES)
+    p.add_argument("--role", required=True, choices=ROLES)
+    p.add_argument("--round", type=int, default=1)
+    p.add_argument("--slot")
+    p.add_argument("--chunk", type=int)
+    p.add_argument("--lens")
+    p.add_argument("--advance", action="store_true")
+    p.add_argument("--panel", action="store_true")
+    p.add_argument("--force-gate", dest="force_gate", metavar="REASON")
+    p.set_defaults(func=cmd_dispatch_record)
+
     p = sub.add_parser("next", help="one line: stage, what to dispatch next, the verdict state")
     p.add_argument("card_id")
     p.set_defaults(func=cmd_next)
@@ -2657,6 +2727,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("resume")
     p.add_argument("--json", action="store_true")
+    _remote_client_flag(p)
     p.set_defaults(func=cmd_resume)
 
     p = sub.add_parser("conflicts")
@@ -2668,6 +2739,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("handoff")
     p.add_argument("--json", action="store_true")
+    _remote_client_flag(p)
     p.set_defaults(func=cmd_handoff)
 
     p = sub.add_parser("vigil", help="passthrough to the vigil plugin's CLI")
@@ -2678,6 +2750,7 @@ def build_parser() -> argparse.ArgumentParser:
         "handover", help="hand the ledger rollup to vigil (handoff | vigil handover), no pipe"
     )
     p.add_argument("--notes", help="extra prose for the handover")
+    _remote_client_flag(p)
     p.set_defaults(func=cmd_handover)
 
     p = sub.add_parser("board")

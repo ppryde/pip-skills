@@ -57,10 +57,14 @@ SAFE_DESTS = {
         "advance", "card_id", "chunk", "force_gate", "lens", "panel", "role", "round", "slot",
         "stage", "var"
     },
+    "dispatch-record": {
+        "advance", "card_id", "chunk", "force_gate", "lens", "panel", "role", "round", "slot",
+        "stage"
+    },
     "done": {"card_id"},
     "facts": {"card", "count", "json", "pending", "stale", "tag"},
-    "handoff": {"json"},
-    "handover": {"notes"},
+    "handoff": {"json", "remote_client"},
+    "handover": {"notes", "remote_client"},
     "help": {"verb"},
     "init": {"yes"},
     "label-color": {"color_key", "json", "name"},
@@ -79,7 +83,7 @@ SAFE_DESTS = {
     "release": {"card_id"},
     "reorder": {"ids"},
     "repos": {"json"},
-    "resume": {"json"},
+    "resume": {"json", "remote_client"},
     "retire-fact": {"fact_id", "superseded_by"},
     "rollup-sprint": {"sprint_id"},
     "set-field": {
@@ -259,7 +263,7 @@ def test_every_hook_verb_but_pretool_is_denied() -> None:
 # (a decision that it is safe over exec) or to _DENIED_VERBS.
 ALLOWED_VERBS = {
     "abandon", "accept-fact", "add-fact", "append-body", "block", "board", "boards",
-    "bootstrap-begin", "bootstrap-finish",
+    "bootstrap-begin", "bootstrap-finish", "dispatch-record",
     "calibration", "checklist", "claim", "claim-nudged", "conflicts", "depends", "done",
     "facts", "handoff", "handover", "help", "label-color", "log-progress", "log-review",
     "log-usage", "new-card", "new-sprint", "next", "park", "pretool-hook", "pull-children",
@@ -283,7 +287,7 @@ def test_allowed_and_denied_partition_the_verbs() -> None:
 GIT_RUNNING = {"bootstrap", "dispatch-prep"}
 GIT_LOOKUP = {"resume", "handoff", "handover", "repos"}
 GIT_FREE = {
-    "bootstrap-begin", "bootstrap-finish",
+    "bootstrap-begin", "bootstrap-finish", "dispatch-record",
     "new-card", "set-stage", "block", "unblock", "done", "abandon", "set-field", "append-body",
     "reorder", "depends", "checklist", "park", "unpark", "pull-children", "claim", "unclaim",
     "release", "claim-nudged", "log-progress", "log-review", "next", "new-sprint", "rollup-sprint",

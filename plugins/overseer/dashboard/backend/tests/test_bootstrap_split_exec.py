@@ -44,3 +44,12 @@ def test_finish_on_a_card_past_bootstrap_is_refused_over_exec(client: TestClient
 def test_session_id_never_reaches_the_exec_child(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "host-session")
     assert "CLAUDE_CODE_SESSION_ID" not in board_service._child_env(tmp_path)
+
+
+def test_dispatch_record_is_allowed_and_dispatch_prep_stays_denied(client: TestClient) -> None:
+    _exec(client, ["bootstrap-begin", "--title", "T"])
+    _exec(client, ["bootstrap-finish", "WF-001", "--branch", "b", "--worktree", "/c/wt"])
+    denied = _exec(client, ["dispatch-prep", "WF-001", "--stage", "planning", "--role", "planner"])
+    assert denied.status_code == 403
+    res = _exec(client, ["dispatch-record", "WF-001", "--stage", "planning", "--role", "planner"]).json()
+    assert res["returncode"] == 0 and json.loads(res["stdout"])["card"]["worktree"] == "/c/wt"

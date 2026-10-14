@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from scripts import gitops
@@ -131,6 +132,43 @@ def _calibration(archived: list[Card]) -> str:
     return "; ".join(parts) or "_(no samples)_"
 
 
+@dataclass(frozen=True)
+class BundleSpec:
+    """Everything ``render`` needs from the board, as plain strings: a ``--remote``
+    client gets it from ``dispatch-record`` and renders in its own container, so
+    no host path is in it (``worktree`` is None until the card has one)."""
+
+    card_id: str
+    title: str
+    complexity: str | None
+    goal: str | None
+    plan: str
+    worktree: str | None
+    stage: str
+    role: str
+    round_no: int
+    slot: str | None
+    chunk: int | None
+    lens: str | None
+    verbosity: str
+    knowledge: str
+    calibration: str
+
+
+def spec_from_record(
+    record: dict, *, stage: str, role: str, round_no: int, slot: str | None, lens: str | None,
+) -> BundleSpec:
+    """A ``BundleSpec`` from one ``dispatch-record`` JSON record and one of its slots."""
+    card = record["card"]
+    return BundleSpec(
+        card_id=card["id"], title=card["title"], complexity=card["complexity"],
+        goal=card["goal"], plan=card["plan"], worktree=card["worktree"], stage=stage,
+        role=role, round_no=round_no, slot=slot, chunk=record["chunk"], lens=lens,
+        verbosity=record["verbosity"], knowledge=record["knowledge"],
+        calibration=record["calibration"],
+    )
+
+
 def prepare(
     repo_root: Path,
     card: Card,
@@ -147,27 +185,62 @@ def prepare(
     archived: list[Card],
     today: str,
 ) -> Path:
+    """Load the board-derived parts, take the review diff when one is due, and
+    ``render``. The local path; a remote client does the same from a record."""
+    reply_name(role, round_no=round_no, slot=slot, chunk=chunk)
+    spec = BundleSpec(
+        card_id=card.id, title=card.title, complexity=card.complexity,
+        goal=card.sections.get("## Goal"), plan=card.sections.get("## Plan", ""),
+        worktree=card.worktree, stage=stage, role=role,
+        round_no=round_no, slot=slot, chunk=chunk, lens=lens, verbosity=verbosity,
+        knowledge=_knowledge(repo_root, card, today, knowledge_max),
+        calibration=_calibration(archived) if role == "planner" else "",
+    )
+    diff_text = None
+    if role == "reviewer" and stage != "plan-review":
+        worktree = Path(card.worktree) if card.worktree else repo_root
+        try:
+            review = gitops.review_diff(worktree)
+        except gitops.GitError as exc:
+            raise BundleError(f"could not write the diff: {exc}") from exc
+        diff_text = review.text
+        for warning in review.warnings:
+            print(f"dispatch-prep: {warning}", file=sys.stderr)
+    return render(spec, diff_text, dispatch_dir(repo_root, card.id, stage),
+                  f"{sys.executable} {CLI_PATH} --root {repo_root}", repo_root, variables)
+
+
+def render(
+    spec: BundleSpec,
+    diff_text: str | None,
+    directory: Path,
+    cli: str,
+    repo_root: Path,
+    variables: dict[str, str],
+) -> Path:
+    """Write the bundle (and the reviewer's plan snapshot or diff) into
+    ``directory``. Pure of the board and of git: ``repo_root`` only stands in for
+    a card with no worktree yet."""
+    role, stage, round_no, slot, chunk = spec.role, spec.stage, spec.round_no, spec.slot, spec.chunk
     reply = reply_name(role, round_no=round_no, slot=slot, chunk=chunk)
-    directory = dispatch_dir(repo_root, card.id, stage)
     directory.mkdir(parents=True, exist_ok=True)
-    worktree = Path(card.worktree) if card.worktree else repo_root
-    sections = card.sections
+    worktree = Path(spec.worktree) if spec.worktree else repo_root
     values: dict[str, str] = {
-        "card_id": card.id,
-        "title": card.title,
+        "card_id": spec.card_id,
+        "title": spec.title,
         "stage": stage,
         "round_no": str(round_no),
         "slot": slot or "",
         "chunk_no": "" if chunk is None else str(chunk),
-        "goal": sections.get("## Goal") or "_(none)_",
-        "complexity": card.complexity or "_(ungraded)_",
+        "goal": spec.goal or "_(none)_",
+        "complexity": spec.complexity or "_(ungraded)_",
         "worktree": str(worktree),
         "reply_path": str(directory / reply),
-        "cli": f"{sys.executable} {CLI_PATH} --root {repo_root}",
-        "knowledge": _knowledge(repo_root, card, today, knowledge_max),
-        "calibration": _calibration(archived) if role == "planner" else "",
-        "charter": "" if verbosity == "normal" else TERSE_CHARTER,
-        "lens": lens or "general",
+        "cli": cli,
+        "knowledge": spec.knowledge,
+        "calibration": spec.calibration,
+        "charter": "" if spec.verbosity == "normal" else TERSE_CHARTER,
+        "lens": spec.lens or "general",
         "prior_findings": _bullets(
             _files_for_rounds(directory, set(range(1, round_no)), include_fix=True)
         ),
@@ -178,17 +251,11 @@ def prepare(
     if role == "reviewer":
         if stage == "plan-review":
             target = directory / "plan.snapshot.md"
-            target.write_text(sections.get("## Plan", ""))
+            target.write_text(spec.plan)
             values["target_note"] = " (a read-only snapshot of the card's ## Plan; do not edit it)"
         else:
             target = directory / "diff.patch"
-            try:
-                review = gitops.review_diff(worktree)
-                target.write_text(review.text)
-                for warning in review.warnings:
-                    print(f"dispatch-prep: {warning}", file=sys.stderr)
-            except gitops.GitError as exc:
-                raise BundleError(f"could not write the diff: {exc}") from exc
+            target.write_text(diff_text or "")
         values["target_path"] = str(target)
     if role == "fixer" and stage == "plan-review":
         # The reviewers read a snapshot taken from the card's ## Plan at dispatch time,
@@ -197,10 +264,10 @@ def prepare(
             "\n- Plan fixes: the plan is the card's `## Plan` section; `plan.snapshot.md` in the "
             "dispatch folder is a read-only view for reviewers and editing it fixes nothing. "
             "Read the CURRENT plan first with "
-            f"`{values['cli']} show {card.id} --section Plan` (it may have been edited since "
+            f"`{values['cli']} show {spec.card_id} --section Plan` (it may have been edited since "
             "dispatch; never build on the snapshot) and apply your fixes on top of it. "
             "Write the corrected full plan to a temp file, then run "
-            f"`{values['cli']} set-section {card.id} --section Plan --text-file <file>`; "
+            f"`{values['cli']} set-section {spec.card_id} --section Plan --text-file <file>`; "
             "the next round's snapshot is taken from it."
         )
     if role in KNOWLEDGE_ON_REQUEST:
