@@ -126,7 +126,7 @@ function withRoot(url: string): string {
  * `detail` string (falling back to `res.statusText` when `detail` is
  * absent/unparsable) so callers can surface it to a toast.
  *
- * Auth (WF-... token gate): every request carries `X-Overseer-Token` when
+ * Auth (dashboard token gate): every request carries `X-Overseer-Token` when
  * one is stored (`authHeaders`), which is a no-op header-wise on the
  * ungated-by-default backend. On a 401 (gate active, no/expired token) we
  * prompt once via `window.prompt`, store whatever the operator pastes, and

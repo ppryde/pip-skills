@@ -1,10 +1,13 @@
 // /census-setup: the questions, what an answer means, and the settings.json surgery. Pure: no `$`.
 import { expandHome, joinPath } from './home'
 import type { HomeEnv } from './home'
-import { DEFAULT_SEGMENTS } from './render'
+import { DEFAULT_BUDGET, DEFAULT_SEGMENTS, draw, parseBudget, plain } from './render'
+import type { RenderInput } from './render'
 
 export type RecordMode = 'yes' | 'shadow' | 'no'
 export type Preset = 'two' | 'compact' | 'minimal'
+/** Pip's Pac-Man bars (the layout presets apply) or Dave's plain one-liner. */
+export type Style = 'pacman' | 'clean'
 export type Placement = 'above' | 'below'
 
 /** What the person answered, in $.store. Absent = not answered; the defaults below apply. */
@@ -13,8 +16,12 @@ export type Saved = {
   record?: RecordMode
   draw?: boolean
   placement?: Placement
+  /** Absent = pacman: installs from before the style question draw as they did. */
+  style?: Style
   preset?: Preset
   pr?: boolean
+  /** What a main session's 💸 cost bar fills up to, in dollars. */
+  budget?: number
   answeredAt?: number
 }
 
@@ -27,6 +34,8 @@ export const PRESETS: Record<Preset, string> = {
   compact: 'context,cache,limits,cost,model,git',
   minimal: 'context,limits/git',
 }
+/** Dave's Nice 'n' Clean in the same three layouts: Full is the one-liner plus a where-am-I line. */
+export const CLEAN_PRESETS: Record<Preset, string> = { two: 'clean/cleanwhere', compact: 'clean', minimal: 'cleanmin' }
 
 // ---- what is on this machine ------------------------------------------------------------------
 
@@ -105,8 +114,8 @@ export function writerActive(entries: { updatedAt: number; hasCensusMod: boolean
 
 // ---- settings: env > $.store > defaults ----------------------------------------------------------
 
-export type SetupEnv = HomeEnv & { CENSUS_MOD_STORE?: string; CENSUS_STATUSLINE_SEGMENTS?: string; CENSUS_MOD_PLACEMENT?: string; CENSUS_MOD_PR_HINT?: string }
-export type Effective = { record: RecordMode; shadowDir: string | null; draw: boolean; placement: Placement; segments: string | undefined; pr: boolean; prHint: boolean }
+export type SetupEnv = HomeEnv & { CENSUS_MOD_STORE?: string; CENSUS_STATUSLINE_SEGMENTS?: string; CENSUS_MOD_PLACEMENT?: string; CENSUS_MOD_PR_HINT?: string; CLAUDE_COST_BUDGET?: string }
+export type Effective = { style: Style; budget: number; record: RecordMode; shadowDir: string | null; draw: boolean; placement: Placement; segments: string | undefined; pr: boolean; prHint: boolean }
 
 /**
  * Before any answer: record to the real store ONLY if this account's status line does not carry the
@@ -126,12 +135,15 @@ export function effective(saved: Saved, env: SetupEnv, det: Detection, configRoo
   if (record === 'shadow' && !shadowDir) record = 'no' // nowhere to write
   const envSegments = env.CENSUS_STATUSLINE_SEGMENTS?.trim()
   return {
+    // A usable CLAUDE_COST_BUDGET wins (existing installs keep working), then the answer, then $20.
+    style: saved.style ?? 'pacman',
+    budget: parseBudget(env.CLAUDE_COST_BUDGET) ?? saved.budget ?? DEFAULT_BUDGET,
     record,
     shadowDir,
     draw: saved.draw ?? true,
     // An install that never answered stays where it was (above); the question recommends below for new ones.
     placement: ((p: string | undefined): Placement | null => (p === 'above' || p === 'below' ? p : null))(env.CENSUS_MOD_PLACEMENT?.trim().toLowerCase()) ?? saved.placement ?? 'above',
-    segments: envSegments || (saved.preset ? PRESETS[saved.preset] : undefined),
+    segments: envSegments || (saved.style === 'clean' ? CLEAN_PRESETS[saved.preset ?? 'two'] : saved.preset ? PRESETS[saved.preset] : undefined),
     pr: saved.pr ?? false,
     prHint: /^(1|true|on|yes)$/i.test(env.CENSUS_MOD_PR_HINT?.trim() ?? ''),
   }
@@ -159,9 +171,16 @@ export const L = {
   wRemove: "Remove this account's status line (census-mod draws it instead)",
   wKeep: "Keep my status line; census-mod won't record",
   wBoth: 'Keep both (not recommended)',
-  presetTwo: 'Your two lines',
+  presetTwo: 'Full — two lines',
   presetCompact: 'Compact — one line',
   presetMinimal: 'Minimal — context, limits / git',
+  stylePacman: "Pip's Pac-Man flavour",
+  styleClean: "Dave's Nice 'n' Clean",
+  styleShow: 'Show me',
+  budget10: '$10',
+  budget20: '$20',
+  budget50: '$50',
+  budget100: '$100',
   prYes: 'Yes — look up with gh',
   prNo: "No — no gh lookups (PRs this session makes still show)",
 } as const
@@ -230,10 +249,26 @@ export const Q = {
     question: `This account's status line also records into the census store${otherWriter ? ' (and it has written in the last few minutes)' : ''}. Two writers on one store muddle idle and liveness. What now?`,
     options: draw ? [rec(L.wRemove, true), L.wKeep, L.wBoth] : [rec(L.wKeep, true), L.wBoth],
   }),
+  /** `showMe`: the same question again with both samples in its text, and only the two styles to pick. */
+  style: (showMe = false): Question => {
+    const { pacman, clean } = styleSamples()
+    return {
+      header: '🎨 Style',
+      question: showMe
+        ? `Which style should the status line have? Both, from a sample session:\n\n${L.stylePacman}:\n${pacman}\n\n${L.styleClean}:\n${clean}\n`
+        : 'Which style should the status line have? Pick Show me to see both.',
+      options: showMe ? [rec(L.stylePacman, true), L.styleClean] : [rec(L.stylePacman, true), L.styleClean, L.styleShow],
+    }
+  },
   preset: (): Question => ({
     header: '📐 Layout',
     question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)',
     options: [rec(L.presetTwo, true), L.presetCompact, L.presetMinimal],
+  }),
+  budget: (retry = false): Question => ({
+    header: '💸 Budget',
+    question: `${retry ? 'That is not a positive number. Type one, like 35 or $12.50. ' : ''}What should a main session's cost bar fill up to? (The 💸 bar on the status line. CLAUDE_COST_BUDGET still overrides this.)`,
+    options: [L.budget10, rec(L.budget20, true), L.budget50, L.budget100],
   }),
   pr: (): Question => ({
     header: '🔀 PR',
@@ -264,6 +299,43 @@ export function presetFrom(answer: string): Preset | null {
   if (is(answer, L.presetCompact)) return 'compact'
   if (is(answer, L.presetMinimal)) return 'minimal'
   return null
+}
+/** A budget answer: an option or Other text, an optional leading $, decimals allowed; null unless positive. */
+export function budgetFrom(answer: string): number | null {
+  const v = parseBudget(strip(answer).trim().replace(/^\$\s*/, ''))
+  return v !== null && v > 0 && Number.isFinite(v) ? v : null
+}
+export function styleFrom(answer: string): Style | null {
+  if (is(answer, L.stylePacman)) return 'pacman'
+  if (is(answer, L.styleClean)) return 'clean'
+  return null
+}
+export const isShowMe = (answer: string): boolean => is(answer, L.styleShow)
+
+// ---- the style samples: drawn by the real renderers from one fixed session, so they cannot drift -------------
+
+/** Both samples are the Full layout. */
+const SAMPLE_NOW = 1_791_000_000
+export const SAMPLE: RenderInput = {
+  now: SAMPLE_NOW,
+  ctxPct: 42.5,
+  ctxWindow: 200_000,
+  cache: { hitRatio: 0.93, requests: 12, warm: true, expiresAt: SAMPLE_NOW + 50 * 60, misses: 0 },
+  limits: {
+    five_hour: { used_percentage: 38, resets_at: SAMPLE_NOW + 9450 },
+    seven_day: { used_percentage: 12, resets_at: SAMPLE_NOW + 507_200 },
+  },
+  costUsd: 1.37,
+  durationMs: 6_480_000,
+  modelName: 'Opus 5.5',
+  git: { branch: 'feat/x', uncommitted: 3, ahead: 2, hasUpstream: true },
+  pr: { number: 187, url: 'https://example.test/pull/187', reviewState: 'approved' },
+  cwd: '/work/pip-skills',
+  env: {},
+}
+export function styleSamples(): { pacman: string; clean: string } {
+  const text = (segments: string) => draw({ ...SAMPLE, env: { CENSUS_STATUSLINE_SEGMENTS: segments } }).map(plain).join('\n')
+  return { pacman: text(DEFAULT_SEGMENTS), clean: text(CLEAN_PRESETS.two) }
 }
 export type Writers = 'remove' | 'keep' | 'both'
 export function writersFrom(answer: string): Writers | null {

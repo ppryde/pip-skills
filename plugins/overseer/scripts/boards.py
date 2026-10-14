@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts import config, db, knowledge, migrate, views
+from scripts.labels import valid_label
 from scripts.store import derive_repo_label, derive_repo_root, slugify
 
 # Per-board files beside board.db worth carrying across when the target has
@@ -37,9 +38,166 @@ from scripts.store import derive_repo_label, derive_repo_root, slugify
 SIDECARS = ("knowledge", "usage.jsonl")
 
 
+def _ro_uri(db_path: Path, immutable: bool) -> str:
+    """``immutable=1`` on an archived board: sqlite then never opens or creates
+    the -shm/-wal files, so a plain listing leaves the archive folder as it was."""
+    return f"{db_path.resolve().as_uri()}?mode=ro" + ("&immutable=1" if immutable else "")
+
+
+def _read_repo_root_meta(db_path: Path, immutable: bool = False) -> str | None:
+    """Best-effort read-only peek at a board.db's ``meta['repo_root']`` for
+    the ``repos`` discovery verb. Opened read-only (``mode=ro``) so
+    discovery never creates, locks, or schema-touches a board it's merely
+    listing. Never raises — a corrupt, mid-write, or otherwise unreadable
+    board.db is simply skipped, same quarantine-safe spirit as the rest of
+    this module's report-building verbs.
+    """
+    try:
+        conn = sqlite3.connect(_ro_uri(db_path, immutable), uri=True, timeout=5.0)
+    except (sqlite3.Error, ValueError):
+        return None
+    try:
+        return db.get_meta(conn, "repo_root")
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+_DISCOVER_TTL = 10.0
+# (cache key) -> (monotonic stamp, entries). The key is the tuple of resolved
+# claude dirs, archive_dirs and aliases, so a config edit is never served stale.
+_discover_cache: dict[tuple, tuple[float, list[dict[str, Any]]]] = {}
+
+
+def _discover_cache_clear() -> None:
+    _discover_cache.clear()
+
+
+def _aliases_by_root() -> dict[Path, list[str]]:
+    try:
+        raw = config.load_machine_config().get("aliases") or {}
+    except ValueError:
+        return {}
+    out: dict[Path, list[str]] = {}
+    if isinstance(raw, dict):
+        for name, target in raw.items():
+            try:
+                out.setdefault(Path(str(target)).expanduser().resolve(), []).append(str(name))
+            except OSError:
+                continue
+    return out
+
+
+def discover(dirs: list[Path] | None = None) -> list[dict[str, Any]]:
+    """Every discoverable board across the watched Claude config dirs, one
+    entry per repo root: ``{label, root, board_dir, archived, aliases}``.
+
+    Live dirs are scanned first, then archived ones, first-wins by canonical
+    root, so an archive can never shadow a live board whatever its listing
+    order; an archive entry survives only for a root with no live board.
+    Consumers filter (exec uses the non-archived entries). A board is skipped
+    when ``meta['repo_root']`` is missing or no longer exists on disk.
+    Results are cached for a few seconds and each root's label is derived
+    once per call.
+    """
+    if dirs is None:
+        dirs = config.claude_dirs()
+    resolved = tuple(str(d.expanduser().resolve()) for d in dirs)
+    aliases = _aliases_by_root()
+    key = (resolved, tuple(str(a) for a in config.archive_dirs()),
+           tuple(sorted((str(r), tuple(n)) for r, n in aliases.items())))
+    hit = _discover_cache.get(key)
+    now = time.monotonic()
+    if hit is not None and now - hit[0] < _DISCOVER_TTL:
+        return [dict(e, aliases=list(e["aliases"])) for e in hit[1]]
+    flagged = [(d, config.is_archived(d)) for d in dirs]
+    ordered = [d for d, a in flagged if not a] + [d for d, a in flagged if a]
+    archived_dirs = {d for d, a in flagged if a}
+    results: list[dict[str, Any]] = []
+    seen_roots: set[str] = set()
+    labels: dict[str, str] = {}
+    for config_dir in ordered:
+        overseer_dir = config_dir / "overseer"
+        if not overseer_dir.is_dir():
+            continue
+        for label_dir in sorted(overseer_dir.iterdir()):
+            if not label_dir.is_dir():
+                continue
+            db_path = label_dir / "board.db"
+            if not db_path.is_file():
+                continue
+            root_str = _read_repo_root_meta(db_path, immutable=config_dir in archived_dirs)
+            if not root_str or not Path(root_str).exists():
+                continue
+            canonical = str(Path(root_str).resolve())
+            if canonical in seen_roots:
+                continue
+            seen_roots.add(canonical)
+            # Display label comes from the repo root, never the folder name —
+            # the default folder is `<label>-<hash>` (see config.central_root).
+            if canonical not in labels:
+                labels[canonical] = derive_repo_label(Path(root_str)) or Path(root_str).name
+            is_arch = config_dir in archived_dirs
+            results.append({
+                "label": labels[canonical],
+                "root": root_str,
+                "board_dir": str(label_dir),
+                "archived": is_arch,
+                "aliases": [] if is_arch else sorted(aliases.get(Path(canonical), [])),
+            })
+    results.sort(key=lambda r: r["label"])
+    _discover_cache[key] = (now, results)
+    return [dict(e, aliases=list(e["aliases"])) for e in results]
+
+
+def resolve_aliases(
+    entries: list[dict[str, Any]], aliases: object
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Map each machine-config alias name to the ONE live entry it names.
+
+    ``entries`` are the LIVE discovered boards. Nothing here is fatal; every
+    alias that cannot be honoured is dropped with a warning line:
+
+    - a name that is not a valid label;
+    - a target that is not the root of a live entry (undiscovered, archived,
+      gone, or not a path at all);
+    - an alias equal to a discovered bare label is KEPT and wins (the alias is
+      owner config, the label is derived from a container-writable ``.git``),
+      with one warning that the label is shadowed.
+    """
+    if not isinstance(aliases, dict):
+        return {}, []
+    by_root: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        try:
+            by_root.setdefault(str(Path(entry["root"]).resolve()), entry)
+        except OSError:
+            continue
+    out: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+    for name, target in aliases.items():
+        if not valid_label(name):
+            warnings.append(f"alias {name!r} ignored: not a valid label")
+            continue
+        hit: dict[str, Any] | None = None
+        if isinstance(target, str) and target:
+            try:
+                hit = by_root.get(str(Path(target).expanduser().resolve()))
+            except (OSError, RuntimeError):
+                hit = None
+        if hit is None:
+            warnings.append(f"alias {name!r} ignored: {target!r} is not a live discovered board")
+            continue
+        if any(e["label"] == name and e is not hit for e in entries):
+            warnings.append(f"alias {name!r} shadows a discovered repo label of the same name")
+        out[name] = hit
+    return out, warnings
+
+
 def _read_only(path: Path) -> sqlite3.Connection | None:
     try:
-        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5.0)
+        conn = sqlite3.connect(_ro_uri(path, config.is_archived_path(path)), uri=True, timeout=5.0)
     except (sqlite3.Error, ValueError):
         return None
     conn.row_factory = sqlite3.Row

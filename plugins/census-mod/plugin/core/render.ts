@@ -26,6 +26,8 @@ export type RenderInput = {
   ctxPct: number | null
   cache: { hitRatio: number | null; requests: number; warm: boolean; expiresAt: number | null; misses: number }
   limits: Record<string, { used_percentage: number; resets_at: number } | undefined>
+  /** The context window's size in tokens, when known (the Clean preset shows used/size). */
+  ctxWindow?: number | null
   costUsd: number | null
   durationMs: number | null
   modelName: string | null
@@ -108,12 +110,13 @@ function segLimits(i: RenderInput): Line[] {
   return out
 }
 
-function budget(env: RenderEnv): number {
-  // The whole value or nothing: "5oops" is not a $5 budget.
-  const t = (env.CLAUDE_COST_BUDGET ?? '').trim()
-  const v = /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : Number.NaN
-  return Number.isFinite(v) ? v : DEFAULT_BUDGET
+/** The whole value or nothing: "5oops" is not a $5 budget. */
+export function parseBudget(raw: string | undefined): number | null {
+  const t = (raw ?? '').trim()
+  return /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : null
 }
+
+const budget = (env: RenderEnv): number => parseBudget(env.CLAUDE_COST_BUDGET) ?? DEFAULT_BUDGET
 
 function segCost(i: RenderInput): Line[] {
   if (i.costUsd === null) return []
@@ -174,8 +177,76 @@ function segPr(i: RenderInput): Line[] {
   return [line]
 }
 
+// ---- Clean: one plain line, `🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x` ----------------
+
+/** 85000 -> 85k, 1000000 -> 1M, 1250000 -> 1.3M. */
+export function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${String(Math.round((n / 1_000_000) * 10) / 10)}M`
+  if (n >= 1000) return `${Math.round(n / 1000)}k`
+  return String(Math.round(n))
+}
+
+/** used% over the share of the window gone (resets_at is when it ends); null when under 1% has gone or the reset is not inside the window. */
+export function paceMultiplier(usedPct: number, resetsAt: number, windowSec: number, now: number): number | null {
+  const elapsed = 1 - (resetsAt - now) / windowSec
+  if (!(elapsed >= 0.01) || elapsed > 1) return null
+  return usedPct / (elapsed * 100)
+}
+
+const CLEAN_SEPARATOR: Run = { t: ' | ', tone: 'grey' }
+
+function cleanWindow(i: RenderInput, key: 'five_hour' | 'seven_day', emoji: string, label: string, windowSec: number, withPace = true): Run[] | null {
+  const w = i.limits[key]
+  if (!w || w.resets_at <= i.now) return null // absent, or an expired window: a fossil
+  const shown = roundHalfEven(w.used_percentage)
+  const pace = withPace ? paceMultiplier(w.used_percentage, w.resets_at, windowSec, i.now) : null
+  return [{ t: `${emoji} ${label} ` }, { t: `${shown}%`, tone: levelTone(shown) }, ...(pace === null ? [] : [{ t: ` ${pace.toFixed(1)}x` }])]
+}
+
+const cleanLine = (parts: Run[][]): Line[] => (parts.length ? [parts.flatMap((p, k) => (k === 0 ? p : [CLEAN_SEPARATOR, ...p]))] : [])
+
+/** Clean Minimal: `🧠 42% | 🕔 5h 38% | 🗓️ 7d 12%`, no model, cost or multipliers. */
+function segCleanMin(i: RenderInput): Line[] {
+  const parts: Run[][] = []
+  if (i.ctxPct !== null) {
+    const shown = roundHalfEven(i.ctxPct)
+    parts.push([{ t: '🧠 ' }, { t: `${shown}%`, tone: levelTone(shown) }])
+  }
+  for (const w of [cleanWindow(i, 'five_hour', '🕔', '5h', 5 * 3600, false), cleanWindow(i, 'seven_day', '🗓️', '7d', 7 * 86400, false)]) if (w) parts.push(w)
+  return cleanLine(parts)
+}
+
+/** Clean's second line: `📁 pip-skills | 🌿 feat/x +2 ~3 | 🔀 #187 approved`; what is absent goes, separator with it. */
+function segCleanWhere(i: RenderInput): Line[] {
+  const parts: Run[][] = [[{ t: `📁 ${i.cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? i.cwd}`, tone: 'magenta' }]]
+  if (i.git?.branch) {
+    const ahead = i.git.ahead > 0 && i.git.hasUpstream ? ` +${i.git.ahead}` : ''
+    const dirty = i.git.uncommitted > 0 ? ` ~${i.git.uncommitted}` : ''
+    parts.push([{ t: `🌿 ${i.git.branch}${ahead}${dirty}`, tone: 'green' }])
+  }
+  if (i.pr && i.pr.number > 0) {
+    const pr: Run[] = [i.pr.stale ? { t: `🔀 #${i.pr.number}`, tone: 'grey' } : { t: `🔀 #${i.pr.number}` }] // unconfirmed: dimmed
+    if (i.pr.reviewState) pr.push({ t: ` ${i.pr.reviewState}`, tone: i.pr.stale ? 'grey' : REVIEW_TONE[i.pr.reviewState] ?? 'grey' })
+    parts.push(pr)
+  }
+  return cleanLine(parts)
+}
+
+function segClean(i: RenderInput): Line[] {
+  const parts: Run[][] = [[{ t: '🤖 ' }, { t: i.modelName || 'Claude', tone: 'cyan' }]]
+  if (i.ctxPct !== null) {
+    const shown = roundHalfEven(i.ctxPct)
+    const size = i.ctxWindow && i.ctxWindow > 0 ? i.ctxWindow : null
+    // The engine reports a percentage and the window, not a token count: used is their product.
+    parts.push([{ t: `🧠 ${size ? `${fmtTokens((i.ctxPct / 100) * size)}/${fmtTokens(size)} ` : ''}` }, { t: `${shown}%`, tone: levelTone(shown) }])
+  }
+  if (i.costUsd !== null) parts.push([{ t: `💵 $${i.costUsd.toFixed(2)}` }])
+  for (const w of [cleanWindow(i, 'five_hour', '🕔', '5h', 5 * 3600), cleanWindow(i, 'seven_day', '🗓️', '7d', 7 * 86400)]) if (w) parts.push(w)
+  return cleanLine(parts)
+}
+
 export const SEGMENTS: Record<string, (i: RenderInput) => Line[]> = {
-  context: segContext, cache: segCache, limits: segLimits, cost: segCost, model: segModel, git: segGit, dir: segDir, changes: segChanges, pr: segPr,
+  context: segContext, cache: segCache, limits: segLimits, cost: segCost, model: segModel, clean: segClean, cleanmin: segCleanMin, cleanwhere: segCleanWhere, git: segGit, dir: segDir, changes: segChanges, pr: segPr,
 }
 
 /** The configured segments as lines of names; `/` starts a new line, unknown names are dropped. */
@@ -222,10 +293,17 @@ export const lineWidth = (line: Line): number => displayWidth(plain(line))
 /** Drop whole trailing parts until the line fits `columns`; a lone part is kept (the surface truncates it). */
 export function fit(line: Line, columns: number): Line {
   const parts: Line[] = [[]]
+  const seps: Run[] = []
   for (const r of line) {
-    if (r === SEPARATOR) parts.push([])
-    else parts[parts.length - 1]?.push(r)
+    if (r === SEPARATOR || r === CLEAN_SEPARATOR) {
+      parts.push([])
+      seps.push(r)
+    } else parts[parts.length - 1]?.push(r)
   }
-  while (parts.length > 1 && lineWidth(parts.flatMap((p, k) => (k === 0 ? p : [SEPARATOR, ...p]))) > columns) parts.pop()
-  return parts.flatMap((p, k) => (k === 0 ? p : [SEPARATOR, ...p]))
+  const join = () => parts.flatMap((p, k) => (k === 0 ? p : [seps[k - 1] ?? SEPARATOR, ...p]))
+  while (parts.length > 1 && lineWidth(join()) > columns) {
+    parts.pop()
+    seps.pop()
+  }
+  return join()
 }

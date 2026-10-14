@@ -303,3 +303,40 @@ class TestHookVerb:
         dr._write_failure("overseer dashboard restart FAILED — port taken")
         assert main(["--root", str(tmp_path), "dashboard-refresh-hook"]) == 0
         assert "FAILED" in json.loads(capsys.readouterr().out)["systemMessage"]
+
+
+# --- WF-100 C7: the dashboard log is owner-only at both Popen sites ----------
+
+
+def test_launch_log_is_0600(monkeypatch):
+    import stat
+    import subprocess
+
+    seen = {}
+
+    class _P:
+        pid = 7
+
+    def fake_popen(argv, **kw):
+        seen["kw"] = kw
+        return _P()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    log = dr.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("old\n")
+    log.chmod(0o644)  # a pre-existing wide log is tightened too
+    assert dr.launch(_record()) == 7
+    assert stat.S_IMODE(log.stat().st_mode) == 0o600
+
+
+def test_restart_worker_log_is_0600(monkeypatch):
+    import stat
+    import subprocess
+
+    class _P:
+        pid = 8
+
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: _P())
+    assert dr.spawn_restart_worker("owner") == 8
+    assert stat.S_IMODE(dr.log_path().stat().st_mode) == 0o600

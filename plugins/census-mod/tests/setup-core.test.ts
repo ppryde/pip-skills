@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
+import { DEFAULT_SEGMENTS, draw, plain } from '../plugin/core/render'
 import {
-  NO_DETECTION, PRESETS, placementFrom, Q, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
+  CLEAN_PRESETS, NO_DETECTION, PRESETS, SAMPLE, budgetFrom, isShowMe, styleFrom, styleSamples, placementFrom, Q, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
   backupBlocks, removeStatusLine, restoreStatusLine, scriptCandidates, statusLineCommand, writerActive, writersFrom,
 } from '../plugin/core/setup'
 
@@ -10,7 +11,7 @@ const CFG = '/home/u/.claude'
 // ---- defaults and precedence -------------------------------------------------------------------
 
 test('before any answer: record to the real store only when the status line has no census ingest block; draw yes; gh NO (opt-in), hint confirmation off', async () => {
-  expect(effective({}, {}, NO_DETECTION, CFG)).toEqual({ record: 'yes', shadowDir: null, draw: true, placement: 'above', segments: undefined, pr: false, prHint: false })
+  expect(effective({}, {}, NO_DETECTION, CFG)).toEqual({ style: 'pacman', budget: 20, record: 'yes', shadowDir: null, draw: true, placement: 'above', segments: undefined, pr: false, prHint: false })
   expect(effective({}, {}, WITH_BLOCK, CFG)).toMatchObject({ record: 'no', draw: true, pr: false })
 })
 
@@ -255,4 +256,73 @@ test('the exclusivity question names every enabled census and how to disable it;
   expect(q.question).toContain('claude plugin disable census@a; claude plugin disable census@b')
   expect(q.options).toEqual(["Stop — I'll disable census first (Recommended)", 'Continue anyway (two writers)'])
   expect(q.options.map(continueAnyway)).toEqual([false, true])
+})
+
+// ---- the cost-bar budget -------------------------------------------------------------------------
+
+test('the budget question: four options, $20 recommended, and the env override is in the text', async () => {
+  const q = Q.budget()
+  expect(q.header).toBe('💸 Budget')
+  expect(q.question).toContain("What should a main session's cost bar fill up to?")
+  expect(q.question).toContain('CLAUDE_COST_BUDGET')
+  expect(q.options).toEqual(['$10', '$20 (Recommended)', '$50', '$100'])
+  expect(Q.budget(true).question).toContain('positive number')
+})
+
+test('budgetFrom: the options and Other ("$35", "35", "12.5") parse; junk, zero and negatives do not', async () => {
+  for (const [a, n] of [['$10', 10], ['$20 (Recommended)', 20], ['$100', 100], ['$35', 35], ['35', 35], ['12.5', 12.5], [' $ 7.25 ', 7.25]] as const) expect(budgetFrom(a)).toBe(n)
+  for (const a of ['abc', '0', '-5', '$0', '', '5oops', '$-5', '1e3', 'Infinity']) expect(budgetFrom(a)).toBeNull()
+})
+
+test('the budget: the environment, then the saved answer, then $20', async () => {
+  expect(effective({}, {}, NO_DETECTION, CFG).budget).toBe(20)
+  expect(effective({ budget: 50 }, {}, NO_DETECTION, CFG).budget).toBe(50)
+  expect(effective({ budget: 50 }, { CLAUDE_COST_BUDGET: '75' }, NO_DETECTION, CFG).budget).toBe(75)
+  expect(effective({ budget: 50 }, { CLAUDE_COST_BUDGET: '5oops' }, NO_DETECTION, CFG).budget).toBe(50) // not a budget: falls through
+  expect(effective({}, { CLAUDE_COST_BUDGET: '' }, NO_DETECTION, CFG).budget).toBe(20)
+})
+
+test('the style question: Pip\'s Pac-Man flavour is recommended, then Dave\'s Nice \'n\' Clean, then Show me', async () => {
+  const q = Q.style()
+  expect(q.header).toBe('🎨 Style')
+  expect(q.options).toEqual(["Pip's Pac-Man flavour (Recommended)", "Dave's Nice 'n' Clean", 'Show me'])
+  expect(styleFrom(q.options[0] ?? '')).toBe('pacman')
+  expect(styleFrom(q.options[1] ?? '')).toBe('clean')
+  expect(styleFrom('Show me')).toBeNull()
+  expect(isShowMe('Show me')).toBe(true)
+})
+
+test('Show me re-asks with both samples in the text, each named, and only the two styles to pick', async () => {
+  const q = Q.style(true)
+  const { pacman, clean } = styleSamples()
+  expect(q.options).toEqual(["Pip's Pac-Man flavour (Recommended)", "Dave's Nice 'n' Clean"])
+  expect(q.question).toContain(`Pip's Pac-Man flavour:\n${pacman}`)
+  expect(q.question).toContain(`Dave's Nice 'n' Clean:\n${clean}`)
+})
+
+test('the samples come from the real renderers, both in the Full layout, so they cannot drift', async () => {
+  const { pacman, clean } = styleSamples()
+  expect(pacman).toBe(draw({ ...SAMPLE, env: { CENSUS_STATUSLINE_SEGMENTS: DEFAULT_SEGMENTS } }).map(plain).join('\n'))
+  expect(clean).toBe(draw({ ...SAMPLE, env: { CENSUS_STATUSLINE_SEGMENTS: CLEAN_PRESETS.two } }).map(plain).join('\n'))
+  expect(pacman.split('\n')).toHaveLength(2)
+  expect(pacman).toContain('ᗧ')
+  expect(clean).toBe('🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x\n📁 pip-skills | 🌿 feat/x +2 ~3 | 🔀 #187 approved')
+})
+
+test('style and layout are two independent ids: all six combinations pick their segments', async () => {
+  const seg = (style: 'pacman' | 'clean', preset: 'two' | 'compact' | 'minimal') => effective({ style, preset }, {}, NO_DETECTION, CFG).segments
+  expect(seg('pacman', 'two')).toBe(PRESETS.two)
+  expect(seg('pacman', 'compact')).toBe(PRESETS.compact)
+  expect(seg('pacman', 'minimal')).toBe(PRESETS.minimal)
+  expect(seg('clean', 'two')).toBe('clean/cleanwhere')
+  expect(seg('clean', 'compact')).toBe('clean')
+  expect(seg('clean', 'minimal')).toBe('cleanmin')
+  expect(effective({ style: 'clean' }, {}, NO_DETECTION, CFG).segments).toBe('clean/cleanwhere') // no layout answered yet: Full
+})
+
+test('style: no saved style is Pac-Man, so existing installs are unchanged; the environment still wins', async () => {
+  expect(effective({}, {}, NO_DETECTION, CFG).style).toBe('pacman')
+  expect(effective({}, {}, NO_DETECTION, CFG).segments).toBeUndefined()
+  expect(effective({ preset: 'minimal' }, {}, NO_DETECTION, CFG).segments).toBe(PRESETS.minimal)
+  expect(effective({ style: 'clean', preset: 'compact' }, { CENSUS_STATUSLINE_SEGMENTS: 'model' }, NO_DETECTION, CFG).segments).toBe('model')
 })
