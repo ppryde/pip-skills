@@ -1215,6 +1215,8 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         resolves it against discovery; the child is handed that root and board,
         so it cannot re-derive a different one. No fallback to the pinned board."""
         assert req.repo is not None
+        if _exec_code_in_repo is not None:  # the CLI sits in a repo a container may write
+            raise HTTPException(status_code=503, detail=f"exec unavailable: {_exec_code_in_repo}")
         check_exec_limits(req)
         check_repo_label(req.repo)
         pinned_by = [v for v in (overseer_config.CENTRAL_ENV, overseer_db.DB_ENV) if os.environ.get(v)]

@@ -401,3 +401,21 @@ def test_a_board_moved_into_the_archive_after_discovery_is_404_and_not_recreated
 
     assert resp.status_code == 404
     assert not old.exists()
+
+
+def test_labelled_calls_also_obey_the_pinned_repo_cli_guard(
+    machine: Machine, spy: _Spy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI inside the PINNED repo (writable by a container that mounts it)
+    disables exec for labelled calls to other boards too."""
+    inside = machine.launch_root / "plugins" / "overseer" / "scripts" / "cli.py"
+    inside.parent.mkdir(parents=True)
+    inside.write_text("")
+    monkeypatch.setattr(board_service, "_OVERSEER_CLI", inside)
+    monkeypatch.setattr(main_mod, "_OVERSEER_CLI", inside)
+    client = machine.client()
+
+    resp = _exec(client, ["board"], repo="beta")
+
+    assert resp.status_code == 503 and "pinned repo" in resp.json()["detail"]
+    assert spy.calls == []
