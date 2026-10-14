@@ -291,10 +291,10 @@ def run_cli(pinned_root: Path, central: Path, req: ExecRequest) -> ExecResult:
             timeout=_EXEC_TIMEOUT,
             check=False,
         )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="overseer CLI timed out")
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail="overseer CLI timed out") from exc
     except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"cannot run overseer CLI: {exc}")
+        raise HTTPException(status_code=500, detail=f"cannot run overseer CLI: {exc}") from exc
     finally:
         _EXEC_SLOTS.release()
     return ExecResult(stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode)
