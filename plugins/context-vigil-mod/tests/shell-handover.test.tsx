@@ -1233,3 +1233,18 @@ test('a prompt from before the handover started is not carried', async ($, on) =
   await w.clock.advance(500)
   expect(w.submits.at(-1)?.text).not.toContain('before it all')
 })
+
+test('a plugin-origin prompt (the instruction itself) is never "sent during handover"', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.prompt.submit({ text: w.submits.at(-1)?.text ?? 'instruction', wait: false, origin: { kind: 'plugin' } as never })
+  await $.tool.call(call() as never)
+  await $.prompt.submit({ text: 'another plugin prompt', wait: false, origin: { kind: 'plugin' } as never })
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).not.toContain('Sent during handover')
+})
