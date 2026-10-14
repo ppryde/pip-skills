@@ -66,8 +66,8 @@ for 10 minutes first, so other sessions starting at the same moment stay
 quiet (two starting within the same instant can still both ask); closing it
 without answering lets a session started after those 10 minutes ask again. **Install** builds the helper and installs it into Default and
 every profile VS Code's storage lists: a window loads only its own profile's
-extensions, and one without the helper is invisible to the roster (and
-answers the link with "cannot be installed because it was not found").
+extensions, and one without the helper is invisible to the roster, which is
+never sent the link for it and opens the session in Terminal.app instead.
 `/roster setup-vscode` runs the same install any time (after a new profile, or
 after "Never"); by hand it is `sh plugins/agent-roster/plugin/vscode/build.sh install
 [profile…]`.
@@ -99,7 +99,7 @@ A session in its own tmux session is ended with `tmux kill-session`, so no
 orphaned shell pane is left. The socket is found by matching the session's pid
 against each server's pane pids (the default server first, then any server
 under `/tmp/tmux-<uid>/`), never by name alone. Otherwise the session gets
-SIGTERM, which can leave a shell pane behind: when it shares a tmux session
+SIGTERM (`kill <pid>`; on Windows `taskkill /PID <pid> /F`), which can leave a shell pane behind: when it shares a tmux session
 with the one the command or pane runs in (by pane or by name), when no tmux
 server shows its pid, or when it runs outside tmux. The session the command or
 pane runs in is always refused.

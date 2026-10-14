@@ -69,14 +69,14 @@ Set `ROSTER_CONFIG_DIRS` in each account's `settings.json`:
 - Titles and prompts come from each session's transcript. Branches come from `git branch --show-current`, cached for a minute.
 - A session at a startup prompt has not registered, so the mod finds it from the tmux panes and shows it under Needs you.
 - Open raises the VS Code window that shows the repo and attaches there. With no such window it opens a Terminal.app window.
-- Kill ends a session in its own tmux session with `tmux kill-session`. Otherwise it sends SIGTERM.
+- Kill ends a session in its own tmux session with `tmux kill-session`. Otherwise it signals the process: `kill` (SIGTERM) on macOS and Linux, `taskkill /PID <pid> /F` on Windows.
 
 ## Troubleshooting
 
 - **`/roster` is not found.** The mod is not loaded. Start a new session after install.
 - **A session from another account is missing.** Run `/roster setup`, or set `ROSTER_CONFIG_DIRS`.
 - **A row says "running in another account".** That account's config dir is not listed. Run `/roster setup`.
-- **`open` says the helper cannot be installed or found.** That VS Code window has no helper. Run `/roster setup-vscode`.
+- **`open` goes to Terminal.app although the repo is open in VS Code.** That window has no helper, so the roster cannot see it. Run `/roster setup-vscode`, then reload the window.
 - **Kill is refused as ambiguous.** The tmux name exists on two servers. Kill by the pids it lists.
 - **Kill is missing on a row.** The row is the session you are in, or it sits at a startup prompt. Answer the prompt or close the pane.
 - **A warning names an unreadable dir.** Check its permissions or mount. The other dirs still show.
