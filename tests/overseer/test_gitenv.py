@@ -182,7 +182,8 @@ def test_the_lookups_fire_nothing_in_a_trapped_repo(trapped, tmp_path, monkeypat
 # --- the control: git runs only where it is classified -----------------------------------
 
 GIT_CALLERS = {"scripts/store.py", "scripts/gitops.py", "scripts/resume.py"}
-GITOPS_IMPORTERS = {"cli.py", "bundle.py"}
+# remote_git.py is the --remote CLIENT: it runs git in the container, never on the host (WF-300).
+GITOPS_IMPORTERS = {"cli.py", "bundle.py", "remote_git.py"}
 _OS_SPAWN = re.compile(r"^(system|popen|exec\w*|spawn\w*|posix_spawnp?)$")
 _GIT_WORD = re.compile(r"\bgit\b")
 # (file, exact string constant) pairs that say "git" in a file that can spawn processes,

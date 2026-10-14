@@ -2958,6 +2958,28 @@ def _inline_file_option(argv: list[str]) -> tuple[list[str], str | None]:
     return out, content
 
 
+def _run_remote_git(url: str, raw_argv: list[str], root: Path, verb: str,
+                    repo: "str | None", token: "str | None") -> int:
+    """``bootstrap`` / ``dispatch-prep`` under --remote: git runs here, in the
+    container; the host only gets the git-free board verbs (scripts/remote_git.py)."""
+    from scripts import remote, remote_git
+    args = build_parser().parse_args(_forwardable_argv(raw_argv))
+    local = derive_repo_label(args.root)
+    if repo is not None and local not in (None, repo):
+        print(f"warning: OVERSEER_REMOTE_REPO is '{repo}' but this checkout is '{local}'",
+              file=sys.stderr)
+
+    def call(argv: list[str], stdin: "str | None") -> "remote.RemoteResult":
+        return remote.exec_remote(url, token, argv, stdin, **({} if repo is None else {"repo": repo}))
+
+    flow = remote_git.bootstrap if verb == "bootstrap" else remote_git.dispatch_prep
+    try:
+        return flow(call, args, args.root)
+    except remote.RemoteError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+
 def _run_remote(url: str, raw_argv: list[str], root: Path, verb: str | None = None) -> int:
     """Forward the whole command to the host server and relay the result."""
     from scripts import remote  # lazy: httpx only needed on the remote path
@@ -2969,7 +2991,11 @@ def _run_remote(url: str, raw_argv: list[str], root: Path, verb: str | None = No
               file=sys.stderr)
         return 1
     token = os.environ.get("OVERSEER_REMOTE_TOKEN") or read_remote_token(root)
+    if verb in ("bootstrap", "dispatch-prep"):
+        return _run_remote_git(url, raw_argv, root, verb, repo, token)
     forward = _forwardable_argv(raw_argv)
+    if verb in ("resume", "handoff", "handover"):
+        forward = [*forward, "--remote-client"]  # the host cannot see this container's git
     inlined: str | None = None
     if verb in ("set-section", "append-body"):
         try:
