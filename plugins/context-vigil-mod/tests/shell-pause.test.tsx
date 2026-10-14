@@ -133,3 +133,22 @@ test('the paused line has the lowest precedence: a draft wait wins', async ($, o
   expect(await ui.find({ type: 'Text', text: /vigil paused/ })).toBeUndefined()
   await ui.unmount()
 })
+
+test('a threshold handover asked for before the pause and saved after it is kept, not cleared', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(measure(20))
+  await $.session.measure(measure(36))
+  await w.clock.settle()
+  expect(asks(w)).toBe(1)                                   // the instruction is out
+  await $.command.run(cmd('vigil-pause'))
+  const r = await $.tool.call(call)
+  expect(String((r as { result?: unknown }).result)).not.toContain('Stop now')
+  await w.clock.advance(60_000)
+  expect(w.commands).not.toContain('clear')
+  expect(w.state.get('context-vigil-mod.pending')).toMatchObject({ reason: 'threshold' })
+  expect(w.notices.some(n => n.startsWith('📜 A handover is waiting'))).toBe(true)
+})

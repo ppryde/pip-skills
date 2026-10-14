@@ -1853,8 +1853,15 @@ export const register: Register = on => {
       return { result: `Saved handover to ${path} (not requested by context-vigil-mod; nothing was cleared)` } as never
     }
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
-    const clears = reason === 'threshold' || reason === 'request'
+    // Asked for before /vigil-pause, saved after it: kept as an offer, no clear.
+    const pausedOut = paused && reason === 'threshold'
+    const clears = !pausedOut && (reason === 'threshold' || reason === 'request')
     if (clears) scheduleClear($, asked?.unattended ?? false)
+    else if (pausedOut) {
+      clearParked = true
+      await log($, 'paused.skip', { what: 'clear' })
+      await notify($, V.pendingOffer(path))
+    }
     return { result: `Saved handover to ${path}${standingNote(orders)}${clears ? ` ${STOP_NOW}` : ''}` } as never
   })
 
