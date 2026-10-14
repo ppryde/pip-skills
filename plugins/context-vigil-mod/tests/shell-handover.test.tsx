@@ -1145,3 +1145,231 @@ test('a clear attempt that errors is announced and leaves the handover offered, 
   expect(w.commands).not.toContain('clear')
   expect(w.state.get('context-vigil-mod.pending')).toMatchObject({ path: expect.any(String) })
 })
+
+// WF-302: standing orders are carried across the chain by the mod; the model adds and retires.
+async function handOver(w: World, $: Engine, extra: Record<string, unknown>, next: string) {
+  await $.command.run(vho)
+  await w.clock.settle()
+  const r = await $.tool.call(call(extra) as never)
+  await w.clock.settle()
+  w.sessionId.value = next
+  await $.classic.SessionStart({ source: 'clear', transcript_path: `/t/${next}.jsonl` } as never)
+  return String((r as { result?: unknown }).result)
+}
+
+test('standing orders are carried forward across the chain, retired only by name', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await handOver(w, $, { standing: '- Never cd into worktrees\n- PR bodies end with the link' }, 's2')
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s1-1.md')).toContain('## Standing orders\n\n- Never cd into worktrees\n- PR bodies end with the link')
+  // The second handover supplies nothing: the mod copies the first one's list.
+  const r2 = await handOver(w, $, { standing: 'Bump versions', standing_retire: '"never cd into worktrees"\nnot a rule' }, 's3')
+  const md2 = w.files.get('/cfg/context-vigil-mod/handovers/s2-1.md') ?? ''
+  expect(md2).toContain('- PR bodies end with the link\n- Bump versions')
+  expect(md2).not.toContain('- Never cd into worktrees\n')
+  expect(md2).toContain('- retired: Never cd into worktrees')
+  expect(md2).toContain('- not found, nothing retired: not a rule')
+  expect(r2).toContain('Retired standing orders: Never cd into worktrees')
+  expect(r2).toContain('No standing order matched')
+  await handOver(w, $, {}, 's4')
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s3-1.md')).toContain('- PR bodies end with the link\n- Bump versions')
+  expect(w.store.has('standing:s1')).toBe(false)
+})
+
+test('a handover with no standing orders at all renders no such section', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await handOver(w, $, {}, 's2')
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s1-1.md')).not.toContain('Standing orders')
+})
+
+// WF-303: a prompt sent while the handover is written is carried into the resume.
+test('prompts sent during the handover, before and after the save, reach the resume verbatim', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.prompt.submit(human('add a card for the above\nas a priority'))   // while the model writes it
+  await $.tool.call(call() as never)
+  await $.prompt.submit(human('and also check the tests'))                  // saved, not yet cleared
+  await $.prompt.submit(human('/help'))                                     // a command is not a prompt to answer
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  const text = w.submits.at(-1)?.text ?? ''
+  expect(text).toContain('Resume from the handover')
+  expect(text).toContain('## Sent during handover')
+  expect(text).toContain('> add a card for the above\n> as a priority')
+  expect(text).toContain('> and also check the tests')
+  expect(text).not.toContain('/help')
+})
+
+test('the handover request itself and plugin prompts are not "sent during handover"', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hello'))
+  await $.prompt.submit(human('do a handover'))   // dropped: it is the request
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).not.toContain('Sent during handover')
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
+test('a prompt from before the handover started is not carried', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('before it all'))
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).not.toContain('before it all')
+})
+
+test('a plugin-origin prompt (the instruction itself) is never "sent during handover"', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.prompt.submit({ text: w.submits.at(-1)?.text ?? 'instruction', wait: false, origin: { kind: 'plugin' } as never })
+  await $.tool.call(call() as never)
+  await $.prompt.submit({ text: 'another plugin prompt', wait: false, origin: { kind: 'plugin' } as never })
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).not.toContain('Sent during handover')
+})
+
+// Review r1.
+test('a slow-start clear (successor id not yet known) keeps the standing orders', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call({ standing: 'Keep me' }) as never)
+  await w.clock.settle()
+  await $.classic.SessionStart({ source: 'clear' } as never)   // engine still answers the old id, no transcript path
+  expect(w.store.get('standing:s1')).toEqual(['Keep me'])
+})
+
+test('an item written with quotes can be retired by naming it with or without them', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await handOver(w, $, { standing: '"Quoted" rule\n`code` rule' }, 's2')
+  await handOver(w, $, { standing_retire: '"Quoted" rule\n`code` rule' }, 's3')
+  const md = w.files.get('/cfg/context-vigil-mod/handovers/s2-1.md') ?? ''
+  expect(md).toContain('- retired: "Quoted" rule')
+  expect(md).toContain('- retired: `code` rule')
+})
+
+test('an unreadable standing list refuses the save; the retry keeps old and new items across the next handover', async ($, on) => {
+  const w = world(on, { store: { 'standing:s1': ['Old rule'] } })
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  w.storeGetRefused.value = true
+  const res = await $.tool.call(call({ standing: 'New rule' }) as never)
+  w.storeGetRefused.value = false
+  expect(String((res as { result?: unknown }).result)).toContain('again with the same content')
+  expect([...w.files.keys()].some(k => k.includes('/handovers/'))).toBe(false)
+  expect(w.store.get('standing:s1')).toEqual(['Old rule'])
+  await $.tool.call(call({ standing: 'New rule' }) as never)
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await handOver(w, $, {}, 's3')
+  const md = w.files.get('/cfg/context-vigil-mod/handovers/s2-1.md') ?? ''
+  expect(md).toContain('- Old rule\n- New rule')
+})
+
+test('an item stored with its quotes can be retired by the bare name', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await handOver(w, $, { standing: '"Never X"' }, 's2')
+  await handOver(w, $, { standing_retire: 'Never X' }, 's3')
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s2-1.md')).toContain('- retired: "Never X"')
+})
+
+test('an awaiting handover that expired forgets the prompts sent during it', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.prompt.submit(human('sent before expiry'))
+  await w.clock.advance(11 * MIN)
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.state.get('context-vigil-mod.sentDuring')).toEqual([])
+})
+
+test('a failed save keeps the prompts sent during the handover for the retry', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.prompt.submit(human('please keep me'))
+  w.handoverWriteRefused.value = true
+  await $.tool.call(call() as never)
+  w.handoverWriteRefused.value = false
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).toContain('> please keep me')
+})
+
+test('an abandoned handover forgets the prompts sent during it', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await instructionTurn($, w, 'a')
+  await $.prompt.submit(human('sent then abandoned'))
+  await $.turn.complete({ ...turn('a'), isAborted: true, reason: 'aborted' } as never)
+  await w.clock.settle()
+  expect(w.state.get('context-vigil-mod.sentDuring')).toEqual([])
+})
+
+// Review r3: a call that fails before the file is written leaves the request asked for.
+test('an auto-threshold handover whose standing read is refused still clears on the retry', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await autoHandoverInFlight($, w)
+  w.storeGetRefused.value = true
+  const first = await $.tool.call(call() as never)
+  w.storeGetRefused.value = false
+  expect(String((first as { result?: unknown }).result)).toContain('not saved')
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  await w.clock.advance(60_000)
+  expect(w.commands).toContain('clear')
+})
+
+test('an auto-threshold handover whose file write fails still clears on the retry', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await autoHandoverInFlight($, w)
+  w.handoverWriteRefused.value = true
+  await $.tool.call(call() as never)
+  w.handoverWriteRefused.value = false
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  await w.clock.advance(60_000)
+  expect(w.commands).toContain('clear')
+})
+
+test('retiring X retires the exact X before a quoted "X"', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await handOver(w, $, { standing: '"X"\nX' }, 's2')
+  await handOver(w, $, { standing_retire: 'X' }, 's3')
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s2-1.md')).toContain('## Standing orders\n\n- "X"\n')
+})

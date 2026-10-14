@@ -4,13 +4,13 @@ import type { Activity, Awaiting, Consent, EventKind, EventRecord, Git, Latch, M
 import { ASK, DEFAULT_OVERRIDES, checkOverrides, fromModelThresholds, formatKey, formatOverride, formatWindow, overridesJson, ordered, parseKey, parseOverridesArgs, patternFor, removeOverride, resolve, sameKey, setOverride } from '../core/overrides'
 import type { Resolved } from '../core/overrides'
 import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath, overridesPath } from '../core/name'
-import { DEFAULTS, PENDING_KEEP_MS, PENDING_PREFIX, STORE_KEY, STRANDED_PREFIX, loadSettings, pendingKey, strandedKey } from '../core/settings'
+import { DEFAULTS, PENDING_KEEP_MS, PENDING_PREFIX, STORE_KEY, STRANDED_PREFIX, loadSettings, pendingKey, standingKey, strandedKey } from '../core/settings'
 import type { Stranded } from '../core/settings'
 import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, GIT_DIR_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
-import { INPUT_SCHEMA, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
+import { INPUT_SCHEMA, SENT_MAX, mergeStanding, sentSection, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 import { HOME_VARS_CHECKED } from '../core/home'
 import { TITLE_CMD, archiveName, isArchived, lastTitle } from '../core/title'
 import { TAIL_CMD, type CacheTtl, cacheLinesFromText, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
@@ -48,6 +48,8 @@ const consentA = atom({ plugin: 'context-vigil-mod', key: 'consent' } as const, 
 const lastApiA = atom({ plugin: 'context-vigil-mod', key: 'lastApiAt' } as const, null)
 const awaitingA = atom({ plugin: 'context-vigil-mod', key: 'awaiting' } as const, null as Awaiting | null)
 const deferredA = atom({ plugin: 'context-vigil-mod', key: 'deferred' } as const, null as Awaiting | null)
+// Prompts the person sent since the handover was asked for and before its tool call (WF-303).
+const sentDuringA = atom({ plugin: 'context-vigil-mod', key: 'sentDuring' } as const, [] as string[])
 const handoverCountA = atom({ plugin: 'context-vigil-mod', key: 'handoverCount' } as const, 0)
 // The phone facts of `activity`, written through so a hot reload (which keeps $.state) restores
 // them; a clear wipes this, so the clear branch writes it again from the module copy.
@@ -190,6 +192,30 @@ async function submitWithRetry($: EngineInterface, prompt: { text: string; asUse
   return 'failed'
 }
 
+// What the model is told about its standing orders after a save: nothing when nothing needs saying.
+function standingNote(o: ReturnType<typeof mergeStanding>): string {
+  const parts = [
+    o.retired.length ? `Retired standing orders: ${o.retired.join('; ')}.` : '',
+    o.unmatched.length ? `No standing order matched these retirements (nothing was retired): ${o.unmatched.join('; ')}.` : '',
+    o.warning ?? '',
+  ].filter(Boolean)
+  return parts.length ? `. ${parts.join(' ')}` : ''
+}
+
+// WF-303: a prompt from the person while a handover is being written (asked for, or saved and not yet
+// cleared) is kept verbatim for the resume. Slash commands are not prompts to answer.
+async function recordSent($: EngineInterface, text: string) {
+  if (standDown || !text.trim() || text.trimStart().startsWith('/')) return
+  if (await read($, awaitingA)) {
+    await update($, sentDuringA, l => (l.length < SENT_MAX ? [...l, text] : l))
+    return
+  }
+  const pending = await read($, pendingA)
+  if (pending?.resume && (pending.reason === 'threshold' || pending.reason === 'request') && (pending.sent?.length ?? 0) < SENT_MAX) {
+    await savePending($, { ...pending, sent: [...(pending.sent ?? []), text] })
+  }
+}
+
 function resumeSoon($: EngineInterface, prompt: { text: string; asUser?: true }, path: string | null, held: string | null) {
   void submitWithRetry($, prompt, 500)
     .then(outcome => (outcome === 'failed' ? resumeFailed($, path, held) : undefined))
@@ -202,6 +228,12 @@ async function resumeFailed($: EngineInterface, path: string | null, held: strin
   await log($, 'guard.wait', { reason: 'resume-rejected', path, held: held !== null })
 }
 
+// An awaited handover that ends without a save: the prompts sent during it go with it.
+async function abandonAwaiting($: EngineInterface) {
+  await update($, awaitingA, () => null)
+  await update($, sentDuringA, () => [])
+}
+
 // PROBES.md §7: a mod never sees its own submit in prompt.submit, so `started` is marked here.
 function submitInstruction($: EngineInterface, reason: PendingReason) {
   submitSoon($, { text: instructionText(reason) }, 0, () => {
@@ -209,7 +241,7 @@ function submitInstruction($: EngineInterface, reason: PendingReason) {
   }, () => {
     // A rejected submit must not leave the handover waiting for a turn that never comes.
     void (async () => {
-      await update($, awaitingA, () => null)
+      await abandonAwaiting($)
       await withdrawConsent($)   // told it failed: a later save is asked about, never cleared silently
       await notify($, V.handoverFailed)
       await log($, 'guard.wait', { reason: 'submit-rejected' })
@@ -636,7 +668,7 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
       await log($, 'guard.wait', { reason: 'handover-in-flight', asked: reason })
       return 'in-flight'
     }
-    await update($, awaitingA, () => null)
+    await abandonAwaiting($)
     await notify($, V.handoverLost)
     await log($, 'guard.wait', { reason: 'awaiting-expired', asked: reason })
   }
@@ -648,6 +680,7 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
     return 'reused'
   }
   if (pending) await supersedePending($)
+  await update($, sentDuringA, () => [])   // the handover starts now: only prompts after this count
   await update($, awaitingA, () => ({ reason, resume, attempts: 1, started: false, unattended, since: now }))
   await log($, 'handover.requested', { reason, resume })
   submitInstruction($, reason)
@@ -1284,6 +1317,14 @@ export const register: Register = on => {
     const named = tpath.slice(Math.max(tpath.lastIndexOf('/'), tpath.lastIndexOf('\\')) + 1).replace(/\.jsonl$/, '')
     const successor = named && named !== before ? named : session !== before ? session : null
     if (successor !== null) await moveStranded($, before, successor)
+    // The chain's standing orders follow the handover to the successor session.
+    if (pending) {
+      try {
+        const to = successor ?? session
+        const orders = to === before ? undefined : await $.store.get(standingKey(before))   // a slow start: the id has not moved, nothing to move
+        if (orders !== undefined && orders !== null) { await $.store.set(standingKey(to), orders); await $.store.delete(standingKey(before)) }
+      } catch (err) { await log($, 'guard.wait', { reason: 'standing-move-failed', error: String(err) }) }
+    }
     // A slow start can leave the engine still answering the old id: this clear's events then land in the
     // old session's file. Say so rather than look like a log that went missing.
     if (session === before) {
@@ -1308,7 +1349,9 @@ export const register: Register = on => {
     // (no turn since it was written) and no latch (R1-10); otherwise a notice says why not.
     let stale = false
     let noResume = false
-    if (follow) resumeSoon($, { text: follow, asUser: true }, pending.path, follow)
+    let sentCarried = false   // the resume message holds the prompts sent during the handover
+    const sentBlock = sentSection(pending.sent)
+    if (follow) { sentCarried = sentBlock !== ''; resumeSoon($, { text: sentBlock ? `${follow}\n\n${sentBlock}` : follow, asUser: true }, pending.path, follow) }
     else if (pending.resume) {
       if (!fresh(pending, apiBefore, await nowMs($))) {
         stale = true
@@ -1316,7 +1359,7 @@ export const register: Register = on => {
       } else if (await readLatch($)) {
         await notify($, V.resumeLatched(pending.path))
         await log($, 'guard.wait', { reason: 'latched', deferred: 'resume' })
-      } else resumeSoon($, { text: resumeText(pending.path) }, pending.path, null)
+      } else { sentCarried = sentBlock !== ''; resumeSoon($, { text: sentBlock ? `${resumeText(pending.path)}\n\n${sentBlock}` : resumeText(pending.path) }, pending.path, null) }
     } else {
       // R2-17: a handover that carries no automatic resume (a limit or last-light one) is still
       // injected on a manual /clear; never silently.
@@ -1324,7 +1367,7 @@ export const register: Register = on => {
       noResume = true
     }
     await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null, ...(stale ? { stale: true } : {}), ...(noResume ? { noResume: true } : {}) })
-    return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown)] }
+    return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown) + (sentBlock && !sentCarried ? `\n\n${sentBlock}` : '')] }
   })
 
   on('classic.StopFailure', async ($, e, next) => {
@@ -1374,6 +1417,7 @@ export const register: Register = on => {
         $.clock.after(0, () => { void giveConsent($).then(() => startHandover($, 'request', true)).catch(err => timerFailed($, 'handover-request', err)) })
         return { drop: V.handoverRequested }
       }
+      await recordSent($, e.text)
     }
     return next(e)
   })
@@ -1423,19 +1467,19 @@ export const register: Register = on => {
     if (awaitingNow?.started && e.agentId === undefined && awaitingNow.turnId !== undefined && e.turnId === awaitingNow.turnId) {
       if (e.isAborted) {
         // The person pressed Esc: that is presence, and no retry (R1-02). It takes back their request too.
-        await update($, awaitingA, () => null)
+        await abandonAwaiting($)
         await withdrawConsent($)
         await observe($, { kind: 'human-command', at: now })
         await notify($, V.handoverInterrupted)
         await log($, 'guard.wait', { reason: 'instruction-interrupted' })
       } else if (standDown) {
         // R2-09: the classic hooks own the session now (spec §7); no second instruction.
-        await update($, awaitingA, () => null)
+        await abandonAwaiting($)
         await notify($, V.handoverFailed)
         await log($, 'guard.wait', { reason: 'standdown', deferred: awaitingNow.reason })
       } else if (awaitingNow.attempts < 2 && (await readLatch($))) {
         // R2-09: the turn died on a limit. Never submit while latched (spec §5): wait for the lift.
-        await update($, awaitingA, () => null)
+        await abandonAwaiting($)
         await update($, deferredA, () => ({ ...awaitingNow, started: false, turnId: undefined }))
         await notify($, V.waiting('latched'))
         await log($, 'guard.wait', { reason: 'latched', deferred: awaitingNow.reason })
@@ -1444,7 +1488,7 @@ export const register: Register = on => {
         submitInstruction($, awaitingNow.reason)
       } else {
         // Told it failed: a later save is the model's own, asked about, never cleared silently.
-        await update($, awaitingA, () => null)
+        await abandonAwaiting($)
         await withdrawConsent($)
         await notify($, V.handoverFailed)
         await log($, 'guard.wait', { reason: 'tool-not-called' })
@@ -1565,8 +1609,8 @@ export const register: Register = on => {
     const requested = asked !== null
     const reason = asked?.reason ?? 'request'
     const resume = asked?.resume ?? false
-    await update($, awaitingA, () => null)
-    await update($, handoverMentionedA, () => false)   // spent by any valid call, asked for or not
+    // Nothing about the request is spent until the file is written: a call that fails before then
+    // leaves it asked for, so the retry still clears.
     // No config dir known: a handover written anywhere else would be lost or misplaced; save nothing.
     const at = root
     if (!at) {
@@ -1576,10 +1620,22 @@ export const register: Register = on => {
     // The count lives in $.state and a restart or --resume starts it at 0: skip files already on disk (R1-18).
     let n = (await read($, handoverCountA)) + 1
     while (await $.fs.exists(handoverPath(at, session, n)).catch(() => false)) n++
-    await update($, handoverCountA, () => n)
     const path = handoverPath(at, session, n)
+    const sent = await read($, sentDuringA)   // cleared once the save succeeds, so a retry keeps them
     const now = await nowMs($)
-    const markdown = renderHandover(parsed.fields, {
+    // Standing orders: the chain's earlier list is carried forward by the mod; the model only adds and retires.
+    // An unreadable list is not an empty one: refuse the save (nothing written) so the retry carries it all.
+    let prevStanding: string[] = []
+    try {
+      const got = (await $.store.get(standingKey(session))) as unknown
+      if (Array.isArray(got)) prevStanding = got as string[]
+    } catch (err) {
+      await log($, 'guard.wait', { reason: 'standing-read-failed', error: String(err) })
+      return { result: `Handover not saved: the standing orders could not be read (${String(err)}). Nothing was written or cleared; call ${TOOL_FULL} again with the same content.` } as never
+    }
+    const orders = mergeStanding(prevStanding, parsed.fields.standing, parsed.fields.standing_retire)
+    const retireLog = [...orders.retired.map(r => `- retired: ${r}`), ...orders.unmatched.map(r => `- not found, nothing retired: ${r}`)].join('\n')
+    const markdown = renderHandover({ ...parsed.fields, standing: orders.items.map(i => `- ${i}`).join('\n'), standing_retire: retireLog }, {
       session, at: new Date(now).toISOString(), cwd, branch: git.branch, dirty: git.dirty,
       edited: [...edited], contextPct: await read($, contextA),
     })
@@ -1590,19 +1646,28 @@ export const register: Register = on => {
       await log($, 'guard.wait', { reason: 'write-failed', path, error: String(err) })
       return { result: `Handover not saved: writing ${path} failed (${String(err)}). Nothing was cleared; tell the person.` } as never
     }
+    await update($, awaitingA, () => null)
+    await update($, handoverMentionedA, () => false)   // spent by any valid call, asked for or not
+    await update($, handoverCountA, () => n)
+    try {
+      await $.store.set(standingKey(session), orders.items)
+    } catch (err) {
+      await log($, 'guard.wait', { reason: 'standing-store-failed', error: String(err) })
+    }
     // R3-01: a volunteered call never replaces a live requested pending (its clear injects that one).
     const live = await read($, pendingA)
     const shield = !requested && live !== null && live.resume && reusable(live, await read($, lastApiA), now)
     try {
-      if (!shield) await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now, unattended: asked?.unattended ?? false })
+      if (!shield) await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now, unattended: asked?.unattended ?? false, ...(sent.length ? { sent } : {}) })
     } catch (err) {
       // R2-15: the file is written but the store refused it: say so, clear nothing.
       await notify($, V.handoverFailed)
       await log($, 'guard.wait', { reason: 'store-failed', path, error: String(err) })
       return { result: `Handover not saved to the store (the file is at ${path}): ${String(err)}. Nothing was cleared; tell the person.` } as never
     }
+    await update($, sentDuringA, () => [])
     if (reason === 'limit' && limitResume) limitResume.path = path
-    await log($, 'handover.written', { reason, bytes: markdown.length, path })
+    await log($, 'handover.written', { reason, bytes: markdown.length, path, standing: orders.items.length, ...(orders.retired.length ? { retired: orders.retired } : {}), ...(orders.unmatched.length ? { unmatched: orders.unmatched } : {}) })
     if (!requested) {
       await log($, 'guard.wait', { reason: 'unrequested', path, ...(shield ? { shielded: true } : {}) })
       if (shield) await notify($, V.handoverRepeat(path))
@@ -1611,7 +1676,7 @@ export const register: Register = on => {
     }
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
     if (reason === 'threshold' || reason === 'request') scheduleClear($, asked?.unattended ?? false)
-    return { result: `Saved handover to ${path}` } as never
+    return { result: `Saved handover to ${path}${standingNote(orders)}` } as never
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

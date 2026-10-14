@@ -40,6 +40,8 @@ export type Fields = {
   next_step: string
   open_questions: string
   failed_attempts: string
+  standing: string
+  standing_retire: string
   session_name: string
 }
 
@@ -72,6 +74,7 @@ export type Pending = {
   followUp: string | null
   createdAt: number
   unattended?: boolean   // R3-06: the clear that follows is the mod's own; a reload offers it, never runs it
+  sent?: string[]        // WF-303: prompts the person sent while this handover was being written, verbatim
   archived?: string      // PROBES §15: the name the mod renamed `Archive: <it>` just before its clear
 }
 
@@ -119,6 +122,7 @@ declare module 'claude-code' {
       awaiting: Awaiting | null
       deferred: Awaiting | null
       handoverCount: number
+      sentDuring: string[]
       transcriptPath: string | null
       cacheTtl: '1h' | '5m' | 'unknown'
       ttlRead: boolean

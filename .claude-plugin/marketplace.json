@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.69.14",
+  "version": "1.69.15",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -223,7 +223,7 @@
     {
       "name": "context-vigil-mod",
       "source": "./plugins/context-vigil-mod/plugin",
-      "description": "Context handover as a Claude Code mod: a threshold nudge and vigil bar, auto handover with an in-process /clear and resume while you're away, last light before the 1-hour prompt cache expires, and a limit latch with early stop. No tmux, no status line. Commands /vho, /vhandoff, /vsetup. A mod.",
+      "description": "Context handover as a Claude Code mod: a threshold nudge and vigil bar, auto handover with an in-process /clear and resume while you're away, last light before the 1-hour prompt cache expires, and a limit latch with early stop. No tmux, no status line. Commands /vho (/vigil-handover), /vigil-setup, /vigil-overrides. A mod.",
       "category": "engineering",
       "tags": [
         "context",
