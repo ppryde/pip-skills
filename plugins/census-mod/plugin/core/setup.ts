@@ -1,7 +1,7 @@
 // /census-setup: the questions, what an answer means, and the settings.json surgery. Pure: no `$`.
 import { expandHome, joinPath } from './home'
 import type { HomeEnv } from './home'
-import { DEFAULT_SEGMENTS } from './render'
+import { DEFAULT_BUDGET, DEFAULT_SEGMENTS, parseBudget } from './render'
 
 export type RecordMode = 'yes' | 'shadow' | 'no'
 export type Preset = 'two' | 'compact' | 'minimal'
@@ -15,6 +15,8 @@ export type Saved = {
   placement?: Placement
   preset?: Preset
   pr?: boolean
+  /** What a main session's 💸 cost bar fills up to, in dollars. */
+  budget?: number
   answeredAt?: number
 }
 
@@ -105,8 +107,8 @@ export function writerActive(entries: { updatedAt: number; hasCensusMod: boolean
 
 // ---- settings: env > $.store > defaults ----------------------------------------------------------
 
-export type SetupEnv = HomeEnv & { CENSUS_MOD_STORE?: string; CENSUS_STATUSLINE_SEGMENTS?: string; CENSUS_MOD_PLACEMENT?: string; CENSUS_MOD_PR_HINT?: string }
-export type Effective = { record: RecordMode; shadowDir: string | null; draw: boolean; placement: Placement; segments: string | undefined; pr: boolean; prHint: boolean }
+export type SetupEnv = HomeEnv & { CENSUS_MOD_STORE?: string; CENSUS_STATUSLINE_SEGMENTS?: string; CENSUS_MOD_PLACEMENT?: string; CENSUS_MOD_PR_HINT?: string; CLAUDE_COST_BUDGET?: string }
+export type Effective = { budget: number; record: RecordMode; shadowDir: string | null; draw: boolean; placement: Placement; segments: string | undefined; pr: boolean; prHint: boolean }
 
 /**
  * Before any answer: record to the real store ONLY if this account's status line does not carry the
@@ -126,6 +128,8 @@ export function effective(saved: Saved, env: SetupEnv, det: Detection, configRoo
   if (record === 'shadow' && !shadowDir) record = 'no' // nowhere to write
   const envSegments = env.CENSUS_STATUSLINE_SEGMENTS?.trim()
   return {
+    // A usable CLAUDE_COST_BUDGET wins (existing installs keep working), then the answer, then $20.
+    budget: parseBudget(env.CLAUDE_COST_BUDGET) ?? saved.budget ?? DEFAULT_BUDGET,
     record,
     shadowDir,
     draw: saved.draw ?? true,
@@ -162,6 +166,10 @@ export const L = {
   presetTwo: 'Your two lines',
   presetCompact: 'Compact — one line',
   presetMinimal: 'Minimal — context, limits / git',
+  budget10: '$10',
+  budget20: '$20',
+  budget50: '$50',
+  budget100: '$100',
   prYes: 'Yes — look up with gh',
   prNo: "No — no gh lookups (PRs this session makes still show)",
 } as const
@@ -235,6 +243,11 @@ export const Q = {
     question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)',
     options: [rec(L.presetTwo, true), L.presetCompact, L.presetMinimal],
   }),
+  budget: (retry = false): Question => ({
+    header: '💸 Budget',
+    question: `${retry ? 'That is not a positive number. Type one, like 35 or $12.50. ' : ''}What should a main session's cost bar fill up to? (The 💸 bar on the status line. CLAUDE_COST_BUDGET still overrides this.)`,
+    options: [L.budget10, rec(L.budget20, true), L.budget50, L.budget100],
+  }),
   pr: (): Question => ({
     header: '🔀 PR',
     question: "Look up the branch's open PR (number, review state) using gh? No means gh is never called; PRs this session creates, readies or merges still show, and /census-mod:pr-refresh asks gh once on demand.",
@@ -264,6 +277,11 @@ export function presetFrom(answer: string): Preset | null {
   if (is(answer, L.presetCompact)) return 'compact'
   if (is(answer, L.presetMinimal)) return 'minimal'
   return null
+}
+/** A budget answer: an option or Other text, an optional leading $, decimals allowed; null unless positive. */
+export function budgetFrom(answer: string): number | null {
+  const v = parseBudget(strip(answer).trim().replace(/^\$\s*/, ''))
+  return v !== null && v > 0 && Number.isFinite(v) ? v : null
 }
 export type Writers = 'remove' | 'keep' | 'both'
 export function writersFrom(answer: string): Writers | null {

@@ -108,12 +108,13 @@ function segLimits(i: RenderInput): Line[] {
   return out
 }
 
-function budget(env: RenderEnv): number {
-  // The whole value or nothing: "5oops" is not a $5 budget.
-  const t = (env.CLAUDE_COST_BUDGET ?? '').trim()
-  const v = /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : Number.NaN
-  return Number.isFinite(v) ? v : DEFAULT_BUDGET
+/** The whole value or nothing: "5oops" is not a $5 budget. */
+export function parseBudget(raw: string | undefined): number | null {
+  const t = (raw ?? '').trim()
+  return /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : null
 }
+
+const budget = (env: RenderEnv): number => parseBudget(env.CLAUDE_COST_BUDGET) ?? DEFAULT_BUDGET
 
 function segCost(i: RenderInput): Line[] {
   if (i.costUsd === null) return []

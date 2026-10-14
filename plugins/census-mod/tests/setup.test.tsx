@@ -5,6 +5,7 @@ import { START, classicStart, turn, USAGE, BAND, bandLines, world } from './worl
 import type { World } from './world'
 
 const SEC = 1000
+const BUDGET_Q = "What should a main session's cost bar fill up to? (The 💸 bar on the status line. CLAUDE_COST_BUDGET still overrides this.)"
 const SETTINGS = '/cfg/settings.json'
 const SCRIPT = '/home/u/.claude/line.sh'
 const BACKUP = '/cfg/census/census-mod.statusline.json'
@@ -33,8 +34,8 @@ test('/census-setup is a registered command that asks, in order: record, draw (a
   const r = await setupRun($, w)
 
   expect(r.text).toContain('questions follow')
-  expect(headers(w)).toEqual(['📝 Record', '🎛️ Draw', '📐 Layout', '🔀 PR'])
-  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below', preset: 'two', pr: false, offered: true })
+  expect(headers(w)).toEqual(['📝 Record', '🎛️ Draw', '📐 Layout', '💸 Budget', '🔀 PR'])
+  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below', preset: 'two', budget: 10, pr: false, offered: true }) // the stub answers the first option
   expect(w.toasts.at(-1)).toBe('🧭 census-mod is set up')
   expect(w.logs.join('\n')).toContain('undo any time: /census-setup off')
 })
@@ -47,6 +48,7 @@ test('the exact questions', async ($, on) => {
     { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards and liveness use it) (Recommended)', "No — don't record (dashboards won't see this account)"] },
     { header: '🎛️ Draw', question: 'Should census-mod draw your status line, and where?', options: ["Yes — below the input, under Claude Code's hint line (Recommended)", 'Yes — above the input, in the band', 'No — record only, draw nothing'] },
     { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Your two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git'] },
+    { header: '💸 Budget', question: BUDGET_Q, options: ['$10', '$20 (Recommended)', '$50', '$100'] },
     { header: '🔀 PR', question: "Look up the branch's open PR (number, review state) using gh? No means gh is never called; PRs this session creates, readies or merges still show, and /census-mod:pr-refresh asks gh once on demand.", options: ["No — no gh lookups (PRs this session makes still show) (Recommended)", 'Yes — look up with gh'] },
   ])
 })
@@ -356,7 +358,7 @@ test('off with nothing to restore just stops', async ($, on) => {
 
 test('an unknown argument says how to use it', async ($, on) => {
   const w = world(on)
-  expect((await setupRun($, w, 'nope')).text).toBe('Usage: /census-setup (guided setup) or /census-setup off')
+  expect((await setupRun($, w, 'nope')).text).toBe('Usage: /census-setup (guided setup), /census-setup budget (the cost bar only) or /census-setup off')
   expect(w.asks).toHaveLength(0)
 })
 
@@ -413,7 +415,7 @@ test('the first session after install is offered setup, once', async ($, on) => 
     question: 'census-mod is installed. Set it up now? It takes a few questions: whether to record sessions into census, whether and where to draw the status line, and which layout.',
     options: ['Set it up now (Recommended)', 'Not now — use the defaults'],
   })
-  expect(headers(w)).toEqual(['🧭 Setup', '📝 Record', '🎛️ Draw', '📐 Layout', '🔀 PR'])
+  expect(headers(w)).toEqual(['🧭 Setup', '📝 Record', '🎛️ Draw', '📐 Layout', '💸 Budget', '🔀 PR'])
   expect(saved(w).offered).toBe(true)
 })
 
@@ -716,4 +718,82 @@ test('settings.json changed while setup was running: the rename is abandoned, no
   expect([...w.files.keys()].filter(k => k.endsWith('.tmp'))).toEqual([])
   expect(w.runs.some(r => r.argv[0] === 'mv' && r.argv.at(-1) === SETTINGS)).toBe(false)
   expect(w.logs.join('\n')).toContain('could not write /cfg/settings.json, so I left your status line alone')
+})
+
+// ---- the 💸 budget question ----------------------------------------------------------------------------
+
+const budgetAsks = (w: World) => w.asks.filter(a => a.header === '💸 Budget')
+
+test('a record-only setup draws no bar, so the budget is not asked', async ($, on) => {
+  const w = world(on)
+  w.answer.value = q => (q.header === '🎛️ Draw' ? pick(w, 'No — record only')(q) : q.options[0] ?? null)
+  await setupRun($, w)
+
+  expect(budgetAsks(w)).toEqual([])
+  expect(saved(w).budget).toBeUndefined()
+})
+
+test('Other: "$35" is saved as 35; the summary shows it', async ($, on) => {
+  const w = world(on)
+  w.answer.value = q => (q.header === '💸 Budget' ? '$35' : q.options[0] ?? null)
+  await setupRun($, w)
+
+  expect(saved(w).budget).toBe(35)
+  expect(w.logs.join('\n')).toContain('cost bar: fills at $35')
+})
+
+test('Other: junk, zero and negatives are re-asked until a positive number comes', async ($, on) => {
+  const w = world(on)
+  const replies = ['abc', '0', '-5', '12.5']
+  w.answer.value = q => (q.header === '💸 Budget' ? replies.shift() ?? null : q.options[0] ?? null)
+  await setupRun($, w)
+
+  expect(budgetAsks(w)).toHaveLength(4)
+  expect(budgetAsks(w)[1]?.question).toContain('positive number')
+  expect(saved(w).budget).toBe(12.5)
+})
+
+test('/census-setup budget asks only the budget, and a dismissal saves nothing', async ($, on) => {
+  const w = world(on)
+  w.store.set('census-mod:setup', { offered: true, record: 'yes', draw: true })
+  w.answer.value = q => (q.header === '💸 Budget' ? pick(w, '$50')(q) : null)
+  await setupRun($, w, 'budget')
+
+  expect(headers(w)).toEqual(['💸 Budget'])
+  expect(saved(w).budget).toBe(50)
+})
+
+test('/census-setup budget with drawing off says there is no bar to size', async ($, on) => {
+  const w = world(on)
+  w.store.set('census-mod:setup', { offered: true, draw: false })
+  await setupRun($, w, 'budget')
+
+  expect(w.asks).toEqual([])
+  expect(w.logs.join('\n')).toContain('draw is off')
+})
+
+const costBar = async ($: Engine, w: World) => {
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const ui = await $.ui.mount(BAND())
+  const bar = (await bandLines(ui))[0]?.match(/💸 \S+/)?.[0]
+  await ui.unmount()
+  return bar
+}
+const barWorld = (on: On, extra: object, budget?: number) => {
+  const w = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u', ...extra } })
+  w.store.set('census-mod:setup', { offered: true, ...(budget ? { budget } : {}) })
+  return w
+}
+
+test('with no budget saved the 💸 bar fills at $20 ($0.90 is 5%)', async ($, on) => {
+  expect(await costBar($, barWorld(on, {}))).toBe('💸 ᗧ$$$$$$$$$')
+})
+
+test('the saved budget sizes the 💸 bar ($0.90 of $1 is 90%)', async ($, on) => {
+  expect(await costBar($, barWorld(on, {}, 1))).not.toBe('💸 ᗧ$$$$$$$$$')
+})
+
+test('CLAUDE_COST_BUDGET outranks the saved budget', async ($, on) => {
+  expect(await costBar($, barWorld(on, { CLAUDE_COST_BUDGET: '1000' }, 1))).toBe('💸 ᗧ$$$$$$$$$')
 })

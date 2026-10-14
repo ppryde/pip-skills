@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import {
-  NO_DETECTION, PRESETS, placementFrom, Q, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
+  NO_DETECTION, PRESETS, budgetFrom, placementFrom, Q, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
   backupBlocks, removeStatusLine, restoreStatusLine, scriptCandidates, statusLineCommand, writerActive, writersFrom,
 } from '../plugin/core/setup'
 
@@ -10,7 +10,7 @@ const CFG = '/home/u/.claude'
 // ---- defaults and precedence -------------------------------------------------------------------
 
 test('before any answer: record to the real store only when the status line has no census ingest block; draw yes; gh NO (opt-in), hint confirmation off', async () => {
-  expect(effective({}, {}, NO_DETECTION, CFG)).toEqual({ record: 'yes', shadowDir: null, draw: true, placement: 'above', segments: undefined, pr: false, prHint: false })
+  expect(effective({}, {}, NO_DETECTION, CFG)).toEqual({ budget: 20, record: 'yes', shadowDir: null, draw: true, placement: 'above', segments: undefined, pr: false, prHint: false })
   expect(effective({}, {}, WITH_BLOCK, CFG)).toMatchObject({ record: 'no', draw: true, pr: false })
 })
 
@@ -255,4 +255,28 @@ test('the exclusivity question names every enabled census and how to disable it;
   expect(q.question).toContain('claude plugin disable census@a; claude plugin disable census@b')
   expect(q.options).toEqual(["Stop — I'll disable census first (Recommended)", 'Continue anyway (two writers)'])
   expect(q.options.map(continueAnyway)).toEqual([false, true])
+})
+
+// ---- the cost-bar budget -------------------------------------------------------------------------
+
+test('the budget question: four options, $20 recommended, and the env override is in the text', async () => {
+  const q = Q.budget()
+  expect(q.header).toBe('💸 Budget')
+  expect(q.question).toContain("What should a main session's cost bar fill up to?")
+  expect(q.question).toContain('CLAUDE_COST_BUDGET')
+  expect(q.options).toEqual(['$10', '$20 (Recommended)', '$50', '$100'])
+  expect(Q.budget(true).question).toContain('positive number')
+})
+
+test('budgetFrom: the options and Other ("$35", "35", "12.5") parse; junk, zero and negatives do not', async () => {
+  for (const [a, n] of [['$10', 10], ['$20 (Recommended)', 20], ['$100', 100], ['$35', 35], ['35', 35], ['12.5', 12.5], [' $ 7.25 ', 7.25]] as const) expect(budgetFrom(a)).toBe(n)
+  for (const a of ['abc', '0', '-5', '$0', '', '5oops', '$-5', '1e3', 'Infinity']) expect(budgetFrom(a)).toBeNull()
+})
+
+test('the budget: the environment, then the saved answer, then $20', async () => {
+  expect(effective({}, {}, NO_DETECTION, CFG).budget).toBe(20)
+  expect(effective({ budget: 50 }, {}, NO_DETECTION, CFG).budget).toBe(50)
+  expect(effective({ budget: 50 }, { CLAUDE_COST_BUDGET: '75' }, NO_DETECTION, CFG).budget).toBe(75)
+  expect(effective({ budget: 50 }, { CLAUDE_COST_BUDGET: '5oops' }, NO_DETECTION, CFG).budget).toBe(50) // not a budget: falls through
+  expect(effective({}, { CLAUDE_COST_BUDGET: '' }, NO_DETECTION, CFG).budget).toBe(20)
 })
