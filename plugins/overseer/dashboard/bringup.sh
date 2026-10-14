@@ -8,11 +8,13 @@
 #
 # Bind scope:
 #   - Default is LOOPBACK (127.0.0.1) — local machine only, matching the
-#     dashboard's single-user / no-auth design.
+#     dashboard's single-user design (mutations are tokenless there).
 #   - Local network (0.0.0.0) is opt-in: chosen at the interactive prompt,
 #     or forced by passing --host explicitly (which skips the prompt).
 #   - With no TTY (e.g. driven by a tool/CI) the prompt is skipped and it
 #     defaults to loopback; pass --host 0.0.0.0 to expose it deliberately.
+#   - A non-loopback bind arms the dashboard's mutation gate and serves the
+#     exec passthrough (containers: see README 'Remote access'); GETs stay open.
 #
 # Exit codes: 0 = dashboard is up (freshly launched or already running),
 # 1 = a preflight check failed (e.g. missing venv, port held by a stranger).
@@ -77,7 +79,7 @@ elif [ -t 0 ]; then
   case "$reply" in
     [Nn]*)
       host="0.0.0.0"; bind_args=(--host 0.0.0.0)
-      warn "binding 0.0.0.0 — reachable by any device on your LAN (the board has no auth)"
+      warn "binding 0.0.0.0 — reachable by any device on your LAN (reads are open; mutations and exec are token-gated)"
       ;;
     *)
       ok "bind scope: local machine only (127.0.0.1)"

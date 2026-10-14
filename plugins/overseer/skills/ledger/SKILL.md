@@ -13,7 +13,7 @@ effort: medium
 
 # Overseer Ledger
 
-Cards (planned, in-flight, completed work), sprints, usage and the knowledge
+Cards (planned, in-flight, done work), sprints, usage and the knowledge
 base live in one per-repo SQLite `board.db` in a central folder
 (`$CLAUDE_CONFIG_DIR/overseer/<repo-label>/`, overridable with
 `overseer init` / `OVERSEER_CENTRAL`), shared across every worktree so claims
@@ -25,16 +25,14 @@ everything through the CLI, always in this one form:
 python3 "<base directory>/../../scripts/cli.py" --root . <verb> ...
 ```
 
-`<base directory>` is the folder this file loaded from (Claude Code names it
-when it loads a skill); the CLI is two levels up. Never search the filesystem
-for it. `help <verb>` prints one verb's line; the orchestrate skill's
-`references/cli.md` lists every verb. Needs Python 3.11+ and the packages in
-`requirements.txt`.
+`<base directory>` is the folder this file loaded from; the CLI is two levels
+up. Never search for it. `help <verb>` prints one verb's line; the orchestrate skill's
+`references/cli.md` lists every verb. Needs Python 3.11+ and `requirements.txt`.
 
 ## On invocation — always check for in-flight work first
 Run `resume`.
 - Cards in flight → report them and offer per card: **resume / park / block /
-  abandon**. Never silently start fresh. `resume` lists only in-flight and
+  abandon**. Never silently start fresh. `resume` lists in-flight and
   blocked cards.
 - Resuming a card: `show <id> --section Plan` (or `Decisions`); plain `show <id>`
   prints the title and section headings, `--json` everything. Re-enter at the
@@ -97,6 +95,7 @@ Run `resume`.
 | `references/sprints.md` | `new-sprint`, `rollup-sprint`, sprint status |
 | `references/knowledge.md` | `add-fact`, `verify-fact`, `retire-fact`, `facts` |
 | `references/backup.md` | `backup`, `restore`, the pre-push snapshot hook |
+| `references/remote.md` | `OVERSEER_REMOTE` from a container; port 8770, tokens |
 
 ## Reporting style
 Concise and factual, the odd dry aside. Lead with card id and stage; budgets as

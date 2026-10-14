@@ -202,6 +202,14 @@ def probe_dashboard(
     return data if isinstance(data, dict) else {}
 
 
+def _open_log(log: Path) -> Any:
+    """Open the dashboard log for append, owner-only (0600) however it was
+    created before: it records launch output and must not be world-readable."""
+    fd = os.open(str(log), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    os.fchmod(fd, 0o600)
+    return os.fdopen(fd, "ab")
+
+
 def launch(record: dict[str, Any]) -> int:
     """Relaunch ``serve.py`` as recorded — same interpreter, host, port and
     root, never a browser tab — detached, its output appended to the
@@ -217,7 +225,7 @@ def launch(record: dict[str, Any]) -> int:
     ]
     log = log_path()
     log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("ab") as out:
+    with _open_log(log) as out:
         proc = subprocess.Popen(
             argv, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
             start_new_session=True, cwd=str(record["root"]),
@@ -313,7 +321,7 @@ def spawn_restart_worker(owner: str) -> int:
     log = log_path()
     log.parent.mkdir(parents=True, exist_ok=True)
     argv = [sys.executable, str(Path(__file__).resolve()), "--restart-worker", "--lock-owner", owner]
-    with log.open("ab") as out:
+    with _open_log(log) as out:
         proc = subprocess.Popen(
             argv, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
             start_new_session=True,
