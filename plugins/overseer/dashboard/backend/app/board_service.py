@@ -27,6 +27,7 @@ from scripts import boards
 from scripts.gitenv import hardened_git_env
 
 _log = logging.getLogger(__name__)
+_WARNED: set[str] = set()
 # backend/app/board_service.py -> parents: [0]=app [1]=backend [2]=dashboard [3]=overseer
 _OVERSEER_CLI = Path(__file__).resolve().parents[3] / "scripts" / "cli.py"
 _EXEC_TIMEOUT = 30
@@ -230,12 +231,17 @@ def resolve_exec_board(
     check_repo_label(repo)
     by_alias, warnings = boards.resolve_aliases(entries, aliases)
     for line in warnings:
-        _log.warning("%s", line)
+        if line not in _WARNED:  # once per process: every labelled request re-derives them
+            _WARNED.add(line)
+            _log.warning("%s", line)
     if repo in by_alias:
         matches = [by_alias[repo]]
     else:
         matches = [e for e in entries if e["label"] == repo]
-    if not matches or not Path(matches[0]["root"]).is_dir():
+    # board.db must still be there: the discovery cache is 10 s stale, and a
+    # board moved away (into an archive) would otherwise be recreated by the child.
+    if (not matches or not Path(matches[0]["root"]).is_dir()
+            or not (Path(matches[0]["board_dir"]) / "board.db").is_file()):
         valid = sorted({e["label"] for e in entries} | set(by_alias))
         raise HTTPException(
             status_code=404,

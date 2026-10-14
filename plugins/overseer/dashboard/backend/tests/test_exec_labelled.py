@@ -388,3 +388,16 @@ def test_real_discovery_across_accounts_and_an_archive(machine: Machine) -> None
     found = {str(p.parent) for p in machine.tmp.rglob("board.db")}
     assert found <= {str(d) for d in machine.board_dirs.values()}
     assert not (machine.tmp / "no-ambient-config" / "overseer").exists()
+
+
+def test_a_board_moved_into_the_archive_after_discovery_is_404_and_not_recreated(machine: Machine) -> None:
+    client = machine.client()
+    assert _exec(client, ["board"], repo="alpha").status_code == 200  # warms the 10 s cache
+    old = machine.board_dirs["repos/alpha"]
+    moved = machine.archive / "overseer" / old.name
+    old.rename(moved)
+
+    resp = _exec(client, ["new-card", "--title", "ghost"], repo="alpha")
+
+    assert resp.status_code == 404
+    assert not old.exists()

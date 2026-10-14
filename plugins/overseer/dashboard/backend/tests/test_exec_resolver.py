@@ -12,12 +12,21 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
+from app import board_service
 from app.board_service import ExecRequest, resolve_exec_board
+
+
+@pytest.fixture(autouse=True)
+def _fresh_warnings() -> None:
+    board_service._WARNED.clear()
 
 
 def entry(tmp_path: Path, label: str, name: str | None = None) -> dict:
     root = tmp_path / "repos" / (name or label)
     root.mkdir(parents=True, exist_ok=True)
+    board = tmp_path / "boards" / (name or label)
+    board.mkdir(parents=True, exist_ok=True)
+    (board / "board.db").write_bytes(b"")
     return {
         "label": label,
         "root": str(root),
@@ -197,3 +206,22 @@ def test_malformed_aliases_value_is_ignored(tmp_path: Path) -> None:
     e = entry(tmp_path, "alpha")
     assert resolve_exec_board("alpha", [e], ["not", "a", "dict"])[0].name == "alpha"  # type: ignore[arg-type]
     assert resolve_exec_board("alpha", [e], {"x": 5})[0].name == "alpha"  # type: ignore[dict-item]
+
+
+def test_a_board_whose_db_is_gone_is_404_not_a_fresh_board(tmp_path: Path) -> None:
+    """A stale discovery entry (board moved into an archive) must not let the
+    child create a new board.db at the old path."""
+    e = entry(tmp_path, "moved")
+    (Path(e["board_dir"]) / "board.db").unlink()
+    assert status("moved", [e]) == 404
+    assert not (Path(e["board_dir"]) / "board.db").exists()
+
+
+def test_each_alias_warning_is_logged_once_per_process(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    e = entry(tmp_path, "alpha")
+    caplog.set_level(logging.WARNING)
+    for _ in range(3):
+        resolve_exec_board("alpha", [e], {"ghost": str(tmp_path / "nowhere"), "a b": e["root"]})
+    assert caplog.text.count("ghost") == 1 and caplog.text.count("not a valid label") == 1
