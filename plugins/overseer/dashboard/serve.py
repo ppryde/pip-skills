@@ -48,18 +48,24 @@ if str(_OVERSEER_ROOT) not in sys.path:
 
 from app.main import LOOPBACK_HOSTS, create_app
 
-from scripts import dashboard_record
+from scripts import dashboard_record, remote_token
 
 DEFAULT_PORT = 8770
+MIN_TOKEN_LEN = 16
+
+
+class TokenError(ValueError):
+    """An operator-supplied token that must not be used."""
 
 
 def resolve_token(host: str) -> str | None:
-    """The dashboard token in effect for this bind, or None (gate off).
+    """The DASHBOARD gate token in effect for this bind, or None (gate off).
 
     Explicit ``OVERSEER_DASHBOARD_TOKEN`` always wins. Otherwise a token is
-    auto-generated ONLY for a non-loopback bind — exposing the mutation
-    surface beyond localhost must not be tokenless. A pure loopback bind with
-    no env var stays token-free (the common single-user case).
+    generated ONLY for a non-loopback bind — exposing the mutation surface
+    beyond localhost must not be tokenless. A pure loopback bind with no env
+    var stays token-free (the common single-user case). Independent of the
+    exec token: neither secret ever stands in for the other.
     """
     env = os.environ.get("OVERSEER_DASHBOARD_TOKEN")
     if env:
@@ -67,6 +73,31 @@ def resolve_token(host: str) -> str | None:
     if host not in LOOPBACK_HOSTS:
         return secrets.token_urlsafe(24)
     return None
+
+
+def resolve_exec_token(root: Path) -> tuple[str, str]:
+    """The ``/api/exec`` token and where it came from (``"env"`` or ``"file"``).
+
+    ``OVERSEER_REMOTE_TOKEN`` beats the token file at ``<root>/.overseer/
+    remote-token``, which beats minting a new one (and persisting it, so a
+    container mounting the repo can read it). A file the server cannot trust
+    (symlink, foreign owner, group/other bits) is replaced, not used. An env
+    token under MIN_TOKEN_LEN characters raises TokenError.
+    """
+    env = os.environ.get("OVERSEER_REMOTE_TOKEN")
+    if env:
+        if len(env) < MIN_TOKEN_LEN:
+            raise TokenError(
+                f"OVERSEER_REMOTE_TOKEN is shorter than {MIN_TOKEN_LEN} characters; "
+                "refusing to guard exec with it"
+            )
+        return env, "env"
+    existing = remote_token.read_server_token(root)
+    if existing and len(existing) >= MIN_TOKEN_LEN:
+        return existing, "file"
+    token = secrets.token_urlsafe(32)
+    remote_token.write_remote_token(root, token)
+    return token, "file"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -203,16 +234,42 @@ def main(argv: list[str] | None = None) -> int:
     """Build the dashboard app and serve it. Returns a process exit code."""
     args = parse_args(argv)
     root = Path(args.root).resolve()
+    # Before the singleton claim: a bad token must not cost the running
+    # dashboard its place (--replace stops it).
+    exec_token: str | None = None
+    exec_note = "exec token: none (exec disabled)"
+    try:
+        exec_token, source = resolve_exec_token(root)
+        exec_note = (
+            "exec token: from OVERSEER_REMOTE_TOKEN"
+            if source == "env"
+            else f"exec token: {remote_token.remote_token_path(root)}"
+        )
+    except TokenError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"exec disabled: cannot persist the exec token ({exc})", file=sys.stderr)
     refusal = _claim_dashboard(args.replace)
     if refusal:
         print(refusal, file=sys.stderr)
         return 1
     token = resolve_token(args.host)
-    app = create_app(root, host=args.host, token=token)
+    app = create_app(root, host=args.host, token=token, exec_token=exec_token)
     url = f"http://{args.host}:{args.port}/"
     print(f"overseer dashboard serving {root} at {url}")
+    # Neither secret is ever printed (logs, scrollback and backups keep them).
+    print(exec_note)
+    dash_env = bool(os.environ.get("OVERSEER_DASHBOARD_TOKEN"))
     if token:
-        print(f"dashboard token (send as X-Overseer-Token header): {token}")
+        print("dashboard token: from OVERSEER_DASHBOARD_TOKEN" if dash_env
+              else "dashboard token: generated for this run, not shown")
+    if dash_env and exec_token and not os.environ.get("OVERSEER_REMOTE_TOKEN"):
+        print(
+            "note: OVERSEER_DASHBOARD_TOKEN does not open exec; exec uses a "
+            f"different token, at {remote_token.remote_token_path(root)}",
+            file=sys.stderr,
+        )
 
     if not args.no_browser:
         threading.Timer(1.0, _open_browser, args=(url,)).start()
@@ -229,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         uvicorn.run(
             _unstamp_on_shutdown(app, record["pid"]),
             host=args.host, port=args.port, fd=sock.fileno(),
+            proxy_headers=False,
         )
     finally:
         # Belt and braces for exits that are not a signal (the lifespan hook

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 import pytest
 
@@ -85,11 +85,11 @@ def test_main_builds_app_from_resolved_root_and_runs_uvicorn(
     assert rc == 0
     # loopback bind, no env token → token stays None (no friction for the
     # common single-user case)
-    fake_create_app.assert_called_once_with(tmp_path.resolve(), host="127.0.0.1", token=None)
+    fake_create_app.assert_called_once_with(tmp_path.resolve(), host="127.0.0.1", token=None, exec_token=ANY)
     # uvicorn is handed the app wrapped in the record-removing lifespan shim
     # (not the bare app), plus the socket main() already bound.
     fake_run.assert_called_once()
-    assert fake_run.call_args.kwargs == {"host": "127.0.0.1", "port": 9001, "fd": FAKE_FD}
+    assert fake_run.call_args.kwargs == {"host": "127.0.0.1", "port": 9001, "fd": FAKE_FD, "proxy_headers": False}
     assert callable(fake_run.call_args.args[0]) and fake_run.call_args.args[0] is not sentinel_app
     serve._bind.assert_called_once_with("127.0.0.1", 9001)
 
@@ -111,7 +111,7 @@ def test_main_passes_through_custom_host(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert args == (tmp_path.resolve(),)
     assert kwargs["host"] == "0.0.0.0"
     assert kwargs["token"]
-    fake_run.assert_called_once_with(fake_run.call_args.args[0], host="0.0.0.0", port=8080, fd=FAKE_FD)
+    fake_run.assert_called_once_with(fake_run.call_args.args[0], host="0.0.0.0", port=8080, fd=FAKE_FD, proxy_headers=False)
     serve._bind.assert_called_once_with("0.0.0.0", 8080)
 
 
@@ -403,7 +403,7 @@ def test_main_passes_token_to_create_app(monkeypatch) -> None:
     monkeypatch.setenv("OVERSEER_DASHBOARD_TOKEN", "abc123")
     captured = {}
 
-    def fake_create_app(root, *, host, token=None):
+    def fake_create_app(root, *, host, token=None, exec_token=None):
         captured["token"] = token
         return MagicMock()
 
@@ -411,3 +411,159 @@ def test_main_passes_token_to_create_app(monkeypatch) -> None:
     monkeypatch.setattr(serve.uvicorn, "run", MagicMock())
     serve.main(["--no-browser"])
     assert captured["token"] == "abc123"
+
+
+# --- WF-100 C7: the exec token is its own secret ------------------------------
+
+import stat
+
+EXEC_ENV = "OVERSEER_REMOTE_TOKEN"
+LONG = "x" * 24
+
+
+@pytest.fixture
+def _clean_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(EXEC_ENV, raising=False)
+    monkeypatch.delenv("OVERSEER_DASHBOARD_TOKEN", raising=False)
+
+
+def _served(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, extra: list[str] | None = None) -> dict:
+    """Run main() with a fake create_app; return what it was given."""
+    seen: dict = {}
+
+    def fake_create_app(root, *, host, token=None, exec_token=None):
+        seen.update(token=token, exec_token=exec_token)
+        return MagicMock()
+
+    monkeypatch.setattr(serve, "create_app", fake_create_app)
+    monkeypatch.setattr(serve.uvicorn, "run", MagicMock())
+    monkeypatch.setattr(serve.threading, "Timer", MagicMock())
+    rc = serve.main(["--root", str(tmp_path), "--no-browser", *(extra or [])])
+    seen["rc"] = rc
+    return seen
+
+
+def test_exec_token_env_beats_file(_clean_tokens, monkeypatch, tmp_path) -> None:
+    from scripts.remote_token import write_remote_token
+
+    write_remote_token(tmp_path, "f" * 24)
+    monkeypatch.setenv(EXEC_ENV, LONG)
+    assert serve.resolve_exec_token(tmp_path) == (LONG, "env")
+
+
+def test_exec_token_file_beats_mint(_clean_tokens, tmp_path) -> None:
+    from scripts.remote_token import write_remote_token
+
+    write_remote_token(tmp_path, "f" * 24)
+    assert serve.resolve_exec_token(tmp_path) == ("f" * 24, "file")
+
+
+def test_exec_token_minted_once_and_persisted_0600(_clean_tokens, tmp_path) -> None:
+    from scripts.remote_token import remote_token_path
+
+    tok, src = serve.resolve_exec_token(tmp_path)
+    assert src == "file" and len(tok) >= 16
+    assert remote_token_path(tmp_path).read_text() == tok
+    assert stat.S_IMODE(remote_token_path(tmp_path).stat().st_mode) == 0o600
+    assert serve.resolve_exec_token(tmp_path)[0] == tok
+
+
+def test_short_env_exec_token_is_refused(_clean_tokens, monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setenv(EXEC_ENV, "short")
+    with pytest.raises(serve.TokenError):
+        serve.resolve_exec_token(tmp_path)
+    assert serve.main(["--root", str(tmp_path), "--no-browser"]) == 1
+    assert "16" in capsys.readouterr().err
+
+
+def test_dashboard_token_does_not_become_the_exec_token(
+    _clean_tokens, monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.setenv("OVERSEER_DASHBOARD_TOKEN", "dash-" + LONG)
+    seen = _served(monkeypatch, tmp_path)
+    assert seen["token"] == "dash-" + LONG
+    assert seen["exec_token"] and seen["exec_token"] != seen["token"]
+    err = capsys.readouterr().err
+    assert "different token" in err and "remote-token" in err
+
+
+def test_remote_token_env_does_not_arm_the_dashboard_gate(
+    _clean_tokens, monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv(EXEC_ENV, LONG)
+    seen = _served(monkeypatch, tmp_path)
+    assert seen["token"] is None and seen["exec_token"] == LONG
+
+
+def test_tokens_are_never_printed_or_logged(_clean_tokens, monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setenv("OVERSEER_DASHBOARD_TOKEN", "dash-" + LONG)
+    seen = _served(monkeypatch, tmp_path)
+    out = capsys.readouterr()
+    for secret in (seen["token"], seen["exec_token"]):
+        assert secret not in out.out and secret not in out.err
+    assert "remote-token" in out.out  # the PATH is printed, not the value
+
+
+def test_env_exec_token_is_announced_by_name_only(_clean_tokens, monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setenv(EXEC_ENV, LONG)
+    _served(monkeypatch, tmp_path)
+    out = capsys.readouterr().out
+    assert "from OVERSEER_REMOTE_TOKEN" in out and LONG not in out
+
+
+def test_symlinked_token_file_is_replaced_not_followed(_clean_tokens, tmp_path) -> None:
+    from scripts.remote_token import remote_token_path
+
+    sentinel = tmp_path / "sentinel"
+    sentinel.write_text("S" * 24)
+    p = remote_token_path(tmp_path)
+    p.parent.mkdir(parents=True)
+    p.symlink_to(sentinel)
+    tok, _ = serve.resolve_exec_token(tmp_path)
+    assert tok != "S" * 24 and sentinel.read_text() == "S" * 24
+    assert not p.is_symlink() and p.read_text() == tok
+
+
+def test_wide_token_file_is_reminted(_clean_tokens, tmp_path) -> None:
+    from scripts.remote_token import remote_token_path
+
+    p = remote_token_path(tmp_path)
+    p.parent.mkdir(parents=True)
+    p.write_text("w" * 24)
+    p.chmod(0o644)
+    tok, _ = serve.resolve_exec_token(tmp_path)
+    assert tok != "w" * 24
+    assert stat.S_IMODE(p.stat().st_mode) == 0o600
+
+
+def test_unwritable_root_disables_exec_but_still_serves(
+    _clean_tokens, monkeypatch, tmp_path, capsys
+) -> None:
+    (tmp_path / ".overseer").symlink_to(tmp_path)  # writer refuses a symlinked dir
+    seen = _served(monkeypatch, tmp_path)
+    assert seen["rc"] == 0 and seen["exec_token"] is None
+    assert "exec" in capsys.readouterr().err
+
+
+def test_served_app_answers_exec_with_the_token(_clean_tokens, monkeypatch, tmp_path) -> None:
+    """End to end through the real create_app: wiring, not just resolution."""
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv(EXEC_ENV, LONG)
+    captured: dict = {}
+    real = serve.create_app
+
+    def spy(root, **kw):
+        app = real(root, **kw)
+        captured["app"] = app
+        return app
+
+    monkeypatch.setattr(serve, "create_app", spy)
+    monkeypatch.setattr(serve.uvicorn, "run", MagicMock())
+    monkeypatch.setattr(serve.threading, "Timer", MagicMock())
+    assert serve.main(["--root", str(tmp_path), "--no-browser"]) == 0
+    client = TestClient(captured["app"], client=("127.0.0.1", 50000))
+    r = client.post("/api/exec", json={"argv": ["board"]})
+    assert r.status_code == 401  # armed: 503 would mean serve.py never passed the token
+    r = client.post("/api/exec", json={"argv": ["board"]}, headers={"X-Overseer-Token": "wrong" * 5})
+    assert r.status_code == 401
