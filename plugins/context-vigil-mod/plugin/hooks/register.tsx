@@ -104,7 +104,7 @@ let retryTimer: { cancel: () => void } | null = null
 // so a second one must not follow it. Cleared when the command settles.
 let clearInFlight = false
 let draftAsked: string | null = null   // the pending whose draft wait was already asked about: once per handover
-let skipDraft = false                  // the person chose "Clear and resume now": the draft gate is off for this one clear
+let skipDraftFor: string | null = null // the pending the person chose "Clear and resume now" for: the draft gate is off for that one clear
 // Prompts from other sessions, schedules and background tasks: held while a clear-bound handover waits for its clear.
 const HOLD_ORIGINS = new Set(['task-notification', 'scheduled-trigger', 'peer', 'peer-send-message', 'projects-relay', 'coordinator', 'observer', 'observer-activity'])
 // The last API turn as the mod issued its own clear, for the handover it clears into: the engine queues
@@ -715,6 +715,7 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
 // A stale pending handover gives way to the fresh one: its clear stops waiting and a /clear
 // in between injects nothing old. The file stays on disk.
 async function supersedePending($: EngineInterface) {
+  skipDraftFor = null
   retryTimer?.cancel()
   retryTimer = null
   clearParked = false
@@ -753,14 +754,15 @@ async function askDraft($: EngineInterface, path: string) {
         await savePending($, { ...pending, followUp: [pending.followUp, draft].filter(Boolean).join('\n\n') })
         await $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined)
       }
-      skipDraft = true
-      scheduleClear($, unattendedClear)
+      skipDraftFor = path
+      scheduleClear($, false)   // the person's own choice: an attended clear, even for an auto handover
       return
     }
     await log($, 'draft.choice', { choice: 'postpone' })
     retryTimer?.cancel()
     retryTimer = null
     clearParked = true
+    skipDraftFor = null
     lastWait = null
     await setCountdown($, null)
     await releaseHeld($)
@@ -782,6 +784,7 @@ async function tryClear($: EngineInterface) {
     await tryClearInner($)
   } catch (err) {
     clearParked = true
+    skipDraftFor = null
     lastWait = null
     await notify($, V.clearRejected)
     await log($, 'guard.wait', { reason: 'clear-error', error: String(err) }).catch(() => {})
@@ -802,6 +805,7 @@ async function tryClearInner($: EngineInterface) {
   if (autoOff || (unattendedClear && mode(activity, now, settings) === 'attended')) {
     await setCountdown($, null)
     await update($, draftWaitA, () => false)
+    skipDraftFor = null
     lastWait = null
     clearParked = true
     await notify($, autoOff ? V.clearSkippedAutoOff : V.clearSkippedAttended)
@@ -810,13 +814,14 @@ async function tryClearInner($: EngineInterface) {
     return
   }
   const gate = clearGate({
-    now, draft: skipDraft ? '' : (await $.prompt.read()).text, onPhone: onPhone(activity), lastBridgeAt: activity.lastBridgeAt,
+    now, draft: skipDraftFor === pendingNow.path ? '' : (await $.prompt.read()).text, onPhone: onPhone(activity), lastBridgeAt: activity.lastBridgeAt,
     rcAutoClear: settings.rcAutoClear, latched: (await readLatch($)) !== null,
     countdownEndsAt: await read($, countdownA), classicActive: standDown, unattended: unattendedClear,
   })
   await update($, draftWaitA, () => !gate.go && gate.reason === 'draft')
+  if (!gate.go && gate.recheckMs === null) skipDraftFor = null   // parked: the choice does not outlive this clear
   if (gate.go) {
-    skipDraft = false
+    skipDraftFor = null
     lastWait = null
     await setCountdown($, null)
     await log($, 'clear', { unattended: unattendedClear })
@@ -832,6 +837,7 @@ async function tryClearInner($: EngineInterface) {
       issuedClear = null
       if (archived !== null) await unarchive($, archived)
       clearParked = true
+      skipDraftFor = null
       await notify($, V.clearRejected)
       await log($, 'guard.wait', { reason: 'clear-rejected' })
       await releaseHeld($)

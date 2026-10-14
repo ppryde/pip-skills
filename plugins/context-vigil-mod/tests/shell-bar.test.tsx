@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import { START, human, world } from './world'
+import { START, human, turn, world } from './world'
 import type { World } from './world'
 
 const MIN = 60_000
@@ -609,4 +609,57 @@ test('a dismissed dialog postpones', async ($, on) => {
   await w.clock.advance(100)
   expect(w.commands).not.toContain('clear')
   expect(w.state.get('context-vigil-mod.pending')).toBeNull()
+})
+
+test('Clear and resume now on an auto (unattended) handover clears: the choice makes it an attended clear', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  w.askReply.value = () => '🧹 Clear and resume now'
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(measure(20))
+  await $.session.measure(measure(36))
+  await w.clock.settle()
+  await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never)
+  w.draft.value = 'half a sen'                         // typed after the tool hook's own look at the box
+  await w.clock.settle()
+  await w.clock.advance(100)
+  expect(w.commands).toContain('clear')
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).toContain('half a sen')
+})
+
+test('the choice does not outlive its clear: rejected, a later handover still waits on a draft and asks again', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  await draftWaiting($, w, '🧹 Clear and resume now')   // Clear now: the clear is tried, the engine refuses it
+  await w.clock.advance(100)
+  expect(w.notices.some(n => n.includes('rejected') || n.includes('refused') || n.includes("couldn't"))).toBe(true)
+  w.clearRefused.value = false
+  w.draft.value = 'new draft'
+  await w.clock.advance(2 * MIN)
+  await $.turn.complete(turn('x'))                     // the old handover is stale: a new one is written
+  w.askReply.value = null
+  w.commands.length = 0
+  await $.command.run(vhoCmd)
+  await w.clock.settle()
+  await $.tool.call({ ...(callH as object), tool_use_id: 'h2' } as never)
+  await w.clock.settle()
+  await w.clock.advance(5000)
+  expect(w.commands).not.toContain('clear')
+  expect(draftAsks(w).length).toBe(2)
+})
+
+test('the threshold bar takes precedence over the paused line', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.session.measure(measure(41))                 // the bar is up
+  await draftWaiting($, w, 'open')
+  const ui = await $.ui.mount(BAND())
+  expect(await ui.find({ key: 'handover' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Handover paused/ })).toBeUndefined()
+  await ui.unmount()
 })
