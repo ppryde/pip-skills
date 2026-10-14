@@ -8,7 +8,7 @@ const MIN = 60_000
 test('session start registers commands and the tool, resolves the config dir', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
-  expect(w.registered.commands.sort()).toEqual(['vho', 'vigil-handover', 'vigil-overrides', 'vigil-setup'])
+  expect(w.registered.commands.sort()).toEqual(['vho', 'vigil-handover', 'vigil-overrides', 'vigil-pause', 'vigil-resume', 'vigil-setup'])
   expect(w.registered.tools).toEqual(['vigil_handover'])
 })
 

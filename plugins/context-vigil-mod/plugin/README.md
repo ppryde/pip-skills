@@ -36,9 +36,11 @@ It is a Claude Code mod: no tmux, no status line. Deep detail is in [REFERENCE.m
 | `/vho` | Short for `/vigil-handover`. | `/vho` |
 | `/vigil-setup [step]` | Guided setup, or one step: `nudge`, `bar`, `auto`, `last-light`, `limits`, `rc`. Asks in dialogs; nothing goes to the model. | `/vigil-setup auto` |
 | `/vigil-overrides [add\|rm\|check]` | Thresholds per model, per window or both. Bare or `check` lists them and what this session gets. | `/vigil-overrides add` |
+| `/vigil-pause` | Pause vigil for this session: no nudge, bar or threshold handover. `/vho`, last light and limit stops still work. | `/vigil-pause` |
+| `/vigil-resume` | Turn vigil back on, and bring back a bar you dismissed with `0`. | `/vigil-resume` |
 | `1` | Vigil bar: hand over now. | press `1` |
 | `2` | Vigil bar: remind me at the next step. | press `2` |
-| `0` | Vigil bar: dismiss until the next `/clear`. | press `0` |
+| `0` | Vigil bar: dismiss until the next `/clear` (or `/vigil-resume`). | press `0` |
 
 Short plain-words messages such as "do a handover" run `/vho` too. See [REFERENCE.md](REFERENCE.md#command-details).
 

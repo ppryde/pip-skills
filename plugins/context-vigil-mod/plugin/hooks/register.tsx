@@ -36,6 +36,7 @@ const lastNudgedA = atom({ plugin: 'context-vigil-mod', key: 'lastNudged' } as c
 const barShownA = atom({ plugin: 'context-vigil-mod', key: 'barShown' } as const, false)
 const barDismissedA = atom({ plugin: 'context-vigil-mod', key: 'barDismissed' } as const, false)
 const pendingA = atom({ plugin: 'context-vigil-mod', key: 'pending' } as const, null)
+const pausedA = atom({ plugin: 'context-vigil-mod', key: 'paused' } as const, false)
 const draftWaitA = atom({ plugin: 'context-vigil-mod', key: 'draftWait' } as const, false)
 const countdownA = atom({ plugin: 'context-vigil-mod', key: 'countdownEndsAt' } as const, null)
 const transcriptA = atom({ plugin: 'context-vigil-mod', key: 'transcriptPath' } as const, null as string | null)
@@ -102,6 +103,9 @@ let lastWait: WaitReason | null = null
 let retryTimer: { cancel: () => void } | null = null
 // A /clear handed to the engine and not yet run: it is queued until the session is idle (R2-10),
 // so a second one must not follow it. Cleared when the command settles.
+// /vigil-pause: per process, so it outlives a /clear (which wipes $.state); pausedA mirrors it for the band.
+let paused = false
+let lastPausedDue: number | null = null
 let clearInFlight = false
 let draftAsked: string | null = null   // the pending whose draft wait was already asked about: once per handover
 let skipDraftFor: string | null = null // the pending the person chose "Clear and resume now" for: the draft gate is off for that one clear
@@ -557,6 +561,8 @@ async function bindSession($: EngineInterface) {
   lastLightArmed = false
   standDown = false
   rcHinted = false
+  paused = await read($, pausedA)   // a hot reload keeps $.state; a new process starts on
+  lastPausedDue = null
   root = configRoot({
     CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
     HOME: await $.env.get('HOME'),
@@ -604,6 +610,7 @@ async function resetSessionState($: EngineInterface) {
   await update($, baselineA, () => null)
   await update($, barShownA, () => false)
   await update($, barDismissedA, () => false)
+  await update($, pausedA, () => paused)   // a pause is the person's, not the conversation's
   await update($, countdownA, () => null)
   await update($, handoverCountA, () => 0)
   await update($, cacheTtlA, () => 'unknown')
@@ -663,11 +670,12 @@ async function withdrawConsent($: EngineInterface) {
 }
 
 // What startHandover did, so a caller can say it truthfully (R2-14).
-type Started = 'started' | 'reused' | 'covered' | 'standdown' | 'latched' | 'in-flight'
+type Started = 'started' | 'reused' | 'covered' | 'standdown' | 'latched' | 'in-flight' | 'paused'
 
 // `rewrite`: never reuse the pending handover, ask for a fresh one (the dialog's "Update it, then clear").
 async function startHandover($: EngineInterface, reason: PendingReason, resume: boolean, unattended: boolean = reason === 'threshold', rewrite = false): Promise<Started> {
   if (standDown) return 'standdown'
+  if (paused && reason === 'threshold') { await log($, 'paused.skip', { what: 'handover' }); return 'paused' }
   const now = await nowMs($)
   // R2-12: a fresh handover is already on disk (one asked for, waiting to clear): an early stop needs
   // no second one — the limit resume names this file and the waiting clear is left alone.
@@ -973,6 +981,7 @@ async function cancelCountdown($: EngineInterface) {
 }
 
 async function showNudge($: EngineInterface, pct: number) {
+  if (paused) return
   if (settings.bar) {
     if (await read($, barDismissedA)) return          // 0 hid it for this cycle: silent
     if (onPhone(activity)) { void askNudge($, pct); return }
@@ -1008,6 +1017,7 @@ async function barChoice($: EngineInterface, action: 'handover' | 'later' | 'dis
   await update($, barShownA, () => false)
   if (action === 'dismiss') await update($, barDismissedA, () => true)
   await log($, 'bar', { action })
+  if (action === 'dismiss') await notify($, V.barDismissedNote)
   if (action === 'handover') {
     await giveConsent($)
     await startHandover($, 'request', true)
@@ -1320,6 +1330,8 @@ export const register: Register = on => {
     await $.command.register({ name: COMMANDS.handoverShort, description: V.cmdHandoverShort })
     await $.command.register({ name: COMMANDS.setup, description: V.cmdSetup })
     await $.command.register({ name: COMMANDS.overrides, description: V.cmdOverrides })
+    await $.command.register({ name: COMMANDS.pause, description: V.cmdPause })
+    await $.command.register({ name: COMMANDS.resume, description: V.cmdResume })
     await $.tool.register({ name: TOOL, description: TOOL_DESCRIPTION, inputSchema: INPUT_SCHEMA as unknown as Record<string, unknown> })
     await checkInterlock($)
     await checkLatch($, [])   // a latch another process left behind and never lifted
@@ -1649,7 +1661,10 @@ export const register: Register = on => {
     if (pct !== null && !standDown) {
       const { nudgeAt, step } = levels.values
       const due = nextThreshold(pct, { nudgeAt, step }, await read($, lastNudgedA))
-      if (due !== null) {
+      if (due !== null && paused) {
+        // Not spent: /vigil-resume finds it still due.
+        if (due !== lastPausedDue) { lastPausedDue = due; await log($, 'paused.skip', { what: 'threshold', pct }) }
+      } else if (due !== null) {
         const now = await nowMs($)
         const unattended = armed(activity, now, settings)
         const baseline = await read($, baselineA)
@@ -1670,6 +1685,51 @@ export const register: Register = on => {
   on('command.run', { command: COMMANDS.setup }, async ($, e) => {
     await startSetup($, ((e as unknown as { args?: string }).args ?? '').trim() || undefined)
     return { text: V.settingUp }
+  })
+
+  on('command.run', { command: COMMANDS.pause }, async ($) => {
+    if (paused) return { text: V.paused }
+    paused = true
+    await update($, pausedA, () => true)
+    await update($, barShownA, () => false)
+    // A threshold clear that is waiting stands down; the handover stays as an offer. Explicit requests are untouched.
+    const pending = await read($, pendingA)
+    if (pending && pending.reason === 'threshold' && !clearInFlight) {
+      retryTimer?.cancel()
+      retryTimer = null
+      clearParked = true
+      lastWait = null
+      await setCountdown($, null)
+      await update($, draftWaitA, () => false)
+      await releaseHeld($)
+    }
+    await log($, 'pause', {})
+    await notify($, V.paused)
+    return { text: V.paused }
+  })
+
+  on('command.run', { command: COMMANDS.resume }, async ($) => {
+    const dismissed = await read($, barDismissedA)
+    if (!paused && !dismissed) return { text: V.alreadyOn }
+    paused = false
+    lastPausedDue = null
+    await update($, pausedA, () => false)
+    await update($, barDismissedA, () => false)
+    await log($, 'unpause', { dismissed })
+    // Past a threshold now: say so through the normal path, so the ladder stays consistent.
+    const pct = await read($, contextA)
+    if (pct !== null && !standDown) {
+      const { nudgeAt, step } = (await thresholds($)).values
+      const lastNudged = await read($, lastNudgedA)
+      const due = nextThreshold(pct, { nudgeAt, step }, lastNudged)
+      if (due !== null) {
+        await update($, lastNudgedA, () => due)
+        await log($, 'threshold', { pct, step: due, mode: await read($, modeA) })
+        await showNudge($, pct)
+      } else if (dismissed && lastNudged !== null) await showNudge($, pct)
+    }
+    await notify($, V.resumed)
+    return { text: V.resumed }
   })
 
   on('command.run', { command: COMMANDS.overrides }, async ($, e) => {
@@ -1793,8 +1853,15 @@ export const register: Register = on => {
       return { result: `Saved handover to ${path} (not requested by context-vigil-mod; nothing was cleared)` } as never
     }
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
-    const clears = reason === 'threshold' || reason === 'request'
+    // Asked for before /vigil-pause, saved after it: kept as an offer, no clear.
+    const pausedOut = paused && reason === 'threshold'
+    const clears = !pausedOut && (reason === 'threshold' || reason === 'request')
     if (clears) scheduleClear($, asked?.unattended ?? false)
+    else if (pausedOut) {
+      clearParked = true
+      await log($, 'paused.skip', { what: 'clear' })
+      await notify($, V.pendingOffer(path))
+    }
     return { result: `Saved handover to ${path}${standingNote(orders)}${clears ? ` ${STOP_NOW}` : ''}` } as never
   })
 
@@ -1823,7 +1890,14 @@ export const register: Register = on => {
     }
     if (!settings.bar || !(await read($, barShownA))) {
       // The threshold bar wins; otherwise the one quiet fact: last light is off for this cache.
-      if (!settings.lastLight || (await read($, cacheTtlA)) !== '5m' || (await read($, ttlInfoDismissedA))) return next(e)
+      if (!settings.lastLight || (await read($, cacheTtlA)) !== '5m' || (await read($, ttlInfoDismissedA))) {
+        // Lowest precedence: only when nothing else has the band.
+        return (await read($, pausedA)) ? (
+          <Box>
+            <Text>{V.pausedLine}</Text>
+          </Box>
+        ) : next(e)
+      }
       return (
         <Box>
           <Text>{V.lastLightOff}</Text>

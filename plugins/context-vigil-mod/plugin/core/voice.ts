@@ -4,7 +4,7 @@ export type WaitReason =
   | 'countdown' | 'countdown-start'
 
 const WAIT: Record<WaitReason, string> = {
-  'draft': '⏸️ Handover paused while you\'re typing',
+  'draft': '⏸️ Auto-clear paused while you\'re typing',
   'latched': '⏳ Handover waiting — the usage limit is in force',
   'classic': '🕯️ Handover skipped — classic context-vigil is active here',
   'rc-declined': '📱 Handover saved — auto-clear is off for Remote Control sessions',
@@ -17,7 +17,7 @@ export const V = {
   barLine: (pct: number, threshold: number, resumes: string | null) =>
     `🕯️ context ${pct}% · threshold ${threshold}%${resumes ? ` · ⏳ resumes ${resumes}` : ''}`,
   barHandover: '📜 Hand over now',
-  draftTitle: '⏸️ Handover paused while you\'re typing',
+  draftTitle: '⏸️ Auto-clear paused while you\'re typing',
   draftClearNow: '🧹 Clear and resume now',
   draftPostpone: (step: number) => `⏰ Postpone ${step}%`,
   draftPostponed: (next: number) => `⏰ Handover postponed — the next one is at ${next}%`,
@@ -80,6 +80,13 @@ export const V = {
   cmdHandover: '📜 Hand over now (context-vigil-mod)',
   cmdSetup: '⚙️ context-vigil-mod setup — /vigil-setup [nudge|bar|auto|last-light|limits|rc]',
   cmdHandoverShort: '📜 Hand over now — short for /vigil-handover (context-vigil-mod)',
+  cmdPause: '⏸️ Pause vigil for this session — /vigil-resume turns it back on',
+  cmdResume: '▶️ Turn vigil back on (and bring back a dismissed bar)',
+  paused: '⏸️ Vigil paused for this session — /vigil-resume to turn it back on',
+  pausedLine: '⏸️ vigil paused',
+  resumed: '▶️ Vigil back on',
+  alreadyOn: '▶️ Vigil is already on',
+  barDismissedNote: '✖ Bar dismissed — /vigil-resume brings it back',
   cmdOverrides: '🔧 Thresholds per model or window — /vigil-overrides [add|rm|check]',
   overridesUsage: '🔧 /vigil-overrides lists and checks · /vigil-overrides add asks for an override · /vigil-overrides rm model=… window=… (either or both) · or edit overrides.json by hand',
   overridesNoOverride: (key: string) => `🔧 No override for ${key} — /vigil-overrides lists them`,
