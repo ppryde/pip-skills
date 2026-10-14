@@ -252,7 +252,9 @@ server, port **8770**, exec token in `OVERSEER_REMOTE_TOKEN` or
 `.overseer/remote-token`. **BREAKING in 0.30.0:** the separate board API on
 port 8771 and `OVERSEER_DASHBOARD_TOKEN`-opens-exec are retired. Setup,
 migration and the threat table: `dashboard/README.md`, "Remote access from a
-dev container".
+dev container". Since 0.31.0 `bootstrap` and `dispatch-prep` work under
+`--remote`: the client runs their git in the container (set `worktree_dir`
+inside the mounted repo; keep a card's rounds in one container).
 
 Known limit: with `OVERSEER_REMOTE` set, the guard decision is forwarded to
 the host and the orchestrator marker lives on the host, so there is no local
