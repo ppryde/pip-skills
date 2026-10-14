@@ -4,7 +4,7 @@
 
 `/roster` opens a live pane of every Claude Code session on this machine: its tmux name, repo and branch, status and last prompt. You can open or kill a session from it.
 
-It is a mod, early access in Claude Code 2.1.287. It only reads the session registry and costs no model context; it acts on a session only when you press open or kill. Deep detail is in [REFERENCE.md](REFERENCE.md).
+It is a mod, early access in Claude Code 2.1.287. It reads the session registry, session transcripts and tmux panes, and costs no model context; it acts on a session only when you press open or kill. Deep detail is in [REFERENCE.md](REFERENCE.md).
 
 ## Quick start
 

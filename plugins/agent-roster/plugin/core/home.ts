@@ -1,5 +1,5 @@
 // Where "home" and the config dir are, on macOS, Linux and Windows. THE SAME FILE lives in census-mod, context-vigil-mod
-// and agent-roster (plugins share no code); tests/census/test_home_copies.py fails if the copies differ.
+// and agent-roster (plugins share no code); a test_home_copies.py test fails if the copies differ.
 //
 // Rule: the config dir is CLAUDE_CONFIG_DIR, else <home>/.claude; <home> is HOME, else USERPROFILE, else
 // HOMEDRIVE+HOMEPATH. `~`, `~/x` and `~\x` expand with the same home.

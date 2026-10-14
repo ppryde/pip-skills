@@ -60,7 +60,7 @@ Every moment is in exactly one:
 
 | You | The agent | State | At the context threshold |
 |---|---|---|---|
-| engaged | anything | **attended** | nudge only: the bar in the terminal, or a dialog on Remote Control (the phone); never clears |
+| engaged | anything | **attended** | nudge only: with the bar On, the bar in the terminal or a dialog on Remote Control (the phone); with it Off, a terminal toast and log line only; never clears |
 | idle >= idle window | working | **auto armed** | with auto mode On (it defaults to Off), hands over, clears and resumes by itself; the normal guards still apply |
 | idle | idle | **last-light territory** | no clear; before the cache goes cold, write the handover only |
 

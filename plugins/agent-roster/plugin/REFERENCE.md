@@ -99,7 +99,8 @@ A session in its own tmux session is ended with `tmux kill-session`, so no
 orphaned shell pane is left. The socket is found by matching the session's pid
 against each server's pane pids (the default server first, then any server
 under `/tmp/tmux-<uid>/`), never by name alone. Otherwise the session gets
-SIGTERM (`kill <pid>`; on Windows `taskkill /PID <pid> /F`), which can leave a shell pane behind: when it shares a tmux session
+SIGTERM (`kill <pid>`) on macOS and Linux, or is force-terminated on Windows
+(`taskkill /PID <pid> /F`), which can leave a shell pane behind: when it shares a tmux session
 with the one the command or pane runs in (by pane or by name), when no tmux
 server shows its pid, or when it runs outside tmux. The session the command or
 pane runs in is always refused.
@@ -220,7 +221,7 @@ A session that Claude Code did not register is therefore not listed on Windows.
 
 ## Limits and development
 
-- It cannot switch you into another session or tmux pane; it reads the registry and acts only on open and kill.
+- It cannot switch you into another session or tmux pane; it reads the registry, and of sessions it acts only on open and kill (`/roster setup` and `/roster setup-vscode` change only its own settings and helper).
 - `open` needs tmux and macOS: it uses `open` and `osascript`, so on Linux it can only report that it could not open the session.
 - The registry and transcript formats are Claude Code internals, not a
   published API; a release can move them.
