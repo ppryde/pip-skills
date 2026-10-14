@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import { DEFAULT_SEGMENTS, draw, plain } from '../plugin/core/render'
 import {
-  NO_DETECTION, PRESETS, SAMPLE, budgetFrom, isShowMe, styleFrom, styleSamples, placementFrom, Q, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
+  CLEAN_PRESETS, NO_DETECTION, PRESETS, SAMPLE, budgetFrom, isShowMe, styleFrom, styleSamples, placementFrom, Q, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
   backupBlocks, removeStatusLine, restoreStatusLine, scriptCandidates, statusLineCommand, writerActive, writersFrom,
 } from '../plugin/core/setup'
 
@@ -300,19 +300,29 @@ test('Show me re-asks with both samples in the text, each named, and only the tw
   expect(q.question).toContain(`Dave's Nice 'n' Clean:\n${clean}`)
 })
 
-test('the samples come from the real renderers, so they cannot drift', async () => {
+test('the samples come from the real renderers, both in the Full layout, so they cannot drift', async () => {
   const { pacman, clean } = styleSamples()
   expect(pacman).toBe(draw({ ...SAMPLE, env: { CENSUS_STATUSLINE_SEGMENTS: DEFAULT_SEGMENTS } }).map(plain).join('\n'))
-  expect(clean).toBe(draw({ ...SAMPLE, env: { CENSUS_STATUSLINE_SEGMENTS: 'clean' } }).map(plain).join('\n'))
+  expect(clean).toBe(draw({ ...SAMPLE, env: { CENSUS_STATUSLINE_SEGMENTS: CLEAN_PRESETS.two } }).map(plain).join('\n'))
   expect(pacman.split('\n')).toHaveLength(2)
   expect(pacman).toContain('ᗧ')
-  expect(clean).toBe('🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x')
+  expect(clean).toBe('🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x\n📁 pip-skills | 🌿 feat/x +2 ~3 | 🔀 #187 approved')
 })
 
-test('style: saved ids pick the segments; no saved style is Pac-Man, so existing installs are unchanged', async () => {
+test('style and layout are two independent ids: all six combinations pick their segments', async () => {
+  const seg = (style: 'pacman' | 'clean', preset: 'two' | 'compact' | 'minimal') => effective({ style, preset }, {}, NO_DETECTION, CFG).segments
+  expect(seg('pacman', 'two')).toBe(PRESETS.two)
+  expect(seg('pacman', 'compact')).toBe(PRESETS.compact)
+  expect(seg('pacman', 'minimal')).toBe(PRESETS.minimal)
+  expect(seg('clean', 'two')).toBe('clean/cleanwhere')
+  expect(seg('clean', 'compact')).toBe('clean')
+  expect(seg('clean', 'minimal')).toBe('cleanmin')
+  expect(effective({ style: 'clean' }, {}, NO_DETECTION, CFG).segments).toBe('clean/cleanwhere') // no layout answered yet: Full
+})
+
+test('style: no saved style is Pac-Man, so existing installs are unchanged; the environment still wins', async () => {
   expect(effective({}, {}, NO_DETECTION, CFG).style).toBe('pacman')
+  expect(effective({}, {}, NO_DETECTION, CFG).segments).toBeUndefined()
   expect(effective({ preset: 'minimal' }, {}, NO_DETECTION, CFG).segments).toBe(PRESETS.minimal)
-  expect(effective({ style: 'pacman', preset: 'compact' }, {}, NO_DETECTION, CFG).segments).toBe(PRESETS.compact)
-  expect(effective({ style: 'clean', preset: 'compact' }, {}, NO_DETECTION, CFG)).toMatchObject({ style: 'clean', segments: 'clean' })
-  expect(effective({ style: 'clean' }, { CENSUS_STATUSLINE_SEGMENTS: 'model' }, NO_DETECTION, CFG).segments).toBe('model') // the environment still wins
+  expect(effective({ style: 'clean', preset: 'compact' }, { CENSUS_STATUSLINE_SEGMENTS: 'model' }, NO_DETECTION, CFG).segments).toBe('model')
 })

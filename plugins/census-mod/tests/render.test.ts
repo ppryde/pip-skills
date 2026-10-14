@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { TONE_COLOR, draw, fmtTokens, paceMultiplier, displayWidth, fit, fmtReset, layout, levelTone, levelToneInv, lineWidth, pacBar, plain, roundHalfEven } from '../plugin/core/render'
+import { DEFAULT_SEGMENTS, TONE_COLOR, draw, fmtTokens, paceMultiplier, displayWidth, fit, fmtReset, layout, levelTone, levelToneInv, lineWidth, pacBar, plain, roundHalfEven } from '../plugin/core/render'
 import type { RenderInput } from '../plugin/core/render'
 
 // The goldens below are census's own render.py output (NO_COLOR) for the same inputs.
@@ -198,4 +198,43 @@ test('a segment with no data is omitted with its separator; an account with no w
 
 test('Clean has no Pac-Man bars', async () => {
   expect(text(CLEAN)).not.toMatch(/[ᗧ•$]{3}/)
+})
+
+// ---- Clean's three layouts × the two styles: the six combinations --------------------------------------------
+
+const PRESETS_FOR_TEST = { compact: 'context,cache,limits,cost,model,git', minimal: 'context,limits/git' }
+const GIT_PR: RenderInput = {
+  ...CLEAN,
+  cwd: '/Users/u/repos/pip-skills',
+  git: { branch: 'feat/x', uncommitted: 3, ahead: 2, hasUpstream: true },
+  pr: { number: 187, url: 'https://example.test/pull/187', reviewState: 'approved' },
+}
+const spec = (segments: string, i: RenderInput = GIT_PR) => text({ ...i, env: { CENSUS_STATUSLINE_SEGMENTS: segments } })
+
+test('Clean Full: the one-liner, then directory | git | PR on a second line', async () => {
+  expect(spec('clean/cleanwhere')).toBe(
+    ['🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x', '📁 pip-skills | 🌿 feat/x +2 ~3 | 🔀 #187 approved'].join('\n'),
+  )
+})
+
+test('Clean Compact is the one-liner alone', async () => {
+  expect(spec('clean')).toBe('🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x')
+})
+
+test('Clean Minimal: context, 5h, 7d, with no multipliers, no model and no cost', async () => {
+  expect(spec('cleanmin')).toBe('🧠 42% | 🕔 5h 38% | 🗓️ 7d 12%')
+  expect(spec('cleanmin', { ...GIT_PR, limits: {} })).toBe('🧠 42%')
+})
+
+test('Clean\'s second line omits what is absent, separator included', async () => {
+  expect(spec('cleanwhere', { ...GIT_PR, pr: null })).toBe('📁 pip-skills | 🌿 feat/x +2 ~3')
+  expect(spec('cleanwhere', { ...GIT_PR, git: null, pr: null })).toBe('📁 pip-skills')
+  expect(spec('cleanwhere', { ...GIT_PR, git: { branch: 'main', uncommitted: 0, ahead: 0, hasUpstream: false } })).toBe('📁 pip-skills | 🌿 main | 🔀 #187 approved')
+  expect(spec('cleanwhere', { ...GIT_PR, git: { branch: 'main', uncommitted: 0, ahead: 2, hasUpstream: false }, pr: null })).toBe('📁 pip-skills | 🌿 main') // no upstream: ahead means nothing
+})
+
+test('the Pac-Man side of the six: Full, Compact and Minimal are unchanged by Clean existing', async () => {
+  expect(spec(PRESETS_FOR_TEST.minimal, FULL)).toBe('🧠 ••••ᗧ••••• 42% │ ⏳ ••••••••ᗧ• 78% ⟳ 2h10m │ 📅 ••ᗧ••••••• 24% ⟳ 3d4h\n🌿 feat/x')
+  expect(spec(PRESETS_FOR_TEST.compact, FULL).split('\n')).toHaveLength(1)
+  expect(spec(DEFAULT_SEGMENTS, FULL).split('\n')).toHaveLength(2)
 })

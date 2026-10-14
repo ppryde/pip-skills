@@ -14,7 +14,7 @@ import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
 import type { Event } from '../core/payload'
 import { TITLE_ARGV, TITLE_TAIL_CMD, findProc, lastTitle } from '../core/registry'
 import { TONE_COLOR, draw, fit } from '../core/render'
-import { BACKUP_FILE, backupBlocks, budgetFrom, isShowMe, styleFrom, placementFrom, replaceFrom, L, NO_DETECTION, PRESETS, Q, SETUP_KEY, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
+import { BACKUP_FILE, backupBlocks, budgetFrom, CLEAN_PRESETS, isShowMe, styleFrom, placementFrom, replaceFrom, L, NO_DETECTION, PRESETS, Q, SETUP_KEY, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
 import type { Detection, Effective, Saved, Style } from '../core/setup'
 import type { Line, RenderEnv, RenderInput } from '../core/render'
 import type { Counters, RateLimit, Snap } from '../core/types'
@@ -842,7 +842,7 @@ async function askBudget($: EngineInterface, run: object): Promise<Answer | null
 }
 
 /**
- * The 🎨 style question, then Layout for Pac-Man only (Clean is one line). Show me asks again with both samples
+ * The 🎨 style question, then Layout (either style has all three). Show me asks again with both samples
  * (the ask call takes labels, not previews). Returns the style, or why it stopped.
  */
 async function askStyle($: EngineInterface, run: object): Promise<{ style: Style } | Answer> {
@@ -852,7 +852,6 @@ async function askStyle($: EngineInterface, run: object): Promise<{ style: Style
     if (isShowMe(a.a)) continue
     const style = styleFrom(a.a) ?? 'pacman'
     await saveAnswer($, { style })
-    if (style === 'clean') return { style }
     const l = await askOne($, run, Q.preset())
     if (typeof l !== 'object') return l
     await saveAnswer($, { preset: presetFrom(l.a) ?? 'two' })
@@ -977,7 +976,7 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   setupRun = null
   say($, '🧭 census-mod is set up', [
     `recording: ${eff.record === 'yes' ? 'into census (the real store)' : eff.record === 'shadow' ? `shadow store ${eff.shadowDir ?? ''} — the dashboards do not read it; run /census-setup and answer Yes to record into census itself` : 'off'}`,
-    `band: ${drawOn ? `on, ${eff.placement === 'below' ? 'below the input' : 'above the input'}, ${eff.style === 'clean' ? "Dave's Nice 'n' Clean (clean)" : PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
+    `band: ${drawOn ? `on, ${eff.placement === 'below' ? 'below the input' : 'above the input'}, ${eff.style === 'clean' ? `Dave's Nice 'n' Clean, ${CLEAN_PRESETS[preset ?? 'two']}` : PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
     ...(drawOn && eff.style === 'pacman' ? [`cost bar: fills at $${eff.budget}${rawEnv.CLAUDE_COST_BUDGET?.trim() ? ' (CLAUDE_COST_BUDGET overrides your answer)' : ''}`] : []),
     `PR segment: ${eff.pr ? 'on, with gh lookups' : 'gh is never called (run /census-mod:pr-refresh to ask it once); PRs this session creates, readies or merges still show'}`,
     ...(removed ? [`your status line was removed from settings.json; it is backed up in ${removed}`] : []),

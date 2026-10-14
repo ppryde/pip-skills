@@ -195,12 +195,41 @@ export function paceMultiplier(usedPct: number, resetsAt: number, windowSec: num
 
 const CLEAN_SEPARATOR: Run = { t: ' | ', tone: 'grey' }
 
-function cleanWindow(i: RenderInput, key: 'five_hour' | 'seven_day', emoji: string, label: string, windowSec: number): Run[] | null {
+function cleanWindow(i: RenderInput, key: 'five_hour' | 'seven_day', emoji: string, label: string, windowSec: number, withPace = true): Run[] | null {
   const w = i.limits[key]
   if (!w || w.resets_at <= i.now) return null // absent, or an expired window: a fossil
   const shown = roundHalfEven(w.used_percentage)
-  const pace = paceMultiplier(w.used_percentage, w.resets_at, windowSec, i.now)
+  const pace = withPace ? paceMultiplier(w.used_percentage, w.resets_at, windowSec, i.now) : null
   return [{ t: `${emoji} ${label} ` }, { t: `${shown}%`, tone: levelTone(shown) }, ...(pace === null ? [] : [{ t: ` ${pace.toFixed(1)}x` }])]
+}
+
+const cleanLine = (parts: Run[][]): Line[] => (parts.length ? [parts.flatMap((p, k) => (k === 0 ? p : [CLEAN_SEPARATOR, ...p]))] : [])
+
+/** Clean Minimal: `🧠 42% | 🕔 5h 38% | 🗓️ 7d 12%`, no model, cost or multipliers. */
+function segCleanMin(i: RenderInput): Line[] {
+  const parts: Run[][] = []
+  if (i.ctxPct !== null) {
+    const shown = roundHalfEven(i.ctxPct)
+    parts.push([{ t: '🧠 ' }, { t: `${shown}%`, tone: levelTone(shown) }])
+  }
+  for (const w of [cleanWindow(i, 'five_hour', '🕔', '5h', 5 * 3600, false), cleanWindow(i, 'seven_day', '🗓️', '7d', 7 * 86400, false)]) if (w) parts.push(w)
+  return cleanLine(parts)
+}
+
+/** Clean's second line: `📁 pip-skills | 🌿 feat/x +2 ~3 | 🔀 #187 approved`; what is absent goes, separator with it. */
+function segCleanWhere(i: RenderInput): Line[] {
+  const parts: Run[][] = [[{ t: `📁 ${i.cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? i.cwd}`, tone: 'magenta' }]]
+  if (i.git?.branch) {
+    const ahead = i.git.ahead > 0 && i.git.hasUpstream ? ` +${i.git.ahead}` : ''
+    const dirty = i.git.uncommitted > 0 ? ` ~${i.git.uncommitted}` : ''
+    parts.push([{ t: `🌿 ${i.git.branch}${ahead}${dirty}`, tone: 'green' }])
+  }
+  if (i.pr && i.pr.number > 0) {
+    const pr: Run[] = [i.pr.stale ? { t: `🔀 #${i.pr.number}`, tone: 'grey' } : { t: `🔀 #${i.pr.number}` }] // unconfirmed: dimmed
+    if (i.pr.reviewState) pr.push({ t: ` ${i.pr.reviewState}`, tone: i.pr.stale ? 'grey' : REVIEW_TONE[i.pr.reviewState] ?? 'grey' })
+    parts.push(pr)
+  }
+  return cleanLine(parts)
 }
 
 function segClean(i: RenderInput): Line[] {
@@ -213,11 +242,11 @@ function segClean(i: RenderInput): Line[] {
   }
   if (i.costUsd !== null) parts.push([{ t: `💵 $${i.costUsd.toFixed(2)}` }])
   for (const w of [cleanWindow(i, 'five_hour', '🕔', '5h', 5 * 3600), cleanWindow(i, 'seven_day', '🗓️', '7d', 7 * 86400)]) if (w) parts.push(w)
-  return [parts.flatMap((p, k) => (k === 0 ? p : [CLEAN_SEPARATOR, ...p]))]
+  return cleanLine(parts)
 }
 
 export const SEGMENTS: Record<string, (i: RenderInput) => Line[]> = {
-  context: segContext, cache: segCache, limits: segLimits, cost: segCost, model: segModel, clean: segClean, git: segGit, dir: segDir, changes: segChanges, pr: segPr,
+  context: segContext, cache: segCache, limits: segLimits, cost: segCost, model: segModel, clean: segClean, cleanmin: segCleanMin, cleanwhere: segCleanWhere, git: segGit, dir: segDir, changes: segChanges, pr: segPr,
 }
 
 /** The configured segments as lines of names; `/` starts a new line, unknown names are dropped. */

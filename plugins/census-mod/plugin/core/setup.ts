@@ -34,7 +34,8 @@ export const PRESETS: Record<Preset, string> = {
   compact: 'context,cache,limits,cost,model,git',
   minimal: 'context,limits/git',
 }
-export const CLEAN_SEGMENTS = 'clean'
+/** Dave's Nice 'n' Clean in the same three layouts: Full is the one-liner plus a where-am-I line. */
+export const CLEAN_PRESETS: Record<Preset, string> = { two: 'clean/cleanwhere', compact: 'clean', minimal: 'cleanmin' }
 
 // ---- what is on this machine ------------------------------------------------------------------
 
@@ -142,7 +143,7 @@ export function effective(saved: Saved, env: SetupEnv, det: Detection, configRoo
     draw: saved.draw ?? true,
     // An install that never answered stays where it was (above); the question recommends below for new ones.
     placement: ((p: string | undefined): Placement | null => (p === 'above' || p === 'below' ? p : null))(env.CENSUS_MOD_PLACEMENT?.trim().toLowerCase()) ?? saved.placement ?? 'above',
-    segments: envSegments || (saved.style === 'clean' ? CLEAN_SEGMENTS : saved.preset ? PRESETS[saved.preset] : undefined),
+    segments: envSegments || (saved.style === 'clean' ? CLEAN_PRESETS[saved.preset ?? 'two'] : saved.preset ? PRESETS[saved.preset] : undefined),
     pr: saved.pr ?? false,
     prHint: /^(1|true|on|yes)$/i.test(env.CENSUS_MOD_PR_HINT?.trim() ?? ''),
   }
@@ -313,6 +314,7 @@ export const isShowMe = (answer: string): boolean => is(answer, L.styleShow)
 
 // ---- the style samples: drawn by the real renderers from one fixed session, so they cannot drift -------------
 
+/** Both samples are the Full layout. */
 const SAMPLE_NOW = 1_791_000_000
 export const SAMPLE: RenderInput = {
   now: SAMPLE_NOW,
@@ -326,14 +328,14 @@ export const SAMPLE: RenderInput = {
   costUsd: 1.37,
   durationMs: 6_480_000,
   modelName: 'Opus 5.5',
-  git: { branch: 'main', uncommitted: 0, ahead: 0, hasUpstream: true },
-  pr: null,
-  cwd: '/work/project',
+  git: { branch: 'feat/x', uncommitted: 3, ahead: 2, hasUpstream: true },
+  pr: { number: 187, url: 'https://example.test/pull/187', reviewState: 'approved' },
+  cwd: '/work/pip-skills',
   env: {},
 }
 export function styleSamples(): { pacman: string; clean: string } {
   const text = (segments: string) => draw({ ...SAMPLE, env: { CENSUS_STATUSLINE_SEGMENTS: segments } }).map(plain).join('\n')
-  return { pacman: text(DEFAULT_SEGMENTS), clean: text(CLEAN_SEGMENTS) }
+  return { pacman: text(DEFAULT_SEGMENTS), clean: text(CLEAN_PRESETS.two) }
 }
 export type Writers = 'remove' | 'keep' | 'both'
 export function writersFrom(answer: string): Writers | null {

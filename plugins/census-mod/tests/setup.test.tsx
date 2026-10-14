@@ -804,20 +804,18 @@ test('CLAUDE_COST_BUDGET outranks the saved budget', async ($, on) => {
 
 const styleAnswer = (label: string) => (q: { header: string; options: string[] }) => (q.header === '🎨 Style' ? label : q.options[0] ?? null)
 
-test("Dave's Nice 'n' Clean skips Layout and Budget (one line, no bar) and is saved as an id", async ($, on) => {
+test("Dave's Nice 'n' Clean is followed by Layout too, skips Budget (no bar), and is saved as an id beside the layout id", async ($, on) => {
   const w = world(on)
-  w.answer.value = styleAnswer("Dave's Nice 'n' Clean")
+  w.answer.value = q => (q.header === '🎨 Style' ? "Dave's Nice 'n' Clean" : q.header === '📐 Layout' ? pick(w, 'Minimal')(q) : q.options[0] ?? null)
   await setupRun($, w)
 
-  expect(headers(w)).toEqual(['📝 Record', '🎛️ Draw', '🎨 Style', '🔀 PR'])
-  expect(saved(w)).toMatchObject({ style: 'clean' })
-  expect(saved(w).preset).toBeUndefined()
-  expect(w.logs.join('\n')).toContain('clean')
+  expect(headers(w)).toEqual(['📝 Record', '🎛️ Draw', '🎨 Style', '📐 Layout', '🔀 PR'])
+  expect(saved(w)).toMatchObject({ style: 'clean', preset: 'minimal' })
 })
 
-test("Clean draws one plain line", async ($, on) => {
+test("Clean Compact draws one plain line", async ($, on) => {
   const w = world(on)
-  w.store.set('census-mod:setup', { offered: true, style: 'clean' })
+  w.store.set('census-mod:setup', { offered: true, style: 'clean', preset: 'compact' })
   await $.session.start(START)
   await w.clock.advance(0)
   const ui = await $.ui.mount(BAND())
@@ -838,18 +836,19 @@ test('Show me re-asks with both samples, then the choice stands', async ($, on) 
   expect(styles).toHaveLength(2)
   expect(styles[1]?.question).toContain("Pip's Pac-Man flavour:\n")
   expect(styles[1]?.question).toContain("Dave's Nice 'n' Clean:\n🤖 ")
+  expect(styles[1]?.question).toContain('\n📁 pip-skills | ')
   expect(styles[1]?.options).toEqual(["Pip's Pac-Man flavour (Recommended)", "Dave's Nice 'n' Clean"])
   expect(saved(w).style).toBe('clean')
 })
 
-test('Pac-Man is followed by Layout', async ($, on) => {
+test('Pac-Man is followed by Layout and Budget', async ($, on) => {
   const w = world(on)
   await setupRun($, w)
-  expect(headers(w)).toContain('📐 Layout')
+  expect(headers(w)).toEqual(['📝 Record', '🎛️ Draw', '🎨 Style', '📐 Layout', '💸 Budget', '🔀 PR'])
   expect(saved(w).style).toBe('pacman')
 })
 
-test('/census-setup style asks the style, and Layout for Pac-Man', async ($, on) => {
+test('/census-setup style asks the style and then the layout', async ($, on) => {
   const w = world(on)
   w.store.set('census-mod:setup', { offered: true, record: 'yes', draw: true })
   await setupRun($, w, 'style')
