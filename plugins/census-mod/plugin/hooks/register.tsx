@@ -14,8 +14,8 @@ import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
 import type { Event } from '../core/payload'
 import { TITLE_ARGV, TITLE_TAIL_CMD, findProc, lastTitle } from '../core/registry'
 import { TONE_COLOR, draw, fit } from '../core/render'
-import { BACKUP_FILE, backupBlocks, budgetFrom, placementFrom, replaceFrom, L, NO_DETECTION, PRESETS, Q, SETUP_KEY, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
-import type { Detection, Effective, Saved } from '../core/setup'
+import { BACKUP_FILE, backupBlocks, budgetFrom, isShowMe, styleFrom, placementFrom, replaceFrom, L, NO_DETECTION, PRESETS, Q, SETUP_KEY, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
+import type { Detection, Effective, Saved, Style } from '../core/setup'
 import type { Line, RenderEnv, RenderInput } from '../core/render'
 import type { Counters, RateLimit, Snap } from '../core/types'
 
@@ -841,19 +841,43 @@ async function askBudget($: EngineInterface, run: object): Promise<Answer | null
   }
 }
 
-/** `/census-setup budget`: only the budget question, and only where a bar is drawn. */
-async function setupBudget($: EngineInterface, run: object) {
+/**
+ * The 🎨 style question, then Layout for Pac-Man only (Clean is one line). Show me asks again with both samples
+ * (the ask call takes labels, not previews). Returns the style, or why it stopped.
+ */
+async function askStyle($: EngineInterface, run: object): Promise<{ style: Style } | Answer> {
+  for (let showMe = false; ; showMe = true) {
+    const a = await askOne($, run, Q.style(showMe))
+    if (typeof a !== 'object') return a
+    if (isShowMe(a.a)) continue
+    const style = styleFrom(a.a) ?? 'pacman'
+    await saveAnswer($, { style })
+    if (style === 'clean') return { style }
+    const l = await askOne($, run, Q.preset())
+    if (typeof l !== 'object') return l
+    await saveAnswer($, { preset: presetFrom(l.a) ?? 'two' })
+    return { style }
+  }
+}
+
+/** `/census-setup style` or `budget`: only that question, and only where the line is drawn. */
+async function setupOne($: EngineInterface, run: object, only: 'style' | 'budget') {
   await loadSetup($)
   if (!eff.draw) {
-    say($, '🧭 census-setup: draw is off, so there is no cost bar to size. Run /census-setup to turn the status line on')
+    say($, `🧭 census-setup: draw is off, so there is no ${only === 'budget' ? 'cost bar' : 'band'} to ${only === 'budget' ? 'size' : 'style'}. Run /census-setup to turn the status line on`)
     if (setupRun === run) setupRun = null
     return
   }
-  const stopped = await askBudget($, run)
-  if (stopped === 'superseded') return
+  if (only === 'budget' && eff.style === 'clean') {
+    say($, '🧭 census-setup: the Clean style has no cost bar, so there is no budget to set. Run /census-setup style to change the style')
+    if (setupRun === run) setupRun = null
+    return
+  }
+  const got = only === 'style' ? await askStyle($, run) : await askBudget($, run)
+  if (got === 'superseded') return
   if (setupRun === run) setupRun = null
-  if (stopped === 'dismissed') say($, '🧭 census-setup stopped; what you answered is saved')
-  else say($, `🧭 census-mod: the cost bar fills at $${eff.budget}${rawEnv.CLAUDE_COST_BUDGET?.trim() ? ' (CLAUDE_COST_BUDGET overrides this)' : ''}`)
+  if (got === 'dismissed') say($, '🧭 census-setup stopped; what you answered is saved')
+  else say($, only === 'style' ? `🧭 census-mod: style is ${eff.style === 'clean' ? "Dave's Nice 'n' Clean" : "Pip's Pac-Man flavour"}` : `🧭 census-mod: the cost bar fills at $${eff.budget}${rawEnv.CLAUDE_COST_BUDGET?.trim() ? ' (CLAUDE_COST_BUDGET overrides this)' : ''}`)
 }
 
 async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
@@ -938,12 +962,13 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   }
   let preset = saved.preset
   if (drawOn) {
-    const a = await askOne($, run, Q.preset())
-    if (typeof a !== 'object') return stop(a)
-    preset = presetFrom(a.a) ?? 'two'
-    await saveAnswer($, { preset })
-    const stopped = await askBudget($, run)
-    if (stopped) return stop(stopped)
+    const st = await askStyle($, run)
+    if (typeof st !== 'object' || !('style' in st)) return stop(st)
+    preset = saved.preset
+    if (st.style === 'pacman') {
+      const stopped = await askBudget($, run) // only the Pac-Man bars have a cost bar
+      if (stopped) return stop(stopped)
+    }
   }
   const pr = await askOne($, run, Q.pr())
   if (typeof pr !== 'object') return stop(pr)
@@ -952,8 +977,8 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   setupRun = null
   say($, '🧭 census-mod is set up', [
     `recording: ${eff.record === 'yes' ? 'into census (the real store)' : eff.record === 'shadow' ? `shadow store ${eff.shadowDir ?? ''} — the dashboards do not read it; run /census-setup and answer Yes to record into census itself` : 'off'}`,
-    `band: ${drawOn ? `on, ${eff.placement === 'below' ? 'below the input' : 'above the input'}, ${PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
-    ...(drawOn ? [`cost bar: fills at $${eff.budget}${rawEnv.CLAUDE_COST_BUDGET?.trim() ? ' (CLAUDE_COST_BUDGET overrides your answer)' : ''}`] : []),
+    `band: ${drawOn ? `on, ${eff.placement === 'below' ? 'below the input' : 'above the input'}, ${eff.style === 'clean' ? "Dave's Nice 'n' Clean (clean)" : PRESETS[preset ?? 'two']}` : 'off'}${rawEnv.CENSUS_STATUSLINE_SEGMENTS?.trim() ? ' (CENSUS_STATUSLINE_SEGMENTS overrides the layout)' : ''}`,
+    ...(drawOn && eff.style === 'pacman' ? [`cost bar: fills at $${eff.budget}${rawEnv.CLAUDE_COST_BUDGET?.trim() ? ' (CLAUDE_COST_BUDGET overrides your answer)' : ''}`] : []),
     `PR segment: ${eff.pr ? 'on, with gh lookups' : 'gh is never called (run /census-mod:pr-refresh to ask it once); PRs this session creates, readies or merges still show'}`,
     ...(removed ? [`your status line was removed from settings.json; it is backed up in ${removed}`] : []),
     ...(keptForShadow ? ['your status line was kept: CENSUS_MOD_STORE makes census-mod record to a shadow store, so the status line is still the real store\'s writer. Unset it and run /census-setup again to replace it'] : []),
@@ -961,11 +986,11 @@ async function setup($: EngineInterface, run: object, mode: 'full' | 'offer') {
   ])
 }
 
-function startSetup($: EngineInterface, mode: 'full' | 'offer' | 'budget') {
+function startSetup($: EngineInterface, mode: 'full' | 'offer' | 'budget' | 'style') {
   const run = {}
   setupRun = run
   // After the command has replied: the dialogs follow it rather than holding it open.
-  $.clock.after(0, () => void (mode === 'budget' ? setupBudget($, run) : setup($, run, mode)).catch(() => { if (setupRun === run) setupRun = null }))
+  $.clock.after(0, () => void (mode === 'budget' || mode === 'style' ? setupOne($, run, mode) : setup($, run, mode)).catch(() => { if (setupRun === run) setupRun = null }))
 }
 
 /** The first session after install: say so once, ever. An answer or a dismissal both count. */
@@ -1034,7 +1059,7 @@ export const register: Register = on => {
     interactive = e.isInteractive
     if (!interactive) return r
     await quietly(async () => {
-      await $.command.register({ name: 'census-setup', description: 'Guided census-mod setup: record, draw, layout, cost budget, gh. `budget` asks only the cost budget; `off` stops it.', argumentHint: '[off|budget]' }).catch(() => undefined)
+      await $.command.register({ name: 'census-setup', description: 'Guided census-mod setup: record, draw, style, layout, cost budget, gh. `style` or `budget` asks only that question; `off` stops it.', argumentHint: '[off|style|budget]' }).catch(() => undefined)
       await $.command.register({ name: 'pr-refresh', description: "Ask gh once for this branch's open PR (number, review state) and record it." }).catch(() => undefined)
       rawEnv = await loadEnv($)
       env = { ...rawEnv }
@@ -1206,9 +1231,9 @@ export const register: Register = on => {
       await quietly(async () => { if (Object.keys(rawEnv).length === 0) { rawEnv = await loadEnv($); env = { ...rawEnv } } await loadSetup($); await turnOff($) })
       return { text: 'census-mod is off. /census-setup to turn it on again.' }
     }
-    if (args !== '' && args !== 'budget') return { text: 'Usage: /census-setup (guided setup), /census-setup budget (the cost bar only) or /census-setup off' }
+    if (args !== '' && args !== 'budget' && args !== 'style') return { text: 'Usage: /census-setup (guided setup), /census-setup style or budget (one question) or /census-setup off' }
     if (Object.keys(rawEnv).length === 0) { rawEnv = await loadEnv($); env = { ...rawEnv } }
-    startSetup($, args === 'budget' ? 'budget' : 'full')
+    startSetup($, args === 'budget' ? 'budget' : args === 'style' ? 'style' : 'full')
     return { text: '🧭 census-setup: a few questions follow.' }
   })
 

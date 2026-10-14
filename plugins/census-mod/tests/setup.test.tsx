@@ -5,6 +5,7 @@ import { START, classicStart, turn, USAGE, BAND, bandLines, world } from './worl
 import type { World } from './world'
 
 const SEC = 1000
+const STYLE_Q = 'Which style should the status line have? Pick Show me to see both.'
 const BUDGET_Q = "What should a main session's cost bar fill up to? (The 💸 bar on the status line. CLAUDE_COST_BUDGET still overrides this.)"
 const SETTINGS = '/cfg/settings.json'
 const SCRIPT = '/home/u/.claude/line.sh'
@@ -34,8 +35,8 @@ test('/census-setup is a registered command that asks, in order: record, draw (a
   const r = await setupRun($, w)
 
   expect(r.text).toContain('questions follow')
-  expect(headers(w)).toEqual(['📝 Record', '🎛️ Draw', '📐 Layout', '💸 Budget', '🔀 PR'])
-  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below', preset: 'two', budget: 10, pr: false, offered: true }) // the stub answers the first option
+  expect(headers(w)).toEqual(['📝 Record', '🎛️ Draw', '🎨 Style', '📐 Layout', '💸 Budget', '🔀 PR'])
+  expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below', style: 'pacman', preset: 'two', budget: 10, pr: false, offered: true }) // the stub answers the first option
   expect(w.toasts.at(-1)).toBe('🧭 census-mod is set up')
   expect(w.logs.join('\n')).toContain('undo any time: /census-setup off')
 })
@@ -47,7 +48,8 @@ test('the exact questions', async ($, on) => {
   expect(w.asks).toEqual([
     { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards and liveness use it) (Recommended)', "No — don't record (dashboards won't see this account)"] },
     { header: '🎛️ Draw', question: 'Should census-mod draw your status line, and where?', options: ["Yes — below the input, under Claude Code's hint line (Recommended)", 'Yes — above the input, in the band', 'No — record only, draw nothing'] },
-    { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Full — two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git', 'Clean — one plain line'] },
+    { header: '🎨 Style', question: STYLE_Q, options: ["Pip's Pac-Man flavour (Recommended)", "Dave's Nice 'n' Clean", 'Show me'] },
+    { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Full — two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git'] },
     { header: '💸 Budget', question: BUDGET_Q, options: ['$10', '$20 (Recommended)', '$50', '$100'] },
     { header: '🔀 PR', question: "Look up the branch's open PR (number, review state) using gh? No means gh is never called; PRs this session creates, readies or merges still show, and /census-mod:pr-refresh asks gh once on demand.", options: ["No — no gh lookups (PRs this session makes still show) (Recommended)", 'Yes — look up with gh'] },
   ])
@@ -358,7 +360,7 @@ test('off with nothing to restore just stops', async ($, on) => {
 
 test('an unknown argument says how to use it', async ($, on) => {
   const w = world(on)
-  expect((await setupRun($, w, 'nope')).text).toBe('Usage: /census-setup (guided setup), /census-setup budget (the cost bar only) or /census-setup off')
+  expect((await setupRun($, w, 'nope')).text).toBe('Usage: /census-setup (guided setup), /census-setup style or budget (one question) or /census-setup off')
   expect(w.asks).toHaveLength(0)
 })
 
@@ -415,7 +417,7 @@ test('the first session after install is offered setup, once', async ($, on) => 
     question: 'census-mod is installed. Set it up now? It takes a few questions: whether to record sessions into census, whether and where to draw the status line, and which layout.',
     options: ['Set it up now (Recommended)', 'Not now — use the defaults'],
   })
-  expect(headers(w)).toEqual(['🧭 Setup', '📝 Record', '🎛️ Draw', '📐 Layout', '💸 Budget', '🔀 PR'])
+  expect(headers(w)).toEqual(['🧭 Setup', '📝 Record', '🎛️ Draw', '🎨 Style', '📐 Layout', '💸 Budget', '🔀 PR'])
   expect(saved(w).offered).toBe(true)
 })
 
@@ -796,4 +798,83 @@ test('the saved budget sizes the 💸 bar ($0.90 of $1 is 90%)', async ($, on) =
 
 test('CLAUDE_COST_BUDGET outranks the saved budget', async ($, on) => {
   expect(await costBar($, barWorld(on, { CLAUDE_COST_BUDGET: '1000' }, 1))).toBe('💸 ᗧ$$$$$$$$$')
+})
+
+// ---- the 🎨 style question ---------------------------------------------------------------------------------
+
+const styleAnswer = (label: string) => (q: { header: string; options: string[] }) => (q.header === '🎨 Style' ? label : q.options[0] ?? null)
+
+test("Dave's Nice 'n' Clean skips Layout and Budget (one line, no bar) and is saved as an id", async ($, on) => {
+  const w = world(on)
+  w.answer.value = styleAnswer("Dave's Nice 'n' Clean")
+  await setupRun($, w)
+
+  expect(headers(w)).toEqual(['📝 Record', '🎛️ Draw', '🎨 Style', '🔀 PR'])
+  expect(saved(w)).toMatchObject({ style: 'clean' })
+  expect(saved(w).preset).toBeUndefined()
+  expect(w.logs.join('\n')).toContain('clean')
+})
+
+test("Clean draws one plain line", async ($, on) => {
+  const w = world(on)
+  w.store.set('census-mod:setup', { offered: true, style: 'clean' })
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const ui = await $.ui.mount(BAND())
+  const lines = await bandLines(ui)
+  await ui.unmount()
+
+  expect(lines).toHaveLength(1)
+  expect(lines[0]).toMatch(/^🤖 .* \| 🧠 .*% \| 💵 \$0\.90/)
+})
+
+test('Show me re-asks with both samples, then the choice stands', async ($, on) => {
+  const w = world(on)
+  const replies = ['Show me', "Dave's Nice 'n' Clean"]
+  w.answer.value = q => (q.header === '🎨 Style' ? replies.shift() ?? null : q.options[0] ?? null)
+  await setupRun($, w)
+
+  const styles = w.asks.filter(a => a.header === '🎨 Style')
+  expect(styles).toHaveLength(2)
+  expect(styles[1]?.question).toContain("Pip's Pac-Man flavour:\n")
+  expect(styles[1]?.question).toContain("Dave's Nice 'n' Clean:\n🤖 ")
+  expect(styles[1]?.options).toEqual(["Pip's Pac-Man flavour (Recommended)", "Dave's Nice 'n' Clean"])
+  expect(saved(w).style).toBe('clean')
+})
+
+test('Pac-Man is followed by Layout', async ($, on) => {
+  const w = world(on)
+  await setupRun($, w)
+  expect(headers(w)).toContain('📐 Layout')
+  expect(saved(w).style).toBe('pacman')
+})
+
+test('/census-setup style asks the style, and Layout for Pac-Man', async ($, on) => {
+  const w = world(on)
+  w.store.set('census-mod:setup', { offered: true, record: 'yes', draw: true })
+  await setupRun($, w, 'style')
+
+  expect(headers(w)).toEqual(['🎨 Style', '📐 Layout'])
+  expect(saved(w)).toMatchObject({ style: 'pacman', preset: 'two' })
+})
+
+test('/census-setup style with drawing off says there is no band to style', async ($, on) => {
+  const w = world(on)
+  w.store.set('census-mod:setup', { offered: true, draw: false })
+  await setupRun($, w, 'style')
+
+  expect(w.asks).toEqual([])
+  expect(w.logs.join('\n')).toContain('draw is off')
+})
+
+test('saved settings from before the style existed still draw the Pac-Man band', async ($, on) => {
+  const w = world(on)
+  w.store.set('census-mod:setup', { offered: true, preset: 'minimal' })
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const ui = await $.ui.mount(BAND())
+  const lines = await bandLines(ui)
+  await ui.unmount()
+
+  expect(lines).toEqual(['🧠 •ᗧ•••••••• 9%', '🌿 main'])
 })

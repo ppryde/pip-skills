@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
+import { DEFAULT_SEGMENTS, draw, plain } from '../plugin/core/render'
 import {
-  NO_DETECTION, PRESETS, budgetFrom, placementFrom, Q, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
+  NO_DETECTION, PRESETS, SAMPLE, budgetFrom, isShowMe, styleFrom, styleSamples, placementFrom, Q, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
   backupBlocks, removeStatusLine, restoreStatusLine, scriptCandidates, statusLineCommand, writerActive, writersFrom,
 } from '../plugin/core/setup'
 
@@ -10,7 +11,7 @@ const CFG = '/home/u/.claude'
 // ---- defaults and precedence -------------------------------------------------------------------
 
 test('before any answer: record to the real store only when the status line has no census ingest block; draw yes; gh NO (opt-in), hint confirmation off', async () => {
-  expect(effective({}, {}, NO_DETECTION, CFG)).toEqual({ budget: 20, record: 'yes', shadowDir: null, draw: true, placement: 'above', segments: undefined, pr: false, prHint: false })
+  expect(effective({}, {}, NO_DETECTION, CFG)).toEqual({ style: 'pacman', budget: 20, record: 'yes', shadowDir: null, draw: true, placement: 'above', segments: undefined, pr: false, prHint: false })
   expect(effective({}, {}, WITH_BLOCK, CFG)).toMatchObject({ record: 'no', draw: true, pr: false })
 })
 
@@ -117,7 +118,7 @@ test('another writer alone brings Shadow (recommended) but not Replace', async (
 test('answers map back to values, recommendation marker or not', async () => {
   for (const o of Q.record(NO_DETECTION).options) expect(recordFrom(o)).not.toBeNull()
   expect(Q.record(NO_DETECTION).options.map(recordFrom)).toEqual(['yes', 'no'])
-  expect(Q.preset().options.map(presetFrom)).toEqual(['two', 'compact', 'minimal', 'clean'])
+  expect(Q.preset().options.map(presetFrom)).toEqual(['two', 'compact', 'minimal'])
   expect(Q.writers(true, false).options.map(writersFrom)).toEqual(['remove', 'keep', 'both'])
   expect(Q.writers(false, false).options.map(writersFrom)).toEqual(['keep', 'both']) // no band to replace it: no removal on offer
   expect(recordFrom('something else')).toBeNull()
@@ -281,9 +282,37 @@ test('the budget: the environment, then the saved answer, then $20', async () =>
   expect(effective({}, { CLAUDE_COST_BUDGET: '' }, NO_DETECTION, CFG).budget).toBe(20)
 })
 
-test('the Clean layout preset: its label, its id and its segment spec; Full stays the recommended default', async () => {
-  expect(Q.preset().options).toEqual(['Full — two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git', 'Clean — one plain line'])
-  expect(presetFrom('Clean — one plain line')).toBe('clean')
-  expect(PRESETS.clean).toBe('clean')
-  expect(effective({ preset: 'clean' }, {}, NO_DETECTION, CFG).segments).toBe('clean')
+test('the style question: Pip\'s Pac-Man flavour is recommended, then Dave\'s Nice \'n\' Clean, then Show me', async () => {
+  const q = Q.style()
+  expect(q.header).toBe('🎨 Style')
+  expect(q.options).toEqual(["Pip's Pac-Man flavour (Recommended)", "Dave's Nice 'n' Clean", 'Show me'])
+  expect(styleFrom(q.options[0] ?? '')).toBe('pacman')
+  expect(styleFrom(q.options[1] ?? '')).toBe('clean')
+  expect(styleFrom('Show me')).toBeNull()
+  expect(isShowMe('Show me')).toBe(true)
+})
+
+test('Show me re-asks with both samples in the text, each named, and only the two styles to pick', async () => {
+  const q = Q.style(true)
+  const { pacman, clean } = styleSamples()
+  expect(q.options).toEqual(["Pip's Pac-Man flavour (Recommended)", "Dave's Nice 'n' Clean"])
+  expect(q.question).toContain(`Pip's Pac-Man flavour:\n${pacman}`)
+  expect(q.question).toContain(`Dave's Nice 'n' Clean:\n${clean}`)
+})
+
+test('the samples come from the real renderers, so they cannot drift', async () => {
+  const { pacman, clean } = styleSamples()
+  expect(pacman).toBe(draw({ ...SAMPLE, env: { CENSUS_STATUSLINE_SEGMENTS: DEFAULT_SEGMENTS } }).map(plain).join('\n'))
+  expect(clean).toBe(draw({ ...SAMPLE, env: { CENSUS_STATUSLINE_SEGMENTS: 'clean' } }).map(plain).join('\n'))
+  expect(pacman.split('\n')).toHaveLength(2)
+  expect(pacman).toContain('ᗧ')
+  expect(clean).toBe('🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x')
+})
+
+test('style: saved ids pick the segments; no saved style is Pac-Man, so existing installs are unchanged', async () => {
+  expect(effective({}, {}, NO_DETECTION, CFG).style).toBe('pacman')
+  expect(effective({ preset: 'minimal' }, {}, NO_DETECTION, CFG).segments).toBe(PRESETS.minimal)
+  expect(effective({ style: 'pacman', preset: 'compact' }, {}, NO_DETECTION, CFG).segments).toBe(PRESETS.compact)
+  expect(effective({ style: 'clean', preset: 'compact' }, {}, NO_DETECTION, CFG)).toMatchObject({ style: 'clean', segments: 'clean' })
+  expect(effective({ style: 'clean' }, { CENSUS_STATUSLINE_SEGMENTS: 'model' }, NO_DETECTION, CFG).segments).toBe('model') // the environment still wins
 })
