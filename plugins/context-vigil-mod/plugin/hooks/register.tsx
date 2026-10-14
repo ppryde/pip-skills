@@ -19,6 +19,7 @@ import { clearGate, needsRcHint } from '../core/surfaces'
 import { applyAnswers, extractAnswers, isStep, nextCard, questionFor } from '../core/setup'
 import { RESUME_DELAY_MS, earlyStopDue, formatHHMM, latchCleared, latchFromMeasure, latchFromStopFailure, nextHop } from '../core/limits'
 import { classicHooksInstalled } from '../core/interlock'
+import { messagesAfterHandover, renderTail } from '../core/tail'
 import { V } from '../core/voice'
 import type { WaitReason } from '../core/voice'
 
@@ -943,6 +944,25 @@ async function hasShell($: EngineInterface): Promise<boolean> {
   return shellRuns
 }
 
+// The messages the old session saw after its last handover call: null = could not tell (no file, no call
+// within the last 2 MB, no shell and an unreadable file).
+const TAIL_CHUNKS = [256 * 1024, 1024 * 1024, 2 * 1024 * 1024]
+async function transcriptTail($: EngineInterface, path: string): Promise<string[] | null> {
+  try {
+    if (!(await hasShell($))) {
+      const text = await $.fs.read(path).catch(() => undefined)
+      return typeof text === 'string' ? messagesAfterHandover(text, TOOL_FULL) : null
+    }
+    for (const n of TAIL_CHUNKS) {
+      const r = await $.process.run(['sh', '-c', 'tail -c "$2" "$1"', 'sh', path, String(n)])
+      if (r.exitCode !== 0 || r.isStdoutTruncated) return null
+      const found = messagesAfterHandover(r.stdout, TOOL_FULL)
+      if (found || r.stdout.length < n) return found
+    }
+  } catch { /* unknown */ }
+  return null
+}
+
 // The transcript's last custom title: null = unnamed, undefined = could not tell.
 async function transcriptTitle($: EngineInterface, transcriptPath: string): Promise<string | null | undefined> {
   try {
@@ -1359,9 +1379,14 @@ export const register: Register = on => {
     let noResume = false
     let sentCarried = false   // the resume message holds the prompts sent during the handover
     const sentBlock = sentSection(pending.sent)
+    // What happened after the handover was written rides with it; up to the cap it keeps the handover fresh.
+    const msgs = oldTranscript === undefined ? null : await transcriptTail($, oldTranscript)
+    const tail = msgs === null ? null : renderTail(msgs)
+    const tailLog = tail === null ? 'unreadable' : tail.total === 0 ? 'none' : tail.over ? 'over' : tail.total
+    const tailFresh = tail === null || tail.total === 0 ? null : !tail.over
     if (follow) { sentCarried = sentBlock !== ''; resumeSoon($, { text: sentBlock ? `${follow}\n\n${sentBlock}` : follow, asUser: true }, pending.path, follow) }
     else if (pending.resume) {
-      if (!fresh(pending, apiBefore, await nowMs($))) {
+      if (!(tailFresh ?? fresh(pending, apiBefore, await nowMs($)))) {
         stale = true
         await notify($, V.resumeStale(pending.path))
       } else if (await readLatch($)) {
@@ -1374,8 +1399,8 @@ export const register: Register = on => {
       await notify($, V.injectedNoResume(pending.path))
       noResume = true
     }
-    await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null, ...(stale ? { stale: true } : {}), ...(noResume ? { noResume: true } : {}) })
-    return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown) + (sentBlock && !sentCarried ? `\n\n${sentBlock}` : '')] }
+    await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null, tail: tailLog, ...(stale ? { stale: true } : {}), ...(noResume ? { noResume: true } : {}) })
+    return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown) + (tail?.section ? `\n\n${tail.section}` : '') + (sentBlock && !sentCarried ? `\n\n${sentBlock}` : '')] }
   })
 
   on('classic.StopFailure', async ($, e, next) => {

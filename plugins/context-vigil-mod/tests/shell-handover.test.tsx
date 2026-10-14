@@ -1413,3 +1413,70 @@ test('a manual /clear of a handover with a later turn is still stale, even after
   expect(w.submits.some(s => s.text.includes('Resume from the handover'))).toBe(false)
   expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(true)
 })
+
+// A handover's old transcript: the handover call, then `after` lines.
+const tjson = (type: string, content: unknown) => JSON.stringify({ type, message: { role: type, content } })
+const transcript = (after: string[]) => [tjson('assistant', [{ type: 'tool_use', id: 'h1', name: TOOL, input: {} }]), ...after].join('\n') + '\n'
+const msgs = (n: number) => Array.from({ length: n }, (_, i) => tjson('user', `later ${i}`))
+
+async function handedOver($: Engine, w: World, tr: string | null) {
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  if (tr !== null) w.files.set('/t/s1.jsonl', tr)
+  await w.clock.advance(2 * MIN)
+  await $.turn.complete(turn('later'))   // last API turn is past createdAt + 60 s
+  w.sessionId.value = 's2'
+  w.submits.length = 0
+  w.notices.length = 0
+  return $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+}
+
+test('a tail of 3 messages: the section is injected and the resume is sent though a later turn ran', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  const ss = await handedOver($, w, transcript([tjson('user', 'hello'), tjson('assistant', [{ type: 'text', text: 'on it' }]), tjson('assistant', [{ type: 'tool_use', id: 'b', name: 'Bash', input: { command: 'ls' } }])]))
+  await w.clock.advance(500)
+  const inj = ss.additionalContext?.join('\n') ?? ''
+  expect(inj).toContain('## Since this handover was written')
+  expect(inj).toContain('User: hello\nAssistant: on it\n→ Bash: ls')
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+  expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(false)
+  expect([...w.files.values()].join('')).toContain('"tail":3')
+})
+
+test('a tail of 25 messages: stale notice, no resume, the newest 20 injected', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  const ss = await handedOver($, w, transcript(msgs(25)))
+  await w.clock.advance(500)
+  const inj = ss.additionalContext?.join('\n') ?? ''
+  expect(inj).toContain('User: later 24')
+  expect(inj).toContain('User: later 5')
+  expect(inj).not.toContain('User: later 4\n')
+  expect(inj).toContain('earlier messages left out')
+  expect(w.submits.some(s => s.text.includes('Resume from the handover'))).toBe(false)
+  expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(true)
+  expect([...w.files.values()].join('')).toContain('"tail":"over"')
+})
+
+test('an unreadable transcript falls back to the freshness rule, logged as unreadable', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  const ss = await handedOver($, w, null)
+  await w.clock.advance(500)
+  expect(ss.additionalContext?.join('\n')).not.toContain('## Since this handover was written')
+  expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(true)
+  expect([...w.files.values()].join('')).toContain('"tail":"unreadable"')
+})
+
+test('nothing after the handover: no section, today\'s rule (stale after a later turn)', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  const ss = await handedOver($, w, transcript([]))
+  expect(ss.additionalContext?.join('\n')).not.toContain('## Since this handover was written')
+  expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(true)
+  expect([...w.files.values()].join('')).toContain('"tail":"none"')
+})
