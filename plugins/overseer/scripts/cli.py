@@ -664,26 +664,22 @@ def _brief_gate_problems(args: argparse.Namespace) -> "tuple[list[str], bool]":
     return problems, True
 
 
-def cmd_bootstrap(args: argparse.Namespace) -> int:
-    """new-card + base-branch detection + worktree + branch + set-field +
-    set-stage planning, in one orchestrator turn instead of seven.
-
-    ``--brief`` is the S-card shortcut (policy.md "right-sizing the
-    ceremony"): it writes the given text as ``## Plan`` directly and lands
-    the card at `implementation`, skipping the planner dispatch, plan-review
-    loop and PLAN GATE conversation entirely — one call instead of the
-    set-field/set-section-with-a-temp-file dance."""
+def _bootstrap_begin(args: argparse.Namespace) -> tuple[Card, str | None] | int:
+    """The git-free first half of ``bootstrap``: argument checks, the brief gate
+    dry run, the card (created or loaded) and its move to stage ``bootstrap``.
+    Returns the card and the --force-gate reason, or an exit code when it refused (nothing was created)."""
     if not args.card and not args.title:
         print("error: bootstrap needs --title (new card) or --card (existing)", file=sys.stderr)
         return 1
-    if args.brief_file and args.brief is not None:
+    brief_file = getattr(args, "brief_file", None)
+    if brief_file and args.brief is not None:
         print("error: pass --brief or --brief-file, not both", file=sys.stderr)
         return 1
     force = _force_reason(args)  # a bad --force-gate also fails before anything is created
     # Read the brief up front: a bad path or stdin must fail BEFORE the card
     # and worktree are created.
-    if args.brief_file:
-        args.brief = Path(args.brief_file).read_text().rstrip("\n")
+    if brief_file:
+        args.brief = Path(brief_file).read_text().rstrip("\n")
     elif args.brief == "-":
         args.brief = sys.stdin.read().rstrip("\n")
     if args.brief and force is None:
@@ -695,27 +691,35 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     except sqlite3.IntegrityError:
         print("error: card already exists", file=sys.stderr)
         return 1
-    main_root = derive_repo_root(args.root) or args.root
-    branch = f"{args.type}/{card.id}-{args.slug or slugify(card.title)}"
-    path = worktree_path(main_root, card.id, config.load_config(args.root))
-    base = gitops.base_ref(main_root)
-    # Three short steps: record "bootstrap" (a transaction), run git (OUTSIDE
-    # any transaction), record the outcome (a second transaction).
     _edit(args.root, card.id, lambda c: c.set_stage("bootstrap", _now()), ack=True)
-    try:
-        gitops.worktree_add(main_root, path, branch, base)
-    except gitops.GitError as exc:
-        _stamp_orchestrator(args.root, card.id)
-        print(f"error: {card.id} left at bootstrap — {exc}", file=sys.stderr)
-        return 1
+    return card, force
 
+
+def _bootstrap_branch(args: argparse.Namespace, card: Card) -> str:
+    return f"{args.type}/{card.id}-{args.slug or slugify(card.title)}"
+
+
+def _bootstrap_record(
+    args: argparse.Namespace, card_id: str, branch: str, path: Path | str, brief: str | None,
+    force: str | None, *, check: bool = False,
+) -> Card:
+    """The second transaction of ``bootstrap``: branch, worktree, the S-card
+    plan and the move out of ``bootstrap``. ``check`` (bootstrap-finish, which
+    a remote caller drives) first refuses unless the card is still at
+    ``bootstrap`` with no different branch/worktree recorded."""
     notes: list[str] = []
 
     def record(c: Card) -> None:
+        if check and (c.stage != "bootstrap" or c.branch not in (None, branch)
+                      or c.worktree not in (None, str(path))):
+            where = (f"; branch/worktree already set to {c.branch} / {c.worktree}"
+                     if c.branch or c.worktree else "")
+            raise db.EditAbort(f"{c.id} is at {c.stage}; bootstrap-finish only completes a "
+                               f"card at bootstrap{where}")
         c.branch = branch
         c.worktree = str(path)
-        if args.brief:
-            c.set_section("## Plan", args.brief, _now())
+        if brief:
+            c.set_section("## Plan", brief, _now())
             # The S shortcut's evidence goes in BEFORE the move, in the same
             # transaction, so the plan-review gate knows the review was skipped
             # by design (and a refused move rolls the evidence back too).
@@ -725,10 +729,73 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
         else:
             _gated_move(args.root, c, "planning", force, notes)
 
-    card = _edit(args.root, card.id, record)
+    card = _edit(args.root, card_id, record)
     _flush_notes(notes)
+    return card
+
+
+def cmd_bootstrap(args: argparse.Namespace) -> int:
+    """new-card + base-branch detection + worktree + branch + set-field +
+    set-stage planning, in one orchestrator turn instead of seven.
+
+    ``--brief`` is the S-card shortcut (policy.md "right-sizing the
+    ceremony"): it writes the given text as ``## Plan`` directly and lands
+    the card at `implementation`, skipping the planner dispatch, plan-review
+    loop and PLAN GATE conversation entirely — one call instead of the
+    set-field/set-section-with-a-temp-file dance."""
+    begun = _bootstrap_begin(args)
+    if isinstance(begun, int):
+        return begun
+    card, force = begun
+    main_root = derive_repo_root(args.root) or args.root
+    branch = _bootstrap_branch(args, card)
+    path = worktree_path(main_root, card.id, config.load_config(args.root))
+    base = gitops.base_ref(main_root)
+    # Three short steps: record "bootstrap" (a transaction, in _bootstrap_begin),
+    # run git (OUTSIDE any transaction), record the outcome (a second transaction).
+    try:
+        gitops.worktree_add(main_root, path, branch, base)
+    except gitops.GitError as exc:
+        _stamp_orchestrator(args.root, card.id)
+        print(f"error: {card.id} left at bootstrap — {exc}", file=sys.stderr)
+        return 1
+    card = _bootstrap_record(args, card.id, branch, path, args.brief, force)
     _stamp_orchestrator(args.root, card.id)
     print(f"{card.id} {card.stage} · {branch} · {path} (base {base})")
+    return 0
+
+
+def cmd_bootstrap_begin(args: argparse.Namespace) -> int:
+    """Git-free first half of ``bootstrap`` for a ``--remote`` client, which
+    runs the git half itself. Prints ``{"v":1,"id","branch"}``."""
+    begun = _bootstrap_begin(args)
+    if isinstance(begun, int):
+        return begun
+    card = begun[0]
+    _stamp_orchestrator(args.root, card.id)
+    print(json.dumps({"v": 1, "id": card.id, "branch": _bootstrap_branch(args, card)}))
+    return 0
+
+
+def cmd_bootstrap_finish(args: argparse.Namespace) -> int:
+    """Git-free second half of ``bootstrap``: records the client's branch and
+    worktree and moves the card out of ``bootstrap``. Refuses (writing
+    nothing) unless the card is still at ``bootstrap``; an equal rerun is fine."""
+    force = _force_reason(args)
+    brief = sys.stdin.read().rstrip("\n") if args.brief == "-" else args.brief
+    if brief and force is None:  # the same S-only gate bootstrap-begin runs
+        args.card, args.title, args.complexity, args.brief = args.card_id, None, None, brief
+        refused, offer_override = _brief_gate_problems(args)
+        if refused:
+            raise gates.GateRefused(refused, offer_override=offer_override)
+    try:
+        card = _bootstrap_record(args, args.card_id, args.branch, args.worktree, brief, force,
+                                 check=True)
+    except db.EditAbort as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    _stamp_orchestrator(args.root, card.id)
+    print(f"{card.id} {card.stage} · {args.branch} · {args.worktree} (base {args.base or '?'})")
     return 0
 
 
@@ -1606,17 +1673,13 @@ def cmd_log_review(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_dispatch_prep(args: argparse.Namespace) -> int:
-    """``--advance`` folds a set-stage into the same call (same validation:
-    ``Card.set_stage`` raises on an unknown stage, though ``--stage``'s own
-    ``choices=STAGES`` already rules that out here) so each stage playbook
-    entry is one Bash call instead of set-stage-then-dispatch-prep. Prints
-    only the bundle path either way.
+_DISPATCH_REFUSED = -1
 
-    ``--panel`` (reviewer role, a review stage) preps every slot of the round's
-    panel (``nextstep.panel``: slots, lenses, model tiers) in one call and prints
-    one ``<agent> <model> <path>`` line per slot instead of the bare path."""
-    force = _force_reason(args)
+
+def _dispatch_validate(args: argparse.Namespace) -> int | None:
+    """The side-effect-free pre-checks of ``dispatch-prep`` / ``dispatch-record``
+    (one function so the local and the remote path cannot drift). Returns the
+    effective chunk, or ``-1`` after printing why the call is refused."""
     chunk = args.chunk
     if chunk is None and args.role == "implementer":
         chunk = 1
@@ -1629,13 +1692,22 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
             else "--panel picks the slots and lenses: drop --lens" if args.lens else None)
         if refusal:
             print(f"error: {refusal}", file=sys.stderr)
-            return 1
+            return _DISPATCH_REFUSED
     try:  # bad --slot/--chunk/--role fails BEFORE a forced gate or dispatch row is written
         bundle.reply_name(args.role, round_no=args.round,
                           slot="A" if args.panel else args.slot, chunk=chunk)
     except bundle.BundleError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 1
+        return _DISPATCH_REFUSED
+    return chunk
+
+
+def _dispatch_board(
+    args: argparse.Namespace, chunk: int | None,
+) -> tuple[Card, list[nextstep.Slot], list[int]]:
+    """The board half of a dispatch: the optional ``--advance``, the dispatch
+    gates, the panel's slots and the ``dispatched`` evidence rows."""
+    force = _force_reason(args)
     notes: list[str] = []
     dispatched: list[int] = []
     slots: list[nextstep.Slot] = []
@@ -1662,6 +1734,49 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
 
     card = _edit(args.root, args.card_id, prep, ack=args.advance)
     _flush_notes(notes)
+    return card, slots, dispatched
+
+
+def cmd_dispatch_record(args: argparse.Namespace) -> int:
+    """Board half of ``dispatch-prep`` for a ``--remote`` client, which renders the
+    bundle (and takes any diff) in its own container. Prints one JSON record."""
+    chunk = _dispatch_validate(args)
+    if chunk == _DISPATCH_REFUSED:
+        return 1
+    card, slots, _ = _dispatch_board(args, chunk)
+    cfg = config.load_config(args.root)
+    today = _today()
+    record = {
+        "v": 1,
+        "card": {"id": card.id, "title": card.title, "complexity": card.complexity,
+                 "goal": card.sections.get("## Goal"), "plan": card.sections.get("## Plan", ""),
+                 "worktree": card.worktree},
+        "slots": [{"slot": s.slot, "lens": s.lens, "model": s.model} for s in slots],
+        "chunk": chunk,
+        "knowledge": bundle._knowledge(args.root, card, today, _knowledge_max(cfg)),
+        "calibration": (bundle._calibration(db.load_archived_cards(_conn(args.root)))
+                        if args.role == "planner" else ""),
+        "verbosity": str(cfg.get("verbosity", "terse")),
+    }
+    _stamp_orchestrator(args.root, card.id)
+    print(json.dumps(record))
+    return 0
+
+
+def cmd_dispatch_prep(args: argparse.Namespace) -> int:
+    """``--advance`` folds a set-stage into the same call (same validation:
+    ``Card.set_stage`` raises on an unknown stage, though ``--stage``'s own
+    ``choices=STAGES`` already rules that out here) so each stage playbook
+    entry is one Bash call instead of set-stage-then-dispatch-prep. Prints
+    only the bundle path either way.
+
+    ``--panel`` (reviewer role, a review stage) preps every slot of the round's
+    panel (``nextstep.panel``: slots, lenses, model tiers) in one call and prints
+    one ``<agent> <model> <path>`` line per slot instead of the bare path."""
+    chunk = _dispatch_validate(args)
+    if chunk == _DISPATCH_REFUSED:
+        return 1
+    card, slots, dispatched = _dispatch_board(args, chunk)
     cfg = config.load_config(args.root)
     lines: list[str] = []
     try:
@@ -1769,7 +1884,7 @@ def cmd_rebuild_index(args: argparse.Namespace) -> int:
 def cmd_resume(args: argparse.Namespace) -> int:
     _, quarantined = db.load_live_cards(_conn(args.root))
     _report_quarantined(quarantined)
-    entries = resume_entries(args.root, session_id=args.session_id)
+    entries = resume_entries(args.root, session_id=args.session_id, remote_client=args.remote_client)
     if args.json:
         print(json.dumps(entries, indent=2))
     else:
@@ -1837,7 +1952,7 @@ def cmd_vigil(args: argparse.Namespace) -> int:
 def cmd_handover(args: argparse.Namespace) -> int:
     """``handover`` = ``handoff | vigil handover --no-snapshot --content-file -``
     without a shell pipe, so the guard sees one ledger-CLI call."""
-    data = handoff_data(args.root)
+    data = handoff_data(args.root, remote_client=args.remote_client)
     for path in data["quarantined"]:
         print(f"QUARANTINED: {path}", file=sys.stderr)
     if _vigil_cli() is None:
@@ -1851,7 +1966,7 @@ def cmd_handover(args: argparse.Namespace) -> int:
 
 
 def cmd_handoff(args: argparse.Namespace) -> int:
-    data = handoff_data(args.root)
+    data = handoff_data(args.root, remote_client=args.remote_client)
     for path in data["quarantined"]:
         print(f"QUARANTINED: {path}", file=sys.stderr)
     if args.json:
@@ -2334,6 +2449,13 @@ def cmd_label_color_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _remote_client_flag(p: argparse.ArgumentParser) -> None:
+    """Set by `_run_remote` on the verbs that look at git state: the host cannot
+    see the container's worktrees and branches, so it reports them unchecked."""
+    p.add_argument("--remote-client", dest="remote_client", action="store_true",
+                   help=argparse.SUPPRESS)
+
+
 def build_parser() -> argparse.ArgumentParser:
     # allow_abbrev=False: reject abbreviated optionals (e.g. `--roo`, `--rem`).
     # The remote /api/exec strippers match `--root`/`--remote` exactly, so an
@@ -2401,6 +2523,32 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force-gate", dest="force_gate", metavar="REASON",
                    help="override a refused stage gate (see set-stage)")
     p.set_defaults(func=cmd_bootstrap)
+
+    # The two git-free halves of `bootstrap` a --remote client drives (WF-300);
+    # no --*file option, the client inlines the brief as `--brief -` on stdin.
+    p = sub.add_parser("bootstrap-begin")
+    p.add_argument("--card")
+    p.add_argument("--title")
+    ref = p.add_mutually_exclusive_group()
+    ref.add_argument("--jira")
+    ref.add_argument("--linear")
+    p.add_argument("--complexity", choices=["S", "M", "L", "XL"])
+    p.add_argument("--labels")
+    p.add_argument("--goal")
+    p.add_argument("--type", default="feat")
+    p.add_argument("--slug")
+    p.add_argument("--brief")
+    p.add_argument("--force-gate", dest="force_gate", metavar="REASON")
+    p.set_defaults(func=cmd_bootstrap_begin)
+
+    p = sub.add_parser("bootstrap-finish")
+    p.add_argument("card_id")
+    p.add_argument("--branch", required=True)
+    p.add_argument("--worktree", required=True)
+    p.add_argument("--brief")
+    p.add_argument("--force-gate", dest="force_gate", metavar="REASON")
+    p.add_argument("--base")
+    p.set_defaults(func=cmd_bootstrap_finish)
 
     p = sub.add_parser("set-stage")
     p.add_argument("card_id")
@@ -2546,6 +2694,21 @@ def build_parser() -> argparse.ArgumentParser:
                    help="override a refused stage or round-cap gate (see set-stage)")
     p.set_defaults(func=cmd_dispatch_prep)
 
+    # Board half of dispatch-prep for a --remote client (WF-300); no --var: the
+    # client parses and applies those itself when it renders.
+    p = sub.add_parser("dispatch-record")
+    p.add_argument("card_id")
+    p.add_argument("--stage", required=True, choices=STAGES)
+    p.add_argument("--role", required=True, choices=ROLES)
+    p.add_argument("--round", type=int, default=1)
+    p.add_argument("--slot")
+    p.add_argument("--chunk", type=int)
+    p.add_argument("--lens")
+    p.add_argument("--advance", action="store_true")
+    p.add_argument("--panel", action="store_true")
+    p.add_argument("--force-gate", dest="force_gate", metavar="REASON")
+    p.set_defaults(func=cmd_dispatch_record)
+
     p = sub.add_parser("next", help="one line: stage, what to dispatch next, the verdict state")
     p.add_argument("card_id")
     p.set_defaults(func=cmd_next)
@@ -2569,6 +2732,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("resume")
     p.add_argument("--json", action="store_true")
+    _remote_client_flag(p)
     p.set_defaults(func=cmd_resume)
 
     p = sub.add_parser("conflicts")
@@ -2580,6 +2744,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("handoff")
     p.add_argument("--json", action="store_true")
+    _remote_client_flag(p)
     p.set_defaults(func=cmd_handoff)
 
     p = sub.add_parser("vigil", help="passthrough to the vigil plugin's CLI")
@@ -2590,6 +2755,7 @@ def build_parser() -> argparse.ArgumentParser:
         "handover", help="hand the ledger rollup to vigil (handoff | vigil handover), no pipe"
     )
     p.add_argument("--notes", help="extra prose for the handover")
+    _remote_client_flag(p)
     p.set_defaults(func=cmd_handover)
 
     p = sub.add_parser("board")
@@ -2797,6 +2963,28 @@ def _inline_file_option(argv: list[str]) -> tuple[list[str], str | None]:
     return out, content
 
 
+def _run_remote_git(url: str, raw_argv: list[str], root: Path, verb: str,
+                    repo: str | None, token: str | None) -> int:
+    """``bootstrap`` / ``dispatch-prep`` under --remote: git runs here, in the
+    container; the host only gets the git-free board verbs (scripts/remote_git.py)."""
+    from scripts import remote, remote_git
+    args = build_parser().parse_args(_forwardable_argv(raw_argv))
+    local = derive_repo_label(args.root)
+    if repo is not None and local not in (None, repo):
+        print(f"warning: OVERSEER_REMOTE_REPO is '{repo}' but this checkout is '{local}'",
+              file=sys.stderr)
+
+    def call(argv: list[str], stdin: str | None) -> remote.RemoteResult:
+        return remote.exec_remote(url, token, argv, stdin, repo=repo)
+
+    flow = remote_git.bootstrap if verb == "bootstrap" else remote_git.dispatch_prep
+    try:
+        return flow(call, args, args.root)
+    except remote.RemoteError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+
 def _run_remote(url: str, raw_argv: list[str], root: Path, verb: str | None = None) -> int:
     """Forward the whole command to the host server and relay the result."""
     from scripts import remote  # lazy: httpx only needed on the remote path
@@ -2808,7 +2996,11 @@ def _run_remote(url: str, raw_argv: list[str], root: Path, verb: str | None = No
               file=sys.stderr)
         return 1
     token = os.environ.get("OVERSEER_REMOTE_TOKEN") or read_remote_token(root)
+    if verb in ("bootstrap", "dispatch-prep"):
+        return _run_remote_git(url, raw_argv, root, verb, repo, token)
     forward = _forwardable_argv(raw_argv)
+    if verb in ("resume", "handoff", "handover"):
+        forward = [*forward, "--remote-client"]  # the host cannot see this container's git
     inlined: str | None = None
     if verb in ("set-section", "append-body"):
         try:

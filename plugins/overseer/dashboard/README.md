@@ -211,7 +211,7 @@ The token plus a label is a master key to every live board on the machine. The
 label is a routing hint chosen by the container, which controls its own `.git`;
 it is not an identity. Every other guard applies unchanged to labelled calls:
 the LAN guard, the token, the denied verbs (`bootstrap` and `dispatch-prep`
-included), argv sanitising, the hardened git environment, the secret strip and
+included: the client runs their git, see below), argv sanitising, the hardened git environment, the secret strip and
 read-only archives. Known limits: a repo with boards in two live accounts
 resolves to the first-listed one (cure: `overseer merge-boards` or move the
 backup into `archive_dirs`); exec never translates paths, so the machine
@@ -231,7 +231,7 @@ residual below.
 | Tailscale reachable | refused (the guard is LAN-only, see below) |
 | archived board copies reachable | `archive_dirs` (and `backup`/`archive` path segments) are never exec targets; the dashboard shows them as `[archived]`, read-only |
 | a repo with boards in two live accounts | the first-listed account's board wins; `overseer merge-boards` on the host is the cure |
-| `bootstrap`, `dispatch-prep` over `--remote` | refused (403, follow-up WF-300); run them on the host, or do `new-card`, a local `git worktree add`, `set-field ID --worktree <path> --branch <branch>`, `set-stage`. A host-side `dispatch-prep` cannot see a container worktree path |
+| `bootstrap`, `dispatch-prep` over `--remote` | still 403 on the host, but the `--remote` client now runs their git in the container (0.31.0) and calls the git-free `bootstrap-begin`, `bootstrap-finish` and `dispatch-record` instead; worktrees, diffs and bundles live in the container, so set `worktree_dir` inside the mounted repo and keep a card's rounds in one container. Needs 0.31.0 on both sides |
 | a value starting `--file`, `--text-file`, `--brief-file` (e.g. `--filename`) | refused with 403 by design |
 
 **Archive dirs.** A config dir is archived if it is listed in `archive_dirs`
@@ -262,7 +262,7 @@ without `OVERSEER_DASHBOARD_ALLOW_REMOTE_DESTRUCTIVE=1`, and exec denies
 | What | Allowed or refused | Notes |
 |---|---|---|
 | Exec verbs | Denylist (`_DENIED_VERBS`); a parity test classifies every parser verb as allowed or denied, so a new verb fails the suite until it is classified | `--root`, `--remote`, `--dir`, `--central`, `--backup-dir` are stripped; abbreviations are off on every sub-parser |
-| Denied verbs | `init`, `backup`, `restore`, `clear`, `claude-dirs`, `merge-boards`, the `*-hook` verbs except `pretool-hook` (whose `cwd` is pinned to the served root), `bootstrap`, `dispatch-prep` | the two git-running verbs answer 403 naming the verb and WF-300 |
+| Denied verbs | `init`, `backup`, `restore`, `clear`, `claude-dirs`, `merge-boards`, the `*-hook` verbs except `pretool-hook` (whose `cwd` is pinned to the served root), `bootstrap`, `dispatch-prep` | the two git-running verbs answer 403 naming the verb and WF-300; their client-side halves (`bootstrap-begin`, `bootstrap-finish`, `dispatch-record`) run no git, and `bootstrap-finish` completes only a card still at `bootstrap` |
 | Host path options | `--file`, `--text-file`, `--brief-file` (prefix, and `=` forms): 403 | the client inlines `--file`/`--text-file` as stdin before sending |
 | Git | No git in container-writable trees except the hardened lookups (`rev-parse --git-common-dir`, `rev-parse --verify`: hooks and fsmonitor off, `GIT_CONFIG_*`/`GIT_SSH*` dropped, never touching index or worktree) | an AST scan pins which files may call git |
 | Child process | Board pinned to the one the host chose (`OVERSEER_CENTRAL`); env stripped of `OVERSEER_REMOTE*`, `OVERSEER_DASHBOARD_TOKEN` and anything named `*TOKEN*`/`*SECRET*`/`*KEY*`/`*PASSWORD*`, `AWS_`/`GH_`/`GITHUB_` (keeping `CENSUS_`/`CHRONICLE_`) | 1 MiB body cap, 4 concurrent children (busy 503), 30 s timeout, NUL in argv or stdin 400 |

@@ -75,8 +75,8 @@ cards (`depends <id> --on <other>`), never a `block`.
 
 ## On invocation
 1. Run `resume`. In-flight cards → offer resume/park/abandon per card; re-enter
-   at the recorded stage, never earlier. A worktree or branch flagged `MISSING`:
-   tell the user; recreate it only on their confirmation.
+   at the recorded stage. `MISSING` worktree/branch: tell the user, recreate
+   on their OK; `not checked (remote)`: `git worktree list`.
 2. Named-teammate spawning available → team mode; otherwise subagent mode.
 
 ## Stage playbook

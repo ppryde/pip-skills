@@ -28,9 +28,17 @@ def _branch_exists(repo_root: Path, branch: str | None) -> bool:
     return result.returncode == 0
 
 
-def _entry(repo_root: Path, card: Card, cards: list[Card]) -> dict:
-    worktree_exists = card.worktree is not None and (repo_root / card.worktree).is_dir()
-    branch_exists = _branch_exists(repo_root, card.branch)
+def _entry(repo_root: Path, card: Card, cards: list[Card], remote_client: bool = False) -> dict:
+    worktree_exists: bool | None
+    branch_exists: bool | None
+    if remote_client:
+        # The host cannot see the container's worktrees or branches: None, not False,
+        # so nothing reads "unchecked" as "missing".
+        worktree_exists = None if card.worktree else False
+        branch_exists = None if card.branch else False
+    else:
+        worktree_exists = card.worktree is not None and (repo_root / card.worktree).is_dir()
+        branch_exists = _branch_exists(repo_root, card.branch)
     round_no = (
         card.review_rounds(card.stage)
         if card.stage and card.stage.endswith("review")
@@ -58,7 +66,9 @@ def _entry(repo_root: Path, card: Card, cards: list[Card]) -> dict:
     }
 
 
-def resume_entries(repo_root: Path, session_id: str | None = None) -> list[dict]:
+def resume_entries(
+    repo_root: Path, session_id: str | None = None, remote_client: bool = False,
+) -> list[dict]:
     """In-flight/blocked cards. When ``session_id`` is given (the CLI's global
     ``--session-id``), cards claimed by that session sort first — a stable
     sort, so relative order within each group is unchanged (design spec §3).
@@ -70,7 +80,8 @@ def resume_entries(repo_root: Path, session_id: str | None = None) -> list[dict]
     cards, _ = db.load_live_cards(conn)
     pool = cards + db.load_archived_cards(conn)
     entries = [
-        _entry(repo_root, c, pool) for c in cards if c.status in ("in-flight", "blocked")
+        _entry(repo_root, c, pool, remote_client)
+        for c in cards if c.status in ("in-flight", "blocked")
     ]
     if session_id:
         entries.sort(key=lambda e: e["claimed_by"] != session_id)
@@ -86,10 +97,12 @@ def format_report(entries: list[dict], session_id: str | None = None) -> str:
         if e["round"]:
             stage = f"{stage}, round {e['round']}"
         worktree = e["worktree"] or "no worktree"
-        if e["worktree"] and not e["worktree_exists"]:
+        if e["worktree"] and e["worktree_exists"] is None:
+            worktree += " (not checked, remote)"
+        elif e["worktree"] and not e["worktree_exists"]:
             worktree += " (MISSING)"
         line = f"- {e['id']} — {e['title']}: {stage} | {worktree} | {e['budget']}"
-        if e["branch"] and not e["branch_exists"]:
+        if e["branch"] and e["branch_exists"] is False:
             line += " (branch MISSING)"
         if e["pr"]:
             line += f" | PR: {e['pr']}"
@@ -107,13 +120,13 @@ def format_report(entries: list[dict], session_id: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def handoff_data(repo_root: Path) -> dict:
+def handoff_data(repo_root: Path, remote_client: bool = False) -> dict:
     """Everything a fresh session needs, derived in one scan."""
     conn = db.connect(repo_root)
     cards, quarantined = db.load_live_cards(conn)
     archived = db.load_archived_cards(conn)
     pool = cards + archived
-    entries = [_entry(repo_root, c, pool) for c in cards
+    entries = [_entry(repo_root, c, pool, remote_client) for c in cards
                if c.status in ("in-flight", "blocked")]
     live_branches: dict[str, list[str]] = {}
     for c in cards:

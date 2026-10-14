@@ -32,12 +32,11 @@ up. Never search for it. `help <verb>` prints one verb's line; the orchestrate s
 ## On invocation — always check for in-flight work first
 Run `resume`.
 - Cards in flight → report them and offer per card: **resume / park / block /
-  abandon**. Never silently start fresh. `resume` lists in-flight and
-  blocked cards.
+  abandon**. Never silently start fresh.
 - Resuming a card: `show <id> --section Plan` (or `Decisions`); plain `show <id>`
   prints the title and section headings, `--json` everything. Re-enter at the
   recorded stage — never earlier, never assume later. A `(MISSING)` worktree is
-  recreated from the recorded branch before continuing.
+  recreated from its branch; `not checked (remote)`: check `git worktree list`.
 - No state root yet and the user wants tracked work: `init`.
 
 ## Starting a new piece of work

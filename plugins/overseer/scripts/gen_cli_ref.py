@@ -41,6 +41,7 @@ ELIDE = {
     "show": {"json"},
 }
 # Verbs that are hook backends, never typed by a model.
+CLIENT_HALVES = {"bootstrap-begin", "bootstrap-finish", "dispatch-record"}
 HOOK_BACKENDS = {
     "report-hook", "pretool-hook", "checklist-sync-hook", "claim-stop-hook",
     "claim-prompt-hook", "dashboard-refresh-hook", "claim-nudged",
@@ -70,7 +71,7 @@ def reference() -> str:
         "",
         "```",
     ]
-    lines += [sigs[v] for v in sigs if v not in HOOK_BACKENDS]
+    lines += [sigs[v] for v in sigs if v not in HOOK_BACKENDS | CLIENT_HALVES]
     lines += ["```", "", "## Hook backends (never typed by hand)", "", "```"]
     lines += [sigs[v] for v in sorted(HOOK_BACKENDS) if v in sigs]
     lines += ["```", ""]
