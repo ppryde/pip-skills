@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from scripts import db
+from scripts.gitenv import hardened_git_env
 from scripts.models import Card, format_tokens
 from scripts.relations import is_ready
 
@@ -20,6 +21,7 @@ def _branch_exists(repo_root: Path, branch: str | None) -> bool:
             ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
             cwd=repo_root,
             capture_output=True,
+            env=hardened_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return False

@@ -179,3 +179,37 @@ def test_allowed_and_denied_partition_the_verbs() -> None:
     assert allowed | denied == verbs
     assert not allowed & denied
     assert {"board", "show", "set-section", "append-body", "pretool-hook", "repos"} <= allowed
+
+
+# --- git classification (C6): every verb is git-free, a hardened lookup, or git-running ----------
+# GIT_RUNNING verbs run `git` against the repo (a checkout, a diff, a status): denied over exec.
+# GIT_LOOKUP verbs add a filter-free `rev-parse --verify`; every verb also does the filter-free
+# `rev-parse --git-common-dir` identity lookup. Both lookups run with scripts.gitenv.
+GIT_RUNNING = {"bootstrap", "dispatch-prep"}
+GIT_LOOKUP = {"resume", "handoff", "handover", "repos"}
+GIT_FREE = {
+    "new-card", "set-stage", "block", "unblock", "done", "abandon", "set-field", "append-body",
+    "reorder", "depends", "checklist", "park", "unpark", "pull-children", "claim", "unclaim",
+    "release", "claim-nudged", "log-progress", "log-review", "next", "new-sprint", "rollup-sprint",
+    "set-sprint-status", "rebuild-index", "conflicts", "vigil", "board", "show", "help", "boards",
+    "log-usage", "usage", "calibration", "add-fact", "verify-fact", "retire-fact", "facts",
+    "set-section", "accept-fact", "reject-fact", "label-color",
+    "pretool-hook",
+    # denied for other reasons, but they run no git of their own
+    "init", "backup", "restore", "clear", "claude-dirs", "merge-boards",
+    "checklist-sync-hook", "claim-stop-hook", "claim-prompt-hook", "report-hook",
+    "dashboard-refresh-hook",
+}
+
+
+def test_every_verb_is_classified_for_git_exactly_once() -> None:
+    verbs = _top_level_verbs()
+    assert GIT_RUNNING | GIT_LOOKUP | GIT_FREE == verbs, (
+        verbs - (GIT_RUNNING | GIT_LOOKUP | GIT_FREE), (GIT_RUNNING | GIT_LOOKUP | GIT_FREE) - verbs,
+    )
+    assert not GIT_RUNNING & GIT_LOOKUP and not GIT_RUNNING & GIT_FREE and not GIT_LOOKUP & GIT_FREE
+
+
+def test_every_git_running_verb_is_denied() -> None:
+    assert GIT_RUNNING <= board_service._DENIED_VERBS
+    assert not GIT_LOOKUP & board_service._DENIED_VERBS

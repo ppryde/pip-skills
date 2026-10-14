@@ -21,6 +21,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 from pydantic import BaseModel
+from scripts.gitenv import hardened_git_env
 
 # backend/app/board_service.py -> parents: [0]=app [1]=backend [2]=dashboard [3]=overseer
 _OVERSEER_CLI = Path(__file__).resolve().parents[3] / "scripts" / "cli.py"
@@ -37,7 +38,9 @@ _EXEC_SLOTS = threading.BoundedSemaphore(4)
 _ALWAYS_DROPPED = {"OVERSEER_REMOTE", "OVERSEER_REMOTE_TOKEN", "OVERSEER_DASHBOARD_TOKEN"}
 _SECRET_SUBSTRINGS = ("TOKEN", "SECRET", "KEY", "PASSWORD")
 _SECRET_PREFIXES = ("AWS_", "GH_", "GITHUB_")
-_NEEDED_PREFIXES = ("CENSUS_", "CHRONICLE_")
+# GIT_CONFIG_KEY_n would match "KEY"; stripping it but keeping COUNT and VALUE_n
+# would make every git call in the child fail ("missing config key").
+_NEEDED_PREFIXES = ("CENSUS_", "CHRONICLE_", "GIT_CONFIG_")
 
 
 def _child_env(central: Path) -> dict[str, str]:
@@ -53,7 +56,7 @@ def _child_env(central: Path) -> dict[str, str]:
             continue
         env[name] = value
     env["OVERSEER_CENTRAL"] = str(central)
-    return env
+    return hardened_git_env(env)
 
 
 class ExecRequest(BaseModel):
@@ -106,12 +109,18 @@ _STRIPPED_FLAGS = ("--root", "--remote", "--dir", "--central", "--backup-dir")
 # `--root` (cli._hook_root), so any of them escapes the pinned root, and
 # `report-hook` writes; `dashboard-refresh-hook` restarts the host dashboard.
 # `pretool-hook` is the one hook forwarded remotely: its `cwd` is overwritten.
+# `bootstrap` (fetch + `worktree add`, a checkout) and `dispatch-prep` (`status`
+# and `diff` in the card's worktree) run git in a tree the container can write:
+# hooks and filters planted there would run on the host. They move client-side
+# in the follow-up card; until then run them on the host.
+GIT_FOLLOWUP_CARD = "WF-300"
+_GIT_VERBS = {"bootstrap", "dispatch-prep"}
 _DENIED_VERBS = {
     "clear", "init", "backup", "restore",
     "claude-dirs", "merge-boards",
     "checklist-sync-hook", "claim-stop-hook", "claim-prompt-hook", "report-hook",
     "dashboard-refresh-hook",
-}
+} | _GIT_VERBS
 
 # Options that read a HOST file. Refused, not stripped: stripping would turn
 # `set-section --file F` into a call that silently waits on stdin. The client
@@ -168,6 +177,11 @@ def sanitise_argv(argv: list[str]) -> list[str]:
     if any(tok.startswith(_FILE_FLAGS) for tok in argv):
         raise HTTPException(status_code=403, detail="host path options are not permitted remotely")
     verb = _invoked_verb(argv)
+    if verb in _GIT_VERBS:
+        raise HTTPException(
+            status_code=403,
+            detail=f"verb '{verb}' runs git in the repo; run it locally (follow-up {GIT_FOLLOWUP_CARD})",
+        )
     if verb in _DENIED_VERBS:
         raise HTTPException(
             status_code=403,

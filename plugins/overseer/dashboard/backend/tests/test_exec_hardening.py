@@ -155,3 +155,108 @@ def test_denied_hook_verbs_leave_the_board_untouched(root: Path, client: TestCli
         assert _exec(client, [verb], stdin=payload).status_code == 403
     assert _exec(client, ["board", "--json"]).json()["stdout"] == before
     assert not (tmp_path / "other").exists()
+
+
+# --- WF-100 C6: verbs that run git in the repo are denied -----------------------------------
+
+GIT_VERBS = ("bootstrap", "dispatch-prep")
+
+
+@pytest.mark.parametrize("verb", GIT_VERBS)
+def test_git_running_verbs_are_403_naming_the_verb_and_the_followup(
+    client: TestClient, spy: _Spy, verb: str
+) -> None:
+    res = _exec(client, [verb, "--title", "t"])
+    assert res.status_code == 403
+    detail = res.json()["detail"]
+    assert f"verb '{verb}' runs git in the repo" in detail
+    assert board_service.GIT_FOLLOWUP_CARD == "WF-300" and "WF-300" in detail
+    assert spy.calls == []
+
+
+@pytest.mark.parametrize("argv", [
+    ["--session-id", "s", "bootstrap", "--title", "t"],
+    ["--session-id=s", "bootstrap", "--title", "t"],
+    ["--remote", "http://evil", "bootstrap", "--title", "t"],
+    ["--remote=http://evil", "bootstrap", "--title", "t"],
+    ["--root", "/elsewhere", "bootstrap", "--title", "t"],
+    ["--root=/elsewhere", "dispatch-prep", "WF-1", "--stage", "implementation", "--role", "reviewer"],
+    ["--", "bootstrap", "--title", "t"],
+    ["--session-id", "s", "--remote", "http://evil", "--root", "/x", "dispatch-prep", "WF-1"],
+])
+def test_denial_holds_however_the_verb_is_reached(client: TestClient, spy: _Spy, argv: list[str]) -> None:
+    assert _exec(client, argv).status_code == 403
+    assert spy.calls == []
+
+
+@pytest.mark.parametrize("argv", [
+    ["bootstra", "--title", "t"],            # a verb prefix is no verb
+    ["BOOTSTRAP", "--title", "t"],           # nor a different case
+    ["--session-i", "s", "bootstrap"],       # abbreviated global option: the child's parser refuses it
+    ["--rem", "http://evil", "bootstrap"],
+    ["--roo", "/x", "bootstrap"],
+    ["-h", "bootstrap"],
+])
+def test_a_token_that_is_not_the_denied_verb_never_runs_it(root: Path, client: TestClient, argv: list[str]) -> None:
+    # Through the real parser: whatever the route lets through must still not create a card
+    # (bootstrap would) or a worktree, and must not succeed as bootstrap.
+    before = _exec(client, ["board", "--json"]).json()["stdout"]
+    res = _exec(client, argv)
+    assert res.status_code in (200, 403)
+    if res.status_code == 200:
+        assert res.json()["returncode"] != 0 or "usage" in res.json()["stdout"]
+    assert _exec(client, ["board", "--json"]).json()["stdout"] == before
+    assert not list(root.glob("**/worktrees"))
+
+
+def test_the_exec_child_environment_is_hardened(client: TestClient, spy: _Spy) -> None:
+    _exec(client, ["board"])
+    env = spy.calls[0]["env"]
+    pairs = [(env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"]) for i in range(int(env["GIT_CONFIG_COUNT"]))]
+    assert ("core.fsmonitor", "false") in pairs and ("core.hooksPath", "/dev/null") in pairs
+    assert env["GIT_TERMINAL_PROMPT"] == "0" and env["GIT_CONFIG_NOSYSTEM"] == "1"
+
+
+def test_a_preexisting_git_config_count_is_kept_by_the_child_env(
+    client: TestClient, spy: _Spy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "user.name")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "keep")
+    _exec(client, ["board"])
+    env = spy.calls[0]["env"]
+    assert env["GIT_CONFIG_COUNT"] == "3"
+    # GIT_CONFIG_KEY_0 looks secret-shaped ("KEY") but must survive with its COUNT and VALUE
+    assert (env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]) == ("user.name", "keep")
+
+
+# --- the booby-trapped repo: nothing fires in what is still reachable -------------------------
+
+def _plant_traps(repo: Path, tmp_path: Path) -> Path:
+    fired = tmp_path / "FIRED"
+    trap = tmp_path / "trap.sh"
+    trap.write_text(f'#!/bin/sh\necho "$0 $*" >> "{fired}"\ncat > /dev/null 2>&1\nexit 0\n')
+    trap.chmod(0o755)
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    for name in ("pre-commit", "post-commit", "post-checkout", "reference-transaction",
+                 "post-index-change", "pre-push", "post-merge"):
+        (hooks / name).write_bytes(trap.read_bytes())
+        (hooks / name).chmod(0o755)
+    (repo / "a.txt").write_text("x\n")
+    (repo / ".gitattributes").write_text("* filter=boom\n*.txt diff=boom\n")
+    for key, value in (("core.fsmonitor", str(trap)), ("core.hooksPath", str(hooks)),
+                       ("filter.boom.clean", str(trap)), ("filter.boom.smudge", str(trap)),
+                       ("diff.boom.textconv", str(trap))):
+        subprocess.run(["git", "config", key, value], cwd=repo, check=True)
+    return fired
+
+
+def test_nothing_fires_when_exec_reaches_the_lookup_verbs_in_a_trapped_repo(root: Path, tmp_path: Path) -> None:
+    fired = _plant_traps(root, tmp_path)
+    client = TestClient(create_app(root, exec_token="t"))  # real child processes: no spy
+    assert _exec(client, ["new-card", "--title", "t"]).status_code == 200
+    for argv in (["resume"], ["handoff"], ["handover"], ["repos"], ["board"], ["show", "WF-001"],
+                 ["set-field", "WF-001", "--branch", "main", "--worktree", "wt"], ["resume", "--json"]):
+        assert _exec(client, argv).status_code == 200, argv
+    assert not fired.exists(), fired.read_text()
