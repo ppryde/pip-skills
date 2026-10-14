@@ -27,10 +27,21 @@ class RemoteError(Exception):
     """Transport-level failure (unreachable host, refused, malformed response)."""
 
 
+def _detail(resp: httpx.Response) -> str:
+    try:
+        detail = resp.json().get("detail")
+    except (ValueError, AttributeError):
+        return ""
+    return detail if isinstance(detail, str) else ""
+
+
 def exec_remote(url: str, token: str | None, argv: list[str], stdin: str | None,
-                *, transport: httpx.BaseTransport | None = None) -> RemoteResult:
+                *, repo: str | None = None,
+                transport: httpx.BaseTransport | None = None) -> RemoteResult:
     headers = {"X-Overseer-Token": token} if token else {}
-    payload = {"argv": argv, "stdin": stdin}
+    payload: dict[str, object] = {"argv": argv, "stdin": stdin}
+    if repo is not None:
+        payload["repo"] = repo
     endpoint = f"{url.rstrip('/')}/api/exec"
     try:
         with httpx.Client(transport=transport, timeout=_TIMEOUT) as client:
@@ -49,6 +60,12 @@ def exec_remote(url: str, token: str | None, argv: list[str], stdin: str | None,
             "overseer board API refused this request (403)"
             + (f": {detail}" if detail else " — the caller must be on the LAN")
         )
+    if resp.status_code in (400, 404, 409) and (detail := _detail(resp)):
+        hint = {
+            404: " - check OVERSEER_REMOTE_REPO",
+            409: " - set OVERSEER_REMOTE_REPO to a unique label or an alias",
+        }.get(resp.status_code, "")
+        raise RemoteError(f"overseer board API: {detail} ({resp.status_code}){hint}")
     if resp.status_code != 200:
         raise RemoteError(f"overseer board API error {resp.status_code}: {resp.text[:200]}")
     try:

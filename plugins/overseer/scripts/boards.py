@@ -23,7 +23,6 @@ Idempotent in effect: a second run finds nothing to absorb.
 """
 from __future__ import annotations
 
-import re
 import shutil
 import sqlite3
 import time
@@ -31,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts import config, db, knowledge, migrate, views
+from scripts.labels import valid_label
 from scripts.store import derive_repo_label, derive_repo_root, slugify
 
 # Per-board files beside board.db worth carrying across when the target has
@@ -149,14 +149,6 @@ def discover(dirs: list[Path] | None = None) -> list[dict[str, Any]]:
     results.sort(key=lambda r: r["label"])
     _discover_cache[key] = (now, results)
     return [dict(e, aliases=list(e["aliases"])) for e in results]
-
-
-LABEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
-
-
-def valid_label(name: object) -> bool:
-    """A repo label as exec accepts it: the charset, and not ``.`` or ``..``."""
-    return isinstance(name, str) and name not in (".", "..") and LABEL_RE.fullmatch(name) is not None
 
 
 def resolve_aliases(

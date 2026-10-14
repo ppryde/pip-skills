@@ -2800,7 +2800,13 @@ def _inline_file_option(argv: list[str]) -> tuple[list[str], str | None]:
 def _run_remote(url: str, raw_argv: list[str], root: Path, verb: str | None = None) -> int:
     """Forward the whole command to the host board API and relay the result."""
     from scripts import remote  # lazy: httpx only needed on the remote path
+    from scripts.labels import valid_label
     from scripts.remote_token import read_remote_token
+    repo = os.environ.get("OVERSEER_REMOTE_REPO")
+    if repo is not None and not valid_label(repo):
+        print("overseer: OVERSEER_REMOTE_REPO must be a repo label like 'pip-skills'",
+              file=sys.stderr)
+        return 1
     token = os.environ.get("OVERSEER_REMOTE_TOKEN") or read_remote_token(root)
     forward = _forwardable_argv(raw_argv)
     inlined: str | None = None
@@ -2814,7 +2820,7 @@ def _run_remote(url: str, raw_argv: list[str], root: Path, verb: str | None = No
     # A file option wins over piped stdin (the text is the file's).
     stdin = inlined if inlined is not None else (None if sys.stdin.isatty() else sys.stdin.read())
     try:
-        res = remote.exec_remote(url, token, forward, stdin)
+        res = remote.exec_remote(url, token, forward, stdin, **({} if repo is None else {"repo": repo}))
     except remote.RemoteError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

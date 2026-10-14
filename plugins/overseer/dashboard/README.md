@@ -172,6 +172,55 @@ container forward to the host board. Interactive verbs (`clear`) must pass
 `--yes`. `--file` / `--text-file` are read in the container and sent as
 `--text -` stdin.
 
+### Reaching another repo's board
+
+By default every container call lands on the board pinned when the server
+started. A container that works in a *different* repo names it by **label**:
+
+```bash
+export OVERSEER_REMOTE_REPO=pip-skills   # a repo label, never a path
+```
+
+Unset, nothing is sent and the pinned board is used. Set, the host resolves the
+label against every watched **live** board on the machine (all accounts;
+`overseer repos` lists them), runs the CLI with that repo as `--root` and that
+board as `OVERSEER_CENTRAL`, and the child cannot pick another. The label is
+validated on the client (`letters, digits . _ -`, up to 100): a malformed value
+is a hard error before any request, never silently dropped. `pretool-hook`
+forwards with the same label.
+
+| Answer | Meaning | Remedy |
+|---|---|---|
+| 400 | not a label (empty, a path, odd characters) | fix `OVERSEER_REMOTE_REPO` |
+| 404 | no live board has that label; the message lists the valid ones. There is **no fallback** to the pinned board, and an archived repo is a 404 too | pick a listed label; a repo with no `board.db` yet is not listed (`init` is denied remotely, run it on the host) |
+| 409 | two live boards share the label (the message names both roots), or the server itself is pinned by `OVERSEER_CENTRAL`/`OVERSEER_DB` | add an alias in the host's machine config, `"aliases": {"wayflyer-old": "~/repos/old/wayflyer"}`, and set `OVERSEER_REMOTE_REPO=wayflyer-old`; for the env pin, start the server without those variables |
+| 503 | the overseer plugin lies inside the *target* repo (the same check as for the pinned repo, run against the resolved root) | run the dashboard from an installed plugin outside every mounted repo |
+
+Aliases win over a discovered label of the same name (the alias is owner
+config, the label comes from a `.git` a container can write); a clash is logged
+once and shadows the label. An alias that names no live discovered board, or is
+not a valid label, is ignored with a warning. `overseer repos` shows each
+repo's aliases.
+
+Tokens: a container that mounts the *launch* repo reads `.overseer/remote-token`
+itself. A container that mounts only some other repo has no such file there (the
+server never writes token files into other repos), so give it
+`OVERSEER_REMOTE_TOKEN` in its environment.
+
+The token plus a label is a master key to every live board on the machine. The
+label is a routing hint chosen by the container, which controls its own `.git`;
+it is not an identity. Every other guard applies unchanged to labelled calls:
+the LAN guard, the token, the denied verbs (`bootstrap` and `dispatch-prep`
+included), argv sanitising, the hardened git environment, the secret strip and
+read-only archives. Known limits: a repo with boards in two live accounts
+resolves to the first-listed one (cure: `overseer merge-boards` or move the
+backup into `archive_dirs`); exec never translates paths, so the machine
+config's `path_map` plays no part; a discovered root swapped for a symlink
+needs host filesystem control and is accepted. A writable mount of a repo also
+exposes its `.overseer/config.json` and `.git` to the container, which
+the pin makes harmless for *board* selection but not for the repo identity
+residual below.
+
 ### Migration from the old service
 
 | Before | After |
