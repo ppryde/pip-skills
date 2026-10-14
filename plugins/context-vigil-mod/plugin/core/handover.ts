@@ -139,10 +139,17 @@ const WHY: Record<PendingReason, string> = {
   limit: 'A usage limit is close. Save the handover so work can resume after the reset.',
 }
 
+const FIELDS = '(goal, state, decisions, next step, open questions, failed attempts, any new standing orders, session name). Earlier standing orders are carried forward for you: give only new standing orders, and retire one only by naming it.'
+
 export function instructionText(reason: PendingReason): string {
-  return `[context-vigil-mod] ${WHY[reason]} Call the ${TOOL_FULL} tool now with a complete handover ` +
-    '(goal, state, decisions, next step, open questions, failed attempts, any new standing orders, session name). Earlier standing orders are carried forward for you: give only new standing orders, and retire one only by naming it. Do nothing else this turn.'
+  // A clear follows the save: wait for a sensible stopping point. The time-critical reasons save now.
+  const when = reason === 'threshold' || reason === 'request'
+    ? `At your next sensible stopping point (finish the step in hand, start no new work, leave no edit half-done) call the ${TOOL_FULL} tool with a complete handover `
+    : `Call the ${TOOL_FULL} tool now with a complete handover `
+  return `[context-vigil-mod] ${WHY[reason]} ${when}${FIELDS}${reason === 'threshold' || reason === 'request' ? '' : ' Do nothing else this turn.'}`
 }
+
+export const STOP_NOW = 'Stop now: end your turn with no further tool calls or work; context-vigil-mod clears and resumes from this handover.'
 
 // Prompts the person sent while the handover was being written: carried verbatim, answered first.
 export const SENT_MAX = 10

@@ -1480,3 +1480,19 @@ test('nothing after the handover: no section, today\'s rule (stale after a later
   expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(true)
   expect([...w.files.values()].join('')).toContain('"tail":"none"')
 })
+
+test('the save result tells the model to stop when a clear follows', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  const requested = await $.tool.call(call() as never)
+  expect(String((requested as { result?: unknown }).result)).toContain('Stop now: end your turn with no further tool calls or work')
+})
+
+test('a volunteered save result carries no stop line: nothing is cleared', async ($, on) => {
+  world(on)
+  await $.session.start(START)
+  const volunteered = await $.tool.call(call({ tool_use_id: 'v1' }) as never)
+  expect(String((volunteered as { result?: unknown }).result)).not.toContain('Stop now')
+})

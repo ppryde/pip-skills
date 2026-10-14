@@ -193,3 +193,17 @@ describe('standing orders size is counted in UTF-8 bytes', () => {
     expect(mergeStanding([wide], '', '').warning).not.toBeNull()
   })
 })
+
+test('instructionText: threshold and request wait for a stopping point; last_light and limit save now', () => {
+  for (const r of ['threshold', 'request'] as const) {
+    const t = instructionText(r)
+    expect(t).toContain('next sensible stopping point')
+    expect(t).toContain('new standing orders')
+    expect(t).not.toContain('tool now')
+    expect(t).not.toContain('Do nothing else this turn')
+  }
+  for (const r of ['last_light', 'limit'] as const) {
+    expect(instructionText(r)).toContain('tool now')
+    expect(instructionText(r)).not.toContain('stopping point')
+  }
+})

@@ -10,7 +10,7 @@ import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, recor
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, GIT_DIR_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
-import { INPUT_SCHEMA, SENT_MAX, mergeStanding, sentSection, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
+import { INPUT_SCHEMA, SENT_MAX, mergeStanding, sentSection, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, STOP_NOW, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 import { HOME_VARS_CHECKED } from '../core/home'
 import { TITLE_CMD, archiveName, isArchived, lastTitle } from '../core/title'
 import { TAIL_CMD, type CacheTtl, cacheLinesFromText, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
@@ -1708,8 +1708,9 @@ export const register: Register = on => {
       return { result: `Saved handover to ${path} (not requested by context-vigil-mod; nothing was cleared)` } as never
     }
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
-    if (reason === 'threshold' || reason === 'request') scheduleClear($, asked?.unattended ?? false)
-    return { result: `Saved handover to ${path}${standingNote(orders)}` } as never
+    const clears = reason === 'threshold' || reason === 'request'
+    if (clears) scheduleClear($, asked?.unattended ?? false)
+    return { result: `Saved handover to ${path}${standingNote(orders)}${clears ? ` ${STOP_NOW}` : ''}` } as never
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
