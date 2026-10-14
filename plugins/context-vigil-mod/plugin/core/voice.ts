@@ -4,7 +4,7 @@ export type WaitReason =
   | 'countdown' | 'countdown-start'
 
 const WAIT: Record<WaitReason, string> = {
-  'draft': '⏸️ Handover paused while you\'re typing',
+  'draft': '⏸️ Auto-clear paused while you\'re typing',
   'latched': '⏳ Handover waiting — the usage limit is in force',
   'classic': '🕯️ Handover skipped — classic context-vigil is active here',
   'rc-declined': '📱 Handover saved — auto-clear is off for Remote Control sessions',
@@ -17,7 +17,7 @@ export const V = {
   barLine: (pct: number, threshold: number, resumes: string | null) =>
     `🕯️ context ${pct}% · threshold ${threshold}%${resumes ? ` · ⏳ resumes ${resumes}` : ''}`,
   barHandover: '📜 Hand over now',
-  draftTitle: '⏸️ Handover paused while you\'re typing',
+  draftTitle: '⏸️ Auto-clear paused while you\'re typing',
   draftClearNow: '🧹 Clear and resume now',
   draftPostpone: (step: number) => `⏰ Postpone ${step}%`,
   draftPostponed: (next: number) => `⏰ Handover postponed — the next one is at ${next}%`,

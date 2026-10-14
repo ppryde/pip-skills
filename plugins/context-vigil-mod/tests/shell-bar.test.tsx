@@ -553,7 +553,7 @@ async function draftWaiting($: Engine, w: World, reply: string | null | 'open') 
   await $.tool.call(callH)
   await w.clock.settle()
 }
-const draftAsks = (w: World) => w.asks.filter(q => q.question === '⏸️ Handover paused while you\'re typing')
+const draftAsks = (w: World) => w.asks.filter(q => q.question === '⏸️ Auto-clear paused while you\'re typing')
 
 test('a clear waiting on a draft asks once, however long it waits', async ($, on) => {
   const w = world(on)
@@ -569,12 +569,12 @@ test('the band says the handover is paused while the clear waits on a draft, and
   const w = world(on)
   await draftWaiting($, w, 'open')
   let ui = await $.ui.mount(BAND())
-  expect(await ui.find({ type: 'Text', text: /Handover paused while you're typing/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Auto-clear paused while you're typing/ })).toBeDefined()
   await ui.unmount()
   w.draft.value = ''
   await w.clock.advance(3000)
   ui = await $.ui.mount(BAND())
-  expect(await ui.find({ type: 'Text', text: /Handover paused/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Auto-clear paused/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -660,6 +660,6 @@ test('the threshold bar takes precedence over the paused line', async ($, on) =>
   await draftWaiting($, w, 'open')
   const ui = await $.ui.mount(BAND())
   expect(await ui.find({ key: 'handover' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Handover paused/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Auto-clear paused/ })).toBeUndefined()
   await ui.unmount()
 })

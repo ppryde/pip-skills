@@ -129,7 +129,7 @@ test('the paused line has the lowest precedence: a draft wait wins', async ($, o
   await w.clock.settle()
   await $.command.run(cmd('vigil-pause'))   // an explicit request's clear is not a threshold one: it still waits on the draft
   const ui = await $.ui.mount(BAND())
-  expect(await ui.find({ type: 'Text', text: /Handover paused while you're typing/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Auto-clear paused while you're typing/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /vigil paused/ })).toBeUndefined()
   await ui.unmount()
 })
