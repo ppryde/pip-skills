@@ -33,7 +33,7 @@ It is a mod, so it acts on events and costs about nothing when idle. It is stand
 
 | Command | What it does | Example |
 |---|---|---|
-| `/census-setup [off|style|budget]` | Guided setup (argument hint `[off|style|budget]`): record, draw, style, layout, PR lookup, budget. Dialogs only; nothing goes to the model. | `/census-setup` |
+| `/census-setup [off\|style\|budget]` | Guided setup: record, draw, style, layout, PR lookup, budget. Dialogs only; nothing goes to the model. | `/census-setup` |
 | `/census-setup style` | Jumps straight to the Style question. Needs drawing on. | `/census-setup style` |
 | `/census-setup budget` | Jumps straight to the Budget question. Needs drawing on. | `/census-setup budget` |
 | `/census-setup off` | Stops recording and drawing. Puts a removed status line back if settings still have none. | `/census-setup off` |
