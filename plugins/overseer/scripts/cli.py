@@ -783,6 +783,11 @@ def cmd_bootstrap_finish(args: argparse.Namespace) -> int:
     nothing) unless the card is still at ``bootstrap``; an equal rerun is fine."""
     force = _force_reason(args)
     brief = sys.stdin.read().rstrip("\n") if args.brief == "-" else args.brief
+    if brief and force is None:  # the same S-only gate bootstrap-begin runs
+        args.card, args.title, args.complexity, args.brief = args.card_id, None, None, brief
+        refused, offer_override = _brief_gate_problems(args)
+        if refused:
+            raise gates.GateRefused(refused, offer_override=offer_override)
     try:
         card = _bootstrap_record(args, args.card_id, args.branch, args.worktree, brief, force,
                                  check=True)

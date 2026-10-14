@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -166,7 +167,15 @@ def _bootstrap(call: Call, args: argparse.Namespace, root: Path) -> int:
     if args.force_gate is not None:
         finish += ["--force-gate", args.force_gate]
     from scripts.remote import RemoteError
-    retry = (f"card {card_id} is at bootstrap on the host; rerun bootstrap --card {card_id} "
+    again = "".join(f" {flag} {shlex.quote(value)}" for flag, value in (
+        ("--type", args.type), ("--slug", args.slug), ("--force-gate", args.force_gate)) if value)
+    if args.brief_file:
+        again += f" --brief-file {shlex.quote(args.brief_file)}"
+    elif args.brief == "-":
+        again += " --brief - < the same brief"
+    elif args.brief:
+        again += f" --brief {shlex.quote(args.brief)}"
+    retry = (f"card {card_id} is at bootstrap on the host; rerun bootstrap --card {card_id}{again} "
              "(the existing worktree is adopted)")
     try:
         res = _call(call, finish, brief if brief else None, "bootstrap-finish")

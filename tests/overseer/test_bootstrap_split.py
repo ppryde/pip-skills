@@ -154,3 +154,14 @@ def _finish_for(repo, capsys, card_id, *extra):
     rc = main(["--root", str(repo), "bootstrap-finish", card_id, *extra])
     out = capsys.readouterr()
     return rc, out.out, out.err
+
+
+def test_finish_runs_the_same_s_only_brief_gate_as_begin(repo, capsys, monkeypatch):
+    import io
+    monkeypatch.setenv("OVERSEER_GATES", "hard")
+    _begin(repo, capsys, "--title", "T", "--complexity", "M")
+    monkeypatch.setattr("sys.stdin", io.StringIO("plan\n"))
+    rc, _, err = _finish(repo, capsys, "--branch", "b", "--worktree", "/w", "--brief", "-")
+    assert rc == 3 and "GATE: --brief is for S cards only" in err
+    card = _card(repo)
+    assert (card.stage, card.branch, card.worktree) == ("bootstrap", None, None)

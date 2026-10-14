@@ -203,6 +203,18 @@ def test_failed_finish_then_rerun_adopts_the_worktree(m: Machines, capsys) -> No
     assert "bootstrap --card" not in m.host("next", "WF-001")["stdout"]
 
 
+def test_retry_hint_carries_type_slug_and_brief(m: Machines, capsys) -> None:
+    m.fail_on["bootstrap-finish"] = remote.RemoteError("cannot reach overseer server")
+    assert m.run("bootstrap", "--title", "T", "--complexity", "S", "--type", "fix", "--slug", "short",
+                 "--brief", "Fix the typo.") == 1
+    err = capsys.readouterr().err
+    assert ("rerun bootstrap --card WF-001 --type fix --slug short --brief 'Fix the typo.'") in err
+    assert m.run("bootstrap", "--card", "WF-001", "--type", "fix", "--slug", "short",
+                 "--brief", "Fix the typo.") == 0
+    card = m.card()
+    assert (card["stage"], card["branch"]) == ("implementation", "fix/WF-001-short")
+
+
 # --- (d) failure matrix ---------------------------------------------------------------
 
 def test_no_checkout_fails_before_any_host_call(m: Machines, tmp_path: Path, capsys) -> None:
