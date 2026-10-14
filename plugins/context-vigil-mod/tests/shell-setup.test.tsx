@@ -17,13 +17,13 @@ test('/vigil-setup asks each step itself, one dialog at a time, with no prompt t
   const w = world(on)
   w.askReply.value = byHeader({
     [STEPS.nudge.header]: '50%', [STEPS.bar.header]: 'Off', [STEPS.auto.header]: 'On', [STEPS.idle.header]: '15 min', [STEPS.rc.header]: 'No',
-    [STEPS.last_light.header]: 'Off (Recommended)', [STEPS.limits.header]: 'On (Recommended)',
+    [STEPS.last_light.header]: 'Off', [STEPS.limits.header]: 'On (Recommended)',
     [STEPS.limit_pct.header]: '97', [STEPS.limit_windows.header]: 'Weekly (seven_day)',
   })
   await $.session.start(START)
   await $.command.run(setup())
   await w.clock.settle()
-  expect(w.asks.map(q => q.header)).toEqual(['🎚️ Nudge at', '🎛️ The bar', '🤖 Auto mode', '⏱️ Idle time', '📱 RC clear', 'Last light', '⏳ Limits', '⏳ Trigger %', '⏳ Windows'])
+  expect(w.asks.map(q => q.header)).toEqual(['🎚️ Nudge at', '🎛️ The bar', '🤖 Auto mode', '⏱️ Idle time', '📱 RC clear', '🌅 Lastlight', '⏳ Limits', '⏳ Trigger %', '⏳ Windows'])
   expect(pluginSubmits(w)).toEqual([])
   // Labels only: nothing for AskUserQuestion to draw on a second line.
   expect(w.asks.flatMap(q => q.descriptions).every(d => d === '')).toBe(true)
