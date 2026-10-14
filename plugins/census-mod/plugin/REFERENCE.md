@@ -59,15 +59,16 @@ continue anyway (two writers on one store: a warning, not a ban). Then:
 2. **Draw**: one question, "Should census-mod draw your status line, and where?": below the
    input, under Claude Code's hint line (recommended; see "The band"), above it in the band,
    or not at all.
-3. **Two writers**, only when recording to the real store (without Replace) while this
+3. **🎨 Style** (when drawing): "Pip's Pac-Man flavour" (recommended; the bars), "Dave's Nice 'n' Clean" (plain text, ` | ` separators), or "Show me", which asks again with a sample line of each. Saved as `style` (`pacman` or `clean`; missing means pacman). `/census-setup style` jumps straight here.
+4. **Two writers**, only when recording to the real store (without Replace) while this
    account's status line also records: remove this account's `statusLine` (offered only when drawing; it is
    backed up exactly to `<census dir>/census-mod.statusline.json` and `settings.json` is
    rewritten atomically with every other key kept; invalid JSON is never edited), keep the
    status line and not record, or keep both. The shared status-line script and the census
    launcher are never touched.
-4. **Layout** (band on): Full — two lines (the default), compact (one line), or minimal.
-5. **PR**: also look the branch's PR up with `gh` (review state, PRs opened elsewhere). **No is the default and the recommended answer**: `gh` is never called on its own; the PR segment still follows PRs the session itself creates, readies, closes or merges (see "PR state from events"), and `/census-mod:pr-refresh` asks `gh` once when you want it. An install that already answered Yes keeps Yes (nothing is migrated).
-6. **💸 Budget** (only when the status line is drawn): the main-session cost budget the 💸 bar fills to. Options are $10, $20 (recommended), $50, $100 or any amount. `CLAUDE_COST_BUDGET` in the environment overrides the saved answer, which overrides the `$20` default. `/census-setup budget` jumps straight to this question.
+5. **📐 Layout** (band on, either style): Full — two lines (the default, recommended), Compact (one line) or Minimal.
+6. **PR**: also look the branch's PR up with `gh` (review state, PRs opened elsewhere). **No is the default and the recommended answer**: `gh` is never called on its own; the PR segment still follows PRs the session itself creates, readies, closes or merges (see "PR state from events"), and `/census-mod:pr-refresh` asks `gh` once when you want it. An install that already answered Yes keeps Yes (nothing is migrated).
+7. **💸 Budget** (only when drawing in Pac-Man style; Clean has no cost bar): the main-session cost budget the 💸 bar fills to. Options are $10, $20 (recommended), $50, $100 or any amount. `CLAUDE_COST_BUDGET` in the environment overrides the saved answer, which overrides the `$20` default. `/census-setup budget` jumps straight to this question.
 
 `/census-setup off` (or answering No to record and band) stops recording and drawing and puts
 a removed status line back exactly, but only if `settings.json` has no status line now (or
@@ -192,6 +193,36 @@ Precedence is **the session's own events > the status-line command's `pr` > gh**
   close by seconds), and a confirmation is made at most every 5 minutes.
 
 ## The band
+
+`CENSUS_STATUSLINE_SEGMENTS` overrides both styles.
+
+Clean style layouts (sample data):
+
+Full, two lines:
+
+```
+🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x
+📁 pip-skills | 🌿 feat/x +2 ~3 | 🔀 #187 approved
+```
+
+Compact, line one alone:
+
+```
+🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x
+```
+
+Minimal:
+
+```
+🧠 42% | 🕔 5h 38% | 🗓️ 7d 12%
+```
+
+Notes on Clean:
+
+- The pace multiplier (`0.8x`) is used % ÷ the share of the window gone. Under `1.0x` means under even pace.
+- The token count is derived from context % × window, so it is approximate.
+- Absent data is omitted along with its separator.
+
 
 Same segments as `census statusline`, in `CENSUS_STATUSLINE_SEGMENTS` syntax (`,` joins on
 a line, `/` starts the next; default `context,cache,limits,cost/model,git,dir,changes,pr`).
