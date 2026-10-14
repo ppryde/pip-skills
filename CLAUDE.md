@@ -53,17 +53,10 @@ plugins/<p>/typecheck.sh             # dev-only, so outside plugin/
 - Bump `plugin/.claude-plugin/plugin.json` `version` when a mod changes, and
   the marketplace `version` with it.
 
-## Tool Discipline
+## Running gates
 
-Skills in this repo instruct Claude to read doctrine files, scan templates, and search codebases.
-Always use dedicated tools — not Bash — for these operations:
-
-- **File search** → `Glob` tool, not `find` or `ls`
-- **Content search** → `Grep` tool, not `grep` or `rg`
-- **Read files** → `Read` tool, not `cat`, `head`, or `tail`
-- **Edit files** → `Edit` tool, not `sed` or `awk`
-
-Using Bash for these triggers permission prompts on every call. Dedicated tools are pre-approved and render more clearly in the UI.
+`poetry run` does not work here: there is no root `pyproject.toml`, and `plugins/overseer/pyproject.toml` is tool config only. Run gates through the root `.venv` (gitignored), from the plugin dir:
+`<worktree>/.venv/bin/python -m pytest -q`, `<worktree>/.venv/bin/ruff check scripts tests`, `<worktree>/.venv/bin/mypy scripts` (strict — annotate every def).
 
 ## Lean skills
 
