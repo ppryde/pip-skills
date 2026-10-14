@@ -249,13 +249,24 @@ def test_every_hook_verb_but_pretool_is_denied() -> None:
     assert "pretool-hook" in hooks
 
 
+# Every verb the exec route lets through, committed by hand: a new verb must be added here
+# (a decision that it is safe over exec) or to _DENIED_VERBS.
+ALLOWED_VERBS = {
+    "abandon", "accept-fact", "add-fact", "append-body", "block", "board", "boards",
+    "calibration", "checklist", "claim", "claim-nudged", "conflicts", "depends", "done",
+    "facts", "handoff", "handover", "help", "label-color", "log-progress", "log-review",
+    "log-usage", "new-card", "new-sprint", "next", "park", "pretool-hook", "pull-children",
+    "rebuild-index", "reject-fact", "release", "reorder", "repos", "resume", "retire-fact",
+    "rollup-sprint", "set-field", "set-section", "set-sprint-status", "set-stage", "show",
+    "unblock", "unclaim", "unpark", "usage", "verify-fact", "vigil",
+}
+
+
 def test_allowed_and_denied_partition_the_verbs() -> None:
     verbs = _top_level_verbs()
     denied = board_service._DENIED_VERBS
-    allowed = verbs - denied
-    assert allowed | denied == verbs
-    assert not allowed & denied
-    assert {"board", "show", "set-section", "append-body", "pretool-hook", "repos"} <= allowed
+    assert ALLOWED_VERBS | denied == verbs, (verbs - (ALLOWED_VERBS | denied), (ALLOWED_VERBS | denied) - verbs)
+    assert not ALLOWED_VERBS & denied
 
 
 # --- git classification (C6): every verb is git-free, a hardened lookup, or git-running ----------
