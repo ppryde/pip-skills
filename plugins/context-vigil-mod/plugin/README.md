@@ -92,12 +92,12 @@ Every moment is in one of three states.
 | You | The agent | State | At the threshold |
 |---|---|---|---|
 | engaged | anything | attended | Nudge only. Never clears. |
-| idle for the idle window | working | auto armed | Hands over, clears, resumes. |
+| idle for the idle window | working | auto armed | With auto mode On: hands over, clears, resumes. |
 | idle | idle | last light | Writes the handover only. |
 
 - The bar shows `context 41% · threshold 35%` with the three buttons above. On the phone the same choices arrive as a dialog.
 - A handover saves `goal`, `state`, `next_step` and a snapshot of the repo to `handovers/`. The mod then clears and resumes from it.
-- A `/clear` you run yourself picks up a saved handover.
+- A `/clear` you run yourself picks up a saved handover. Prompts you type while it is written, or after it is saved and before the clear (up to 10), are carried into the new session.
 - Standing orders (rules for the whole chain of sessions) carry forward from one handover to the next.
 - A named session is renamed `Archive: <name>` before the clear; the new session gets the name back.
 - A rate-limit failure sets a latch: no clearing until the limit resets.
