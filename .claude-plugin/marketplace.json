@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.69.18",
+  "version": "1.69.19",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -209,7 +209,7 @@
     {
       "name": "agent-roster",
       "source": "./plugins/agent-roster/plugin",
-      "description": "A live /roster pane (the roster as text over Remote Control) listing the Claude sessions registered in the configured config dirs (`ROSTER_CONFIG_DIRS`), plus tmux sessions still at a startup prompt: tmux name, repo and worktree, branch, status, last active and last prompt. A mod.",
+      "description": "Beta: a live /roster pane (the roster as text over Remote Control) listing the Claude sessions registered in the configured config dirs (`ROSTER_CONFIG_DIRS`), plus tmux sessions still at a startup prompt: tmux name, repo and worktree, branch, status, last active and last prompt. A mod.",
       "category": "engineering",
       "tags": [
         "sessions",
