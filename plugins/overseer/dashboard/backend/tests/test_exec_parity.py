@@ -22,7 +22,8 @@ PATH_DESTS = {
     "file", "text_file", "brief_file", "path",
 }
 # stored as a string and read later only as `Path.is_dir()` / `rev-parse --verify`
-WATCH_DESTS = {("set-field", "worktree"), ("set-field", "branch")}
+WATCH_DESTS = {("set-field", "worktree"), ("set-field", "branch"),
+               ("bootstrap-finish", "worktree"), ("bootstrap-finish", "branch")}
 # everything else, keyed by (top-level verb, dest): the literal result of enumerating the
 # parser. A new option that reuses a dest name still has to be listed under its verb.
 SAFE_DESTS = {
@@ -35,6 +36,11 @@ SAFE_DESTS = {
     "block": {"card_id", "reason"},
     "board": {"full", "json"},
     "boards": {"json"},
+    "bootstrap-begin": {
+        "brief", "card", "complexity", "force_gate", "goal", "jira", "labels", "linear", "slug",
+        "title", "type"
+    },
+    "bootstrap-finish": {"base", "brief", "card_id", "force_gate"},
     "bootstrap": {
         "brief", "card", "complexity", "force_gate", "goal", "jira", "labels", "linear", "slug",
         "title", "type"
@@ -253,6 +259,7 @@ def test_every_hook_verb_but_pretool_is_denied() -> None:
 # (a decision that it is safe over exec) or to _DENIED_VERBS.
 ALLOWED_VERBS = {
     "abandon", "accept-fact", "add-fact", "append-body", "block", "board", "boards",
+    "bootstrap-begin", "bootstrap-finish",
     "calibration", "checklist", "claim", "claim-nudged", "conflicts", "depends", "done",
     "facts", "handoff", "handover", "help", "label-color", "log-progress", "log-review",
     "log-usage", "new-card", "new-sprint", "next", "park", "pretool-hook", "pull-children",
@@ -276,6 +283,7 @@ def test_allowed_and_denied_partition_the_verbs() -> None:
 GIT_RUNNING = {"bootstrap", "dispatch-prep"}
 GIT_LOOKUP = {"resume", "handoff", "handover", "repos"}
 GIT_FREE = {
+    "bootstrap-begin", "bootstrap-finish",
     "new-card", "set-stage", "block", "unblock", "done", "abandon", "set-field", "append-body",
     "reorder", "depends", "checklist", "park", "unpark", "pull-children", "claim", "unclaim",
     "release", "claim-nudged", "log-progress", "log-review", "next", "new-sprint", "rollup-sprint",

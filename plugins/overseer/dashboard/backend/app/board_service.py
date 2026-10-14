@@ -40,7 +40,10 @@ _EXEC_SLOTS = threading.BoundedSemaphore(4)
 # credential. A strip, not an allowlist: the CLI needs PATH, HOME, git, the
 # ssh agent, CENSUS_*, CHRONICLE_* and test pins, and every new variable would
 # silently break an allowlist.
-_ALWAYS_DROPPED = {"OVERSEER_REMOTE", "OVERSEER_REMOTE_TOKEN", "OVERSEER_DASHBOARD_TOKEN"}
+# CLAUDE_CODE_SESSION_ID too: the host's own session is not the remote caller's, so
+# an exec child must never stamp (or guard-mark) an orchestrator.
+_ALWAYS_DROPPED = {"OVERSEER_REMOTE", "OVERSEER_REMOTE_TOKEN", "OVERSEER_DASHBOARD_TOKEN",
+                   "CLAUDE_CODE_SESSION_ID"}
 _SECRET_SUBSTRINGS = ("TOKEN", "SECRET", "KEY", "PASSWORD")
 _SECRET_PREFIXES = ("AWS_", "GH_", "GITHUB_")
 _NEEDED_PREFIXES = ("CENSUS_", "CHRONICLE_")

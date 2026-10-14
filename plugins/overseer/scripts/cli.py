@@ -664,26 +664,22 @@ def _brief_gate_problems(args: argparse.Namespace) -> "tuple[list[str], bool]":
     return problems, True
 
 
-def cmd_bootstrap(args: argparse.Namespace) -> int:
-    """new-card + base-branch detection + worktree + branch + set-field +
-    set-stage planning, in one orchestrator turn instead of seven.
-
-    ``--brief`` is the S-card shortcut (policy.md "right-sizing the
-    ceremony"): it writes the given text as ``## Plan`` directly and lands
-    the card at `implementation`, skipping the planner dispatch, plan-review
-    loop and PLAN GATE conversation entirely — one call instead of the
-    set-field/set-section-with-a-temp-file dance."""
+def _bootstrap_begin(args: argparse.Namespace) -> "tuple[Card, str | None] | int":
+    """The git-free first half of ``bootstrap``: argument checks, the brief gate
+    dry run, the card (created or loaded) and its move to stage ``bootstrap``.
+    Returns the card and the --force-gate reason, or an exit code when it refused (nothing was created)."""
     if not args.card and not args.title:
         print("error: bootstrap needs --title (new card) or --card (existing)", file=sys.stderr)
         return 1
-    if args.brief_file and args.brief is not None:
+    brief_file = getattr(args, "brief_file", None)
+    if brief_file and args.brief is not None:
         print("error: pass --brief or --brief-file, not both", file=sys.stderr)
         return 1
     force = _force_reason(args)  # a bad --force-gate also fails before anything is created
     # Read the brief up front: a bad path or stdin must fail BEFORE the card
     # and worktree are created.
-    if args.brief_file:
-        args.brief = Path(args.brief_file).read_text().rstrip("\n")
+    if brief_file:
+        args.brief = Path(brief_file).read_text().rstrip("\n")
     elif args.brief == "-":
         args.brief = sys.stdin.read().rstrip("\n")
     if args.brief and force is None:
@@ -695,27 +691,35 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     except sqlite3.IntegrityError:
         print("error: card already exists", file=sys.stderr)
         return 1
-    main_root = derive_repo_root(args.root) or args.root
-    branch = f"{args.type}/{card.id}-{args.slug or slugify(card.title)}"
-    path = worktree_path(main_root, card.id, config.load_config(args.root))
-    base = gitops.base_ref(main_root)
-    # Three short steps: record "bootstrap" (a transaction), run git (OUTSIDE
-    # any transaction), record the outcome (a second transaction).
     _edit(args.root, card.id, lambda c: c.set_stage("bootstrap", _now()), ack=True)
-    try:
-        gitops.worktree_add(main_root, path, branch, base)
-    except gitops.GitError as exc:
-        _stamp_orchestrator(args.root, card.id)
-        print(f"error: {card.id} left at bootstrap — {exc}", file=sys.stderr)
-        return 1
+    return card, force
 
+
+def _bootstrap_branch(args: argparse.Namespace, card: Card) -> str:
+    return f"{args.type}/{card.id}-{args.slug or slugify(card.title)}"
+
+
+def _bootstrap_record(
+    args: argparse.Namespace, card_id: str, branch: str, path: "Path | str", brief: "str | None",
+    force: "str | None", *, check: bool = False,
+) -> Card:
+    """The second transaction of ``bootstrap``: branch, worktree, the S-card
+    plan and the move out of ``bootstrap``. ``check`` (bootstrap-finish, which
+    a remote caller drives) first refuses unless the card is still at
+    ``bootstrap`` with no different branch/worktree recorded."""
     notes: list[str] = []
 
     def record(c: Card) -> None:
+        if check and (c.stage != "bootstrap" or c.branch not in (None, branch)
+                      or c.worktree not in (None, str(path))):
+            where = (f"; branch/worktree already set to {c.branch} / {c.worktree}"
+                     if c.branch or c.worktree else "")
+            raise db.EditAbort(f"{c.id} is at {c.stage}; bootstrap-finish only completes a "
+                               f"card at bootstrap{where}")
         c.branch = branch
         c.worktree = str(path)
-        if args.brief:
-            c.set_section("## Plan", args.brief, _now())
+        if brief:
+            c.set_section("## Plan", brief, _now())
             # The S shortcut's evidence goes in BEFORE the move, in the same
             # transaction, so the plan-review gate knows the review was skipped
             # by design (and a refused move rolls the evidence back too).
@@ -725,10 +729,68 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
         else:
             _gated_move(args.root, c, "planning", force, notes)
 
-    card = _edit(args.root, card.id, record)
+    card = _edit(args.root, card_id, record)
     _flush_notes(notes)
+    return card
+
+
+def cmd_bootstrap(args: argparse.Namespace) -> int:
+    """new-card + base-branch detection + worktree + branch + set-field +
+    set-stage planning, in one orchestrator turn instead of seven.
+
+    ``--brief`` is the S-card shortcut (policy.md "right-sizing the
+    ceremony"): it writes the given text as ``## Plan`` directly and lands
+    the card at `implementation`, skipping the planner dispatch, plan-review
+    loop and PLAN GATE conversation entirely — one call instead of the
+    set-field/set-section-with-a-temp-file dance."""
+    begun = _bootstrap_begin(args)
+    if isinstance(begun, int):
+        return begun
+    card, force = begun
+    main_root = derive_repo_root(args.root) or args.root
+    branch = _bootstrap_branch(args, card)
+    path = worktree_path(main_root, card.id, config.load_config(args.root))
+    base = gitops.base_ref(main_root)
+    # Three short steps: record "bootstrap" (a transaction, in _bootstrap_begin),
+    # run git (OUTSIDE any transaction), record the outcome (a second transaction).
+    try:
+        gitops.worktree_add(main_root, path, branch, base)
+    except gitops.GitError as exc:
+        _stamp_orchestrator(args.root, card.id)
+        print(f"error: {card.id} left at bootstrap — {exc}", file=sys.stderr)
+        return 1
+    card = _bootstrap_record(args, card.id, branch, path, args.brief, force)
     _stamp_orchestrator(args.root, card.id)
     print(f"{card.id} {card.stage} · {branch} · {path} (base {base})")
+    return 0
+
+
+def cmd_bootstrap_begin(args: argparse.Namespace) -> int:
+    """Git-free first half of ``bootstrap`` for a ``--remote`` client, which
+    runs the git half itself. Prints ``{"v":1,"id","branch"}``."""
+    begun = _bootstrap_begin(args)
+    if isinstance(begun, int):
+        return begun
+    card = begun[0]
+    _stamp_orchestrator(args.root, card.id)
+    print(json.dumps({"v": 1, "id": card.id, "branch": _bootstrap_branch(args, card)}))
+    return 0
+
+
+def cmd_bootstrap_finish(args: argparse.Namespace) -> int:
+    """Git-free second half of ``bootstrap``: records the client's branch and
+    worktree and moves the card out of ``bootstrap``. Refuses (writing
+    nothing) unless the card is still at ``bootstrap``; an equal rerun is fine."""
+    force = _force_reason(args)
+    brief = sys.stdin.read().rstrip("\n") if args.brief == "-" else args.brief
+    try:
+        card = _bootstrap_record(args, args.card_id, args.branch, args.worktree, brief, force,
+                                 check=True)
+    except db.EditAbort as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    _stamp_orchestrator(args.root, card.id)
+    print(f"{card.id} {card.stage} · {args.branch} · {args.worktree} (base {args.base or '?'})")
     return 0
 
 
@@ -2401,6 +2463,32 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force-gate", dest="force_gate", metavar="REASON",
                    help="override a refused stage gate (see set-stage)")
     p.set_defaults(func=cmd_bootstrap)
+
+    # The two git-free halves of `bootstrap` a --remote client drives (WF-300);
+    # no --*file option, the client inlines the brief as `--brief -` on stdin.
+    p = sub.add_parser("bootstrap-begin")
+    p.add_argument("--card")
+    p.add_argument("--title")
+    ref = p.add_mutually_exclusive_group()
+    ref.add_argument("--jira")
+    ref.add_argument("--linear")
+    p.add_argument("--complexity", choices=["S", "M", "L", "XL"])
+    p.add_argument("--labels")
+    p.add_argument("--goal")
+    p.add_argument("--type", default="feat")
+    p.add_argument("--slug")
+    p.add_argument("--brief")
+    p.add_argument("--force-gate", dest="force_gate", metavar="REASON")
+    p.set_defaults(func=cmd_bootstrap_begin)
+
+    p = sub.add_parser("bootstrap-finish")
+    p.add_argument("card_id")
+    p.add_argument("--branch", required=True)
+    p.add_argument("--worktree", required=True)
+    p.add_argument("--brief")
+    p.add_argument("--force-gate", dest="force_gate", metavar="REASON")
+    p.add_argument("--base")
+    p.set_defaults(func=cmd_bootstrap_finish)
 
     p = sub.add_parser("set-stage")
     p.add_argument("card_id")
