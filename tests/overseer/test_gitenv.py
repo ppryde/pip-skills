@@ -9,7 +9,6 @@ hardened environment is belt and braces for config-driven execution.
 """
 import ast
 import os
-import re
 import stat
 import subprocess
 from pathlib import Path
@@ -158,20 +157,91 @@ def test_the_lookups_fire_nothing_in_a_trapped_repo(trapped, tmp_path, monkeypat
 
 # --- the control: git runs only where it is classified -----------------------------------
 
-_GIT_ARGV = re.compile(r"""\[\s*["']git["']""")
-GIT_CALLERS = {"store.py", "gitops.py", "resume.py"}
+GIT_CALLERS = {"scripts/store.py", "scripts/gitops.py", "scripts/resume.py"}
 GITOPS_IMPORTERS = {"cli.py", "bundle.py"}
+_SPAWNERS = {
+    "run", "Popen", "call", "check_call", "check_output", "getoutput", "getstatusoutput",
+    "system", "popen", "execv", "execve", "execvp", "execvpe", "execl", "execle", "execlp",
+    "execlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe", "spawnl", "spawnle", "spawnlp",
+    "spawnlpe", "posix_spawn", "posix_spawnp", "create_subprocess_exec", "create_subprocess_shell",
+}
+
+
+def _is_git_text(value: object) -> bool:
+    return isinstance(value, str) and (
+        value == "git" or value.endswith("/git") or value.startswith("git ")
+    )
+
+
+def runs_git(source: str) -> bool:
+    """True when a subprocess/os spawn call has a git string constant, a path ending in
+    /git, or a name bound to one anywhere inside its arguments."""
+    tree = ast.parse(source)
+    git_names = {
+        t.id
+        for node in ast.walk(tree) if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Constant) and _is_git_text(node.value.value)
+        for t in node.targets if isinstance(t, ast.Name)
+    }
+    for call in (n for n in ast.walk(tree) if isinstance(n, ast.Call)):
+        func = call.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name not in _SPAWNERS:
+            continue
+        for arg in [*call.args, *(k.value for k in call.keywords)]:
+            for node in ast.walk(arg):
+                if isinstance(node, ast.Constant) and _is_git_text(node.value):
+                    return True
+                if isinstance(node, ast.Name) and node.id in git_names:
+                    return True
+    return False
+
+
+def _py_files(root: Path):
+    skip = {"tests", "node_modules", "__pycache__", ".venv", "dist"}
+    for p in root.rglob("*.py"):
+        if not skip & set(p.relative_to(root).parts):
+            yield p
+
+
+def git_runners(root: Path) -> set[str]:
+    return {p.relative_to(root).as_posix() for p in _py_files(root) if runs_git(p.read_text())}
 
 
 def _sources():
-    yield from (PLUGIN / "scripts").glob("*.py")
-    yield from (PLUGIN / "dashboard" / "backend" / "app").glob("*.py")
+    yield from _py_files(PLUGIN)
+
+
+@pytest.mark.parametrize("source", [
+    'import subprocess\nsubprocess.run(("git", "status"))',
+    'import subprocess\nGIT = "git"\nsubprocess.run([GIT, "status"])',
+    'import subprocess\nsubprocess.run(["/usr/bin/git", "status"])',
+    'import os\nos.system("git status")',
+    'import subprocess\nsubprocess.check_output(f"git log {x}", shell=True)',
+    'import subprocess\nsubprocess.Popen(args=["git", "-C", "x", "diff"])',
+    'import os\nos.execvp("git", ["git", "status"])',
+    'from subprocess import run\nrun([*base, "git"])',
+])
+def test_the_scanner_catches_every_bypass_form(source):
+    assert runs_git(source)
+
+
+def test_the_scanner_ignores_git_free_spawns_and_mere_mentions():
+    assert not runs_git('import subprocess\nsubprocess.run(["census", "read"])')
+    assert not runs_git('words = ["git", "status"]\nprint(words)')
+
+
+def test_the_scanner_finds_a_file_in_a_subdirectory(tmp_path):
+    deep = tmp_path / "a" / "b"
+    deep.mkdir(parents=True)
+    (deep / "x.py").write_text('import os\nos.system("git status")')
+    (tmp_path / "ok.py").write_text("x = 1")
+    assert git_runners(tmp_path) == {"a/b/x.py"}
 
 
 def test_git_subprocesses_live_only_in_classified_modules():
-    callers = {p.name for p in _sources() if _GIT_ARGV.search(p.read_text())}
-    assert callers == GIT_CALLERS, (
-        "a new module runs git: classify it (and, if exec can reach it, deny or harden it) first"
+    assert git_runners(PLUGIN) == GIT_CALLERS, (
+        "a module runs git: classify it (and, if exec can reach it, deny or harden it) first"
     )
 
 
