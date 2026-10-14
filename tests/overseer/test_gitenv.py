@@ -185,11 +185,15 @@ GIT_CALLERS = {"scripts/store.py", "scripts/gitops.py", "scripts/resume.py"}
 GITOPS_IMPORTERS = {"cli.py", "bundle.py"}
 _OS_SPAWN = re.compile(r"^(system|popen|exec\w*|spawn\w*|posix_spawnp?)$")
 _GIT_WORD = re.compile(r"\bgit\b")
-# Files that spawn processes AND say "git" in a non-docstring string, with the reason
-# they are not git callers. Justify each entry.
-GIT_SCAN_EXEMPT: dict[str, str] = {
-    "dashboard/backend/app/board_service.py": "the 403 text for the denied git verbs; it spawns only the overseer CLI",
-    "scripts/cli.py": "a help string mentions git; its git work goes through gitops (checked below)",
+# (file, exact string constant) pairs that say "git" in a file that can spawn processes,
+# each with the reason it is not a git call. Only that string is exempt, never the file.
+GIT_SCAN_EXEMPT: dict[tuple[str, str], str] = {
+    ("dashboard/backend/app/board_service.py", "' runs git in the repo; run it locally (follow-up "):
+        "the 403 text for the denied git verbs",
+    ("scripts/cli.py", (
+        "override the derived top-level repo name (default: derived from --root via "
+        "`git rev-parse --git-common-dir`)"
+    )): "a help string; cli's git work goes through gitops (checked below)",
 }
 
 
@@ -203,7 +207,7 @@ def _docstring_nodes(tree: ast.AST) -> set[int]:
     return ids
 
 
-def runs_git(source: str) -> bool:
+def runs_git(source: str, exempt: frozenset[str] = frozenset()) -> bool:
     """Deliberately coarse (it guards against ACCIDENTAL new git callers): a file that
     can spawn a process (imports subprocess, or touches os.system/popen/exec*/spawn*)
     AND holds any non-docstring string constant with the word `git` is flagged."""
@@ -222,7 +226,7 @@ def runs_git(source: str) -> bool:
     docs = _docstring_nodes(tree)
     return any(
         isinstance(n, ast.Constant) and isinstance(n.value, str)
-        and id(n) not in docs and _GIT_WORD.search(n.value)
+        and id(n) not in docs and n.value not in exempt and _GIT_WORD.search(n.value)
         for n in ast.walk(tree)
     )
 
@@ -235,10 +239,13 @@ def _py_files(root: Path):
 
 
 def git_runners(root: Path) -> set[str]:
-    return {
-        p.relative_to(root).as_posix() for p in _py_files(root)
-        if p.relative_to(root).as_posix() not in GIT_SCAN_EXEMPT and runs_git(p.read_text())
-    }
+    found = set()
+    for p in _py_files(root):
+        rel = p.relative_to(root).as_posix()
+        exempt = frozenset(text for f, text in GIT_SCAN_EXEMPT if f == rel)
+        if runs_git(p.read_text(), exempt):
+            found.add(rel)
+    return found
 
 
 def _sources():
@@ -267,6 +274,21 @@ def test_the_scanner_ignores_git_free_spawns_and_mere_mentions():
     assert not runs_git('words = ["git", "status"]\nprint(words)')
     assert not runs_git('"""Wraps git for you."""\nimport subprocess\nsubprocess.run(["census"])')
     assert not runs_git('import subprocess\ndef f():\n    "git notes"\n    subprocess.run(["x"])')
+
+
+def test_an_exemption_covers_only_its_exact_string(tmp_path):
+    src = 'import subprocess\nHELP = "mentions git here"\nsubprocess.run(["census"])'
+    assert runs_git(src)
+    assert not runs_git(src, frozenset({"mentions git here"}))
+    assert runs_git(src + '\nsubprocess.run(["git", "status"])', frozenset({"mentions git here"}))
+
+
+def test_a_new_git_call_in_cli_or_board_service_still_fails():
+    for rel in ("scripts/cli.py", "dashboard/backend/app/board_service.py"):
+        exempt = frozenset(text for f, text in GIT_SCAN_EXEMPT if f == rel)
+        assert not runs_git((PLUGIN / rel).read_text(), exempt)
+        assert runs_git((PLUGIN / rel).read_text() + '\nsubprocess.run(["git", "status"])', exempt)
+        assert runs_git((PLUGIN / rel).read_text() + '\nsubprocess.run(cmd := ["git"])', exempt)
 
 
 def test_the_scanner_finds_a_file_in_a_subdirectory(tmp_path):
