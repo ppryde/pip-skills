@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { DEFAULT_SEGMENTS, TONE_COLOR, draw, fmtTokens, paceMultiplier, displayWidth, fit, fmtReset, layout, levelTone, levelToneInv, lineWidth, pacBar, plain, roundHalfEven } from '../plugin/core/render'
+import { DEFAULT_SEGMENTS, parseBudget, TONE_COLOR, draw, fmtTokens, paceMultiplier, displayWidth, fit, fmtReset, layout, levelTone, levelToneInv, lineWidth, pacBar, plain, roundHalfEven } from '../plugin/core/render'
 import type { RenderInput } from '../plugin/core/render'
 
 // The goldens below are census's own render.py output (NO_COLOR) for the same inputs.
@@ -237,4 +237,10 @@ test('the Pac-Man side of the six: Full, Compact and Minimal are unchanged by Cl
   expect(spec(PRESETS_FOR_TEST.minimal, FULL)).toBe('🧠 ••••ᗧ••••• 42% │ ⏳ ••••••••ᗧ• 78% ⟳ 2h10m │ 📅 ••ᗧ••••••• 24% ⟳ 3d4h\n🌿 feat/x')
   expect(spec(PRESETS_FOR_TEST.compact, FULL).split('\n')).toHaveLength(1)
   expect(spec(DEFAULT_SEGMENTS, FULL).split('\n')).toHaveLength(2)
+})
+
+test('parseBudget rejects overflow, so a huge CLAUDE_COST_BUDGET falls back instead of becoming Infinity', () => {
+  expect(parseBudget('1e999')).toBeNull()
+  expect(parseBudget('9'.repeat(400))).toBeNull()
+  expect(parseBudget('12.5')).toBe(12.5)
 })

@@ -1,7 +1,7 @@
 // /census-setup: the questions, what an answer means, and the settings.json surgery. Pure: no `$`.
 import { expandHome, joinPath } from './home'
 import type { HomeEnv } from './home'
-import { DEFAULT_BUDGET, DEFAULT_SEGMENTS, draw, parseBudget, plain } from './render'
+import { DEFAULT_BUDGET, DEFAULT_SEGMENTS, draw, layout, parseBudget, plain } from './render'
 import type { RenderInput } from './render'
 
 export type RecordMode = 'yes' | 'shadow' | 'no'
@@ -304,6 +304,10 @@ export function presetFrom(answer: string): Preset | null {
 export function budgetFrom(answer: string): number | null {
   const v = parseBudget(strip(answer).trim().replace(/^\$\s*/, ''))
   return v !== null && v > 0 && Number.isFinite(v) ? v : null
+}
+/** A budget means something only when the effective segments draw the cost bar (a custom spec can add it to Clean). */
+export function hasCostBar(eff: Pick<Effective, 'segments'>): boolean {
+  return layout(eff.segments).some(line => line.includes('cost'))
 }
 export function styleFrom(answer: string): Style | null {
   if (is(answer, L.stylePacman)) return 'pacman'

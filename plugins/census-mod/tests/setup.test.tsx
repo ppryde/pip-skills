@@ -755,7 +755,7 @@ test('Other: junk, zero and negatives are re-asked until a positive number comes
   expect(saved(w).budget).toBe(12.5)
 })
 
-test('/census-setup budget asks only the budget, and a dismissal saves nothing', async ($, on) => {
+test('/census-setup budget asks only the budget and saves the pick', async ($, on) => {
   const w = world(on)
   w.store.set('census-mod:setup', { offered: true, record: 'yes', draw: true })
   w.answer.value = q => (q.header === '💸 Budget' ? pick(w, '$50')(q) : null)
@@ -763,6 +763,61 @@ test('/census-setup budget asks only the budget, and a dismissal saves nothing',
 
   expect(headers(w)).toEqual(['💸 Budget'])
   expect(saved(w).budget).toBe(50)
+})
+
+test('/census-setup budget dismissed saves no budget', async ($, on) => {
+  const w = world(on)
+  w.store.set('census-mod:setup', { offered: true, record: 'yes', draw: true })
+  w.answer.value = () => null
+  await setupRun($, w, 'budget')
+
+  expect(headers(w)).toEqual(['💸 Budget'])
+  expect(saved(w).budget).toBeUndefined()
+})
+
+test('/census-setup budget on Clean with a custom CENSUS_STATUSLINE_SEGMENTS containing cost still asks', async ($, on) => {
+  const w = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u', CENSUS_STATUSLINE_SEGMENTS: 'clean,cost' } })
+  w.store.set('census-mod:setup', { offered: true, record: 'yes', draw: true, style: 'clean' })
+  w.answer.value = pick(w, '$50')
+  await setupRun($, w, 'budget')
+
+  expect(headers(w)).toEqual(['💸 Budget'])
+  expect(saved(w).budget).toBe(50)
+})
+
+test('/census-setup budget on Clean without a cost segment says there is no bar', async ($, on) => {
+  const w = world(on)
+  w.store.set('census-mod:setup', { offered: true, record: 'yes', draw: true, style: 'clean' })
+  await setupRun($, w, 'budget')
+
+  expect(w.asks).toEqual([])
+  expect(w.logs.join('\n')).toContain('no budget to set')
+})
+
+test('/census-setup budget on Pac-Man whose segments drop cost says there is no bar', async ($, on) => {
+  const w = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u', CENSUS_STATUSLINE_SEGMENTS: 'context,model' } })
+  w.store.set('census-mod:setup', { offered: true, record: 'yes', draw: true })
+  await setupRun($, w, 'budget')
+
+  expect(w.asks).toEqual([])
+})
+
+test('/census-setup style asks Style only and keeps the saved layout', async ($, on) => {
+  const w = world(on)
+  w.store.set('census-mod:setup', { offered: true, record: 'yes', draw: true, preset: 'compact' })
+  w.answer.value = q => (q.header === '🎨 Style' ? "Dave's Nice 'n' Clean" : null)
+  await setupRun($, w, 'style')
+
+  expect(headers(w)).toEqual(['🎨 Style'])
+  expect(saved(w)).toMatchObject({ style: 'clean', preset: 'compact' })
+})
+
+test('the guided setup on Clean with a custom segment spec containing cost asks the budget', async ($, on) => {
+  const w = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u', CENSUS_STATUSLINE_SEGMENTS: 'clean,cost' } })
+  w.answer.value = q => (q.header === '🎨 Style' ? "Dave's Nice 'n' Clean" : q.options[0] ?? null)
+  await setupRun($, w)
+
+  expect(headers(w)).toContain('💸 Budget')
 })
 
 test('/census-setup budget with drawing off says there is no bar to size', async ($, on) => {
@@ -793,7 +848,7 @@ test('with no budget saved the 💸 bar fills at $20 ($0.90 is 5%)', async ($, o
 })
 
 test('the saved budget sizes the 💸 bar ($0.90 of $1 is 90%)', async ($, on) => {
-  expect(await costBar($, barWorld(on, {}, 1))).not.toBe('💸 ᗧ$$$$$$$$$')
+  expect(await costBar($, barWorld(on, {}, 1))).toBe('💸 •••••••••ᗧ')
 })
 
 test('CLAUDE_COST_BUDGET outranks the saved budget', async ($, on) => {
@@ -848,13 +903,14 @@ test('Pac-Man is followed by Layout and Budget', async ($, on) => {
   expect(saved(w).style).toBe('pacman')
 })
 
-test('/census-setup style asks the style and then the layout', async ($, on) => {
+test('/census-setup style asks the style only and leaves the layout', async ($, on) => {
   const w = world(on)
   w.store.set('census-mod:setup', { offered: true, record: 'yes', draw: true })
   await setupRun($, w, 'style')
 
-  expect(headers(w)).toEqual(['🎨 Style', '📐 Layout'])
-  expect(saved(w)).toMatchObject({ style: 'pacman', preset: 'two' })
+  expect(headers(w)).toEqual(['🎨 Style'])
+  expect(saved(w)).toMatchObject({ style: 'pacman' })
+  expect(saved(w).preset).toBeUndefined()
 })
 
 test('/census-setup style with drawing off says there is no band to style', async ($, on) => {

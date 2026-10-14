@@ -59,16 +59,16 @@ continue anyway (two writers on one store: a warning, not a ban). Then:
 2. **Draw**: one question, "Should census-mod draw your status line, and where?": below the
    input, under Claude Code's hint line (recommended; see "The band"), above it in the band,
    or not at all.
-3. **🎨 Style** (when drawing): "Pip's Pac-Man flavour" (recommended; the bars), "Dave's Nice 'n' Clean" (plain text, ` | ` separators), or "Show me", which asks again with a sample line of each. Saved as `style` (`pacman` or `clean`; missing means pacman). `/census-setup style` jumps straight here.
-4. **Two writers**, only when recording to the real store (without Replace) while this
+3. **Two writers**, only when recording to the real store (without Replace) while this
    account's status line also records: remove this account's `statusLine` (offered only when drawing; it is
    backed up exactly to `<census dir>/census-mod.statusline.json` and `settings.json` is
    rewritten atomically with every other key kept; invalid JSON is never edited), keep the
    status line and not record, or keep both. The shared status-line script and the census
    launcher are never touched.
+4. **🎨 Style** (when drawing): "Pip's Pac-Man flavour" (recommended; the bars), "Dave's Nice 'n' Clean" (plain text, ` | ` separators), or "Show me", which asks again with a sample line of each. Saved as `style` (`pacman` or `clean`; missing means pacman). `/census-setup style` asks only this question and keeps the saved layout; the full setup asks Layout next.
 5. **📐 Layout** (band on, either style): Full — two lines (the default, recommended), Compact (one line) or Minimal.
-6. **PR**: also look the branch's PR up with `gh` (review state, PRs opened elsewhere). **No is the default and the recommended answer**: `gh` is never called on its own; the PR segment still follows PRs the session itself creates, readies, closes or merges (see "PR state from events"), and `/census-mod:pr-refresh` asks `gh` once when you want it. An install that already answered Yes keeps Yes (nothing is migrated).
-7. **💸 Budget** (only when drawing in Pac-Man style; Clean has no cost bar): the main-session cost budget the 💸 bar fills to. Options are $10, $20 (recommended), $50, $100 or any amount. `CLAUDE_COST_BUDGET` in the environment overrides the saved answer, which overrides the `$20` default. `/census-setup budget` jumps straight to this question.
+6. **💸 Budget** (only when the effective segments include `cost`: the Pac-Man layouts do, the Clean ones do not, unless `CENSUS_STATUSLINE_SEGMENTS` adds it; asked after Layout): the main-session cost budget the 💸 bar fills to. Options are $10, $20 (recommended), $50, $100 or any amount. `CLAUDE_COST_BUDGET` in the environment overrides the saved answer, which overrides the `$20` default. `/census-setup budget` jumps straight to this question, under the same rule.
+7. **PR**: also look the branch's PR up with `gh` (review state, PRs opened elsewhere). **No is the default and the recommended answer**: `gh` is never called on its own; the PR segment still follows PRs the session itself creates, readies, closes or merges (see "PR state from events"), and `/census-mod:pr-refresh` asks `gh` once when you want it. An install that already answered Yes keeps Yes (nothing is migrated).
 
 `/census-setup off` (or answering No to record and band) stops recording and drawing and puts
 a removed status line back exactly, but only if `settings.json` has no status line now (or

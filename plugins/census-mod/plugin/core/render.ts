@@ -113,7 +113,8 @@ function segLimits(i: RenderInput): Line[] {
 /** The whole value or nothing: "5oops" is not a $5 budget. */
 export function parseBudget(raw: string | undefined): number | null {
   const t = (raw ?? '').trim()
-  return /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : null
+  const v = /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : null
+  return v !== null && Number.isFinite(v) ? v : null
 }
 
 const budget = (env: RenderEnv): number => parseBudget(env.CLAUDE_COST_BUDGET) ?? DEFAULT_BUDGET
