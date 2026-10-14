@@ -15,6 +15,11 @@ export const PENDING_PREFIX = 'pending:'
 // session id, so a /resume or restart still knows it; pruned like a pending handover.
 export type Stranded = { name: string; at: number }
 export const STRANDED_PREFIX = 'stranded:'
+// The standing orders of the chain this session belongs to; moved to the successor's id by the clear.
+export function standingKey(session: string): string {
+  return `standing:${session}`
+}
+
 export function strandedKey(session: string): string {
   return `${STRANDED_PREFIX}${session}`
 }

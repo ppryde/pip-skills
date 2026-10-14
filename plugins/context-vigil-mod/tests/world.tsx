@@ -43,6 +43,7 @@ export type World = {
   askHold: { held: boolean; waiting: ((answer: string) => void)[] }   // while held, each ask stays open until its resolver is called
   asks: AskSeen[]                      // every AskUserQuestion question asked, $.ui.ask included, in order
   askReply: { value: ((q: AskSeen) => string | null) | null }   // answers per question when set (null = dismissed); else askAnswer
+  storeGetRefused: { value: boolean }  // makes $.store.get reject
   onStoreSet: { value: ((key: string) => Promise<unknown>) | null }  // runs inside store.set, before it answers
 }
 
@@ -56,10 +57,10 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '', dir: '/repo/.git' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, renameRefusedAt: new Set(), submitRefused: { value: false }, submitFails: { count: 0 }, eventsWriteRefused: { value: false }, renames: [],
     shell: { value: true }, titles: new Map(), transcript: { value: null }, grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
-    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, askHold: { held: false, waiting: [] }, asks: [], askReply: { value: null }, promptReadFails: { count: 0 }, onStoreSet: { value: null }, fsRead: { gate: null, error: null },
+    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, askHold: { held: false, waiting: [] }, asks: [], askReply: { value: null }, promptReadFails: { count: 0 }, onStoreSet: { value: null }, storeGetRefused: { value: false }, fsRead: { gate: null, error: null },
   }
   // $.store, per account: in memory, survives a clear, and open to the test (another process's writes).
-  on('store.get', (_$, e) => ({ value: w.store.get(e.key) as never }))
+  on('store.get', (_$, e) => (w.storeGetRefused.value ? { deny: 'store unavailable' } : { value: w.store.get(e.key) as never }))
   // The hook runs first: a refused write (the hook throws) must leave nothing stored.
   on('store.set', async (_$, e) => { await w.onStoreSet.value?.(e.key); w.store.set(e.key, e.value); return { value: undefined } })
   on('store.delete', (_$, e) => { w.store.delete(e.key); return { value: undefined } })
