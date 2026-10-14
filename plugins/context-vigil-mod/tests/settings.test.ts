@@ -15,7 +15,7 @@ describe('loadSettings', () => {
   test('the spec defaults', () => {
     expect(DEFAULTS).toEqual({
       nudgeAt: 35, step: 5, bar: true, auto: false, idleMin: 30,
-      lastLight: false, lastLightAt: 25, limits: true, limitPct: 95,
+      lastLight: true, lastLightAt: 25, limits: true, limitPct: 98,
       limitWindows: ['seven_day', 'spend_limit'], rcAutoClear: 'unanswered',
     })
   })
@@ -37,6 +37,15 @@ describe('loadSettings', () => {
   test('a windows list with nothing valid left keeps the defaults, not an empty watch', () => {
     expect(loadSettings({ limitWindows: [] }).limitWindows).toEqual(['seven_day', 'spend_limit'])
     expect(loadSettings({ limitWindows: ['bogus'] }).limitWindows).toEqual(['seven_day', 'spend_limit'])
+  })
+  test('five_hour is a valid window; unknown ones are still dropped', () => {
+    expect(loadSettings({ limitWindows: ['five_hour', 'bogus', 'seven_day'] }).limitWindows).toEqual(['five_hour', 'seven_day'])
+  })
+  test('the new defaults: last light On, early stop at 98%, five_hour not watched', () => {
+    const s = loadSettings(undefined)
+    expect(s.lastLight).toBe(true)
+    expect(s.limitPct).toBe(98)
+    expect(s.limitWindows).toEqual(['seven_day', 'spend_limit'])
   })
   test('the defaults object is never shared', () => {
     const s = loadSettings(undefined)

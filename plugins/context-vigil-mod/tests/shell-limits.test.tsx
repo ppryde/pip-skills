@@ -99,10 +99,10 @@ test('seven_day at the trigger: handover once per window, then one resume after 
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
   const resetsAt = iso(1_000_000 + 3 * HOUR)
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt }]))
   await w.clock.settle()
   expect(asks(w)).toBe(1)
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 97, resetsAt }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 99, resetsAt }]))
   await w.clock.settle()
   expect(asks(w)).toBe(1)
   await $.tool.call(write)
@@ -118,7 +118,7 @@ test('a latch set before a clear still holds after it: no handover, no limit res
   const w = world(on, { now: 1_000_000 })
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + HOUR) }]))
   await w.clock.settle()
   expect(asks(w)).toBe(1)
   await $.tool.call(write)
@@ -139,12 +139,12 @@ test('an early stop fired before a clear does not fire again after it for the sa
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
   const resetsAt = iso(1_000_000 + 3 * HOUR)
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt }]))
   await w.clock.settle()
   await $.tool.call(write)
   w.sessionId.value = 's2'
   await $.classic.SessionStart({ source: 'clear' } as never)
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 97, resetsAt }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 99, resetsAt }]))
   await w.clock.settle()
   expect(asks(w)).toBe(1)
 })
@@ -192,7 +192,7 @@ test('the limit resume names the handover file even after a clear consumed it', 
   const w = world(on, { now: 1_000_000 })
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + HOUR) }]))
   await w.clock.settle()
   await $.tool.call(write)
   w.sessionId.value = 's2'
@@ -207,7 +207,7 @@ test('a rejected limit resume is announced and logged, not swallowed', async ($,
   const w = world(on, { now: 1_000_000 })
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + HOUR) }]))
   await w.clock.settle()
   w.submitRefused.value = true
   await w.clock.advance(HOUR + 300_000 + 16_000)   // the submit is retried for about 15 s first
@@ -220,7 +220,7 @@ test('a refused limit resume clears the job: the next early stop is judged on it
   const w = world(on, { now: 1_000_000 })
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + HOUR) }]))
   await w.clock.settle()
   await $.tool.call(write)
   await w.clock.settle()
@@ -232,7 +232,7 @@ test('a refused limit resume clears the job: the next early stop is judged on it
   await $.prompt.submit(human('back at the desk'))
   await w.clock.advance(60_000)
   const resetsAt = iso(1_000_000 + 4 * HOUR)
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 97, resetsAt }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 99, resetsAt }]))
   await w.clock.settle()
   await $.tool.call({ ...(write as object), tool_use_id: 'h2' } as never)
   await w.clock.settle()
@@ -240,6 +240,31 @@ test('a refused limit resume clears the job: the next early stop is judged on it
   const r = resumes(w)
   expect(r.length).toBe(1)
   for (const p of first) expect(r[0]!.text).not.toContain(p)
+})
+
+test('five_hour is not watched by default: 99% there does nothing', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure([{ kind: 'five_hour', percentUsed: 99, resetsAt: iso(1_000_000 + 2 * HOUR) }]))
+  await w.clock.settle()
+  expect(asks(w)).toBe(0)
+})
+
+test('five_hour ticked: handover at the trigger, then one resume after the 5h window\'s own reset', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { settings: { limitWindows: ['five_hour'] } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  const resetsAt = iso(1_000_000 + 2 * HOUR)
+  // A later weekly reset must not set the resume time.
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 10, resetsAt: iso(1_000_000 + 50 * HOUR) }, { kind: 'five_hour', percentUsed: 98, resetsAt }]))
+  await w.clock.settle()
+  expect(asks(w)).toBe(1)
+  await $.tool.call(write)
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+  await w.clock.advance(2 * HOUR + 300_000)
+  expect(w.submits.filter(s => s.text.includes('limit has reset')).length).toBe(1)
 })
 
 test('configured trigger and windows: below or unwatched does nothing; the watched window at its trigger fires', async ($, on) => {
@@ -354,7 +379,7 @@ test('R1-09: the tool handler honours Awaiting.unattended for the attended re-ch
 const stop = async ($: Engine, w: ReturnType<typeof world>, hours = 3) => {
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + hours * HOUR) }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + hours * HOUR) }]))
   await w.clock.settle()
   await $.tool.call(write)
   await w.clock.settle()
@@ -394,7 +419,7 @@ test('R1-12: no handover file means the resume says so, never "(no file)"', asyn
   const w = world(on, { now: 1_000_000 })
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + HOUR) }]))
   await w.clock.settle()
   await w.clock.advance(HOUR + 300_000)
   const r = resumes(w)[0]
@@ -406,7 +431,7 @@ test('an idle session lifts and resumes after a latch another session left behin
   const w = world(on, { now: 1_000_000, store: { latch: { kind: 'five_hour', resetsAtMs: 1_000_000 + 2 * HOUR } } })
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + HOUR) }]))
   await w.clock.settle()
   await w.clock.advance(2 * HOUR + 600_000)           // past the foreign latch's reset: no measure arrives
   expect(w.store.get('latch')).toBeUndefined()
@@ -426,7 +451,7 @@ test('an in-process /resume drops the old conversation\'s limit resume (R2-16)',
   const w = world(on, { now: 1_000_000 })
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + 3 * HOUR) }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + 3 * HOUR) }]))
   await w.clock.settle()
   w.sessionId.value = 's2'
   await $.classic.SessionStart({ source: 'resume' } as never)
@@ -446,7 +471,7 @@ test('an early stop with a fresh /vho handover already on disk writes no second 
   await $.tool.call(write)
   await w.clock.settle()
   expect(w.notices.some(n => n.includes('there is a draft'))).toBe(true)
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + HOUR) }]))
   await w.clock.settle()
   expect(asks(w)).toBe(1)                                             // no second handover
   expect(w.state.get('context-vigil-mod.pending')).toMatchObject({ path: expect.any(String) })    // the requested one is untouched
@@ -461,7 +486,7 @@ test('a skipped limit resume keeps its handover; a later manual /clear injects i
   const w = world(on, { now: 1_000_000 })
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + HOUR) }]))
   await w.clock.settle()
   await $.tool.call(write)
   await w.clock.advance(1000)

@@ -33,6 +33,9 @@ describe('steps fit $.ui.ask', () => {
     expect(questionFor('nudge').options).toEqual(['25%', '35% (Recommended)', '50%', TELL])
     expect(questionFor('bar').options).toEqual(['On (Recommended)', 'Off', TELL])
     expect(questionFor('auto').options).toEqual(['Off (Recommended)', 'On', TELL])
+    expect(questionFor('last_light').options).toEqual(['On (Recommended)', 'Off', TELL])
+    expect(questionFor('limit_pct').options).toEqual(['95%', '98% (Recommended)', '99%', TELL])
+    expect(questionFor('limit_windows').options).toEqual(['Weekly (seven_day)', 'Spend cap (spend_limit)', 'Five-hour (five_hour)', TELL])
     expect(questionFor('rc').options).toEqual(['Yes (Recommended)', 'No', TELL])
   })
   test('last light says it needs a 1-hour cache and stays off for a 5-minute one', () => {
@@ -54,9 +57,14 @@ describe('steps fit $.ui.ask', () => {
     expect(STEPS.last_light.question).toBe('When we\'re both idle, write a handover just before the 1-hour cache expires, so coming back is cheap?')
     expect(STEPS.last_light.explain).toContain('Works only with a 1-hour prompt cache')
     expect(STEPS.last_light_at.question).toBe('Last light: only write the before-the-cache-expires handover when context is at least what %?')
-    expect(STEPS.limits.question).toBe('Near a 7-day or spend limit, stop early with a handover so no work is lost?')
+    expect(STEPS.limits.question).toBe('Near a weekly or spend limit (or the 5-hour one, if you tick it), stop early with a handover so no work is lost?')
+    expect(STEPS.last_light.explain).toContain('Default On.')
+    expect(STEPS.limit_pct.explain).toContain('Default 98%.')
+    expect(STEPS.limit_windows.explain).toContain('already wraps up and auto-continues at the 5-hour limit')
+    expect(STEPS.limit_windows.explain).toContain('Default seven_day and spend_limit.')
     expect(STEPS.limit_pct.question).toBe('Stop at what % of the limit?')
-    expect(STEPS.limit_windows.options.map(o => o.label)).toEqual(['Weekly (seven_day)', 'Spend cap (spend_limit)'])
+    expect(STEPS.limit_windows.options.map(o => o.label)).toEqual(['Weekly (seven_day)', 'Spend cap (spend_limit)', 'Five-hour (five_hour)'])
+    expect(STEPS.last_light.header).toBe('🌅 Lastlight')
     expect(STEPS.rc.question).toBe("I can't see you typing on the phone, so a clear could land mid-message. Allow auto-clear in phone sessions?")
     expect(STEPS.rc.explain).toContain('30-second countdown')
   })
@@ -66,6 +74,7 @@ describe('steps fit $.ui.ask', () => {
   test('window labels map back to their values', () => {
     expect(applyAnswers(DEFAULTS, [{ step: 'limit_windows', answer: 'Spend cap (spend_limit)' }]).settings.limitWindows).toEqual(['spend_limit'])
     expect(applyAnswers(DEFAULTS, [{ step: 'limit_windows', answer: 'Spend cap (spend_limit), Weekly (seven_day)' }]).settings.limitWindows).toEqual(['seven_day', 'spend_limit'])
+    expect(applyAnswers(DEFAULTS, [{ step: 'limit_windows', answer: 'Five-hour (five_hour), Weekly (seven_day)' }]).settings.limitWindows).toEqual(['seven_day', 'five_hour'])
   })
   test('windows is multi-select', () => expect(questionFor('limit_windows').multiSelect).toBe(true))
 })
@@ -126,10 +135,10 @@ describe('applyAnswers', () => {
   test('labels apply', () => {
     const r = applyAnswers(DEFAULTS, [
       { step: 'nudge', answer: '25%' }, { step: 'bar', answer: 'Off' }, { step: 'auto', answer: 'On' }, { step: 'idle', answer: '60 min' },
-      { step: 'last_light', answer: 'On' }, { step: 'last_light_at', answer: '50%' }, { step: 'limits', answer: 'Off' }, { step: 'rc', answer: 'Yes (Recommended)' },
+      { step: 'last_light', answer: 'Off' }, { step: 'last_light_at', answer: '50%' }, { step: 'limits', answer: 'Off' }, { step: 'rc', answer: 'Yes (Recommended)' },
     ])
     expect(r.retell).toEqual([])
-    expect(r.settings).toEqual({ ...DEFAULTS, nudgeAt: 25, bar: false, auto: true, idleMin: 60, lastLight: true, lastLightAt: 50, limits: false, rcAutoClear: 'yes' })
+    expect(r.settings).toEqual({ ...DEFAULTS, nudgeAt: 25, bar: false, auto: true, idleMin: 60, lastLight: false, lastLightAt: 50, limits: false, rcAutoClear: 'yes' })
   })
   test('Tell me more is collected for a retell and changes nothing', () => {
     const r = applyAnswers(DEFAULTS, [{ step: 'bar', answer: TELL }, { step: 'nudge', answer: '50%' }])
@@ -138,10 +147,11 @@ describe('applyAnswers', () => {
   })
   test('trigger % takes Other as a number 1–100', () => {
     expect(applyAnswers(DEFAULTS, [{ step: 'limit_pct', answer: '97' }]).settings.limitPct).toBe(97)
-    expect(applyAnswers(DEFAULTS, [{ step: 'limit_pct', answer: '95% (Recommended)' }]).settings.limitPct).toBe(95)
+    expect(applyAnswers(DEFAULTS, [{ step: 'limit_pct', answer: '95%' }]).settings.limitPct).toBe(95)
+    expect(applyAnswers(DEFAULTS, [{ step: 'limit_pct', answer: '98% (Recommended)' }]).settings.limitPct).toBe(98)
     const bad = applyAnswers(DEFAULTS, [{ step: 'limit_pct', answer: 'lots' }])
     expect(bad.retell).toEqual(['limit_pct'])
-    expect(bad.settings.limitPct).toBe(95)
+    expect(bad.settings.limitPct).toBe(98)
     expect(applyAnswers(DEFAULTS, [{ step: 'limit_pct', answer: '97%' }]).settings.limitPct).toBe(97)
     // Whole numbers only: no truncating 98.9, no trailing junk.
     for (const answer of ['98.9', '95abc', '0', '101']) {

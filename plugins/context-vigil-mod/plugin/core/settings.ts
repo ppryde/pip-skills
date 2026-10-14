@@ -26,7 +26,7 @@ export function strandedKey(session: string): string {
 
 export const DEFAULTS: Settings = {
   nudgeAt: 35, step: 5, bar: true, auto: false, idleMin: 30,
-  lastLight: false, lastLightAt: 25, limits: true, limitPct: 95,
+  lastLight: true, lastLightAt: 25, limits: true, limitPct: 98,
   limitWindows: ['seven_day', 'spend_limit'], rcAutoClear: 'unanswered',
 }
 
@@ -49,7 +49,7 @@ export function loadSettings(raw: unknown): Settings {
   if (typeof r.limits === 'boolean') s.limits = r.limits
   if (isPct(r.limitPct)) s.limitPct = r.limitPct
   if (Array.isArray(r.limitWindows)) {
-    const ok = r.limitWindows.filter((w): w is Window => w === 'seven_day' || w === 'spend_limit')
+    const ok = r.limitWindows.filter((w): w is Window => w === 'seven_day' || w === 'spend_limit' || w === 'five_hour')
     // An empty list would watch nothing while limits reads On: keep the defaults instead.
     if (ok.length) s.limitWindows = [...new Set(ok)]
   }
