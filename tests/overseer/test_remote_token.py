@@ -123,3 +123,68 @@ def test_server_reader_ignores_a_symlinked_overseer_dir(tmp_path):
     root.mkdir()
     (root / ".overseer").symlink_to(real)
     assert read_server_token(root) is None
+
+
+# --- WF-100 p3-fix: unpredictable temp name; one open for the server reader --
+
+
+def test_write_survives_a_preplanted_predictable_temp(tmp_path):
+    sentinel = tmp_path / "sentinel"
+    sentinel.write_text("precious")
+    d = tmp_path / ".overseer"
+    d.mkdir()
+    for name in ("remote-token", "dashboard-token"):
+        (d / f".{name}.{os.getpid()}.tmp").symlink_to(sentinel)
+        write_remote_token(tmp_path, "tok-abcdefghijklmnop", name)
+        assert (d / name).read_text() == "tok-abcdefghijklmnop"
+    assert sentinel.read_text() == "precious"
+
+
+def test_write_cleans_its_temp_up_on_failure(tmp_path, monkeypatch):
+    import pytest
+    from scripts import remote_token
+
+    def boom(src, dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(remote_token.os, "replace", boom)
+    with pytest.raises(OSError):
+        write_remote_token(tmp_path, "tok-abcdefghijklmnop")
+    assert list((tmp_path / ".overseer").iterdir()) == []
+
+
+def test_write_temp_is_0600_from_creation(tmp_path, monkeypatch):
+    from scripts import remote_token
+
+    seen = []
+    real = remote_token.os.replace
+
+    def spy(src, dst):
+        seen.append(stat.S_IMODE(os.stat(src).st_mode))
+        real(src, dst)
+
+    monkeypatch.setattr(remote_token.os, "replace", spy)
+    write_remote_token(tmp_path, "tok-abcdefghijklmnop")
+    assert seen == [0o600]
+
+
+def test_server_reader_opens_once_with_nofollow_and_reads_that_fd(tmp_path, monkeypatch):
+    from scripts import remote_token
+    from scripts.remote_token import read_server_token
+
+    write_remote_token(tmp_path, "tok-abcdefghijklmnop")
+    flags = []
+    real_open = os.open
+
+    def spy_open(path, f, *a, **kw):
+        flags.append(f)
+        return real_open(path, f, *a, **kw)
+
+    monkeypatch.setattr(remote_token.os, "open", spy_open)
+
+    def no_path_read(self, *a, **kw):
+        raise AssertionError("reader must read from the fd it checked")
+
+    monkeypatch.setattr(remote_token.Path, "read_text", no_path_read)
+    assert read_server_token(tmp_path) == "tok-abcdefghijklmnop"
+    assert len(flags) == 1 and flags[0] & os.O_NOFOLLOW

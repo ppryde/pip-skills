@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import stat
+import tempfile
 from pathlib import Path
 
 _TOKEN_FILENAME = "remote-token"
@@ -51,13 +52,17 @@ def read_server_token(root: str | os.PathLike[str], name: str = _TOKEN_FILENAME)
     try:
         if stat.S_ISLNK(os.lstat(path.parent).st_mode):
             return None
-        st = os.lstat(path)
-        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
-            return None
+        # One open, no symlink follow; check and read the SAME fd, so the file
+        # cannot be swapped between the check and the read.
+        fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW)
     except OSError:
         return None
     try:
-        return path.read_text(encoding="utf-8").strip() or None
+        with os.fdopen(fd, "rb") as fh:
+            st = os.fstat(fh.fileno())
+            if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+                return None
+            return fh.read().decode("utf-8").strip() or None
     except (OSError, UnicodeDecodeError):
         return None
 
@@ -71,8 +76,8 @@ def write_remote_token(
     token has its own: the two secrets never share a file).
 
     Refuses (OSError) when ``.overseer`` is a symlink. The token itself goes to
-    a temp file in the same directory (``O_EXCL|O_NOFOLLOW``, 0600 from the
-    start) and is moved into place with ``os.replace``, which swaps the
+    a temp file in the same directory (random name via ``mkstemp``, 0600 from
+    the start) and is moved into place with ``os.replace``, which swaps the
     directory entry and never follows a symlink at the destination, so a
     planted ``remote-token`` link cannot redirect the write.
     """
@@ -85,8 +90,10 @@ def write_remote_token(
         is_link = stat.S_ISLNK(os.lstat(directory).st_mode)
     if is_link:
         raise OSError(f"{directory} is a symlink; refusing to write the exec token through it")
-    tmp = directory / f".{name}.{os.getpid()}.tmp"
-    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    # mkstemp: random name, O_EXCL (never an existing file or link), 0600; a
+    # predictable name could be pre-planted by a container to disable exec.
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{name}.", suffix=".tmp", dir=str(directory))
+    tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             os.fchmod(fh.fileno(), 0o600)

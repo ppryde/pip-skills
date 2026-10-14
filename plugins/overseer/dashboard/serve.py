@@ -295,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
     if token:
         print({
             "env": "dashboard token: from OVERSEER_DASHBOARD_TOKEN",
-            "file": f"dashboard token: {remote_token.dashboard_token_path(root)}",
+            "file": f"dashboard token (the browser needs it to edit): {remote_token.dashboard_token_path(root)}",
         }.get(dash_source, "dashboard token: generated for this run, not shown"))
     if dash_env and exec_token and not os.environ.get("OVERSEER_REMOTE_TOKEN"):
         print(
