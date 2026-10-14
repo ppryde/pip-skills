@@ -80,7 +80,7 @@ def test_write_never_follows_a_symlinked_token_path(tmp_path):
 
 def test_write_leaves_no_temp_files(tmp_path):
     write_remote_token(tmp_path, "tok-abcdefghijklmnop")
-    assert [x.name for x in remote_token_path(tmp_path).parent.iterdir()] == ["remote-token"]
+    assert sorted(x.name for x in remote_token_path(tmp_path).parent.iterdir()) == [".gitignore", "remote-token"]
 
 
 def test_server_reader_accepts_an_own_0600_file(tmp_path):
@@ -150,7 +150,7 @@ def test_write_cleans_its_temp_up_on_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(remote_token.os, "replace", boom)
     with pytest.raises(OSError):
         write_remote_token(tmp_path, "tok-abcdefghijklmnop")
-    assert list((tmp_path / ".overseer").iterdir()) == []
+    assert [x.name for x in (tmp_path / ".overseer").iterdir()] == [".gitignore"]
 
 
 def test_write_temp_is_0600_from_creation(tmp_path, monkeypatch):
@@ -188,3 +188,43 @@ def test_server_reader_opens_once_with_nofollow_and_reads_that_fd(tmp_path, monk
     monkeypatch.setattr(remote_token.Path, "read_text", no_path_read)
     assert read_server_token(tmp_path) == "tok-abcdefghijklmnop"
     assert len(flags) == 1 and flags[0] & os.O_NOFOLLOW
+
+
+_IGNORED = ("remote-token", "dashboard-token", ".*.tmp")
+
+
+def _ignore_lines(root):
+    return (root / ".overseer" / ".gitignore").read_text().splitlines()
+
+
+def test_writing_a_token_creates_a_gitignore_for_the_secret_files(tmp_path):
+    write_remote_token(tmp_path, "tok-abc")
+    assert all(line in _ignore_lines(tmp_path) for line in _IGNORED)
+
+
+def test_an_existing_gitignore_is_appended_to_never_clobbered(tmp_path):
+    (tmp_path / ".overseer").mkdir()
+    gi = tmp_path / ".overseer" / ".gitignore"
+    gi.write_text("keep-me\nremote-token\n")
+    write_remote_token(tmp_path, "t1")
+    write_remote_token(tmp_path, "t2", "dashboard-token")
+    lines = _ignore_lines(tmp_path)
+    assert lines[0] == "keep-me" and all(line in lines for line in _IGNORED)
+    assert lines.count("remote-token") == 1  # no duplicate on a rewrite
+
+
+def test_a_gitignore_without_a_trailing_newline_is_still_appended_cleanly(tmp_path):
+    (tmp_path / ".overseer").mkdir()
+    (tmp_path / ".overseer" / ".gitignore").write_text("keep-me")
+    write_remote_token(tmp_path, "t1")
+    assert _ignore_lines(tmp_path)[0] == "keep-me" and "remote-token" in _ignore_lines(tmp_path)
+
+
+def test_a_symlinked_gitignore_is_not_followed_and_the_token_is_still_written(tmp_path):
+    (tmp_path / ".overseer").mkdir()
+    target = tmp_path / "elsewhere"
+    target.write_text("untouched\n")
+    (tmp_path / ".overseer" / ".gitignore").symlink_to(target)
+    write_remote_token(tmp_path, "tok")
+    assert target.read_text() == "untouched\n"
+    assert read_remote_token(tmp_path) == "tok"
