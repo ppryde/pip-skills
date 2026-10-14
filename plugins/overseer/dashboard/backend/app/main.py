@@ -194,6 +194,16 @@ def make_require_token(token: str | None) -> Callable[..., None]:
     return require_token
 
 
+def _path_inside(path: Path, repo: Path) -> bool:
+    """True when ``path`` is, or lies under, ``repo``. Compares file IDENTITY up the
+    parent chain (macOS is case-insensitive, so a string compare misses a case
+    variant); a stat error answers True, so the caller fails closed."""
+    try:
+        return any(p.samefile(repo) for p in (path, *path.parents))
+    except OSError:
+        return True
+
+
 def make_require_exec_token(token: str | None) -> Callable[..., None]:
     """Build the FastAPI dependency that gates ``POST /api/exec``.
 
@@ -722,10 +732,11 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     # that code lives inside the repo a container can write, the container could
     # edit it and have the host run the edit: exec is off in that layout.
     _exec_code_in_repo: str | None = None
+    _cli = _OVERSEER_CLI.resolve()
     for _repo in {_pinned_root, (derive_repo_root(_pinned_root) or _pinned_root).resolve()}:
-        if _OVERSEER_CLI.resolve().is_relative_to(_repo):
+        if _path_inside(_cli, _repo):
             _exec_code_in_repo = (
-                f"the overseer plugin ({_OVERSEER_CLI.resolve().parents[1]}) lies inside the pinned repo "
+                f"the overseer plugin ({_cli.parents[1]}) lies inside the pinned repo "
                 f"{_repo}, which a container may be able to write; run the dashboard from an installed "
                 "plugin outside the repo to enable exec"
             )

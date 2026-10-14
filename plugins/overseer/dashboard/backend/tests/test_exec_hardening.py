@@ -305,3 +305,29 @@ def test_exec_stays_on_when_the_cli_is_outside_the_pinned_repo(client: TestClien
 def test_nul_in_argv_or_stdin_is_400(client: TestClient, spy: _Spy, argv: list[str], stdin: str | None) -> None:
     assert _exec(client, argv, stdin=stdin).status_code == 400
     assert spy.calls == []
+
+
+def test_a_case_variant_path_does_not_hide_the_plugin_inside_the_repo(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import main as app_main
+
+    twin = root.with_name(root.name.swapcase())
+    if not twin.exists():
+        pytest.skip("case-sensitive filesystem")
+    inside = root / "plugins" / "overseer" / "scripts" / "cli.py"
+    inside.parent.mkdir(parents=True)
+    inside.write_text("")
+    # the same file, spelled with a different case for the repo directory
+    monkeypatch.setattr(app_main, "_OVERSEER_CLI", twin / "plugins" / "overseer" / "scripts" / "cli.py")
+    client = TestClient(create_app(root, exec_token="t"))
+    res = _exec(client, ["board"])
+    assert res.status_code == 503 and "lies inside the pinned repo" in res.json()["detail"]
+
+
+def test_an_unreadable_cli_path_fails_closed(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import main as app_main
+
+    monkeypatch.setattr(app_main, "_OVERSEER_CLI", Path("/nonexistent-wf100-dir/cli.py"))  # cannot be stat'ed
+    client = TestClient(create_app(root, exec_token="t"))
+    assert _exec(client, ["board"]).status_code == 503
