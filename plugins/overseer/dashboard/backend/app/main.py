@@ -204,7 +204,7 @@ def make_require_exec_token(token: str | None) -> Callable[..., None]:
     endpoint takes itself out of service (503) rather than opening up.
     """
     def require_exec_token(x_overseer_token: str | None = Header(default=None)) -> None:
-        if token is None:
+        if not token:
             raise HTTPException(
                 status_code=503,
                 detail="exec unavailable: no exec token configured",

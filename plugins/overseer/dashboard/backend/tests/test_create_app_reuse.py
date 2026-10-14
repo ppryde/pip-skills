@@ -53,6 +53,12 @@ def test_make_require_exec_token_fails_closed_when_no_token():
 
     from app.main import make_require_exec_token
 
+    for unset in (None, ""):
+        dep = make_require_exec_token(unset)
+        for supplied in (None, "", "anything"):
+            with pytest.raises(HTTPException) as ei:
+                dep(supplied)
+            assert ei.value.status_code == 503
     dep = make_require_exec_token(None)
     for supplied in (None, "", "anything"):
         with pytest.raises(HTTPException) as ei:

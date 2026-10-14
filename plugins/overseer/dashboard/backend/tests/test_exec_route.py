@@ -184,3 +184,11 @@ def test_busy_and_size_limits_are_checked_after_auth(root: Path, spy: _Spy) -> N
     client = TestClient(create_app(root, exec_token="t"))
     big = "x" * (1024 * 1024 + 1)
     assert _exec(client, ["board"], stdin=big, headers={}).status_code == 401
+
+
+def test_empty_exec_token_fails_closed_not_open(root: Path, spy: _Spy) -> None:
+    """'' must not match an absent header (supplied or "" == token)."""
+    client = TestClient(create_app(root, exec_token=""))
+    assert _exec(client, ["board"], headers={}).status_code == 503
+    assert _exec(client, ["board"], headers={"X-Overseer-Token": ""}).status_code == 503
+    assert spy.calls == []
