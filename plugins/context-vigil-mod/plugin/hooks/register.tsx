@@ -101,6 +101,9 @@ let retryTimer: { cancel: () => void } | null = null
 // A /clear handed to the engine and not yet run: it is queued until the session is idle (R2-10),
 // so a second one must not follow it. Cleared when the command settles.
 let clearInFlight = false
+// The last API turn as the mod issued its own clear, for the handover it clears into: the engine queues
+// the clear behind the running turn, and turns that finish meanwhile must not make the handover stale.
+let issuedClear: { path: string; apiAt: number } | null = null
 let setupRun: { only: string | undefined; asked: StepId[] } | null = null
 let lastLightTimer: { cancel: () => void } | null = null
 let countdownTick: { cancel: () => void } | null = null
@@ -754,10 +757,13 @@ async function tryClearInner($: EngineInterface) {
     // The person's request ends with its clear: a save after this one is volunteered again.
     await withdrawConsent($)
     clearInFlight = true
+    const issuing = await read($, pendingA)
+    issuedClear = issuing ? { path: issuing.path, apiAt: lastApiMirror ?? now } : null
     const archived = await archiveOutgoing($)
     try {
       await $.command.run({ command: 'clear' })
     } catch {
+      issuedClear = null
       if (archived !== null) await unarchive($, archived)
       clearParked = true
       await notify($, V.clearRejected)
@@ -1307,7 +1313,9 @@ export const register: Register = on => {
     if (pending) await $.store.delete(pendingKey(session))
     const heldOnClear = returnHeldMirror?.length ? returnHeldMirror.join('\n\n') : null   // R3-02
     returnHeldMirror = null
-    const apiBefore = lastApiMirror
+    // A clear the mod issued for this handover is judged as of its issue, a manual /clear as of now (R1-10).
+    const apiBefore = issuedClear && pending && issuedClear.path === pending.path ? issuedClear.apiAt : lastApiMirror
+    issuedClear = null
     lastApiMirror = null   // the new session has run no turn
     const before = session
     session = await $.session.id()
