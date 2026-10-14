@@ -12,6 +12,7 @@ directly below to compute the launch root's OWN main-repo root, matching how
 from __future__ import annotations
 
 import hmac
+import logging
 import math
 import os
 import re
@@ -708,8 +709,15 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     # the repo's `.overseer/config.json` (a container can write it) cannot move
     # it, and the child is handed this path as OVERSEER_CENTRAL on every call.
     _pinned_root = launch_root.resolve()
-    _pinned_central = overseer_config.central_root(_pinned_root)
-    _pinned_archive = overseer_config.archive_root_of(_pinned_central)
+    _pinned_central: Path | None
+    try:
+        _pinned_central = overseer_config.central_root(_pinned_root)
+    except (ValueError, OSError) as exc:
+        # A malformed repo config must not stop the dashboard starting; exec has
+        # no board to pin, so it answers 503 instead of guessing one.
+        logging.getLogger(__name__).warning("malformed repo config; exec disabled: %s", exc)
+        _pinned_central = None
+    _pinned_archive = overseer_config.archive_root_of(_pinned_central) if _pinned_central else None
     # The dashboard is normally launched from inside a worktree (e.g.
     # `.claude/worktrees/<name>`), whose path differs from the main-repo
     # root `board.db` records as `meta['repo_root']`. Derive the MAIN repo
@@ -1150,6 +1158,8 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         Gated by make_require_exec_token, NOT make_require_token — the latter is
         inert when unconfigured and would open this to everyone.
         """
+        if _pinned_central is None:
+            raise HTTPException(status_code=503, detail="exec unavailable: pinned board could not be resolved")
         if _pinned_archive is not None:
             raise HTTPException(
                 status_code=503,

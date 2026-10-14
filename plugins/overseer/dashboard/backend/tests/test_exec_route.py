@@ -192,3 +192,18 @@ def test_empty_exec_token_fails_closed_not_open(root: Path, spy: _Spy) -> None:
     assert _exec(client, ["board"], headers={}).status_code == 503
     assert _exec(client, ["board"], headers={"X-Overseer-Token": ""}).status_code == 503
     assert spy.calls == []
+
+
+def test_malformed_repo_config_does_not_stop_the_dashboard_starting(
+    root: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.delenv("OVERSEER_CENTRAL")
+    monkeypatch.delenv("OVERSEER_DB")
+    (root / ".overseer").mkdir(exist_ok=True)
+    (root / ".overseer" / "config.json").write_text("{ not json")
+
+    client = TestClient(create_app(root, exec_token="t"))  # must not raise
+
+    assert "malformed" in caplog.text.lower() or "central" in caplog.text.lower()
+    assert _exec(client, ["board"]).status_code == 503  # exec off, nothing guessed
+    assert client.get("/api/version").status_code == 200
