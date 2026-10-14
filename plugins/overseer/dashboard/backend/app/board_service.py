@@ -209,6 +209,8 @@ def run_cli(pinned_root: Path, central: Path, req: ExecRequest) -> ExecResult:
     size = sum(len(t.encode()) for t in req.argv) + len((req.stdin or "").encode())
     if size > MAX_EXEC_BYTES:
         raise HTTPException(status_code=413, detail=f"request exceeds {MAX_EXEC_BYTES} bytes")
+    if any("\0" in tok for tok in req.argv) or "\0" in (req.stdin or ""):
+        raise HTTPException(status_code=400, detail="NUL bytes are not allowed in argv or stdin")
     argv = sanitise_argv(req.argv)
     stdin = req.stdin
     if _invoked_verb(argv) == "pretool-hook":

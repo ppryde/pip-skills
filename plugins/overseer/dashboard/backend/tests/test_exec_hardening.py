@@ -293,3 +293,15 @@ def test_exec_is_off_when_the_overseer_cli_lives_inside_the_pinned_repo(
 
 def test_exec_stays_on_when_the_cli_is_outside_the_pinned_repo(client: TestClient, spy: _Spy) -> None:
     assert _exec(client, ["board"]).status_code == 200
+
+
+# --- a NUL byte is a client error, not a 500 ----------------------------------------------------
+
+@pytest.mark.parametrize(("argv", "stdin"), [
+    (["show", "WF-1\x00"], None),
+    (["board"], "a\x00b"),
+    (["set-section", "WF-1", "--section", "Plan", "--text", "-"], "x\x00"),
+])
+def test_nul_in_argv_or_stdin_is_400(client: TestClient, spy: _Spy, argv: list[str], stdin: str | None) -> None:
+    assert _exec(client, argv, stdin=stdin).status_code == 400
+    assert spy.calls == []
