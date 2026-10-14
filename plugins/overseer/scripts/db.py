@@ -32,6 +32,10 @@ from scripts.store import derive_repo_root
 
 SCHEMA_VERSION = 2
 DB_ENV = "OVERSEER_DB"
+# Set by the dashboard when it reads an ARCHIVED board: open the file
+# `mode=ro&immutable=1` and do nothing else (no WAL, no schema, no migrate, no
+# stamp), so a read can never create or change a file in the archive folder.
+READONLY_ENV = "OVERSEER_READONLY"
 _ID_RE = _re.compile(r"\AWF-(\d+)\Z")
 
 _SCHEMA = """
@@ -298,12 +302,28 @@ def connect(repo_root: Path, *, migrate: bool = True) -> sqlite3.Connection:
     return connect_at(board_db_path(repo_root), repo_root, migrate=migrate)
 
 
+def _connect_readonly(path: Path) -> sqlite3.Connection:
+    """Open an archived board for reading only. ``immutable=1`` skips the -shm/
+    -wal machinery entirely, so nothing is created beside the file."""
+    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro&immutable=1", uri=True, timeout=5.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+        conn.close()
+        raise sqlite3.OperationalError(
+            f"{path}: board is not at schema v{SCHEMA_VERSION}; a read-only open cannot upgrade it"
+        )
+    return conn
+
+
 def connect_at(path: Path, repo_root: Path, *, migrate: bool = True) -> sqlite3.Connection:
     """Open the board file at an explicit ``path`` for ``repo_root`` — the
     same pragmas, schema, repo-identity stamp and migrations as ``connect``,
     which is this with the path resolved from the env/central layout. For the
     one caller that must NOT honour the ``OVERSEER_DB`` override: the board
     merge opens the folder ``find_boards`` resolved, by path."""
+    if os.environ.get(READONLY_ENV) == "1":
+        return _connect_readonly(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=5.0)
     conn.row_factory = sqlite3.Row

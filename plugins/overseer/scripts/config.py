@@ -18,8 +18,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import sys
 import sqlite3
+import sys
 from pathlib import Path
 
 from scripts import store
@@ -34,10 +34,14 @@ REPO_CONFIG_DIRNAME = ".overseer"
 # The ONE machine-level config file, under the primary config dir. Shared with
 # the chronicle plugin (which reads the same file with its own small loader):
 #   { "claude_dirs": ["~/.claude-personal", ...],
+#     "archive_dirs": ["~/claude-transcript-archive/backups/x", ...],
+#     "aliases": {"old-name": "~/repos/old/wayflyer"},
 #     "volumes": [{"name": "wf-state", "claude_dir": ".config/claude"}] }
 # `volumes` (Docker named volumes chronicle reads in place) and `path_map` are
-# chronicle's: overseer only ever read-modify-writes `claude_dirs`, and every
-# edit here must preserve the other keys (see `_update_claude_dirs`).
+# chronicle's. Overseer reads `claude_dirs`, `archive_dirs` (dirs holding board
+# copies that are never adopted or written) and `aliases` (repo nicknames), but
+# only ever read-modify-writes `claude_dirs`; every edit here must preserve the
+# other keys (see `_update_claude_dirs`).
 MACHINE_CONFIG_RELPATH = ("overseer", "config.json")
 
 
@@ -106,6 +110,82 @@ def claude_dirs() -> list[Path]:
         seen.add(key)
         out.append(c)
     return out
+
+
+# A claude dir whose resolved path has one of these segments is treated as an
+# archive (case-insensitive), as is any dir listed under `archive_dirs`.
+ARCHIVE_SEGMENTS = frozenset({"backup", "backups", "archive", "archives"})
+_warned_primary: set[Path] = set()
+
+
+def _resolved(p: Path) -> Path | None:
+    try:
+        return p.expanduser().resolve()
+    except OSError:
+        return None
+
+
+def archive_dirs() -> list[Path]:
+    """The machine config's `archive_dirs`, expanded and resolved (a broken
+    config or a non-list value reads as none, like `claude_dirs`)."""
+    try:
+        listed = load_machine_config().get("archive_dirs") or []
+    except ValueError:
+        return []
+    if not isinstance(listed, list):
+        return []
+    out = [_resolved(Path(str(p))) for p in listed if p]
+    return [p for p in out if p is not None]
+
+
+def is_archived(config_dir: Path) -> bool:
+    """True when `config_dir` is listed in `archive_dirs` or any segment of its
+    resolved path is `backup`/`backups`/`archive`/`archives`. The primary dir
+    (`CLAUDE_CONFIG_DIR`) is never archived: a match on it is ignored with a
+    warning."""
+    resolved = _resolved(config_dir)
+    if resolved is None:
+        return False
+    hit = resolved in archive_dirs() or any(
+        seg.lower() in ARCHIVE_SEGMENTS for seg in resolved.parts
+    )
+    if hit and resolved == _resolved(_config_dir()):
+        if resolved not in _warned_primary:
+            _warned_primary.add(resolved)
+            print(f"overseer: primary config dir {resolved} looks archived "
+                  f"(archive_dirs or a backup/archive path segment); ignoring",
+                  file=sys.stderr)
+        return False
+    return hit
+
+
+def archive_root_of(path: Path) -> Path | None:
+    """The archive dir `path` lies under: an `archive_dirs` entry, or a claude
+    dir for which `is_archived` is true; None for anything else. A path outside
+    every claude dir (a repo-local `central_dir` under a `backups` segment,
+    say) is never archived."""
+    resolved = _resolved(path)
+    if resolved is None:
+        return None
+    for a in archive_dirs():
+        if resolved.is_relative_to(a):
+            return a
+    for d in claude_dirs():
+        r = _resolved(d)
+        if r is not None and resolved.is_relative_to(r):
+            return r if is_archived(d) else None
+    return None
+
+
+def is_archived_path(path: Path) -> bool:
+    """True when `path` lies under an archive dir (see `archive_root_of`)."""
+    return archive_root_of(path) is not None
+
+
+def live_claude_dirs() -> list[Path]:
+    """`claude_dirs()` minus the archived ones: the dirs whose boards the CLI
+    may adopt and exec may target."""
+    return [d for d in claude_dirs() if not is_archived(d)]
 
 
 def _update_claude_dirs(mutate) -> list[str]:
@@ -186,7 +266,10 @@ def _plain_owner(plain: Path) -> str:
         # mis-parsed by sqlite's URI reader (an unencoded ``?`` or ``#`` would
         # be read as the query/fragment delimiter, truncating the path and
         # failing the open → a false "unknown" that wrongly adopts the folder).
-        uri = f"{db_path.resolve().as_uri()}?mode=ro"
+        # An archived board opens immutable: a plain `mode=ro` open of a WAL board
+        # creates -shm/-wal inside the archive.
+        immutable = "&immutable=1" if is_archived_path(db_path) else ""
+        uri = f"{db_path.resolve().as_uri()}?mode=ro{immutable}"
         conn = sqlite3.connect(uri, uri=True)
         try:
             row = conn.execute(
@@ -260,7 +343,7 @@ def _central_root(repo_root: Path) -> Path:
     # under that account's dir, and must be found there rather than an empty
     # twin being created under the primary. Only creation defaults to the
     # primary (the fall-through below).
-    for config_dir in claude_dirs():
+    for config_dir in live_claude_dirs():
         base = config_dir / "overseer"
         hashed = base / f"{label}-{_short_hash(canonical)}"
         if hashed.exists():

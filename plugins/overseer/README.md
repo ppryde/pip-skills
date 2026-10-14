@@ -247,6 +247,13 @@ For a session that orchestrates a card (a local marker under
 crashes: it fails closed, not open. `Read`/`Grep`/`Glob` and sessions without
 a marker stay open.
 
+Remote use (`OVERSEER_REMOTE`, a dev container reaching a host board): one
+server, port **8770**, exec token in `OVERSEER_REMOTE_TOKEN` or
+`.overseer/remote-token`. **BREAKING in 0.30.0:** the separate board API on
+port 8771 and `OVERSEER_DASHBOARD_TOKEN`-opens-exec are retired. Setup,
+migration and the threat table: `dashboard/README.md`, "Remote access from a
+dev container".
+
 Known limit: with `OVERSEER_REMOTE` set, the guard decision is forwarded to
 the host and the orchestrator marker lives on the host, so there is no local
 marker to key a deny on. If the forwarded call fails (host CLI unreachable,

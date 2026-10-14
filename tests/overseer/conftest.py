@@ -68,6 +68,16 @@ def _no_ambient_task_env(tmp_path, monkeypatch):
     monkeypatch.setenv("OVERSEER_GATES", "off")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_board_discovery():
+    """`boards.discover` caches for a few seconds; a test must never see a
+    previous test's (or its own earlier) discovery."""
+    from scripts import boards
+    boards._discover_cache_clear()
+    yield
+    boards._discover_cache_clear()
+
+
 @pytest.fixture
 def board_conn(tmp_path):
     """A fresh schema-v2 board for tests that exercise sprint/knowledge/pending

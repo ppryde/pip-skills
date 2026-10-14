@@ -37,7 +37,9 @@ const onOff = (key: 'bar' | 'auto' | 'lastLight' | 'limits', recommendOn: boolea
   return onFirst ? [on, off] : [off, on]
 }
 const always = () => true
-const WINDOW_LABEL: Record<Window, string> = { seven_day: 'Weekly (seven_day)', spend_limit: 'Spend cap (spend_limit)' }
+const WINDOW_LABEL: Record<Window, string> = {
+  seven_day: 'Weekly (seven_day)', spend_limit: 'Spend cap (spend_limit)', five_hour: 'Five-hour (five_hour)',
+}
 
 export const STEPS: Record<StepId, Step> = {
   nudge: {
@@ -62,9 +64,9 @@ export const STEPS: Record<StepId, Step> = {
     askIf: s => s.auto,
   },
   last_light: {
-    header: 'Last light', question: "When we're both idle, write a handover just before the 1-hour cache expires, so coming back is cheap?",
-    explain: 'Works only with a 1-hour prompt cache: Just before I would act I check which one your session writes, and stay off for a 5-minute cache (or if I cannot tell) rather than warm a cold one. When you and the agent are both idle, a few minutes before that cache expires I write a handover — nothing is cleared. When you come back I ask: resume from it cheaply, or carry on and pay the cold cache. Default Off.',
-    options: onOff('lastLight', false, false), askIf: always,
+    header: '🌅 Lastlight', question: "When we're both idle, write a handover just before the 1-hour cache expires, so coming back is cheap?",
+    explain: 'Works only with a 1-hour prompt cache: Just before I would act I check which one your session writes, and stay off for a 5-minute cache (or if I cannot tell) rather than warm a cold one. When you and the agent are both idle, a few minutes before that cache expires I write a handover — nothing is cleared. When you come back I ask: resume from it cheaply, or carry on and pay the cold cache. Default On.',
+    options: onOff('lastLight', true, true), askIf: always,
   },
   last_light_at: {
     header: '🌅 Min ctx %', question: 'Last light: only write the before-the-cache-expires handover when context is at least what %?',
@@ -72,21 +74,21 @@ export const STEPS: Record<StepId, Step> = {
     options: pctOpts('lastLightAt', [25, 35, 50], 25), other: pctOther('lastLightAt'), askIf: s => s.lastLight,
   },
   limits: {
-    header: '⏳ Limits', question: 'Near a 7-day or spend limit, stop early with a handover so no work is lost?',
-    explain: 'Near the limit I write a handover and arrange to resume after the reset if this session stays open. The 5-hour limit is left to Claude Code\'s own wrap-up and auto-continue. Default On.',
+    header: '⏳ Limits', question: 'Near a weekly or spend limit (or the 5-hour one, if you tick it), stop early with a handover so no work is lost?',
+    explain: 'Near the limit I write a handover and arrange to resume after the reset if this session stays open. The 5-hour limit is left to Claude Code\'s own wrap-up unless you tick it under Windows. Default On.',
     options: onOff('limits', true, true), askIf: always,
   },
   limit_pct: {
     header: '⏳ Trigger %', question: 'Stop at what % of the limit?',
-    explain: 'Higher squeezes more work in; lower leaves more room for the handover itself. Type any whole number under Other. Default 95%.',
-    options: [90, 95, 98].map(n => ({ label: n === 95 ? `95%${REC}` : `${n}%`, apply: (s: Settings) => ({ ...s, limitPct: n }) })),
+    explain: 'Higher squeezes more work in; lower leaves more room for the handover itself. Type any whole number under Other. Default 98%.',
+    options: [95, 98, 99].map(n => ({ label: n === 98 ? `98%${REC}` : `${n}%`, apply: (s: Settings) => ({ ...s, limitPct: n }) })),
     other: pctOther('limitPct'),
     askIf: s => s.limits,
   },
   limit_windows: {
     header: '⏳ Windows', question: 'Which limits should I watch?',
-    explain: 'seven_day is the weekly window; spend_limit is a gateway or monthly spend cap. Pick either or both. Default both.',
-    options: (['seven_day', 'spend_limit'] as Window[]).map(w => ({ label: WINDOW_LABEL[w], apply: (s: Settings) => s })),
+    explain: 'seven_day is the weekly window; spend_limit is a gateway or monthly spend cap; five_hour is the rolling 5-hour window. Claude Code already wraps up and auto-continues at the 5-hour limit by itself, so ticking it adds the mod\'s own handover at the trigger % on top. Pick any. Default seven_day and spend_limit.',
+    options: (['seven_day', 'spend_limit', 'five_hour'] as Window[]).map(w => ({ label: WINDOW_LABEL[w], apply: (s: Settings) => s })),
     multiSelect: true, askIf: s => s.limits,
   },
   rc: {
@@ -164,7 +166,7 @@ export function applyAnswers(s: Settings, pairs: { step: StepId; answer: string 
     if (st.multiSelect) {
       const picked = answer.split(',').map(x => x.trim()).filter(Boolean)
       if (picked.length === 0 || picked.includes(TELL)) { retell.push(step); continue }
-      const order: Window[] = ['seven_day', 'spend_limit']
+      const order: Window[] = ['seven_day', 'spend_limit', 'five_hour']
       const windows = order.filter(w => picked.includes(w) || picked.includes(WINDOW_LABEL[w]))
       // An "Other" naming no window would store "watch nothing": re-ask instead.
       if (windows.length === 0) { retell.push(step); continue }

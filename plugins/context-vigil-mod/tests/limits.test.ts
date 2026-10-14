@@ -49,8 +49,10 @@ describe('earlyStopDue', () => {
     expect(due).toEqual({ kind: 'seven_day', key: `seven_day:${iso(T + 1000)}`, pct: 96, resetsAtMs: T + 1000 })
     expect(earlyStopDue([seven], s, [due?.key ?? ''])).toBe(null)
   })
-  test('five_hour is never watched; unwatched windows are ignored', () => {
-    expect(earlyStopDue([{ kind: 'five_hour', percentUsed: 99, resetsAt: iso(T) }], s, [])).toBe(null)
+  test('five_hour is watched only when selected; unwatched windows are ignored', () => {
+    const five = { kind: 'five_hour', percentUsed: 99, resetsAt: iso(T + 500) }
+    expect(earlyStopDue([five], s, [])).toBe(null)
+    expect(earlyStopDue([five], { ...s, limitWindows: ['five_hour' as const] }, [])).toEqual({ kind: 'five_hour', key: `five_hour:${iso(T + 500)}`, pct: 99, resetsAtMs: T + 500 })
     expect(earlyStopDue([seven], { ...s, limitWindows: ['spend_limit'] }, [])).toBe(null)
   })
   test('limits off or below the trigger: nothing', () => {

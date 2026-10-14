@@ -1,4 +1,4 @@
-export type Window = 'seven_day' | 'spend_limit'
+export type Window = 'seven_day' | 'spend_limit' | 'five_hour'
 export type RcAnswer = 'unanswered' | 'yes' | 'no'
 
 // The values an override may set, field by field (core/overrides.ts); settings hold the fallbacks.

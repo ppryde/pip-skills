@@ -12,22 +12,34 @@ directly below to compute the launch root's OWN main-repo root, matching how
 from __future__ import annotations
 
 import hmac
+import logging
 import math
 import os
 import re
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
+from starlette.responses import Response
 
+from app.board_service import (
+    _OVERSEER_CLI,
+    ExecRequest,
+    ExecResult,
+    _is_lan_client,
+    check_exec_limits,
+    check_repo_label,
+    resolve_exec_board,
+    run_cli,
+)
 from app.cli_client import (
     CliError,
     almoner_installed,
@@ -39,6 +51,7 @@ from app.cli_client import (
     run_chronicle,
     run_overseer,
     run_vigil,
+    set_archived_boards,
     watched_account_profiles,
 )
 
@@ -51,6 +64,9 @@ if str(_OVERSEER_ROOT) not in sys.path:
     sys.path.insert(0, str(_OVERSEER_ROOT))
 
 # Both must follow the sys.path setup above.
+from scripts import boards as overseer_boards
+from scripts import config as overseer_config
+from scripts import db as overseer_db
 from scripts.dashboard_record import plugin_version
 from scripts.store import derive_repo_label, derive_repo_root
 
@@ -187,6 +203,40 @@ def make_require_token(token: str | None) -> Callable[..., None]:
             raise HTTPException(status_code=401, detail="missing or invalid dashboard token")
 
     return require_token
+
+
+def _path_inside(path: Path, repo: Path) -> bool:
+    """True when ``path`` is, or lies under, ``repo``. Compares file IDENTITY up the
+    parent chain (macOS is case-insensitive, so a string compare misses a case
+    variant); a stat error answers True, so the caller fails closed."""
+    try:
+        return any(p.samefile(repo) for p in (path, *path.parents))
+    except OSError:
+        return True
+
+
+def make_require_exec_token(token: str | None) -> Callable[..., None]:
+    """Build the FastAPI dependency that gates ``POST /api/exec``.
+
+    UNLIKE ``make_require_token``, this has NO inert mode. The dashboard's gate
+    is deliberately inactive when no token is configured, because loopback board
+    reads are meant to be open. ``/api/exec`` runs arbitrary overseer verbs on
+    the host, so "no token configured" must mean "refuse everyone". A served app
+    always has an exec token; ``None`` here means misconfiguration, and the
+    endpoint takes itself out of service (503) rather than opening up.
+    """
+    def require_exec_token(x_overseer_token: str | None = Header(default=None)) -> None:
+        if not token:
+            raise HTTPException(
+                status_code=503,
+                detail="exec unavailable: no exec token configured",
+            )
+        supplied = x_overseer_token or ""
+        # bytes, not str: compare_digest raises TypeError on a non-ASCII str (a 500).
+        if not hmac.compare_digest(supplied.encode(), token.encode()):
+            raise HTTPException(status_code=401, detail="missing or invalid exec token")
+
+    return require_exec_token
 
 
 def _context_pct(root: Path) -> int | None:
@@ -444,7 +494,14 @@ def _discover_roots(launch_root: Path) -> list[dict[str, Any]]:
         data = run_overseer(launch_root, "repos", "--json", json_out=True)
     except CliError:
         return []
-    return data if isinstance(data, list) else []
+    if not isinstance(data, list):
+        return []
+    set_archived_boards({
+        Path(e["root"]).resolve(): e["board_dir"]
+        for e in data
+        if isinstance(e, dict) and e.get("archived") and e.get("root") and e.get("board_dir")
+    })
+    return data
 
 
 # The last non-empty answer from `_chronicle_roots`, reused when a later call
@@ -515,7 +572,7 @@ def _accounts() -> list[dict[str, Any]]:
 
 
 def _resolve_root(launch_root: Path, default_root: Path, requested: str | None,
-                  also_allowed: set[Path] | None = None) -> Path:
+                  also_allowed: set[Path] | None = None, *, mutating: bool = False) -> Path:
     """Resolve the effective repo root for a request, VALIDATING a
     client-supplied ``root`` against the ``repos`` discovery allowlist
     before it is ever used to shell the CLI.
@@ -540,18 +597,30 @@ def _resolve_root(launch_root: Path, default_root: Path, requested: str | None,
     the allowlist check entirely. Client-supplied roots always go through
     validation above; only the omitted-root default changes here.
     """
+    entries: list[dict[str, Any]] = []
     if requested is None:
-        return default_root
-    candidate = Path(requested).resolve()
-    allowed = {
-        Path(entry["root"]).resolve()
-        for entry in _discover_roots(launch_root)
-        if isinstance(entry, dict) and entry.get("root")
-    }
-    allowed |= also_allowed or set()
-    if candidate not in allowed:
-        raise HTTPException(status_code=400, detail=f"unknown root: {requested!r}")
-    return candidate
+        effective = default_root
+    else:
+        candidate = Path(requested).resolve()
+        entries = [e for e in _discover_roots(launch_root) if isinstance(e, dict) and e.get("root")]
+        allowed = {Path(entry["root"]).resolve() for entry in entries}
+        allowed |= also_allowed or set()
+        if candidate not in allowed:
+            raise HTTPException(status_code=400, detail=f"unknown root: {requested!r}")
+        effective = candidate
+    if mutating:
+        # Decide on the EFFECTIVE board, not just the entry flag: a launch root
+        # (the omitted-root default bypasses the allowlist) whose `central_dir`
+        # points into an archive is read-only too.
+        entry = next((e for e in entries if Path(e["root"]).resolve() == effective), None)
+        central = (
+            os.environ.get("OVERSEER_CENTRAL")
+            or (entry or {}).get("board_dir")
+            or str(overseer_config.central_root(effective))
+        )
+        if (entry and entry.get("archived")) or overseer_config.is_archived_path(Path(central)):
+            raise HTTPException(status_code=403, detail="archived board is read-only")
+    return effective
 
 
 def _board_response(root: Path) -> dict[str, Any]:
@@ -614,7 +683,8 @@ def _is_loopback(host: str) -> bool:
 
 
 def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = None,
-               token: str | None = None, mount_frontend: bool = True) -> FastAPI:
+               token: str | None = None, mount_frontend: bool = True,
+               exec_token: str | None = None) -> FastAPI:
     app = FastAPI(title="overseer dashboard")
     launch_root = root
     launch_host = host
@@ -641,7 +711,51 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
 
+    @app.middleware("http")
+    async def _lan_only(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """Never answer a non-LAN caller, on ANY route, before auth or routing.
+
+        Registered last, so it is the outermost layer. A missing client address
+        is refused too (`_is_lan_client(None)` is False)."""
+        client = request.client.host if request.client else None
+        if not _is_lan_client(client):
+            return JSONResponse(status_code=403, content={"detail": "non-LAN caller refused"})
+        return await call_next(request)
+
     require_token = make_require_token(token)
+    require_exec_token = make_require_exec_token(exec_token)
+    # The board `/api/exec` runs against, fixed ONCE at start: a later edit to
+    # the repo's `.overseer/config.json` (a container can write it) cannot move
+    # it, and the child is handed this path as OVERSEER_CENTRAL on every call.
+    _pinned_root = launch_root.resolve()
+    _pinned_central: Path | None
+    try:
+        _pinned_central = overseer_config.central_root(_pinned_root)
+    except (ValueError, OSError) as exc:
+        # A malformed repo config must not stop the dashboard starting; exec has
+        # no board to pin, so it answers 503 instead of guessing one.
+        logging.getLogger(__name__).warning("malformed repo config; exec disabled: %s", exc)
+        _pinned_central = None
+    _pinned_archive = overseer_config.archive_root_of(_pinned_central) if _pinned_central else None
+    # The exec child runs `<plugin>/scripts/cli.py` (and the sibling vigil CLI). If
+    # that code lives inside the repo a container can write, the container could
+    # edit it and have the host run the edit: exec is off in that layout.
+    def _cli_inside(root: Path, what: str) -> str | None:
+        cli = _OVERSEER_CLI.resolve()
+        for repo in {root, (derive_repo_root(root) or root).resolve()}:
+            if _path_inside(cli, repo):
+                return (
+                    f"the overseer plugin ({cli.parents[1]}) lies inside the {what} {repo}, "
+                    "which a container may be able to write; run the dashboard from an installed "
+                    "plugin outside the repo to enable exec"
+                )
+        return None
+
+    _exec_code_in_repo = _cli_inside(_pinned_root, "pinned repo")
+    if _exec_code_in_repo is not None:
+        logging.getLogger(__name__).warning("exec disabled: %s", _exec_code_in_repo)
     # The dashboard is normally launched from inside a worktree (e.g.
     # `.claude/worktrees/<name>`), whose path differs from the main-repo
     # root `board.db` records as `meta['repo_root']`. Derive the MAIN repo
@@ -703,6 +817,10 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
                 continue
             root = Path(entry["root"]).resolve()
             item = dict(entry)
+            if item.get("archived"):
+                # The frontend shows `label` verbatim and keys on `root`, so the
+                # mark rides in the label: no frontend change.
+                item["label"] = f"{item['label']} [archived]"
             item["current"] = root == _derived_launch_root
             item["has_board"] = True
             item["live_sessions"] = int(census.get(root, {}).get("live", 0))
@@ -775,7 +893,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     def create_card(body: CreateBody, root: str | None = None) -> dict[str, Any]:
         if not body.title.strip():
             raise HTTPException(status_code=400, detail="title cannot be empty")
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
         args = ["new-card", "--title", body.title]
         if body.complexity:
             args += ["--complexity", body.complexity]
@@ -805,7 +923,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             raise HTTPException(status_code=400, detail="title or body required")
         if body.title is not None and not body.title.strip():
             raise HTTPException(status_code=400, detail="title cannot be empty")
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -820,7 +938,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/order", dependencies=[Depends(require_token)])
     def set_order(card_id: str, body: OrderBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -839,7 +957,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         leaves `updated` alone, since ordering records a preference rather
         than work (see `cmd_reorder`).
         """
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             if not body.ids:
@@ -852,7 +970,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/priority", dependencies=[Depends(require_token)])
     def set_priority(card_id: str, body: PriorityBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -866,7 +984,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         sent = body.model_fields_set
         if not sent:
             raise HTTPException(status_code=400, detail="nothing to set")
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -883,7 +1001,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/labels", dependencies=[Depends(require_token)])
     def set_labels(card_id: str, body: LabelsBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -893,7 +1011,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/parent", dependencies=[Depends(require_token)])
     def set_parent(card_id: str, body: ParentBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -908,7 +1026,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     def set_depends(card_id: str, body: DependsBody, root: str | None = None) -> dict[str, Any]:
         if body.on is None and body.off is None:
             raise HTTPException(status_code=400, detail="on or off required")
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -925,7 +1043,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/park", dependencies=[Depends(require_token)])
     def park_card(card_id: str, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -935,7 +1053,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/pull-children", dependencies=[Depends(require_token)])
     def pull_children(card_id: str, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -945,7 +1063,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/unpark", dependencies=[Depends(require_token)])
     def unpark_card(card_id: str, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -958,7 +1076,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         session_id = body.session_id
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id required")
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -968,7 +1086,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/card/{card_id}/unclaim", dependencies=[Depends(require_token)])
     def unclaim_card(card_id: str, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             check_id(card_id)
@@ -989,7 +1107,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         ACTUAL resulting status; it does not fake-honor a requested
         planned-vs-in-flight distinction.
         """
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         if body.stage is not None:
             force: list[str] = []
@@ -1028,7 +1146,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/config/threshold", dependencies=[Depends(require_token)])
     def set_threshold(body: ThresholdBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             run_vigil(effective, "config", "set", "context.threshold", str(body.value))
@@ -1040,7 +1158,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         name = body.name.strip()
         if not name:
             raise HTTPException(status_code=400, detail="label name required")
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root, mutating=True)
 
         def do() -> None:
             if body.color:
@@ -1061,7 +1179,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
                 detail=("destructive clear is disabled on a non-loopback bind; relaunch with "
                         "--host 127.0.0.1 or set OVERSEER_DASHBOARD_ALLOW_REMOTE_DESTRUCTIVE=1"),
             )
-        effective = _resolve_root(launch_root, _derived_launch_root, body.root)
+        effective = _resolve_root(launch_root, _derived_launch_root, body.root, mutating=True)
         try:
             return run_overseer(
                 effective, "clear", "--scope", body.scope, "--yes", "--json",
@@ -1069,6 +1187,54 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             )
         except CliError as exc:
             raise _mutation_error(exc) from exc
+
+    @app.post("/api/exec", dependencies=[Depends(require_exec_token)])
+    def exec_cli(req: ExecRequest) -> ExecResult:
+        """Token-gated passthrough: run the real overseer CLI on this host
+        against the pinned board and relay stdout/stderr/exit code.
+
+        Gated by make_require_exec_token, NOT make_require_token — the latter is
+        inert when unconfigured and would open this to everyone.
+        """
+        if req.repo is not None:
+            return _exec_labelled(req)
+        if _pinned_central is None:
+            raise HTTPException(status_code=503, detail="exec unavailable: pinned board could not be resolved")
+        if _exec_code_in_repo is not None:
+            raise HTTPException(status_code=503, detail=f"exec unavailable: {_exec_code_in_repo}")
+        if _pinned_archive is not None:
+            raise HTTPException(
+                status_code=503,
+                detail=(f"pinned board is in archive dir {_pinned_archive}; "
+                        "exec without a repo label is disabled"),
+            )
+        return run_cli(_pinned_root, _pinned_central, req)
+
+    def _exec_labelled(req: ExecRequest) -> ExecResult:
+        """A `repo` label picks any watched LIVE board on the machine. The host
+        resolves it against discovery; the child is handed that root and board,
+        so it cannot re-derive a different one. No fallback to the pinned board."""
+        assert req.repo is not None
+        if _exec_code_in_repo is not None:  # the CLI sits in a repo a container may write
+            raise HTTPException(status_code=503, detail=f"exec unavailable: {_exec_code_in_repo}")
+        check_exec_limits(req)
+        check_repo_label(req.repo)
+        pinned_by = [v for v in (overseer_config.CENTRAL_ENV, overseer_db.DB_ENV) if os.environ.get(v)]
+        if pinned_by:
+            raise HTTPException(
+                status_code=409,
+                detail=f"repo selection unavailable: server pinned by {' and '.join(pinned_by)}",
+            )
+        live = [e for e in overseer_boards.discover() if not e["archived"]]
+        try:
+            aliases = overseer_config.load_machine_config().get("aliases")
+        except ValueError:
+            aliases = None
+        target_root, target_board = resolve_exec_board(req.repo, live, aliases)
+        inside = _cli_inside(target_root, "target repo")
+        if inside is not None:
+            raise HTTPException(status_code=503, detail=f"exec unavailable: {inside}")
+        return run_cli(target_root, target_board, req)
 
     # One chronicle sync at a time per server process (see chronicle_sync);
     # on `app.state` so tests can hold it.
