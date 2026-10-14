@@ -163,7 +163,7 @@ export const L = {
   wRemove: "Remove this account's status line (census-mod draws it instead)",
   wKeep: "Keep my status line; census-mod won't record",
   wBoth: 'Keep both (not recommended)',
-  presetTwo: 'Your two lines',
+  presetTwo: 'Full — two lines',
   presetCompact: 'Compact — one line',
   presetMinimal: 'Minimal — context, limits / git',
   budget10: '$10',
