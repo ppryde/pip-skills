@@ -142,8 +142,18 @@ export function instructionText(reason: PendingReason): string {
     '(goal, state, decisions, next step, open questions, failed attempts, any new standing orders, session name). Earlier standing orders are carried forward for you: give only new standing orders, and retire one only by naming it. Do nothing else this turn.'
 }
 
-export function resumeText(path: string): string {
-  return `[context-vigil-mod] Resume from the handover injected above (saved at ${path}). Start with its next step.`
+// Prompts the person sent while the handover was being written: carried verbatim, answered first.
+export const SENT_MAX = 10
+export function sentSection(sent: readonly string[] | undefined): string {
+  if (!sent?.length) return ''
+  return `## Sent during handover\n\nThe person sent ${sent.length === 1 ? 'this' : 'these'} while the handover was being written, so the handover does not cover ${sent.length === 1 ? 'it' : 'them'}. Answer ${sent.length === 1 ? 'it' : 'them'} first:\n\n` +
+    sent.map(t => t.split('\n').map(l => `> ${l}`).join('\n')).join('\n\n')
+}
+
+export function resumeText(path: string, sent?: readonly string[]): string {
+  const base = `[context-vigil-mod] Resume from the handover injected above (saved at ${path}). Start with its next step.`
+  const extra = sentSection(sent)
+  return extra ? `[context-vigil-mod] Resume from the handover injected above (saved at ${path}).\n\n${extra}\n\nThen continue with the handover's next step.` : base
 }
 
 export function injectText(markdown: string): string {

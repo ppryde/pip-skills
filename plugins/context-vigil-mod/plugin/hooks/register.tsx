@@ -10,7 +10,7 @@ import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, recor
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, GIT_DIR_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
-import { INPUT_SCHEMA, mergeStanding, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
+import { INPUT_SCHEMA, SENT_MAX, mergeStanding, sentSection, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 import { HOME_VARS_CHECKED } from '../core/home'
 import { TITLE_CMD, archiveName, isArchived, lastTitle } from '../core/title'
 import { TAIL_CMD, type CacheTtl, cacheLinesFromText, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
@@ -48,6 +48,8 @@ const consentA = atom({ plugin: 'context-vigil-mod', key: 'consent' } as const, 
 const lastApiA = atom({ plugin: 'context-vigil-mod', key: 'lastApiAt' } as const, null)
 const awaitingA = atom({ plugin: 'context-vigil-mod', key: 'awaiting' } as const, null as Awaiting | null)
 const deferredA = atom({ plugin: 'context-vigil-mod', key: 'deferred' } as const, null as Awaiting | null)
+// Prompts the person sent since the handover was asked for and before its tool call (WF-303).
+const sentDuringA = atom({ plugin: 'context-vigil-mod', key: 'sentDuring' } as const, [] as string[])
 const handoverCountA = atom({ plugin: 'context-vigil-mod', key: 'handoverCount' } as const, 0)
 // The phone facts of `activity`, written through so a hot reload (which keeps $.state) restores
 // them; a clear wipes this, so the clear branch writes it again from the module copy.
@@ -198,6 +200,20 @@ function standingNote(o: ReturnType<typeof mergeStanding>): string {
     o.warning ?? '',
   ].filter(Boolean)
   return parts.length ? `. ${parts.join(' ')}` : ''
+}
+
+// WF-303: a prompt from the person while a handover is being written (asked for, or saved and not yet
+// cleared) is kept verbatim for the resume. Slash commands are not prompts to answer.
+async function recordSent($: EngineInterface, text: string) {
+  if (standDown || !text.trim() || text.trimStart().startsWith('/')) return
+  if (await read($, awaitingA)) {
+    await update($, sentDuringA, l => (l.length < SENT_MAX ? [...l, text] : l))
+    return
+  }
+  const pending = await read($, pendingA)
+  if (pending?.resume && (pending.reason === 'threshold' || pending.reason === 'request') && (pending.sent?.length ?? 0) < SENT_MAX) {
+    await savePending($, { ...pending, sent: [...(pending.sent ?? []), text] })
+  }
 }
 
 function resumeSoon($: EngineInterface, prompt: { text: string; asUser?: true }, path: string | null, held: string | null) {
@@ -658,6 +674,7 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
     return 'reused'
   }
   if (pending) await supersedePending($)
+  await update($, sentDuringA, () => [])   // the handover starts now: only prompts after this count
   await update($, awaitingA, () => ({ reason, resume, attempts: 1, started: false, unattended, since: now }))
   await log($, 'handover.requested', { reason, resume })
   submitInstruction($, reason)
@@ -1325,7 +1342,9 @@ export const register: Register = on => {
     // (no turn since it was written) and no latch (R1-10); otherwise a notice says why not.
     let stale = false
     let noResume = false
-    if (follow) resumeSoon($, { text: follow, asUser: true }, pending.path, follow)
+    let sentCarried = false   // the resume message holds the prompts sent during the handover
+    const sentBlock = sentSection(pending.sent)
+    if (follow) { sentCarried = sentBlock !== ''; resumeSoon($, { text: sentBlock ? `${follow}\n\n${sentBlock}` : follow, asUser: true }, pending.path, follow) }
     else if (pending.resume) {
       if (!fresh(pending, apiBefore, await nowMs($))) {
         stale = true
@@ -1333,7 +1352,7 @@ export const register: Register = on => {
       } else if (await readLatch($)) {
         await notify($, V.resumeLatched(pending.path))
         await log($, 'guard.wait', { reason: 'latched', deferred: 'resume' })
-      } else resumeSoon($, { text: resumeText(pending.path) }, pending.path, null)
+      } else { sentCarried = sentBlock !== ''; resumeSoon($, { text: resumeText(pending.path, pending.sent) }, pending.path, null) }
     } else {
       // R2-17: a handover that carries no automatic resume (a limit or last-light one) is still
       // injected on a manual /clear; never silently.
@@ -1341,7 +1360,7 @@ export const register: Register = on => {
       noResume = true
     }
     await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null, ...(stale ? { stale: true } : {}), ...(noResume ? { noResume: true } : {}) })
-    return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown)] }
+    return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown) + (sentBlock && !sentCarried ? `\n\n${sentBlock}` : '')] }
   })
 
   on('classic.StopFailure', async ($, e, next) => {
@@ -1391,6 +1410,7 @@ export const register: Register = on => {
         $.clock.after(0, () => { void giveConsent($).then(() => startHandover($, 'request', true)).catch(err => timerFailed($, 'handover-request', err)) })
         return { drop: V.handoverRequested }
       }
+      await recordSent($, e.text)
     }
     return next(e)
   })
@@ -1595,6 +1615,8 @@ export const register: Register = on => {
     while (await $.fs.exists(handoverPath(at, session, n)).catch(() => false)) n++
     await update($, handoverCountA, () => n)
     const path = handoverPath(at, session, n)
+    const sent = await read($, sentDuringA)
+    await update($, sentDuringA, () => [])
     const now = await nowMs($)
     // Standing orders: the chain's earlier list is carried forward by the mod; the model only adds and retires.
     const prevStanding = ((await $.store.get(standingKey(session)).catch(() => null)) as string[] | null | undefined) ?? []
@@ -1620,7 +1642,7 @@ export const register: Register = on => {
     const live = await read($, pendingA)
     const shield = !requested && live !== null && live.resume && reusable(live, await read($, lastApiA), now)
     try {
-      if (!shield) await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now, unattended: asked?.unattended ?? false })
+      if (!shield) await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now, unattended: asked?.unattended ?? false, ...(sent.length ? { sent } : {}) })
     } catch (err) {
       // R2-15: the file is written but the store refused it: say so, clear nothing.
       await notify($, V.handoverFailed)

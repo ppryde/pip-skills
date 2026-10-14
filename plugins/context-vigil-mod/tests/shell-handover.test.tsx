@@ -1182,3 +1182,54 @@ test('a handover with no standing orders at all renders no such section', async 
   await handOver(w, $, {}, 's2')
   expect(w.files.get('/cfg/context-vigil-mod/handovers/s1-1.md')).not.toContain('Standing orders')
 })
+
+// WF-303: a prompt sent while the handover is written is carried into the resume.
+test('prompts sent during the handover, before and after the save, reach the resume verbatim', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.prompt.submit(human('add a card for the above\nas a priority'))   // while the model writes it
+  await $.tool.call(call() as never)
+  await $.prompt.submit(human('and also check the tests'))                  // saved, not yet cleared
+  await $.prompt.submit(human('/help'))                                     // a command is not a prompt to answer
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  const text = w.submits.at(-1)?.text ?? ''
+  expect(text).toContain('Resume from the handover')
+  expect(text).toContain('## Sent during handover')
+  expect(text).toContain('> add a card for the above\n> as a priority')
+  expect(text).toContain('> and also check the tests')
+  expect(text).not.toContain('/help')
+})
+
+test('the handover request itself and plugin prompts are not "sent during handover"', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hello'))
+  await $.prompt.submit(human('do a handover'))   // dropped: it is the request
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).not.toContain('Sent during handover')
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
+test('a prompt from before the handover started is not carried', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('before it all'))
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).not.toContain('before it all')
+})
