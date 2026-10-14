@@ -66,8 +66,8 @@ for 10 minutes first, so other sessions starting at the same moment stay
 quiet (two starting within the same instant can still both ask); closing it
 without answering lets a session started after those 10 minutes ask again. **Install** builds the helper and installs it into Default and
 every profile VS Code's storage lists: a window loads only its own profile's
-extensions, and one without the helper is invisible to the roster (and
-answers the link with "cannot be installed because it was not found").
+extensions, and one without the helper is invisible to the roster, which is
+never sent the link for it and opens the session in Terminal.app instead.
 `/roster setup-vscode` runs the same install any time (after a new profile, or
 after "Never"); by hand it is `sh plugins/agent-roster/plugin/vscode/build.sh install
 [profile…]`.
@@ -86,7 +86,7 @@ control Terminal.
 ## Killing a session
 
 Each row but the session the pane runs in, and those still at a startup
-prompt, has a **kill** button (click it in
+prompt or carrying a note (another account, agents view), has a **kill** button (click it in
 fullscreen, or Tab to it and Enter). The first press only arms the row:
 **confirm kill** or **cancel**. From the phone, or anywhere a pane is not to
 hand, `/roster kill <tmux-name|pid>`; a tmux name held on two tmux servers is
@@ -99,7 +99,7 @@ A session in its own tmux session is ended with `tmux kill-session`, so no
 orphaned shell pane is left. The socket is found by matching the session's pid
 against each server's pane pids (the default server first, then any server
 under `/tmp/tmux-<uid>/`), never by name alone. Otherwise the session gets
-SIGTERM, which can leave a shell pane behind: when it shares a tmux session
+SIGTERM (`kill <pid>`; on Windows `taskkill /PID <pid> /F`), which can leave a shell pane behind: when it shares a tmux session
 with the one the command or pane runs in (by pane or by name), when no tmux
 server shows its pid, or when it runs outside tmux. The session the command or
 pane runs in is always refused.
@@ -214,13 +214,14 @@ else `HOMEDRIVE`+`HOMEPATH`), `ROSTER_CONFIG_DIRS` takes `;`-separated drive pat
 only if PowerShell (`Get-CimInstance Win32_Process`) shows a process whose command line is Claude's own (`claude.exe`, or claude-code's entrypoint: a
 bare `node.exe` or `bun.exe` is not enough); if PowerShell cannot be asked, the registry rows are trusted for display. `/roster kill` runs
 `taskkill /PID <pid> /F` only when that command line matches AND the process's creation time agrees with the registry's `startedAt`; otherwise
-it refuses and ends nothing. tmux, `ps` and `id` do not exist there, so the stray-pane sweep and the VS Code helper and its offer are skipped
+it refuses and ends nothing. tmux, `ps` and `id` do not exist there, so the stray-pane sweep and the VS Code helper offer are skipped
 without a message; `/roster open` is unsupported and answers that the session is outside tmux.
 A session that Claude Code did not register is therefore not listed on Windows.
 
 ## Limits and development
 
-- Read-only: it cannot switch you into another session or tmux pane.
+- It cannot switch you into another session or tmux pane; it reads the registry and acts only on open and kill.
+- `open` needs tmux and macOS: it uses `open` and `osascript`, so on Linux it can only report that it could not open the session.
 - The registry and transcript formats are Claude Code internals, not a
   published API; a release can move them.
 - Tests live beside `plugin/`, in `plugins/agent-roster/tests/`, so they do not ship; run them with `claude plugin test plugins/agent-roster` (or `bash tests/run-mods.sh agent-roster`).
