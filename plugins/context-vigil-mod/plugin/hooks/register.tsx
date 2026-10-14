@@ -1609,8 +1609,8 @@ export const register: Register = on => {
     const requested = asked !== null
     const reason = asked?.reason ?? 'request'
     const resume = asked?.resume ?? false
-    await update($, awaitingA, () => null)
-    await update($, handoverMentionedA, () => false)   // spent by any valid call, asked for or not
+    // Nothing about the request is spent until the file is written: a call that fails before then
+    // leaves it asked for, so the retry still clears.
     // No config dir known: a handover written anywhere else would be lost or misplaced; save nothing.
     const at = root
     if (!at) {
@@ -1620,7 +1620,6 @@ export const register: Register = on => {
     // The count lives in $.state and a restart or --resume starts it at 0: skip files already on disk (R1-18).
     let n = (await read($, handoverCountA)) + 1
     while (await $.fs.exists(handoverPath(at, session, n)).catch(() => false)) n++
-    await update($, handoverCountA, () => n)
     const path = handoverPath(at, session, n)
     const sent = await read($, sentDuringA)   // cleared once the save succeeds, so a retry keeps them
     const now = await nowMs($)
@@ -1647,6 +1646,9 @@ export const register: Register = on => {
       await log($, 'guard.wait', { reason: 'write-failed', path, error: String(err) })
       return { result: `Handover not saved: writing ${path} failed (${String(err)}). Nothing was cleared; tell the person.` } as never
     }
+    await update($, awaitingA, () => null)
+    await update($, handoverMentionedA, () => false)   // spent by any valid call, asked for or not
+    await update($, handoverCountA, () => n)
     try {
       await $.store.set(standingKey(session), orders.items)
     } catch (err) {

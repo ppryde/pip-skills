@@ -1339,3 +1339,37 @@ test('an abandoned handover forgets the prompts sent during it', async ($, on) =
   await w.clock.settle()
   expect(w.state.get('context-vigil-mod.sentDuring')).toEqual([])
 })
+
+// Review r3: a call that fails before the file is written leaves the request asked for.
+test('an auto-threshold handover whose standing read is refused still clears on the retry', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await autoHandoverInFlight($, w)
+  w.storeGetRefused.value = true
+  const first = await $.tool.call(call() as never)
+  w.storeGetRefused.value = false
+  expect(String((first as { result?: unknown }).result)).toContain('not saved')
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  await w.clock.advance(60_000)
+  expect(w.commands).toContain('clear')
+})
+
+test('an auto-threshold handover whose file write fails still clears on the retry', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await autoHandoverInFlight($, w)
+  w.handoverWriteRefused.value = true
+  await $.tool.call(call() as never)
+  w.handoverWriteRefused.value = false
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  await w.clock.advance(60_000)
+  expect(w.commands).toContain('clear')
+})
+
+test('retiring X retires the exact X before a quoted "X"', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await handOver(w, $, { standing: '"X"\nX' }, 's2')
+  await handOver(w, $, { standing_retire: 'X' }, 's3')
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s2-1.md')).toContain('## Standing orders\n\n- "X"\n')
+})
