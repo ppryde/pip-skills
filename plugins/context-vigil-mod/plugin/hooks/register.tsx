@@ -1625,15 +1625,14 @@ export const register: Register = on => {
     const sent = await read($, sentDuringA)   // cleared once the save succeeds, so a retry keeps them
     const now = await nowMs($)
     // Standing orders: the chain's earlier list is carried forward by the mod; the model only adds and retires.
-    // An unreadable list is not an empty one: save the handover with the new items only and leave the stored list alone.
+    // An unreadable list is not an empty one: refuse the save (nothing written) so the retry carries it all.
     let prevStanding: string[] = []
-    let standingReadable = true
     try {
       const got = (await $.store.get(standingKey(session))) as unknown
       if (Array.isArray(got)) prevStanding = got as string[]
     } catch (err) {
-      standingReadable = false
       await log($, 'guard.wait', { reason: 'standing-read-failed', error: String(err) })
+      return { result: `Handover not saved: the standing orders could not be read (${String(err)}). Nothing was written or cleared; call ${TOOL_FULL} again with the same content.` } as never
     }
     const orders = mergeStanding(prevStanding, parsed.fields.standing, parsed.fields.standing_retire)
     const retireLog = [...orders.retired.map(r => `- retired: ${r}`), ...orders.unmatched.map(r => `- not found, nothing retired: ${r}`)].join('\n')
@@ -1649,7 +1648,7 @@ export const register: Register = on => {
       return { result: `Handover not saved: writing ${path} failed (${String(err)}). Nothing was cleared; tell the person.` } as never
     }
     try {
-      if (standingReadable) await $.store.set(standingKey(session), orders.items)
+      await $.store.set(standingKey(session), orders.items)
     } catch (err) {
       await log($, 'guard.wait', { reason: 'standing-store-failed', error: String(err) })
     }
@@ -1675,7 +1674,7 @@ export const register: Register = on => {
     }
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
     if (reason === 'threshold' || reason === 'request') scheduleClear($, asked?.unattended ?? false)
-    return { result: `Saved handover to ${path}${standingNote(orders)}${standingReadable ? '' : ' Your earlier standing orders could not be read, so only the new standing orders were saved in this handover; the stored list is untouched.'}` } as never
+    return { result: `Saved handover to ${path}${standingNote(orders)}` } as never
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

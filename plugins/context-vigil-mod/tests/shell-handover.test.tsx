@@ -1271,18 +1271,44 @@ test('an item written with quotes can be retired by naming it with or without th
   expect(md).toContain('- retired: `code` rule')
 })
 
-test('an unreadable standing list is never overwritten: the handover still saves and the model is told', async ($, on) => {
+test('an unreadable standing list refuses the save; the retry keeps old and new items across the next handover', async ($, on) => {
   const w = world(on, { store: { 'standing:s1': ['Old rule'] } })
   await $.session.start(START)
   await $.command.run(vho)
   await w.clock.settle()
   w.storeGetRefused.value = true
   const res = await $.tool.call(call({ standing: 'New rule' }) as never)
-  const r = String((res as { result?: unknown }).result)
   w.storeGetRefused.value = false
-  expect(r).toContain('Saved handover')
-  expect(r).toContain('standing orders')
+  expect(String((res as { result?: unknown }).result)).toContain('again with the same content')
+  expect([...w.files.keys()].some(k => k.includes('/handovers/'))).toBe(false)
   expect(w.store.get('standing:s1')).toEqual(['Old rule'])
+  await $.tool.call(call({ standing: 'New rule' }) as never)
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  await handOver(w, $, {}, 's3')
+  const md = w.files.get('/cfg/context-vigil-mod/handovers/s2-1.md') ?? ''
+  expect(md).toContain('- Old rule\n- New rule')
+})
+
+test('an item stored with its quotes can be retired by the bare name', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await handOver(w, $, { standing: '"Never X"' }, 's2')
+  await handOver(w, $, { standing_retire: 'Never X' }, 's3')
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s2-1.md')).toContain('- retired: "Never X"')
+})
+
+test('an awaiting handover that expired forgets the prompts sent during it', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.prompt.submit(human('sent before expiry'))
+  await w.clock.advance(11 * MIN)
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.state.get('context-vigil-mod.sentDuring')).toEqual([])
 })
 
 test('a failed save keeps the prompts sent during the handover for the retry', async ($, on) => {

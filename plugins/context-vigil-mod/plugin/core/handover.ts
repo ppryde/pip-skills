@@ -103,7 +103,7 @@ export function mergeStanding(prev: string[], added: string, retire: string): { 
   const unmatched: string[] = []
   for (const r of lines(retire, false)) {
     const bare = r.replace(QUOTES, '').trim()
-    const at = items.findIndex(i => norm(i) === norm(r) || norm(i) === norm(bare))
+    const at = items.findIndex(i => norm(i) === norm(r) || norm(i) === norm(bare) || norm(i.replace(QUOTES, '')) === norm(bare))
     if (at < 0) { unmatched.push(r); continue }
     retired.push(items[at]!)
     items.splice(at, 1)
