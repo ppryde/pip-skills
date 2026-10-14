@@ -17,16 +17,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from scripts import bundle, config, gitops
+from scripts.remote import RemoteResult
 from scripts.store import derive_repo_root
 
 RECORD_VERSION = 1
-Call = Callable[[list[str], "str | None"], "RemoteResultLike"]
-
-
-class RemoteResultLike:  # structural stand-in for scripts.remote.RemoteResult
-    stdout: str
-    stderr: str
-    returncode: int
+Call = Callable[[list[str], "str | None"], RemoteResult]
 
 
 class _Stop(Exception):
@@ -51,7 +46,7 @@ def _is_skew(text: str) -> bool:
     return "invalid choice" in text or "not permitted" in text
 
 
-def _call(call: Call, argv: list[str], stdin: str | None, verb: str) -> RemoteResultLike:
+def _call(call: Call, argv: list[str], stdin: str | None, verb: str) -> RemoteResult:
     """One host call. Transport errors surface as RemoteError to the caller; an older
     host (no such verb) becomes the skew message."""
     from scripts.remote import RemoteError
@@ -66,12 +61,12 @@ def _call(call: Call, argv: list[str], stdin: str | None, verb: str) -> RemoteRe
     return res
 
 
-def _relay(res: RemoteResultLike) -> None:
+def _relay(res: RemoteResult) -> None:
     if res.stderr:
         sys.stderr.write(res.stderr)
 
 
-def _record(res: RemoteResultLike, verb: str) -> dict:
+def _record(res: RemoteResult, verb: str) -> dict:
     try:
         data = json.loads(res.stdout)
     except ValueError:
@@ -162,9 +157,6 @@ def _bootstrap(call: Call, args: argparse.Namespace, root: Path) -> int:
     begun = _record(res, "bootstrap-begin")
     card_id, branch = begun["id"], begun["branch"]
     path = gitops_path(main_root, card_id, root)
-    if not path.resolve().is_relative_to(main_root.resolve()):
-        print(f"warning: worktree {path} is outside the mounted repo and will not survive this "
-              "container; set worktree_dir in .overseer/config.json", file=sys.stderr)
     base = gitops.base_ref(main_root)
     _add_or_adopt(main_root, path, branch, base, card_id)
     finish = ["bootstrap-finish", card_id, "--branch", branch, "--worktree", str(path),

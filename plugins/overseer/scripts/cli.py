@@ -664,7 +664,7 @@ def _brief_gate_problems(args: argparse.Namespace) -> "tuple[list[str], bool]":
     return problems, True
 
 
-def _bootstrap_begin(args: argparse.Namespace) -> "tuple[Card, str | None] | int":
+def _bootstrap_begin(args: argparse.Namespace) -> tuple[Card, str | None] | int:
     """The git-free first half of ``bootstrap``: argument checks, the brief gate
     dry run, the card (created or loaded) and its move to stage ``bootstrap``.
     Returns the card and the --force-gate reason, or an exit code when it refused (nothing was created)."""
@@ -700,8 +700,8 @@ def _bootstrap_branch(args: argparse.Namespace, card: Card) -> str:
 
 
 def _bootstrap_record(
-    args: argparse.Namespace, card_id: str, branch: str, path: "Path | str", brief: "str | None",
-    force: "str | None", *, check: bool = False,
+    args: argparse.Namespace, card_id: str, branch: str, path: Path | str, brief: str | None,
+    force: str | None, *, check: bool = False,
 ) -> Card:
     """The second transaction of ``bootstrap``: branch, worktree, the S-card
     plan and the move out of ``bootstrap``. ``check`` (bootstrap-finish, which
@@ -1671,7 +1671,7 @@ def cmd_log_review(args: argparse.Namespace) -> int:
 _DISPATCH_REFUSED = -1
 
 
-def _dispatch_validate(args: argparse.Namespace) -> "int | None":
+def _dispatch_validate(args: argparse.Namespace) -> int | None:
     """The side-effect-free pre-checks of ``dispatch-prep`` / ``dispatch-record``
     (one function so the local and the remote path cannot drift). Returns the
     effective chunk, or ``-1`` after printing why the call is refused."""
@@ -1698,8 +1698,8 @@ def _dispatch_validate(args: argparse.Namespace) -> "int | None":
 
 
 def _dispatch_board(
-    args: argparse.Namespace, chunk: "int | None",
-) -> "tuple[Card, list[nextstep.Slot], list[int]]":
+    args: argparse.Namespace, chunk: int | None,
+) -> tuple[Card, list[nextstep.Slot], list[int]]:
     """The board half of a dispatch: the optional ``--advance``, the dispatch
     gates, the panel's slots and the ``dispatched`` evidence rows."""
     force = _force_reason(args)
@@ -2959,7 +2959,7 @@ def _inline_file_option(argv: list[str]) -> tuple[list[str], str | None]:
 
 
 def _run_remote_git(url: str, raw_argv: list[str], root: Path, verb: str,
-                    repo: "str | None", token: "str | None") -> int:
+                    repo: str | None, token: str | None) -> int:
     """``bootstrap`` / ``dispatch-prep`` under --remote: git runs here, in the
     container; the host only gets the git-free board verbs (scripts/remote_git.py)."""
     from scripts import remote, remote_git
@@ -2969,8 +2969,8 @@ def _run_remote_git(url: str, raw_argv: list[str], root: Path, verb: str,
         print(f"warning: OVERSEER_REMOTE_REPO is '{repo}' but this checkout is '{local}'",
               file=sys.stderr)
 
-    def call(argv: list[str], stdin: "str | None") -> "remote.RemoteResult":
-        return remote.exec_remote(url, token, argv, stdin, **({} if repo is None else {"repo": repo}))
+    def call(argv: list[str], stdin: str | None) -> remote.RemoteResult:
+        return remote.exec_remote(url, token, argv, stdin, repo=repo)
 
     flow = remote_git.bootstrap if verb == "bootstrap" else remote_git.dispatch_prep
     try:

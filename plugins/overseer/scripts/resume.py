@@ -29,8 +29,8 @@ def _branch_exists(repo_root: Path, branch: str | None) -> bool:
 
 
 def _entry(repo_root: Path, card: Card, cards: list[Card], remote_client: bool = False) -> dict:
-    worktree_exists: "bool | None"
-    branch_exists: "bool | None"
+    worktree_exists: bool | None
+    branch_exists: bool | None
     if remote_client:
         # The host cannot see the container's worktrees or branches: None, not False,
         # so nothing reads "unchecked" as "missing".

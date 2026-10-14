@@ -158,11 +158,6 @@ def test_remote_bootstrap_creates_the_worktree_in_the_container(m: Machines, cap
     assert not Path(m.container_env["OVERSEER_DB"]).exists()  # no board in the container
 
 
-def test_remote_bootstrap_warns_when_the_worktree_is_outside_the_repo(m: Machines, capsys) -> None:
-    assert m.run("bootstrap", "--title", "T") == 0
-    assert "outside the mounted repo" in capsys.readouterr().err
-
-
 # --- (b) reviewer dispatch-prep -------------------------------------------------------
 
 def test_remote_reviewer_dispatch_writes_the_diff_from_the_container_worktree(m: Machines) -> None:
