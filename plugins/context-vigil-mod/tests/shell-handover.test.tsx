@@ -1373,3 +1373,43 @@ test('retiring X retires the exact X before a quoted "X"', async ($, on) => {
   await handOver(w, $, { standing_retire: 'X' }, 's3')
   expect(w.files.get('/cfg/context-vigil-mod/handovers/s2-1.md')).toContain('## Standing orders\n\n- "X"\n')
 })
+
+test('a clear the mod issued is judged when issued: a turn finishing while it is queued does not make the resume stale', async ($, on) => {
+  const w = world(on)
+  w.clearHold.held = true
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(w.commands).toContain('clear')           // issued, queued behind the running turn
+  await w.clock.advance(2 * MIN)
+  await $.turn.complete(turn('kept working'))     // lands more than 60 s after the write
+  w.clearHold.release()
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  w.notices.length = 0
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+  expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(false)
+})
+
+test('a manual /clear of a handover with a later turn is still stale, even after a refused clear of the mod', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  await w.clock.advance(2 * MIN)
+  await $.turn.complete(turn('later'))
+  w.sessionId.value = 's2'
+  w.submits.length = 0
+  w.notices.length = 0
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.some(s => s.text.includes('Resume from the handover'))).toBe(false)
+  expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(true)
+})
