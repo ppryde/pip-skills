@@ -19,6 +19,7 @@ import stat
 from pathlib import Path
 
 _TOKEN_FILENAME = "remote-token"
+DASHBOARD_TOKEN_FILENAME = "dashboard-token"
 
 
 def remote_token_path(root: str | os.PathLike[str]) -> Path:
@@ -38,7 +39,7 @@ def read_remote_token(root: str | os.PathLike[str]) -> str | None:
     return token or None
 
 
-def read_server_token(root: str | os.PathLike[str]) -> str | None:
+def read_server_token(root: str | os.PathLike[str], name: str = _TOKEN_FILENAME) -> str | None:
     """The persisted token for ``root`` if it is safe for the SERVER to trust.
 
     None when ``.overseer`` or the token file is a symlink, the file is not
@@ -46,7 +47,7 @@ def read_server_token(root: str | os.PathLike[str]) -> str | None:
     write to a rw-mounted ``.overseer``, so a token it planted is not a secret
     the host created; the caller re-mints instead of using it.
     """
-    path = remote_token_path(root)
+    path = Path(root) / ".overseer" / name
     try:
         if stat.S_ISLNK(os.lstat(path.parent).st_mode):
             return None
@@ -55,11 +56,19 @@ def read_server_token(root: str | os.PathLike[str]) -> str | None:
             return None
     except OSError:
         return None
-    return read_remote_token(root)
+    try:
+        return path.read_text(encoding="utf-8").strip() or None
+    except (OSError, UnicodeDecodeError):
+        return None
 
 
-def write_remote_token(root: str | os.PathLike[str], token: str) -> Path:
+def write_remote_token(
+    root: str | os.PathLike[str], token: str, name: str = _TOKEN_FILENAME
+) -> Path:
     """Persist ``token`` at ``<root>/.overseer/remote-token`` with mode 0600.
+
+    ``name`` selects another secret file in the same directory (the dashboard
+    token has its own: the two secrets never share a file).
 
     Refuses (OSError) when ``.overseer`` is a symlink. The token itself goes to
     a temp file in the same directory (``O_EXCL|O_NOFOLLOW``, 0600 from the
@@ -67,8 +76,8 @@ def write_remote_token(root: str | os.PathLike[str], token: str) -> Path:
     directory entry and never follows a symlink at the destination, so a
     planted ``remote-token`` link cannot redirect the write.
     """
-    path = remote_token_path(root)
-    directory = path.parent
+    directory = Path(root) / ".overseer"
+    path = directory / name
     try:
         is_link = stat.S_ISLNK(os.lstat(directory).st_mode)
     except FileNotFoundError:
@@ -76,7 +85,7 @@ def write_remote_token(root: str | os.PathLike[str], token: str) -> Path:
         is_link = stat.S_ISLNK(os.lstat(directory).st_mode)
     if is_link:
         raise OSError(f"{directory} is a symlink; refusing to write the exec token through it")
-    tmp = directory / f".remote-token.{os.getpid()}.tmp"
+    tmp = directory / f".{name}.{os.getpid()}.tmp"
     fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -87,3 +96,8 @@ def write_remote_token(root: str | os.PathLike[str], token: str) -> Path:
         tmp.unlink(missing_ok=True)
         raise
     return path
+
+
+def dashboard_token_path(root: str | os.PathLike[str]) -> Path:
+    """Path to the dashboard-gate token file: ``<root>/.overseer/dashboard-token``."""
+    return Path(root) / ".overseer" / DASHBOARD_TOKEN_FILENAME

@@ -178,7 +178,7 @@ container forward to the host board. Interactive verbs (`clear`) must pass
 |---|---|
 | `OVERSEER_REMOTE=http://host:8771` | `http://host:8770`; port 8771 is retired |
 | `OVERSEER_DASHBOARD_TOKEN` opened exec | it never does; exec uses `OVERSEER_REMOTE_TOKEN` or `.overseer/remote-token` |
-| token printed at launch | never printed; read the file |
+| token printed at launch | never printed; exec token in `.overseer/remote-token`, a minted dashboard token (non-loopback only) in `.overseer/dashboard-token` |
 | Tailscale reachable | refused (the guard is LAN-only, see below) |
 | archived board copies reachable | `archive_dirs` (and `backup`/`archive` path segments) are never exec targets; the dashboard shows them as `[archived]`, read-only |
 | a repo with boards in two live accounts | the first-listed account's board wins; `overseer merge-boards` on the host is the cure |
@@ -199,10 +199,14 @@ of bind; no override) and, for `/api/exec`, the **exec token**. GET routes are
 not token-gated, so on a `0.0.0.0` bind any LAN device can read boards. The
 dashboard's own mutation gate is separate from the exec token: unarmed on a
 loopback bind, armed on any other bind or whenever `OVERSEER_DASHBOARD_TOKEN`
-is set, with its **own** token (the browser UI asks for it and stores it).
-`OVERSEER_REMOTE_TOKEN` never arms it, and the dashboard token never opens
-exec. If you bind off loopback, set `OVERSEER_DASHBOARD_TOKEN` yourself: a
-generated one is not shown. `/api/repo/clear` stays refused off loopback
+is set, with its **own** token (the browser UI asks for it once and stores it).
+Without the env var, a non-loopback bind mints that token into its own file,
+`<root>/.overseer/dashboard-token` (`0600`, same hardened writer as the exec
+token, reused across restarts while trusted); the launcher prints the file's
+**path**, never the token, so paste its contents into the UI. Set
+`OVERSEER_DASHBOARD_TOKEN` to choose one instead (no file is written).
+`OVERSEER_REMOTE_TOKEN` never arms the gate, and the dashboard token never
+opens exec; the two secrets live in separate files. `/api/repo/clear` stays refused off loopback
 without `OVERSEER_DASHBOARD_ALLOW_REMOTE_DESTRUCTIVE=1`, and exec denies
 `clear`. Never expose this server beyond your LAN.
 
@@ -213,6 +217,7 @@ without `OVERSEER_DASHBOARD_ALLOW_REMOTE_DESTRUCTIVE=1`, and exec denies
 | Host path options | `--file`, `--text-file`, `--brief-file` (prefix, and `=` forms): 403 | the client inlines `--file`/`--text-file` as stdin before sending |
 | Git | No git in container-writable trees except the hardened lookups (`rev-parse --git-common-dir`, `rev-parse --verify`: hooks and fsmonitor off, `GIT_CONFIG_*`/`GIT_SSH*` dropped, never touching index or worktree) | an AST scan pins which files may call git |
 | Child process | Board pinned to the one the host chose (`OVERSEER_CENTRAL`); env stripped of `OVERSEER_REMOTE*`, `OVERSEER_DASHBOARD_TOKEN` and anything named `*TOKEN*`/`*SECRET*`/`*KEY*`/`*PASSWORD*`, `AWS_`/`GH_`/`GITHUB_` (keeping `CENSUS_`/`CHRONICLE_`) | 1 MiB body cap, 4 concurrent children (busy 503), 30 s timeout, NUL in argv or stdin 400 |
+| Dashboard token | Env, else a minted `0600` file `.overseer/dashboard-token` (non-loopback binds only); a symlinked `.overseer` is refused (the run then uses an unreadable in-memory token) | never printed, separate from the exec token |
 | Token | Fail-closed: no token configured means `503` for everyone; a wrong or non-ASCII header is `401`; env token at least 16 chars and non-empty | independent of the dashboard token |
 | LAN guard | Private, loopback, link-local (IPv6: ULA, mapped and 6to4 judged by the embedded IPv4) pass | **CGNAT `100.64.0.0/10` and Tailscale addresses are refused, on purpose**; use a Tailscale-reachable bind behind your own ACLs, or change the guard deliberately |
 | Archives | Never an exec target, never adopted by the CLI; the dashboard opens them read-only (`mode=ro&immutable=1`) and every POST on one is `403` | see residual 3 |

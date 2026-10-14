@@ -567,3 +567,68 @@ def test_served_app_answers_exec_with_the_token(_clean_tokens, monkeypatch, tmp_
     assert r.status_code == 401  # armed: 503 would mean serve.py never passed the token
     r = client.post("/api/exec", json={"argv": ["board"]}, headers={"X-Overseer-Token": "wrong" * 5})
     assert r.status_code == 401
+
+
+# --- WF-100 C7b: a minted dashboard token lives in its own 0600 file ----------
+
+
+def _dash_path(root: Path) -> Path:
+    return root / ".overseer" / "dashboard-token"
+
+
+def test_non_loopback_mints_dashboard_token_file_0600(_clean_tokens, monkeypatch, tmp_path) -> None:
+    seen = _served(monkeypatch, tmp_path, ["--host", "0.0.0.0"])
+    p = _dash_path(tmp_path)
+    assert p.read_text() == seen["token"] and len(seen["token"]) >= 16
+    assert stat.S_IMODE(p.stat().st_mode) == 0o600
+
+
+def test_dashboard_token_file_differs_from_exec_token_and_is_reused(
+    _clean_tokens, monkeypatch, tmp_path
+) -> None:
+    first = _served(monkeypatch, tmp_path, ["--host", "0.0.0.0"])
+    assert first["token"] != first["exec_token"]
+    assert _dash_path(tmp_path).read_text() != (tmp_path / ".overseer" / "remote-token").read_text()
+    second = _served(monkeypatch, tmp_path, ["--host", "0.0.0.0"])
+    assert second["token"] == first["token"]  # stable across restarts
+
+
+def test_dashboard_token_path_printed_value_never(_clean_tokens, monkeypatch, tmp_path, capsys) -> None:
+    seen = _served(monkeypatch, tmp_path, ["--host", "0.0.0.0"])
+    out = capsys.readouterr()
+    assert str(_dash_path(tmp_path)) in out.out
+    assert seen["token"] not in out.out + out.err
+
+
+def test_env_dashboard_token_writes_no_file(_clean_tokens, monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("OVERSEER_DASHBOARD_TOKEN", "dash-" + LONG)
+    seen = _served(monkeypatch, tmp_path, ["--host", "0.0.0.0"])
+    assert seen["token"] == "dash-" + LONG
+    assert not _dash_path(tmp_path).exists()
+
+
+def test_loopback_writes_no_dashboard_file(_clean_tokens, monkeypatch, tmp_path) -> None:
+    seen = _served(monkeypatch, tmp_path)
+    assert seen["token"] is None and not _dash_path(tmp_path).exists()
+
+
+def test_symlinked_overseer_dir_refused_for_dashboard_token(
+    _clean_tokens, monkeypatch, tmp_path
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".overseer").symlink_to(elsewhere)
+    with pytest.raises(OSError):
+        serve.resolve_dashboard_token("0.0.0.0", root)
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_wide_dashboard_token_file_is_reminted(_clean_tokens, tmp_path) -> None:
+    p = _dash_path(tmp_path)
+    p.parent.mkdir(parents=True)
+    p.write_text("w" * 24)
+    p.chmod(0o644)
+    tok, src = serve.resolve_dashboard_token("0.0.0.0", tmp_path)
+    assert tok != "w" * 24 and src == "file" and stat.S_IMODE(p.stat().st_mode) == 0o600

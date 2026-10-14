@@ -58,6 +58,30 @@ class TokenError(ValueError):
     """An operator-supplied token that must not be used."""
 
 
+def resolve_dashboard_token(host: str, root: Path) -> tuple[str | None, str]:
+    """The dashboard gate token and its source: ``"env"``, ``"file"`` or ``"none"``.
+
+    ``OVERSEER_DASHBOARD_TOKEN`` wins and writes nothing. On a non-loopback
+    bind without it, a token is minted into its OWN file,
+    ``<root>/.overseer/dashboard-token`` (0600, hardened writer, reused while
+    trusted) so the user can paste it into the UI once; it is never printed
+    and never shares a file with the exec token. A symlinked ``.overseer``
+    raises OSError. Loopback without the env var: no gate.
+    """
+    env = os.environ.get("OVERSEER_DASHBOARD_TOKEN")
+    if env:
+        return env, "env"
+    if host in LOOPBACK_HOSTS:
+        return None, "none"
+    name = remote_token.DASHBOARD_TOKEN_FILENAME
+    existing = remote_token.read_server_token(root, name)
+    if existing and len(existing) >= MIN_TOKEN_LEN:
+        return existing, "file"
+    token = secrets.token_urlsafe(24)
+    remote_token.write_remote_token(root, token, name)
+    return token, "file"
+
+
 def resolve_token(host: str) -> str | None:
     """The DASHBOARD gate token in effect for this bind, or None (gate off).
 
@@ -254,7 +278,14 @@ def main(argv: list[str] | None = None) -> int:
     if refusal:
         print(refusal, file=sys.stderr)
         return 1
-    token = resolve_token(args.host)
+    dash_source = "none"
+    try:
+        token, dash_source = resolve_dashboard_token(args.host, root)
+    except OSError as exc:
+        # Gate stays armed on a non-loopback bind: fall back to an in-memory
+        # token nobody can read rather than serving mutations open.
+        print(f"dashboard token not persisted ({exc}); using one for this run only", file=sys.stderr)
+        token = resolve_token(args.host)
     app = create_app(root, host=args.host, token=token, exec_token=exec_token)
     url = f"http://{args.host}:{args.port}/"
     print(f"overseer dashboard serving {root} at {url}")
@@ -262,8 +293,10 @@ def main(argv: list[str] | None = None) -> int:
     print(exec_note)
     dash_env = bool(os.environ.get("OVERSEER_DASHBOARD_TOKEN"))
     if token:
-        print("dashboard token: from OVERSEER_DASHBOARD_TOKEN" if dash_env
-              else "dashboard token: generated for this run, not shown")
+        print({
+            "env": "dashboard token: from OVERSEER_DASHBOARD_TOKEN",
+            "file": f"dashboard token: {remote_token.dashboard_token_path(root)}",
+        }.get(dash_source, "dashboard token: generated for this run, not shown"))
     if dash_env and exec_token and not os.environ.get("OVERSEER_REMOTE_TOKEN"):
         print(
             "note: OVERSEER_DASHBOARD_TOKEN does not open exec; exec uses a "
