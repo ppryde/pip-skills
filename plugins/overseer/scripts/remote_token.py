@@ -67,6 +67,26 @@ def read_server_token(root: str | os.PathLike[str], name: str = _TOKEN_FILENAME)
         return None
 
 
+_IGNORED = ("remote-token", "dashboard-token", ".*.tmp")
+
+
+def _ensure_gitignore(directory: Path) -> None:
+    """Make sure ``.overseer/.gitignore`` lists the secret files, so a
+    ``git add -A`` in the user's repo cannot commit a token. Appends only the
+    missing lines, never rewrites, never follows a symlink; best effort."""
+    path = directory / ".gitignore"
+    try:
+        fd = os.open(str(path), os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(fd, "r+", encoding="utf-8") as fh:
+            fh.seek(0)
+            text = fh.read()
+            missing = [line for line in _IGNORED if line not in text.splitlines()]
+            if missing:
+                fh.write(("" if not text or text.endswith("\n") else "\n") + "\n".join(missing) + "\n")
+    except (OSError, UnicodeDecodeError):
+        return
+
+
 def write_remote_token(
     root: str | os.PathLike[str], token: str, name: str = _TOKEN_FILENAME
 ) -> Path:
@@ -90,6 +110,7 @@ def write_remote_token(
         is_link = stat.S_ISLNK(os.lstat(directory).st_mode)
     if is_link:
         raise OSError(f"{directory} is a symlink; refusing to write the exec token through it")
+    _ensure_gitignore(directory)
     # mkstemp: random name, O_EXCL (never an existing file or link), 0600; a
     # predictable name could be pre-planted by a container to disable exec.
     fd, tmp_name = tempfile.mkstemp(prefix=f".{name}.", suffix=".tmp", dir=str(directory))
