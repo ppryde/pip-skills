@@ -56,11 +56,11 @@ Set these with `/vigil-setup`. They are stored per account and apply to every se
 | Auto (`auto`) | Off | Hands over and clears by itself while you are away. |
 | Idle window (`idleMin`) | `30` (min) | How long you must be idle before auto mode may clear. Setup offers 15, 30 or 60. |
 | Remote Control auto-clear (`rcAutoClear`) | follows `auto` | Whether auto may clear when your last message came from the phone. |
-| Last light (`lastLight`) | Off | Writes a handover, never clears, before the 1-hour cache lapses. |
+| Last light (`lastLight`) | On (recommended) | Writes a handover, never clears, before the 1-hour cache lapses. |
 | Last light at (`lastLightAt`) | `25` (%) | Lowest context % where last light writes. |
 | Limits (`limits`) | On | Early stop before a rate limit. |
-| Limit trigger (`limitPct`) | `95` (%) | Window use where early stop fires. |
-| Limit windows (`limitWindows`) | `seven_day`, `spend_limit` | Windows early stop watches. |
+| Limit trigger (`limitPct`) | `98` (%) | Window use where early stop fires. Setup offers 95, 98 (recommended) and 99, or any number. |
+| Limit windows (`limitWindows`) | `seven_day` (weekly), `spend_limit` (spend cap) | Windows early stop watches. `five_hour` is opt-in and unticked: Claude Code already wraps up and auto-continues at that limit, and ticking it adds the mod's own handover at the trigger % on top. |
 
 Default override: a 200k window uses a nudge at 70%.
 

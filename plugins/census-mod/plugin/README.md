@@ -34,6 +34,7 @@ It is a mod, so it acts on events and costs about nothing when idle. It is stand
 | Command | What it does | Example |
 |---|---|---|
 | `/census-setup` | Guided setup: record, draw, layout, PR lookup. Dialogs only; nothing goes to the model. | `/census-setup` |
+| `/census-setup budget` | Jumps straight to the Budget question. | `/census-setup budget` |
 | `/census-setup off` | Stops recording and drawing. Puts a removed status line back if settings still have none. | `/census-setup off` |
 | `/census-mod:pr-refresh` | Asks `gh` once for this branch's open PR and records it. Does not turn `gh` on. | `/census-mod:pr-refresh` |
 
@@ -44,8 +45,9 @@ Answers from `/census-setup` are stored per account. An environment variable bea
 | Setting | Default | What it changes |
 |---|---|---|
 | Record (setup answer) | Yes if your status line does not already record | Records sessions into the census store. |
+| Budget (setup answer) | `$20` (recommended) | Main-session cost budget the 💸 bar fills to. Asked only when the status line is drawn. Options: `$10`, `$20` (recommended), `$50`, `$100` or any amount. |
 | Draw (setup answer) | above the input | Draws the status line: `above`, `below`, or off. |
-| Layout (setup answer) | your two lines | `compact` (one line) or `minimal`. |
+| Layout (setup answer) | Full, two lines | `compact` (one line) or `minimal`. |
 | PR lookup (setup answer) | No | Lets the mod call `gh pr list`. PRs the session itself opens still show. |
 | `CENSUS_MOD_STORE` | unset | Records to this census dir instead (shadow mode). Forces shadow. |
 | `CENSUS_STORE` | `<config dir>/census` | Census dir for the recorder. `~` expands. |
@@ -53,7 +55,7 @@ Answers from `/census-setup` are stored per account. An environment variable bea
 | `CENSUS_MOD_PR_HINT` | unset | `1` confirms a grey PR from the prompt hint. |
 | `CENSUS_STATUSLINE_SEGMENTS` | `context,cache,limits,cost/model,git,dir,changes,pr` | Segments. `,` joins on a line, `/` starts the next. |
 | `CENSUS_STATUSLINE_MASCOT` | bold `✻` in `#D97757` | Mascot string, drawn as given. |
-| `CLAUDE_COST_BUDGET` | unset | Cost budget read by the cost segment. |
+| `CLAUDE_COST_BUDGET` | unset | Cost budget. Overrides the Budget answer. |
 | `CLAUDE_PROFILE` | unset | `personal`, `home` or `p` means a personal account; any other value means work. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | The account's config dir. |
 

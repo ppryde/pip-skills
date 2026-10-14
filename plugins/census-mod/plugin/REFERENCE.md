@@ -65,8 +65,9 @@ continue anyway (two writers on one store: a warning, not a ban). Then:
    rewritten atomically with every other key kept; invalid JSON is never edited), keep the
    status line and not record, or keep both. The shared status-line script and the census
    launcher are never touched.
-4. **Layout** (band on): your two lines (the default), compact (one line), or minimal.
+4. **Layout** (band on): Full, two lines (the default), compact (one line), or minimal.
 5. **PR**: also look the branch's PR up with `gh` (review state, PRs opened elsewhere). **No is the default and the recommended answer**: `gh` is never called on its own; the PR segment still follows PRs the session itself creates, readies, closes or merges (see "PR state from events"), and `/census-mod:pr-refresh` asks `gh` once when you want it. An install that already answered Yes keeps Yes (nothing is migrated).
+6. **Budget** (only when the status line is drawn): the main-session cost budget the 💸 bar fills to. Options are $10, $20 (recommended), $50, $100 or any amount. `CLAUDE_COST_BUDGET` in the environment still overrides the answer. `/census-setup budget` jumps straight to this question.
 
 `/census-setup off` (or answering No to record and band) stops recording and drawing and puts
 a removed status line back exactly, but only if `settings.json` has no status line now (or
@@ -218,7 +219,7 @@ gray, `yellowBright`, `#ff8700` for orange).
 
 ## Shadow mode
 
-Set `CENSUS_MOD_STORE` to a census dir (e.g. `~/.claude-personal/census-shadow`) and the
+Set `CENSUS_MOD_STORE` to a census dir (e.g. `~/.claude/census-shadow`) and the
 mod records there instead: the bundled ingest runs with `CENSUS_STORE` set to it,
 and the shadow dir gets its own `cli.path`, `limits/` and sweep. Compare the two views
 with `census read` against each dir, then cut over: unset `CENSUS_MOD_STORE` and remove
