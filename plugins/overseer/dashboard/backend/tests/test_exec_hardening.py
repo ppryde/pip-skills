@@ -217,17 +217,21 @@ def test_the_exec_child_environment_is_hardened(client: TestClient, spy: _Spy) -
     assert env["GIT_TERMINAL_PROMPT"] == "0" and env["GIT_CONFIG_NOSYSTEM"] == "1"
 
 
-def test_a_preexisting_git_config_count_is_kept_by_the_child_env(
+def test_inherited_git_config_never_reaches_the_child(
     client: TestClient, spy: _Spy, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
-    monkeypatch.setenv("GIT_CONFIG_KEY_0", "user.name")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "keep")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "http.extraheader")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "Authorization: bearer s3cret")
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'core.fsmonitor'='/tmp/trap'")
+    monkeypatch.setenv("GIT_DIR", "/elsewhere")
+    monkeypatch.setenv("GIT_SSH_COMMAND", "evil")
     _exec(client, ["board"])
     env = spy.calls[0]["env"]
-    assert env["GIT_CONFIG_COUNT"] == "3"
-    # GIT_CONFIG_KEY_0 looks secret-shaped ("KEY") but must survive with its COUNT and VALUE
-    assert (env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]) == ("user.name", "keep")
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "core.hooksPath" and env["GIT_CONFIG_KEY_1"] == "core.fsmonitor"
+    assert not {"GIT_CONFIG_PARAMETERS", "GIT_DIR", "GIT_SSH_COMMAND"} & set(env)
+    assert "s3cret" not in " ".join(env.values())
 
 
 # --- the booby-trapped repo: nothing fires in what is still reachable -------------------------

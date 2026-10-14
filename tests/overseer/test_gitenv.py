@@ -35,20 +35,43 @@ def test_hardened_env_turns_off_hooks_and_fsmonitor_and_prompts():
     assert env["KEEP"] == "me" and env["PATH"] == "/bin"
 
 
-def test_hardened_env_appends_after_an_existing_config_count():
-    base = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "user.name", "GIT_CONFIG_VALUE_0": "x"}
+def test_hardened_env_drops_inherited_git_config_and_starts_at_zero():
+    base = {
+        "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraheader",
+        "GIT_CONFIG_VALUE_0": "Authorization: bearer s3cret",
+        "GIT_CONFIG_PARAMETERS": "'core.fsmonitor'='/tmp/trap'",
+        "GIT_CONFIG_GLOBAL": "/tmp/g", "PATH": "/bin",
+    }
     env = gitenv.hardened_git_env(base)
-    assert env["GIT_CONFIG_COUNT"] == "3"
-    assert _pairs(env) == [
-        ("user.name", "x"), ("core.hooksPath", os.devnull), ("core.fsmonitor", "false"),
-    ]
+    assert _pairs(env) == [("core.hooksPath", os.devnull), ("core.fsmonitor", "false")]
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert not {"GIT_CONFIG_PARAMETERS", "GIT_CONFIG_GLOBAL"} & set(env)
+    assert "s3cret" not in " ".join(env.values())
+    assert env["PATH"] == "/bin"
     assert base["GIT_CONFIG_COUNT"] == "1"  # the input is not mutated
 
 
-@pytest.mark.parametrize("bad", ["", "abc", "-3", "1.5"])
-def test_hardened_env_survives_a_garbage_config_count(bad):
+@pytest.mark.parametrize("name", [
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_EXEC_PATH", "GIT_SSH", "GIT_SSH_COMMAND",
+    "GIT_ASKPASS", "GIT_PAGER", "GIT_EDITOR", "GIT_EXTERNAL_DIFF", "GIT_PROXY_COMMAND",
+    "GIT_TEMPLATE_DIR", "GIT_INDEX_FILE",
+])
+def test_hardened_env_drops_git_execution_variables(name):
+    assert name not in gitenv.hardened_git_env({name: "/x", "KEEP": "1"})
+
+
+def test_an_inherited_config_parameters_cannot_override_the_pins(trapped):
+    repo, fired = trapped
+    trap = fired.parent / "trap.sh"
+    env = gitenv.hardened_git_env({**os.environ, "GIT_CONFIG_PARAMETERS": f"'core.fsmonitor'='{trap}'"})
+    subprocess.run(["git", "status"], cwd=repo, capture_output=True, env=env, check=False)
+    assert not fired.exists()
+
+
+@pytest.mark.parametrize("bad", ["", "abc", "-3", "1.5", " 2 ", "1_0"])
+def test_a_garbage_inherited_count_is_irrelevant(bad):
     env = gitenv.hardened_git_env({"GIT_CONFIG_COUNT": bad})
-    assert _pairs(env)[-2:] == [("core.hooksPath", os.devnull), ("core.fsmonitor", "false")]
+    assert env["GIT_CONFIG_COUNT"] == "2"
 
 
 def test_hardened_env_defaults_to_the_process_environment(monkeypatch):

@@ -38,9 +38,7 @@ _EXEC_SLOTS = threading.BoundedSemaphore(4)
 _ALWAYS_DROPPED = {"OVERSEER_REMOTE", "OVERSEER_REMOTE_TOKEN", "OVERSEER_DASHBOARD_TOKEN"}
 _SECRET_SUBSTRINGS = ("TOKEN", "SECRET", "KEY", "PASSWORD")
 _SECRET_PREFIXES = ("AWS_", "GH_", "GITHUB_")
-# GIT_CONFIG_KEY_n would match "KEY"; stripping it but keeping COUNT and VALUE_n
-# would make every git call in the child fail ("missing config key").
-_NEEDED_PREFIXES = ("CENSUS_", "CHRONICLE_", "GIT_CONFIG_")
+_NEEDED_PREFIXES = ("CENSUS_", "CHRONICLE_")
 
 
 def _child_env(central: Path) -> dict[str, str]:
