@@ -153,8 +153,20 @@ def test_no_path_option_reaches_the_child_of_an_allowed_verb() -> None:
                 assert not [t for t in out if t == opt or t.startswith(f"{opt}=")], (verb, opt, out)
 
 
-def test_positional_path_of_claude_dirs_is_denied_with_its_verb() -> None:
-    assert "claude-dirs" in board_service._DENIED_VERBS
+def test_a_positional_path_dest_is_only_allowed_on_a_denied_verb() -> None:
+    # Positionals have no option string, so the loop above never visits them and
+    # sanitise_argv has nothing to match: the verb itself must be denied.
+    offenders = [
+        "/".join(path) for path, action in _walk(build_parser())
+        if path and action.dest in PATH_DESTS and not action.option_strings
+        and path[0] not in board_service._DENIED_VERBS
+    ]
+    assert offenders == []
+    # the walk really sees positionals (claude-dirs PATH is the one today)
+    assert any(
+        path == ("claude-dirs",) and action.dest == "path" and not action.option_strings
+        for path, action in _walk(build_parser())
+    )
 
 
 # --- verb classification ------------------------------------------------------------------
