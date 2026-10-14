@@ -1874,26 +1874,6 @@ def cmd_board(args: argparse.Namespace) -> int:
     return 0
 
 
-def _read_repo_root_meta(db_path: Path) -> "str | None":
-    """Best-effort read-only peek at a board.db's ``meta['repo_root']`` for
-    the ``repos`` discovery verb. Opened read-only (``mode=ro``) so
-    discovery never creates, locks, or schema-touches a board it's merely
-    listing. Never raises — a corrupt, mid-write, or otherwise unreadable
-    board.db is simply skipped, same quarantine-safe spirit as the rest of
-    this module's report-building verbs.
-    """
-    try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
-    except sqlite3.Error:
-        return None
-    try:
-        return db.get_meta(conn, "repo_root")
-    except sqlite3.Error:
-        return None
-    finally:
-        conn.close()
-
-
 def cmd_repos(args: argparse.Namespace) -> int:
     """`overseer repos --json` — enumerate every discoverable board at
     `<config dir>/overseer/*/board.db` (one per repo, per the per-repo
@@ -1905,41 +1885,20 @@ def cmd_repos(args: argparse.Namespace) -> int:
     older board, or one whose repo_root was never derivable — e.g. no git)
     or when that recorded root no longer exists on disk (repo deleted or
     moved since the board was written). The same repo raised under two
-    accounts lists once, from the first dir that has it (primary wins).
-    Output is a JSON list of `{"label": ..., "root": ...}`, sorted by label.
+    accounts lists once, from the first LIVE dir that has it (primary wins);
+    archived dirs (`config.is_archived`) list only repos with no live board,
+    flagged `"archived": true`. Output is a JSON list of `{"label", "root",
+    "board_dir", "archived", "aliases"}`, sorted by label (see `boards.discover`).
     """
-    results: list[dict[str, str]] = []
-    seen_roots: set[str] = set()
-    for config_dir in config.claude_dirs():
-        overseer_dir = config_dir / "overseer"
-        if not overseer_dir.is_dir():
-            continue
-        for label_dir in overseer_dir.iterdir():
-            if not label_dir.is_dir():
-                continue
-            db_path = label_dir / "board.db"
-            if not db_path.is_file():
-                continue
-            root_str = _read_repo_root_meta(db_path)
-            if not root_str:
-                continue
-            if not Path(root_str).exists():
-                continue
-            canonical = str(Path(root_str).resolve())
-            if canonical in seen_roots:
-                continue
-            seen_roots.add(canonical)
-            # Display label comes from the repo root, never the folder name —
-            # the default folder is now `<label>-<hash>` (see
-            # config.central_root), so `label_dir.name` would leak the hash.
-            label = derive_repo_label(Path(root_str)) or Path(root_str).name
-            results.append({"label": label, "root": root_str})
-    results.sort(key=lambda r: r["label"])
+    from scripts import boards as boards_mod
+    results = boards_mod.discover()
     if args.json:
         print(json.dumps(results))
     else:
         for r in results:
-            print(f"{r['label']}: {r['root']}")
+            tags = ["archived"] if r["archived"] else r["aliases"]
+            mark = f" [{', '.join(tags)}]" if tags else ""
+            print(f"{r['label']}{mark}: {r['root']}")
     return 0
 
 
@@ -2394,7 +2353,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--remote",
         default=os.environ.get("OVERSEER_REMOTE"),
-        help="Forward this command to a remote overseer board API at URL "
+        help="Forward this command to an overseer server at URL "
              "(default: $OVERSEER_REMOTE). Runs the verb on the host board.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2775,7 +2734,19 @@ def build_parser() -> argparse.ArgumentParser:
     lp.add_argument("--json", action="store_true")
     lp.set_defaults(func=cmd_label_color_list)
 
+    _no_abbreviations(parser)
     return parser
+
+
+def _no_abbreviations(parser: argparse.ArgumentParser) -> None:
+    """``allow_abbrev=False`` on every sub-parser too: it is not inherited, and
+    ``set-section --fi PATH`` would otherwise bind ``--file`` past the exact-token
+    checks of ``/api/exec`` (board_service.sanitise_argv)."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for sub in action.choices.values():
+                sub.allow_abbrev = False
+                _no_abbreviations(sub)
 
 
 def _forwardable_argv(raw_argv: list[str]) -> list[str]:
@@ -2797,15 +2768,59 @@ def _forwardable_argv(raw_argv: list[str]) -> list[str]:
     return out
 
 
-def _run_remote(url: str, raw_argv: list[str], root: Path) -> int:
-    """Forward the whole command to the host board API and relay the result."""
+_FILE_OPTIONS = ("--file", "--text-file")
+
+
+def _inline_file_option(argv: list[str]) -> tuple[list[str], str | None]:
+    """``set-section`` / ``append-body`` read their text from a file. The host
+    refuses file options over exec (it would read ITS filesystem), so read the
+    file here and forward ``--text -`` with the content as stdin. Returns the
+    rewritten argv and the file's text (None when the argv has no file option).
+    Raises ``FileNotFoundError``/``OSError`` for an unreadable file."""
+    out: list[str] = []
+    content: str | None = None
+    it = iter(argv)
+    for tok in it:
+        path: str | None = None
+        if tok in _FILE_OPTIONS:
+            path = next(it, None)
+            if path is None:
+                out.append(tok)  # no value: let the host parser say so
+                continue
+        elif tok.startswith(tuple(f"{o}=" for o in _FILE_OPTIONS)):
+            path = tok.split("=", 1)[1]
+        if path is None:
+            out.append(tok)
+            continue
+        content = Path(path).read_text()
+        out.extend(["--text", "-"])
+    return out, content
+
+
+def _run_remote(url: str, raw_argv: list[str], root: Path, verb: str | None = None) -> int:
+    """Forward the whole command to the host server and relay the result."""
     from scripts import remote  # lazy: httpx only needed on the remote path
+    from scripts.labels import valid_label
     from scripts.remote_token import read_remote_token
+    repo = os.environ.get("OVERSEER_REMOTE_REPO")
+    if repo is not None and not valid_label(repo):
+        print("overseer: OVERSEER_REMOTE_REPO must be a repo label like 'pip-skills'",
+              file=sys.stderr)
+        return 1
     token = os.environ.get("OVERSEER_REMOTE_TOKEN") or read_remote_token(root)
     forward = _forwardable_argv(raw_argv)
-    stdin = None if sys.stdin.isatty() else sys.stdin.read()
+    inlined: str | None = None
+    if verb in ("set-section", "append-body"):
+        try:
+            forward, inlined = _inline_file_option(forward)
+        except OSError as exc:
+            print(f"error: cannot read {exc.filename or 'the file'}: {exc.strerror or exc}",
+                  file=sys.stderr)
+            return 1
+    # A file option wins over piped stdin (the text is the file's).
+    stdin = inlined if inlined is not None else (None if sys.stdin.isatty() else sys.stdin.read())
     try:
-        res = remote.exec_remote(url, token, forward, stdin)
+        res = remote.exec_remote(url, token, forward, stdin, **({} if repo is None else {"repo": repo}))
     except remote.RemoteError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -2824,7 +2839,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:  # argparse --help (0) or usage error (2)
         return 0 if not exc.code else 1
     if getattr(args, "remote", None):
-        return _run_remote(args.remote, raw, args.root)
+        return _run_remote(args.remote, raw, args.root, args.command)
     store.memo_begin()
     try:
         result: int = args.func(args)

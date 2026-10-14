@@ -8,6 +8,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from scripts.gitenv import hardened_git_env
+
 WORKFLOW_DIRNAME = ".workflow"
 _MIGRATE_SKIP_TOP = {"ledger.md", "cards"}  # DB owns cards; ledger.md is retired (WF-072)
 _MIGRATE_SKIP_PATHS = {("archive", "cards")}  # DB owns archived cards too
@@ -78,6 +80,7 @@ def _git_common_dir_uncached(repo_root: Path) -> Path | None:
             capture_output=True,
             text=True,
             timeout=5,
+            env=hardened_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return None

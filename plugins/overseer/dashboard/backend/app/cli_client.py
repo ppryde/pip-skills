@@ -27,6 +27,7 @@ if str(_OVERSEER_ROOT) not in sys.path:
     sys.path.insert(0, str(_OVERSEER_ROOT))
 from scripts import config as overseer_config  # must follow the sys.path setup above
 
+
 def _version_key(name: str) -> tuple[int, ...]:
     """A directory name as a comparable version. Non-numeric parts sort as 0,
     so an odd entry never wins over a real version and never raises."""
@@ -102,14 +103,56 @@ def check_id(card_id: str) -> None:
         raise CliError(2, "invalid card id")
 
 
+# Resolved repo root -> board folder, for the roots whose ONLY board is in an
+# archived Claude dir. Filled by the dashboard's `repos` discovery; read by
+# `_run` so an archived board is opened read-only at its own folder.
+_ARCHIVED_BOARDS: dict[Path, str] = {}
+
+
+def set_archived_boards(boards: dict[Path, str]) -> None:
+    _ARCHIVED_BOARDS.clear()
+    _ARCHIVED_BOARDS.update(boards)
+
+
+def _readonly_env(root: Path) -> dict[str, str] | None:
+    """A child env that opens the board read-only, or None to inherit.
+
+    Keys on the EFFECTIVE central folder: the archived board a discovered root
+    maps to, else `OVERSEER_CENTRAL`, else where the CLI would resolve it —
+    so a launch root whose `central_dir` points into an archive is covered
+    too, not only roots discovery flagged."""
+    try:
+        resolved = Path(root).resolve()
+        archived = _ARCHIVED_BOARDS.get(resolved)
+        if archived is not None:
+            central = archived
+        elif os.environ.get("OVERSEER_CENTRAL"):
+            central = os.environ["OVERSEER_CENTRAL"]
+        elif overseer_config.archive_dirs() or any(
+            overseer_config.is_archived(d) for d in overseer_config.claude_dirs()
+        ):
+            central = str(overseer_config.central_root(resolved))
+        else:
+            return None
+        if archived is None and not overseer_config.is_archived_path(Path(central)):
+            return None
+    except Exception:  # noqa: BLE001 — a broken config must not 500 a read
+        return None
+    env = dict(os.environ)
+    env["OVERSEER_CENTRAL"] = central
+    env["OVERSEER_READONLY"] = "1"
+    return env
+
+
 def _run(cli_py: Path, cli_name: str, root: Path, args: tuple[str, ...],
           json_out: bool, timeout: int) -> Any:
+    env = _readonly_env(root) if cli_py == _OVERSEER_CLI else None
     try:
         result = subprocess.run(
             [sys.executable, str(cli_py), "--root", str(root), *args],
             # check=False is the default, stated explicitly: a non-zero exit
             # is inspected below and turned into a CliError, never raised.
-            capture_output=True, text=True, timeout=timeout, check=False,
+            capture_output=True, text=True, timeout=timeout, check=False, env=env,
         )
     except subprocess.TimeoutExpired:
         raise CliError(504, f"{cli_name} {' '.join(args)} timed out") from None

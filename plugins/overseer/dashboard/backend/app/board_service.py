@@ -1,37 +1,73 @@
-"""Standalone overseer board API service — HTTP board access for a dev container.
+"""Mechanics for remote board access from a dev container (``POST /api/exec``).
 
-Reuses the dashboard's ``create_app`` (frontend mount disabled) so the ``/api/*``
-surface is identical, then adds:
-  - a LAN-only source-IP guard (never answer a remote, non-LAN caller), and
-  - ``POST /api/exec``, a token-gated passthrough that runs the real overseer
-    CLI on the host against a PINNED root — the mechanism the container's
-    ``overseer --remote`` forwards every verb/hook to.
+No FastAPI app lives here: ``main.create_app`` mounts the route and the LAN
+guard. This module holds argv sanitisation, the denied-verb list, the child
+environment, and ``run_cli``, which runs the real overseer CLI on the host
+against a board PINNED when the app started — the mechanism the container's
+``overseer --remote`` forwards every verb and hook to.
 
-The host CLI stays the single writer of board.db; this service only shells it,
+The host CLI stays the single writer of board.db; this module only shells it,
 exactly as the dashboard backend's cli_client already does.
 """
 from __future__ import annotations
 
 import ipaddress
+import json
+import logging
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
+from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import HTTPException
 from pydantic import BaseModel
+from scripts import boards
+from scripts.gitenv import hardened_git_env
 
-from app.main import create_app, make_require_token
-
+_log = logging.getLogger(__name__)
+_WARNED: set[str] = set()
 # backend/app/board_service.py -> parents: [0]=app [1]=backend [2]=dashboard [3]=overseer
 _OVERSEER_CLI = Path(__file__).resolve().parents[3] / "scripts" / "cli.py"
 _EXEC_TIMEOUT = 30
+# One request's argv plus stdin may not exceed this many bytes (413).
+MAX_EXEC_BYTES = 1024 * 1024
+# At most this many CLI children at once; a fifth caller is told to retry (503).
+_EXEC_SLOTS = threading.BoundedSemaphore(4)
+
+# The child gets the server's environment minus anything that looks like a
+# credential. A strip, not an allowlist: the CLI needs PATH, HOME, git, the
+# ssh agent, CENSUS_*, CHRONICLE_* and test pins, and every new variable would
+# silently break an allowlist.
+_ALWAYS_DROPPED = {"OVERSEER_REMOTE", "OVERSEER_REMOTE_TOKEN", "OVERSEER_DASHBOARD_TOKEN"}
+_SECRET_SUBSTRINGS = ("TOKEN", "SECRET", "KEY", "PASSWORD")
+_SECRET_PREFIXES = ("AWS_", "GH_", "GITHUB_")
+_NEEDED_PREFIXES = ("CENSUS_", "CHRONICLE_")
+
+
+def _child_env(central: Path) -> dict[str, str]:
+    """The exec child's environment: secrets stripped, the board pinned."""
+    env: dict[str, str] = {}
+    for name, value in os.environ.items():
+        upper = name.upper()
+        if name in _ALWAYS_DROPPED:
+            continue
+        if not upper.startswith(_NEEDED_PREFIXES) and (
+            any(s in upper for s in _SECRET_SUBSTRINGS) or upper.startswith(_SECRET_PREFIXES)
+        ):
+            continue
+        env[name] = value
+    env["OVERSEER_CENTRAL"] = str(central)
+    return hardened_git_env(env)
 
 
 class ExecRequest(BaseModel):
     argv: list[str]
     stdin: str | None = None
+    # A repo label (never a path). Absent or null = the board pinned at start;
+    # anything present is resolved by `resolve_exec_board` and never falls back.
+    repo: str | None = None
 
 
 class ExecResult(BaseModel):
@@ -46,7 +82,7 @@ _IPV6_ULA = ipaddress.ip_network("fc00::/7")
 def _is_lan_client(host: str | None) -> bool:
     """True only for a private/loopback/link-local source address.
 
-    Guarantees the service never answers a remote, non-LAN caller even when
+    Guarantees the server never answers a remote, non-LAN caller even when
     bound to 0.0.0.0. An absent/unparseable client is rejected (safe default).
     """
     if not host:
@@ -73,16 +109,38 @@ def _is_lan_client(host: str | None) -> bool:
 # reach the subprocess even if the denylist is ever bypassed.
 _STRIPPED_FLAGS = ("--root", "--remote", "--dir", "--central", "--backup-dir")
 
-# Verbs refused on the remote board API: they wipe, re-bootstrap, or read/write
+# Verbs refused over the remote exec route: they wipe, re-bootstrap, or read/write
 # arbitrary host paths, none of which a remote container caller may drive.
-_DENIED_VERBS = {"clear", "init", "backup", "restore"}
+# The hook verbs take their root from the stdin payload's `cwd` in preference to
+# `--root` (cli._hook_root), so any of them escapes the pinned root, and
+# `report-hook` writes; `dashboard-refresh-hook` restarts the host dashboard.
+# `pretool-hook` is the one hook forwarded remotely: its `cwd` is overwritten.
+# `bootstrap` (fetch + `worktree add`, a checkout) and `dispatch-prep` (`status`
+# and `diff` in the card's worktree) run git in a tree the container can write:
+# hooks and filters planted there would run on the host. They move client-side
+# in the follow-up card; until then run them on the host.
+GIT_FOLLOWUP_CARD = "WF-300"
+_GIT_VERBS = {"bootstrap", "dispatch-prep"}
+_DENIED_VERBS = {
+    "clear", "init", "backup", "restore",
+    "claude-dirs", "merge-boards",
+    "checklist-sync-hook", "claim-stop-hook", "claim-prompt-hook", "report-hook",
+    "dashboard-refresh-hook",
+} | _GIT_VERBS
+
+# Options that read a HOST file. Refused, not stripped: stripping would turn
+# `set-section --file F` into a call that silently waits on stdin. The client
+# (`cli._run_remote`) inlines the file as stdin before it gets here. Matched by
+# prefix, so `--filename` is refused too (a value starting with one of these is
+# a rare, loud, safe false positive).
+_FILE_FLAGS = ("--file", "--text-file", "--brief-file")
 
 
 def _strip_root_flags(argv: list[str]) -> list[str]:
     """Drop path-override flags (and their values) from a forwarded argv.
 
     A container root/host path is meaningless (or dangerous) on the host, and a
-    forwarded --remote must never recurse. The service injects its own pinned
+    forwarded --remote must never recurse. The server injects its own pinned
     root instead. Handles both ``--flag value`` and ``--flag=value`` forms.
     """
     out: list[str] = []
@@ -118,43 +176,125 @@ def _invoked_verb(argv: list[str]) -> str | None:
     return None
 
 
-def create_service_app(root: Path, *, host: str = "0.0.0.0", token: str | None = None) -> FastAPI:
-    app = create_app(root, host=host, token=token, mount_frontend=False)
-    pinned_root = root.resolve()
-    require_token = make_require_token(token)
+def sanitise_argv(argv: list[str]) -> list[str]:
+    """Strip the path-override flags, then refuse a host file option or a denied
+    verb (403). Returns the argv that may be handed to the CLI."""
+    argv = _strip_root_flags(argv)
+    if any(tok.startswith(_FILE_FLAGS) for tok in argv):
+        raise HTTPException(status_code=403, detail="host path options are not permitted remotely")
+    verb = _invoked_verb(argv)
+    if verb in _GIT_VERBS:
+        raise HTTPException(
+            status_code=403,
+            detail=f"verb '{verb}' runs git in the repo; run it locally (follow-up {GIT_FOLLOWUP_CARD})",
+        )
+    if verb in _DENIED_VERBS:
+        raise HTTPException(
+            status_code=403,
+            detail=f"verb '{verb}' is not permitted over remote exec",
+        )
+    return argv
 
-    @app.middleware("http")
-    async def _lan_only(request: Request, call_next):
-        client = request.client.host if request.client else None
-        if not _is_lan_client(client):
-            return JSONResponse(status_code=403, content={"detail": "non-LAN caller refused"})
-        return await call_next(request)
 
-    @app.post("/api/exec", dependencies=[Depends(require_token)])
-    def exec_cli(req: ExecRequest) -> ExecResult:
-        argv = _strip_root_flags(req.argv)
-        verb = _invoked_verb(argv)
-        if verb in _DENIED_VERBS:
-            raise HTTPException(
-                status_code=403,
-                detail=f"verb '{verb}' is not permitted on the remote board API",
-            )
-        try:
-            proc = subprocess.run(
-                [sys.executable, str(_OVERSEER_CLI), "--root", str(pinned_root), *argv],
-                # cli.py defaults --remote from these; the strip above must hold.
-                env={k: v for k, v in os.environ.items()
-                     if k not in ("OVERSEER_REMOTE", "OVERSEER_REMOTE_TOKEN")},
-                input=req.stdin,
-                capture_output=True,
-                text=True,
-                timeout=_EXEC_TIMEOUT,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            raise HTTPException(status_code=504, detail="overseer CLI timed out")
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"cannot run overseer CLI: {exc}")
-        return ExecResult(stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode)
+def _pin_hook_cwd(stdin: str | None, pinned_root: Path) -> str:
+    """`pretool-hook` reads its root from the payload's `cwd`: pin it."""
+    try:
+        payload = json.loads(stdin or "")
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="pretool-hook needs a JSON object on stdin")
+    payload["cwd"] = str(pinned_root)
+    return json.dumps(payload)
 
-    return app
+
+def check_repo_label(repo: str) -> None:
+    """400 unless ``repo`` is a label (never a path). Runs before any lookup."""
+    if not boards.valid_label(repo):
+        raise HTTPException(
+            status_code=400,
+            detail="repo must be a label like 'pip-skills' (letters, digits, '.', '_', '-'; up to 100)",
+        )
+
+
+def resolve_exec_board(
+    repo: str, entries: list[dict[str, Any]], aliases: object = None
+) -> tuple[Path, Path]:
+    """Turn a repo LABEL into ``(root, board_dir)`` of a live discovered board.
+
+    Pure: ``entries`` are the LIVE (non-archived) ``boards.discover()`` entries,
+    ``aliases`` the machine config's alias map. The label is only compared with
+    labels the host already derived, never joined into a path. 400 for a
+    malformed label, 404 for an unknown one (listing the valid ones; there is no
+    fallback to the pinned board), 409 when two live boards share it.
+    """
+    check_repo_label(repo)
+    by_alias, warnings = boards.resolve_aliases(entries, aliases)
+    for line in warnings:
+        if line not in _WARNED:  # once per process: every labelled request re-derives them
+            _WARNED.add(line)
+            _log.warning("%s", line)
+    if repo in by_alias:
+        matches = [by_alias[repo]]
+    else:
+        matches = [e for e in entries if e["label"] == repo]
+    # board.db must still be there: the discovery cache is 10 s stale, and a
+    # board moved away (into an archive) would otherwise be recreated by the child.
+    if (not matches or not Path(matches[0]["root"]).is_dir()
+            or not (Path(matches[0]["board_dir"]) / "board.db").is_file()):
+        valid = sorted({e["label"] for e in entries} | set(by_alias))
+        raise HTTPException(
+            status_code=404,
+            detail=f"unknown repo {repo!r}; valid: {', '.join(valid) or '(none)'}",
+        )
+    if len(matches) > 1:
+        cands = ", ".join(f"{e['label']} ({e['root']})" for e in matches)
+        raise HTTPException(
+            status_code=409,
+            detail=(f"ambiguous repo {repo!r}: {cands}; add an alias in the overseer machine "
+                    'config: "aliases": {"<name>": "<root>"}'),
+        )
+    entry = matches[0]
+    return Path(entry["root"]).resolve(), Path(entry["board_dir"])
+
+
+def check_exec_limits(req: ExecRequest) -> None:
+    """413 for an oversized request, 400 for NUL bytes. Cheap and pure, so the
+    route runs it BEFORE any board discovery."""
+    size = sum(len(t.encode()) for t in req.argv) + len((req.stdin or "").encode())
+    if size > MAX_EXEC_BYTES:
+        raise HTTPException(status_code=413, detail=f"request exceeds {MAX_EXEC_BYTES} bytes")
+    if any("\0" in tok for tok in req.argv) or "\0" in (req.stdin or ""):
+        raise HTTPException(status_code=400, detail="NUL bytes are not allowed in argv or stdin")
+
+
+def run_cli(pinned_root: Path, central: Path, req: ExecRequest) -> ExecResult:
+    """Sanitise argv, refuse denied verbs, and run the host CLI against the
+    PINNED root and board (``central`` becomes the child's ``OVERSEER_CENTRAL``).
+    Raises HTTPException for every failure mode; a CLI that ran and exited
+    non-zero is a SUCCESSFUL RPC and comes back as a 200 body.
+    """
+    check_exec_limits(req)
+    argv = sanitise_argv(req.argv)
+    stdin = req.stdin
+    if _invoked_verb(argv) == "pretool-hook":
+        stdin = _pin_hook_cwd(stdin, pinned_root)
+    if not _EXEC_SLOTS.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="exec busy: too many CLI calls in flight")
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(_OVERSEER_CLI), "--root", str(pinned_root), *argv],
+            env=_child_env(central),
+            input=stdin,
+            capture_output=True,
+            text=True,
+            timeout=_EXEC_TIMEOUT,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail="overseer CLI timed out") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"cannot run overseer CLI: {exc}") from exc
+    finally:
+        _EXEC_SLOTS.release()
+    return ExecResult(stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode)

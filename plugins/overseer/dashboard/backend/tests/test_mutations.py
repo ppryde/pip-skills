@@ -505,6 +505,10 @@ def test_every_post_api_route_requires_token_and_no_get_route_does(root: Path) -
     a timer from browsers that hold no token. Anything else must be gated.
     """
     UNGATED_POSTS = {"/api/chronicle/sync"}
+    # /api/exec has its own, fail-closed gate (`require_exec_token`); the
+    # dashboard's `require_token` is inert without a token and must not guard it.
+    # test_exec_route.py::test_route_table_exec_has_its_own_gate walks it.
+    EXEC_POST = "/api/exec"
     app = create_app(root, token="s3cret")
 
     checked_post = 0
@@ -517,6 +521,9 @@ def test_every_post_api_route_requires_token_and_no_get_route_does(root: Path) -
             for dep in route.dependant.dependencies
         )
         if "POST" in route.methods:
+            if route.path == EXEC_POST:
+                assert not gated, "POST /api/exec must not use the dashboard gate"
+                continue
             checked_post += 1
             if route.path in UNGATED_POSTS:
                 assert not gated, f"POST {route.path} is listed as ungated but carries the gate"

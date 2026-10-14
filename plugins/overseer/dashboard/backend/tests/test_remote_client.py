@@ -1,10 +1,10 @@
 """Unit tests for scripts.remote — the container-side httpx client for the
-board API's ``--remote`` transport.
+server's ``--remote`` transport.
 
 httpx 0.28.1's ``ASGITransport`` is async-only and cannot be driven by the
 synchronous ``httpx.Client`` that ``exec_remote`` uses (see Task 2's sync
 bridge for the same wall). So these tests do not spin up a real
-``create_service_app`` and hit it over ASGI transport; instead they use
+served app and hit it over ASGI transport; instead they use
 ``httpx.MockTransport`` — a synchronous transport — to intercept the outgoing
 ``httpx.Request`` and return canned responses. This gives a thorough unit
 test of request-building (URL, headers, JSON body) and response/error
@@ -12,7 +12,7 @@ mapping. The genuine client<->service round-trip is left to Task 6's
 end-to-end smoke test.
 
 Importing ``app.board_service`` is not required here since we never build a
-real service app, but importing ``app.main`` (transitively, via other tests
+real served app, but importing ``app.main`` (transitively, via other tests
 in this suite) is what puts the overseer root on sys.path so ``scripts.remote``
 is importable. We import ``scripts.remote`` directly.
 """
@@ -114,3 +114,12 @@ def test_exec_remote_transport_error_wrapped():
     bad = httpx.MockTransport(boom)
     with pytest.raises(remote.RemoteError):
         remote.exec_remote("http://svc", None, ["board"], None, transport=bad)
+
+
+def test_exec_remote_403_relays_the_server_reason():
+    def handler(request):
+        return httpx.Response(403, json={"detail": "host path options are not permitted remotely"})
+
+    with pytest.raises(remote.RemoteError) as ei:
+        remote.exec_remote("http://h", "t", ["x"], None, transport=httpx.MockTransport(handler))
+    assert "host path options are not permitted remotely" in str(ei.value)

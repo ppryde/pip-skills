@@ -56,6 +56,22 @@ class TestFindBoards:
             (str(elsewhere), False, 2),
         ]
 
+    def test_an_archived_board_is_listed_without_touching_its_folder(self, tmp_path, monkeypatch):
+        # `immutable=1` on archived boards: a plain `mode=ro` open of a WAL board
+        # creates -shm/-wal in the archive on every listing.
+        primary, _personal, repo = _setup(tmp_path, monkeypatch)
+        archive = tmp_path / "backups" / "old-account"
+        archive.mkdir(parents=True)
+        archived = _board_under(archive, repo, monkeypatch, [make_card("WF-1")])
+        active = _board_under(primary, repo, monkeypatch, [make_card("WF-1"), make_card("WF-2")])
+        assert config.is_archived(archive)
+        config.add_claude_dir(archive)
+        before = sorted(p.name for p in archived.iterdir())
+        assert "board.db-wal" not in before and "board.db-shm" not in before
+        found = boards.find_boards(repo)
+        assert [(b["path"], b["cards"]) for b in found] == [(str(active), 2), (str(archived), 1)]
+        assert sorted(p.name for p in archived.iterdir()) == before
+
     def test_lists_the_legacy_plain_folder_beside_the_hashed_one(self, tmp_path, monkeypatch):
         primary, _personal, repo = _setup(tmp_path, monkeypatch)
         active = _board_under(primary, repo, monkeypatch, [make_card("WF-1")])
