@@ -119,7 +119,7 @@ test('a draft in the box waits, then clears once it is gone', async ($, on) => {
   await $.tool.call(call() as never)
   await w.clock.settle()
   expect(w.commands).not.toContain('clear')
-  expect(w.notices).toContain('✍️ Handover waiting — there is a draft in your prompt box')
+  expect(w.notices).toContain("⏸️ Handover paused while you're typing")
   w.draft.value = ''
   await w.clock.advance(2000)
   expect(w.commands).toContain('clear')
@@ -1026,7 +1026,7 @@ test('auto mode switched Off while an unattended clear waits stops it, with a no
   await $.tool.call(call() as never)
   w.draft.value = 'half a sen'                   // typed after the tool hook's own look at the box
   await w.clock.settle()
-  expect(w.notices).toContain('✍️ Handover waiting — there is a draft in your prompt box')
+  expect(w.notices).toContain("⏸️ Handover paused while you're typing")
   w.store.set('settings', { auto: false })      // another session, or /vigil-setup auto on the phone
   w.draft.value = ''
   await w.clock.advance(5000)

@@ -470,7 +470,7 @@ test('an early stop with a fresh /vho handover already on disk writes no second 
   w.draft.value = 'half a thought'
   await $.tool.call(write)
   await w.clock.settle()
-  expect(w.notices.some(n => n.includes('there is a draft'))).toBe(true)
+  expect(w.notices.some(n => n.includes('paused while'))).toBe(true)
   await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + HOUR) }]))
   await w.clock.settle()
   expect(asks(w)).toBe(1)                                             // no second handover

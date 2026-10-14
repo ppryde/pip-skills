@@ -539,3 +539,74 @@ test('a held notification goes back to the live session when the clear is reject
   await w.clock.advance(35_000)
   expect(w.submits.some(s => s.text === 'agent finished')).toBe(true)
 })
+
+// A requested handover whose clear waits on a draft.
+const vhoCmd = { command: 'vho', args: '', origin: { kind: 'composer' } as never } as never
+const callH = { tool: TOOL, tool_use_id: 'h1', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never
+async function draftWaiting($: Engine, w: World, reply: string | null | 'open') {
+  if (reply !== 'open') w.askReply.value = () => reply
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run(vhoCmd)
+  await w.clock.settle()
+  w.draft.value = 'half a sen'
+  await $.tool.call(callH)
+  await w.clock.settle()
+}
+const draftAsks = (w: World) => w.asks.filter(q => q.question === '⏸️ Handover paused while you\'re typing')
+
+test('a clear waiting on a draft asks once, however long it waits', async ($, on) => {
+  const w = world(on)
+  await draftWaiting($, w, 'open')
+  expect(draftAsks(w).length).toBe(1)
+  expect(draftAsks(w)[0]?.options).toEqual(['🧹 Clear and resume now', '⏰ Postpone 5%'])
+  await w.clock.advance(20_000)
+  expect(draftAsks(w).length).toBe(1)
+  expect(w.commands).not.toContain('clear')
+})
+
+test('the band says the handover is paused while the clear waits on a draft, and stops when it clears', async ($, on) => {
+  const w = world(on)
+  await draftWaiting($, w, 'open')
+  let ui = await $.ui.mount(BAND())
+  expect(await ui.find({ type: 'Text', text: /Handover paused while you're typing/ })).toBeDefined()
+  await ui.unmount()
+  w.draft.value = ''
+  await w.clock.advance(3000)
+  ui = await $.ui.mount(BAND())
+  expect(await ui.find({ type: 'Text', text: /Handover paused/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('Clear and resume now: the clear goes despite the draft, which is sent as the person\'s after the resume', async ($, on) => {
+  const w = world(on)
+  await draftWaiting($, w, '🧹 Clear and resume now')
+  await w.clock.advance(100)
+  expect(w.commands).toContain('clear')
+  expect(w.draft.value).toBe('')
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).toContain('half a sen')
+})
+
+test('Postpone: no clear, the pending is dropped, and the next step hands over afresh', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.session.measure(measure(36))
+  await draftWaiting($, w, '⏰ Postpone 5%')
+  await w.clock.advance(100)
+  expect(w.commands).not.toContain('clear')
+  expect(w.state.get('context-vigil-mod.pending')).toBeNull()
+  expect(w.state.get('context-vigil-mod.lastNudged')).toBe(35)
+  await $.session.measure(measure(41))
+  expect(w.state.get('context-vigil-mod.lastNudged')).toBe(40)
+})
+
+test('a dismissed dialog postpones', async ($, on) => {
+  const w = world(on)
+  await draftWaiting($, w, null)
+  await w.clock.advance(100)
+  expect(w.commands).not.toContain('clear')
+  expect(w.state.get('context-vigil-mod.pending')).toBeNull()
+})

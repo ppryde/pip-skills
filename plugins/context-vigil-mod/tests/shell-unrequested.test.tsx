@@ -150,7 +150,7 @@ test('the request lapses after 30 minutes with no clear', async ($, on) => {
   await $.tool.call(call('h2') as never)
   await w.clock.settle()
   expect(clears(w)).toBe(0)
-  expect(w.asks.map(q => q.question)).toEqual([V.unrequestedAsk(FILE(2))])
+  expect(w.asks.map(q => q.question).filter(q => q !== V.draftTitle)).toEqual([V.unrequestedAsk(FILE(2))])
 })
 
 // A handover the model saved on its own: a dialog, phone and terminal alike.

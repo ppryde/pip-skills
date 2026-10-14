@@ -66,6 +66,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('store.delete', (_$, e) => { w.store.delete(e.key); return { value: undefined } })
   on('store.keys', () => ({ value: [...w.store.keys()] }))
   mock.env(on, opts.env ?? { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
+  on('prompt.fill', (_$, e) => { w.draft.value = (e as { text: string }).text; return { isFilled: true } as never })
   on('fs.read', async (_$, e) => {
     await w.fsRead.gate
     if (w.fsRead.error !== null) return { deny: w.fsRead.error }
@@ -184,6 +185,8 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
         descriptions: (q.options ?? []).map(o => (typeof o === 'string' ? '' : o.description ?? '')),
       }))
       if (!input.answers) w.asks.push(...seen)
+      // The paused-while-typing dialog stays open unless a test answers it (askReply): dismissing it postpones the handover.
+      if (!input.answers && !w.askReply.value && seen.some(q => q.question.includes('paused while'))) return new Promise(() => undefined) as never
       if (w.askReply.value && !input.answers && !w.askHold.held) {
         const replies = seen.map(q => [q.question, w.askReply.value?.(q) ?? null] as const)
         if (replies.some(([, a]) => a === null)) return { deny: 'dismissed' }
