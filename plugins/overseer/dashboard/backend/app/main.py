@@ -30,7 +30,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 from starlette.responses import Response
 
-from app.board_service import _OVERSEER_CLI, ExecRequest, ExecResult, _is_lan_client, run_cli
+from app.board_service import (
+    _OVERSEER_CLI,
+    ExecRequest,
+    ExecResult,
+    _is_lan_client,
+    check_exec_limits,
+    check_repo_label,
+    resolve_exec_board,
+    run_cli,
+)
 from app.cli_client import (
     CliError,
     almoner_installed,
@@ -55,7 +64,9 @@ if str(_OVERSEER_ROOT) not in sys.path:
     sys.path.insert(0, str(_OVERSEER_ROOT))
 
 # Both must follow the sys.path setup above.
+from scripts import boards as overseer_boards
 from scripts import config as overseer_config
+from scripts import db as overseer_db
 from scripts.dashboard_record import plugin_version
 from scripts.store import derive_repo_label, derive_repo_root
 
@@ -731,17 +742,20 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     # The exec child runs `<plugin>/scripts/cli.py` (and the sibling vigil CLI). If
     # that code lives inside the repo a container can write, the container could
     # edit it and have the host run the edit: exec is off in that layout.
-    _exec_code_in_repo: str | None = None
-    _cli = _OVERSEER_CLI.resolve()
-    for _repo in {_pinned_root, (derive_repo_root(_pinned_root) or _pinned_root).resolve()}:
-        if _path_inside(_cli, _repo):
-            _exec_code_in_repo = (
-                f"the overseer plugin ({_cli.parents[1]}) lies inside the pinned repo "
-                f"{_repo}, which a container may be able to write; run the dashboard from an installed "
-                "plugin outside the repo to enable exec"
-            )
-            logging.getLogger(__name__).warning("exec disabled: %s", _exec_code_in_repo)
-            break
+    def _cli_inside(root: Path, what: str) -> str | None:
+        cli = _OVERSEER_CLI.resolve()
+        for repo in {root, (derive_repo_root(root) or root).resolve()}:
+            if _path_inside(cli, repo):
+                return (
+                    f"the overseer plugin ({cli.parents[1]}) lies inside the {what} {repo}, "
+                    "which a container may be able to write; run the dashboard from an installed "
+                    "plugin outside the repo to enable exec"
+                )
+        return None
+
+    _exec_code_in_repo = _cli_inside(_pinned_root, "pinned repo")
+    if _exec_code_in_repo is not None:
+        logging.getLogger(__name__).warning("exec disabled: %s", _exec_code_in_repo)
     # The dashboard is normally launched from inside a worktree (e.g.
     # `.claude/worktrees/<name>`), whose path differs from the main-repo
     # root `board.db` records as `meta['repo_root']`. Derive the MAIN repo
@@ -1182,6 +1196,8 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         Gated by make_require_exec_token, NOT make_require_token — the latter is
         inert when unconfigured and would open this to everyone.
         """
+        if req.repo is not None:
+            return _exec_labelled(req)
         if _pinned_central is None:
             raise HTTPException(status_code=503, detail="exec unavailable: pinned board could not be resolved")
         if _exec_code_in_repo is not None:
@@ -1193,6 +1209,30 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
                         "exec without a repo label is disabled"),
             )
         return run_cli(_pinned_root, _pinned_central, req)
+
+    def _exec_labelled(req: ExecRequest) -> ExecResult:
+        """A `repo` label picks any watched LIVE board on the machine. The host
+        resolves it against discovery; the child is handed that root and board,
+        so it cannot re-derive a different one. No fallback to the pinned board."""
+        assert req.repo is not None
+        check_exec_limits(req)
+        check_repo_label(req.repo)
+        pinned_by = [v for v in (overseer_config.CENTRAL_ENV, overseer_db.DB_ENV) if os.environ.get(v)]
+        if pinned_by:
+            raise HTTPException(
+                status_code=409,
+                detail=f"repo selection unavailable: server pinned by {' and '.join(pinned_by)}",
+            )
+        live = [e for e in overseer_boards.discover() if not e["archived"]]
+        try:
+            aliases = overseer_config.load_machine_config().get("aliases")
+        except ValueError:
+            aliases = None
+        target_root, target_board = resolve_exec_board(req.repo, live, aliases)
+        inside = _cli_inside(target_root, "target repo")
+        if inside is not None:
+            raise HTTPException(status_code=503, detail=f"exec unavailable: {inside}")
+        return run_cli(target_root, target_board, req)
 
     # One chronicle sync at a time per server process (see chronicle_sync);
     # on `app.state` so tests can hold it.

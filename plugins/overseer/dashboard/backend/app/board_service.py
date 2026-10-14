@@ -207,6 +207,15 @@ def _pin_hook_cwd(stdin: str | None, pinned_root: Path) -> str:
     return json.dumps(payload)
 
 
+def check_repo_label(repo: str) -> None:
+    """400 unless ``repo`` is a label (never a path). Runs before any lookup."""
+    if not boards.valid_label(repo):
+        raise HTTPException(
+            status_code=400,
+            detail="repo must be a label like 'pip-skills' (letters, digits, '.', '_', '-'; up to 100)",
+        )
+
+
 def resolve_exec_board(
     repo: str, entries: list[dict[str, Any]], aliases: object = None
 ) -> tuple[Path, Path]:
@@ -218,11 +227,7 @@ def resolve_exec_board(
     malformed label, 404 for an unknown one (listing the valid ones; there is no
     fallback to the pinned board), 409 when two live boards share it.
     """
-    if not boards.valid_label(repo):
-        raise HTTPException(
-            status_code=400,
-            detail="repo must be a label like 'pip-skills' (letters, digits, '.', '_', '-'; up to 100)",
-        )
+    check_repo_label(repo)
     by_alias, warnings = boards.resolve_aliases(entries, aliases)
     for line in warnings:
         _log.warning("%s", line)
@@ -247,17 +252,23 @@ def resolve_exec_board(
     return Path(entry["root"]).resolve(), Path(entry["board_dir"])
 
 
+def check_exec_limits(req: ExecRequest) -> None:
+    """413 for an oversized request, 400 for NUL bytes. Cheap and pure, so the
+    route runs it BEFORE any board discovery."""
+    size = sum(len(t.encode()) for t in req.argv) + len((req.stdin or "").encode())
+    if size > MAX_EXEC_BYTES:
+        raise HTTPException(status_code=413, detail=f"request exceeds {MAX_EXEC_BYTES} bytes")
+    if any("\0" in tok for tok in req.argv) or "\0" in (req.stdin or ""):
+        raise HTTPException(status_code=400, detail="NUL bytes are not allowed in argv or stdin")
+
+
 def run_cli(pinned_root: Path, central: Path, req: ExecRequest) -> ExecResult:
     """Sanitise argv, refuse denied verbs, and run the host CLI against the
     PINNED root and board (``central`` becomes the child's ``OVERSEER_CENTRAL``).
     Raises HTTPException for every failure mode; a CLI that ran and exited
     non-zero is a SUCCESSFUL RPC and comes back as a 200 body.
     """
-    size = sum(len(t.encode()) for t in req.argv) + len((req.stdin or "").encode())
-    if size > MAX_EXEC_BYTES:
-        raise HTTPException(status_code=413, detail=f"request exceeds {MAX_EXEC_BYTES} bytes")
-    if any("\0" in tok for tok in req.argv) or "\0" in (req.stdin or ""):
-        raise HTTPException(status_code=400, detail="NUL bytes are not allowed in argv or stdin")
+    check_exec_limits(req)
     argv = sanitise_argv(req.argv)
     stdin = req.stdin
     if _invoked_verb(argv) == "pretool-hook":
