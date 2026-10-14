@@ -266,7 +266,10 @@ def _plain_owner(plain: Path) -> str:
         # mis-parsed by sqlite's URI reader (an unencoded ``?`` or ``#`` would
         # be read as the query/fragment delimiter, truncating the path and
         # failing the open → a false "unknown" that wrongly adopts the folder).
-        uri = f"{db_path.resolve().as_uri()}?mode=ro"
+        # An archived board opens immutable: a plain `mode=ro` open of a WAL board
+        # creates -shm/-wal inside the archive.
+        immutable = "&immutable=1" if is_archived_path(db_path) else ""
+        uri = f"{db_path.resolve().as_uri()}?mode=ro{immutable}"
         conn = sqlite3.connect(uri, uri=True)
         try:
             row = conn.execute(
