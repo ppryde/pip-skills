@@ -502,3 +502,11 @@ test('pressing a bar button is presence: the idle window restarts, no unattended
   expect(await ui.find({ key: 'handover' })).toBeDefined()    // still a nudge for the person who is here
   await ui.unmount()
 })
+
+test('RC countdown: a held notification does not cancel it', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
+  await countdownSession($, w)
+  await $.prompt.submit({ text: 'agent finished', wait: false, origin: { kind: 'task-notification' } as never })
+  await w.clock.advance(31_000)
+  expect(w.commands).toContain('clear')
+})

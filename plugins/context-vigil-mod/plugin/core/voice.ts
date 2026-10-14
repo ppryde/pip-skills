@@ -71,6 +71,7 @@ export const V = {
   resumeFailed: (path: string | null, held: string | null) =>
     `▶️ Couldn't resume${path ? ` — the handover is at ${path}` : ''}${held ? ` — your message was not sent: ${held}` : ''}`,
   heldNotSent: (held: string) => `🌅 Your held message was not sent: ${held}`,
+  heldForClear: '📜 Held until the handover\'s clear; it goes into the resume',
   heldForLastLight: '🌅 Held by context-vigil-mod — last light asks first',
   cmdHandover: '📜 Hand over now (context-vigil-mod)',
   cmdSetup: '⚙️ context-vigil-mod setup — /vigil-setup [nudge|bar|auto|last-light|limits|rc]',

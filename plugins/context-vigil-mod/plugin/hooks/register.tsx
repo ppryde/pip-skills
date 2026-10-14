@@ -102,6 +102,8 @@ let retryTimer: { cancel: () => void } | null = null
 // A /clear handed to the engine and not yet run: it is queued until the session is idle (R2-10),
 // so a second one must not follow it. Cleared when the command settles.
 let clearInFlight = false
+// Prompts from other sessions, schedules and background tasks: held while a clear-bound handover waits for its clear.
+const HOLD_ORIGINS = new Set(['task-notification', 'scheduled-trigger', 'peer', 'peer-send-message', 'projects-relay', 'coordinator', 'observer', 'observer-activity'])
 // The last API turn as the mod issued its own clear, for the handover it clears into: the engine queues
 // the clear behind the running turn, and turns that finish meanwhile must not make the handover stale.
 let issuedClear: { path: string; apiAt: number } | null = null
@@ -1441,6 +1443,14 @@ export const register: Register = on => {
     }
     // R1-20: the "last light is off" line goes away with the person's next message (no hotkey: spec §3).
     if (classifyOrigin(e.origin.kind) === 'human' && (await read($, cacheTtlA)) === '5m') await update($, ttlInfoDismissedA, () => true)
+    // A clear is on its way: an agent's or a notification's prompt would start a turn the clear then waits
+    // behind. Hold it; it rides into the resume as a prompt sent during the handover (never lost: a full list lets it run).
+    if (HOLD_ORIGINS.has(e.origin.kind) && !clearParked && pending && pending.resume && (pending.reason === 'threshold' || pending.reason === 'request')
+      && (pending.sent?.length ?? 0) < SENT_MAX && e.text.trim() && !e.text.trimStart().startsWith('/')) {
+      await recordSent($, e.text)
+      await log($, 'prompt.held', { origin: e.origin.kind })
+      return { drop: V.heldForClear }
+    }
     if (e.origin.kind !== 'plugin') await cancelCountdown($)
     if (classifyOrigin(e.origin.kind) === 'human') {
       // A short plain request to hand over runs exactly what /vho runs, not whatever the model improvises.

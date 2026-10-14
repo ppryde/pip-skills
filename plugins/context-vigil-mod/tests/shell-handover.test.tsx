@@ -1496,3 +1496,44 @@ test('a volunteered save result carries no stop line: nothing is cleared', async
   const volunteered = await $.tool.call(call({ tool_use_id: 'v1' }) as never)
   expect(String((volunteered as { result?: unknown }).result)).not.toContain('Stop now')
 })
+
+const agent = (text: string, kind = 'task-notification') => ({ text, wait: false, origin: { kind } as never })
+
+// A requested handover saved, its clear queued behind the running turn.
+async function clearQueued($: Engine, w: World) {
+  w.clearHold.held = true
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+}
+
+test('a notification during a pending clear is held, recorded, and carried into the resume', async ($, on) => {
+  const w = world(on)
+  await clearQueued($, w)
+  const r = await $.prompt.submit(agent('agent X finished'))
+  expect(r).toMatchObject({ drop: V.heldForClear })
+  expect(w.state.get(PENDING)).toMatchObject({ sent: ['agent X finished'] })
+  w.clearHold.release()
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).toContain('agent X finished')
+})
+
+test('the mod\'s own prompts, and any prompt with no clear-bound handover pending, pass', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  expect(await $.prompt.submit(agent('before any handover'))).not.toHaveProperty('drop')
+  await clearQueued($, w)
+  expect(await $.prompt.submit(agent('mod', 'plugin'))).not.toHaveProperty('drop')
+})
+
+test('a full sent list lets the notification run rather than lose it', async ($, on) => {
+  const w = world(on)
+  await clearQueued($, w)
+  for (let i = 0; i < 10; i++) await $.prompt.submit(agent(`n${i}`))
+  expect(await $.prompt.submit(agent('eleventh'))).not.toHaveProperty('drop')
+})
