@@ -1,4 +1,4 @@
-"""Shared location + IO for the remote board API token file.
+"""Shared location + IO for the remote exec token file.
 
 The dashboard launcher (dashboard/serve.py) persists an auto-generated exec
 token to ``<repo>/.overseer/remote-token``; a dev container that mounts the

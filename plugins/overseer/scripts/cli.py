@@ -2353,7 +2353,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--remote",
         default=os.environ.get("OVERSEER_REMOTE"),
-        help="Forward this command to a remote overseer board API at URL "
+        help="Forward this command to an overseer server at URL "
              "(default: $OVERSEER_REMOTE). Runs the verb on the host board.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2798,7 +2798,7 @@ def _inline_file_option(argv: list[str]) -> tuple[list[str], str | None]:
 
 
 def _run_remote(url: str, raw_argv: list[str], root: Path, verb: str | None = None) -> int:
-    """Forward the whole command to the host board API and relay the result."""
+    """Forward the whole command to the host server and relay the result."""
     from scripts import remote  # lazy: httpx only needed on the remote path
     from scripts.labels import valid_label
     from scripts.remote_token import read_remote_token

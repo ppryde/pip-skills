@@ -1,4 +1,4 @@
-"""HTTP client for the overseer board API service (the ``--remote`` transport).
+"""HTTP client for the overseer server's ``/api/exec`` (the ``--remote`` transport).
 
 ``overseer --remote <url>`` forwards its whole argv (and any hook stdin) to the
 host's ``/api/exec``, which runs the real CLI there and returns
@@ -47,17 +47,13 @@ def exec_remote(url: str, token: str | None, argv: list[str], stdin: str | None,
         with httpx.Client(transport=transport, timeout=_TIMEOUT) as client:
             resp = client.post(endpoint, json=payload, headers=headers)
     except httpx.HTTPError as exc:
-        raise RemoteError(f"cannot reach overseer board API at {url}: {exc}") from exc
+        raise RemoteError(f"cannot reach overseer server at {url}: {exc}") from exc
     if resp.status_code == 401:
-        raise RemoteError("overseer board API rejected the token (401) — check OVERSEER_REMOTE_TOKEN")
+        raise RemoteError("overseer server rejected the token (401) — check OVERSEER_REMOTE_TOKEN")
     if resp.status_code == 403:
-        detail = ""
-        try:
-            detail = str(resp.json().get("detail") or "")
-        except (ValueError, AttributeError):
-            pass
+        detail = _detail(resp)
         raise RemoteError(
-            "overseer board API refused this request (403)"
+            "overseer server refused this request (403)"
             + (f": {detail}" if detail else " — the caller must be on the LAN")
         )
     if resp.status_code in (400, 404, 409) and (detail := _detail(resp)):
@@ -65,11 +61,11 @@ def exec_remote(url: str, token: str | None, argv: list[str], stdin: str | None,
             404: " - check OVERSEER_REMOTE_REPO",
             409: " - set OVERSEER_REMOTE_REPO to a unique label or an alias",
         }.get(resp.status_code, "")
-        raise RemoteError(f"overseer board API: {detail} ({resp.status_code}){hint}")
+        raise RemoteError(f"overseer server: {detail} ({resp.status_code}){hint}")
     if resp.status_code != 200:
-        raise RemoteError(f"overseer board API error {resp.status_code}: {resp.text[:200]}")
+        raise RemoteError(f"overseer server error {resp.status_code}: {resp.text[:200]}")
     try:
         data = resp.json()
         return RemoteResult(stdout=data["stdout"], stderr=data["stderr"], returncode=data["returncode"])
     except (ValueError, KeyError) as exc:
-        raise RemoteError(f"malformed response from overseer board API: {exc}") from exc
+        raise RemoteError(f"malformed response from overseer server: {exc}") from exc

@@ -1,5 +1,5 @@
 """Unit tests for scripts.remote — the container-side httpx client for the
-board API's ``--remote`` transport.
+server's ``--remote`` transport.
 
 httpx 0.28.1's ``ASGITransport`` is async-only and cannot be driven by the
 synchronous ``httpx.Client`` that ``exec_remote`` uses (see Task 2's sync
@@ -12,7 +12,7 @@ mapping. The genuine client<->service round-trip is left to Task 6's
 end-to-end smoke test.
 
 Importing ``app.board_service`` is not required here since we never build a
-real service app, but importing ``app.main`` (transitively, via other tests
+real served app, but importing ``app.main`` (transitively, via other tests
 in this suite) is what puts the overseer root on sys.path so ``scripts.remote``
 is importable. We import ``scripts.remote`` directly.
 """

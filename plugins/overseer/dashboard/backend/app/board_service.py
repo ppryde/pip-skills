@@ -82,7 +82,7 @@ _IPV6_ULA = ipaddress.ip_network("fc00::/7")
 def _is_lan_client(host: str | None) -> bool:
     """True only for a private/loopback/link-local source address.
 
-    Guarantees the service never answers a remote, non-LAN caller even when
+    Guarantees the server never answers a remote, non-LAN caller even when
     bound to 0.0.0.0. An absent/unparseable client is rejected (safe default).
     """
     if not host:
@@ -109,7 +109,7 @@ def _is_lan_client(host: str | None) -> bool:
 # reach the subprocess even if the denylist is ever bypassed.
 _STRIPPED_FLAGS = ("--root", "--remote", "--dir", "--central", "--backup-dir")
 
-# Verbs refused on the remote board API: they wipe, re-bootstrap, or read/write
+# Verbs refused over the remote exec route: they wipe, re-bootstrap, or read/write
 # arbitrary host paths, none of which a remote container caller may drive.
 # The hook verbs take their root from the stdin payload's `cwd` in preference to
 # `--root` (cli._hook_root), so any of them escapes the pinned root, and
@@ -140,7 +140,7 @@ def _strip_root_flags(argv: list[str]) -> list[str]:
     """Drop path-override flags (and their values) from a forwarded argv.
 
     A container root/host path is meaningless (or dangerous) on the host, and a
-    forwarded --remote must never recurse. The service injects its own pinned
+    forwarded --remote must never recurse. The server injects its own pinned
     root instead. Handles both ``--flag value`` and ``--flag=value`` forms.
     """
     out: list[str] = []
@@ -191,7 +191,7 @@ def sanitise_argv(argv: list[str]) -> list[str]:
     if verb in _DENIED_VERBS:
         raise HTTPException(
             status_code=403,
-            detail=f"verb '{verb}' is not permitted on the remote board API",
+            detail=f"verb '{verb}' is not permitted over remote exec",
         )
     return argv
 
