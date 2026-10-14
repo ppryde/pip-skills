@@ -104,9 +104,10 @@ def test_repos_lists_the_archive_marked_and_flagged(archive: dict[str, Any]) -> 
 def test_reads_leave_the_whole_archive_folder_untouched(archive: dict[str, Any]) -> None:
     client = _client(archive["primary"])
     root = str(archive["repo"])
-    client.get("/api/repos")  # fills the archived map, as the UI does first
-    before = _tree_hash(archive["folder"])
+    before = _tree_hash(archive["folder"])  # BEFORE the first /api/repos
     assert before, "seed produced no files"
+    client.get("/api/repos")  # fills the archived map, as the UI does first
+    assert _tree_hash(archive["folder"]) == before  # listing alone touches nothing
 
     board = client.get("/api/board", params={"root": root})
     assert board.status_code == 200, board.text
@@ -115,6 +116,7 @@ def test_reads_leave_the_whole_archive_folder_untouched(archive: dict[str, Any])
     assert card.status_code == 200, card.text
 
     assert _tree_hash(archive["folder"]) == before  # content AND listing (no -wal/-shm)
+    assert not list(archive["folder"].glob("*-wal")) and not list(archive["folder"].glob("*-shm"))
 
 
 def test_every_post_route_refuses_an_archived_root(archive: dict[str, Any]) -> None:

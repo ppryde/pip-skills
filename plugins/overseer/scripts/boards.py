@@ -37,7 +37,13 @@ from scripts.store import derive_repo_label, derive_repo_root, slugify
 SIDECARS = ("knowledge", "usage.jsonl")
 
 
-def _read_repo_root_meta(db_path: Path) -> str | None:
+def _ro_uri(db_path: Path, immutable: bool) -> str:
+    """``immutable=1`` on an archived board: sqlite then never opens or creates
+    the -shm/-wal files, so a plain listing leaves the archive folder as it was."""
+    return f"{db_path.resolve().as_uri()}?mode=ro" + ("&immutable=1" if immutable else "")
+
+
+def _read_repo_root_meta(db_path: Path, immutable: bool = False) -> str | None:
     """Best-effort read-only peek at a board.db's ``meta['repo_root']`` for
     the ``repos`` discovery verb. Opened read-only (``mode=ro``) so
     discovery never creates, locks, or schema-touches a board it's merely
@@ -46,8 +52,8 @@ def _read_repo_root_meta(db_path: Path) -> str | None:
     this module's report-building verbs.
     """
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
-    except sqlite3.Error:
+        conn = sqlite3.connect(_ro_uri(db_path, immutable), uri=True, timeout=5.0)
+    except (sqlite3.Error, ValueError):
         return None
     try:
         return db.get_meta(conn, "repo_root")
@@ -120,7 +126,7 @@ def discover(dirs: list[Path] | None = None) -> list[dict[str, Any]]:
             db_path = label_dir / "board.db"
             if not db_path.is_file():
                 continue
-            root_str = _read_repo_root_meta(db_path)
+            root_str = _read_repo_root_meta(db_path, immutable=config_dir in archived_dirs)
             if not root_str or not Path(root_str).exists():
                 continue
             canonical = str(Path(root_str).resolve())
@@ -146,7 +152,7 @@ def discover(dirs: list[Path] | None = None) -> list[dict[str, Any]]:
 
 def _read_only(path: Path) -> sqlite3.Connection | None:
     try:
-        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5.0)
+        conn = sqlite3.connect(_ro_uri(path, config.is_archived_path(path)), uri=True, timeout=5.0)
     except (sqlite3.Error, ValueError):
         return None
     conn.row_factory = sqlite3.Row
