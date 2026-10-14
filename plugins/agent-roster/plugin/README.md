@@ -4,7 +4,7 @@
 
 `/roster` opens a live pane of every Claude Code session on this machine: its tmux name, repo and branch, status and last prompt. You can open or kill a session from it.
 
-It is a mod, early access in Claude Code 2.1.287. It is read-only and costs no model context. Deep detail is in [REFERENCE.md](REFERENCE.md).
+It is a mod, early access in Claude Code 2.1.287. It only reads the session registry and costs no model context; it acts on a session only when you press open or kill. Deep detail is in [REFERENCE.md](REFERENCE.md).
 
 ## Quick start
 
@@ -36,7 +36,7 @@ It is a mod, early access in Claude Code 2.1.287. It is read-only and costs no m
 | Command | What it does | Example |
 |---|---|---|
 | `/roster` | Opens the pane. Over Remote Control it replies with the roster as text (top 15 sessions). | `/roster` |
-| `/roster open <tmux-name\|pid>` | Opens that session in VS Code (tab) or Terminal.app. | `/roster open cc-ledger-2` |
+| `/roster open <tmux-name\|pid>` | Opens that session in VS Code (tab) or Terminal.app. Needs tmux and macOS. | `/roster open cc-ledger-2` |
 | `/roster kill <tmux-name\|pid>` | Ends that session. Refuses the session you are in. | `/roster kill 48213` |
 | `/roster setup` | Pick other Claude accounts to list. One dialog. | `/roster setup` |
 | `/roster setup-vscode` | Installs the VS Code helper extension. | `/roster setup-vscode` |
@@ -63,7 +63,7 @@ Set `ROSTER_CONFIG_DIRS` in each account's `settings.json`:
 
 ## How it works
 
-- Each live Claude process writes `<config dir>/sessions/<pid>.json`. The mod reads these every 5 s and drops dead pids. Nothing is scraped from tmux.
+- Each live Claude process writes `<config dir>/sessions/<pid>.json`. The mod reads these every 5 s and drops dead pids. Registered sessions are not scraped from tmux; tmux is only swept for panes that have not registered (next point).
 - The pane has **Needs you** (red), **Working** (green) and **Idle** sections. Idle for over a day folds away.
 - One tab per repo sits above the sections, with counts. Worktrees group under their repo.
 - Titles and prompts come from each session's transcript. Branches come from `git branch --show-current`, cached for a minute.
@@ -78,7 +78,7 @@ Set `ROSTER_CONFIG_DIRS` in each account's `settings.json`:
 - **A row says "running in another account".** That account's config dir is not listed. Run `/roster setup`.
 - **`open` goes to Terminal.app although the repo is open in VS Code.** That window has no helper, so the roster cannot see it. Run `/roster setup-vscode`, then reload the window.
 - **Kill is refused as ambiguous.** The tmux name exists on two servers. Kill by the pids it lists.
-- **Kill is missing on a row.** The row is the session you are in, or it sits at a startup prompt. Answer the prompt or close the pane.
+- **Kill is missing on a row.** The row is the session you are in, or it sits at a startup prompt or carries a note (`running in another account`, `agents view`). For a startup prompt, answer it or close the pane.
 - **A warning names an unreadable dir.** Check its permissions or mount. The other dirs still show.
 - **Windows.** Only registered sessions list, and `/roster open` is unsupported. See [REFERENCE.md](REFERENCE.md#windows).
 

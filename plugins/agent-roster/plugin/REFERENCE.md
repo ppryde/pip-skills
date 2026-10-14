@@ -86,7 +86,7 @@ control Terminal.
 ## Killing a session
 
 Each row but the session the pane runs in, and those still at a startup
-prompt, has a **kill** button (click it in
+prompt or carrying a note (another account, agents view), has a **kill** button (click it in
 fullscreen, or Tab to it and Enter). The first press only arms the row:
 **confirm kill** or **cancel**. From the phone, or anywhere a pane is not to
 hand, `/roster kill <tmux-name|pid>`; a tmux name held on two tmux servers is
@@ -214,13 +214,14 @@ else `HOMEDRIVE`+`HOMEPATH`), `ROSTER_CONFIG_DIRS` takes `;`-separated drive pat
 only if PowerShell (`Get-CimInstance Win32_Process`) shows a process whose command line is Claude's own (`claude.exe`, or claude-code's entrypoint: a
 bare `node.exe` or `bun.exe` is not enough); if PowerShell cannot be asked, the registry rows are trusted for display. `/roster kill` runs
 `taskkill /PID <pid> /F` only when that command line matches AND the process's creation time agrees with the registry's `startedAt`; otherwise
-it refuses and ends nothing. tmux, `ps` and `id` do not exist there, so the stray-pane sweep and the VS Code helper and its offer are skipped
+it refuses and ends nothing. tmux, `ps` and `id` do not exist there, so the stray-pane sweep and the VS Code helper offer are skipped
 without a message; `/roster open` is unsupported and answers that the session is outside tmux.
 A session that Claude Code did not register is therefore not listed on Windows.
 
 ## Limits and development
 
-- Read-only: it cannot switch you into another session or tmux pane.
+- It cannot switch you into another session or tmux pane; it reads the registry and acts only on open and kill.
+- `open` needs tmux and macOS: it uses `open` and `osascript`, so on Linux it can only report that it could not open the session.
 - The registry and transcript formats are Claude Code internals, not a
   published API; a release can move them.
 - Tests live beside `plugin/`, in `plugins/agent-roster/tests/`, so they do not ship; run them with `claude plugin test plugins/agent-roster` (or `bash tests/run-mods.sh agent-roster`).
