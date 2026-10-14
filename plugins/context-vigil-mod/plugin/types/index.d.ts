@@ -40,6 +40,8 @@ export type Fields = {
   next_step: string
   open_questions: string
   failed_attempts: string
+  standing: string
+  standing_retire: string
   session_name: string
 }
 

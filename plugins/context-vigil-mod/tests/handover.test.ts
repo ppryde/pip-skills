@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { FIELD_NAMES, fresh, INPUT_SCHEMA, cleanName, injectText, instructionText, limitResumeText, nextThreshold, grownEnough, parseFields, renderHandover, resumeText, reusable } from '../plugin/core/handover'
+import { FIELD_NAMES, STANDING_MAX_BYTES, STANDING_MAX_ITEMS, fresh, mergeStanding, INPUT_SCHEMA, cleanName, injectText, instructionText, limitResumeText, nextThreshold, grownEnough, parseFields, renderHandover, resumeText, reusable } from '../plugin/core/handover'
 
 const S = { nudgeAt: 35, step: 5 }
 
@@ -29,7 +29,7 @@ describe('grownEnough', () => {
 describe('parseFields', () => {
   const good = { goal: 'g', state: 's', next_step: 'n', session_name: 'nm' }
   test('required fields only; optional ones default to empty', () => {
-    expect(parseFields(good)).toEqual({ ok: true, fields: { goal: 'g', state: 's', decisions: '', next_step: 'n', open_questions: '', failed_attempts: '', session_name: 'nm' } })
+    expect(parseFields(good)).toEqual({ ok: true, fields: { goal: 'g', state: 's', decisions: '', next_step: 'n', open_questions: '', failed_attempts: '', standing: '', standing_retire: '', session_name: 'nm' } })
   })
   test('a missing or blank required field is rejected with its name', () => {
     const r = parseFields({ ...good, state: '  ' })
@@ -50,7 +50,7 @@ describe('parseFields', () => {
     expect(INPUT_SCHEMA.properties.session_name?.description).toContain('name')
   })
   test('field names end with session_name', () => {
-    expect([...FIELD_NAMES]).toEqual(['goal', 'state', 'decisions', 'next_step', 'open_questions', 'failed_attempts', 'session_name'])
+    expect([...FIELD_NAMES]).toEqual(['goal', 'state', 'decisions', 'next_step', 'open_questions', 'failed_attempts', 'standing', 'standing_retire', 'session_name'])
   })
   test('a missing or blank session_name is rejected, naming it', () => {
     for (const session_name of [undefined, '   ', '/']) {
@@ -76,7 +76,7 @@ describe('cleanName', () => {
 
 describe('renderHandover', () => {
   const snap = { session: 's1', at: '2026-10-04T12:00:00.000Z', cwd: '/repo', branch: 'main', dirty: ['a.ts'], edited: ['b.ts', 'c.ts'], contextPct: 41 }
-  const fields = { goal: 'Ship it', state: 'Half done', decisions: 'Use B', next_step: 'Write tests', open_questions: '', failed_attempts: 'tmux keys', session_name: 'vigil-mod: shell flow' }
+  const fields = { goal: 'Ship it', state: 'Half done', decisions: 'Use B', next_step: 'Write tests', open_questions: '', failed_attempts: 'tmux keys', standing: '', standing_retire: '', session_name: 'vigil-mod: shell flow' }
   test('sections in order, empty ones left out, snapshot at the end', () => {
     const md = renderHandover(fields, snap)
     expect(md.startsWith('# 📜 Handover — s1 (2026-10-04T12:00:00.000Z)\n')).toBe(true)
@@ -131,5 +131,57 @@ describe('reusable', () => {
   test('last light and limit handovers are never cleared into', () => {
     expect(reusable(p('last_light'), null, 1_000_000)).toBe(false)
     expect(reusable(p('limit'), null, 1_000_000)).toBe(false)
+  })
+})
+
+describe('mergeStanding', () => {
+  test('the previous items are kept verbatim and the new ones appended', () => {
+    const m = mergeStanding(['Never cd into worktrees'], '- PR bodies end with the link\n2. Bump versions', '')
+    expect(m.items).toEqual(['Never cd into worktrees', 'PR bodies end with the link', 'Bump versions'])
+    expect(m.retired).toEqual([])
+  })
+  test('a new item equal to an old one (case and spacing aside) is not added twice', () => {
+    expect(mergeStanding(['Bump  versions'], 'bump versions\nOther', '').items).toEqual(['Bump  versions', 'Other'])
+  })
+  test('a retirement names an item, quoted or not, and removes only it', () => {
+    const m = mergeStanding(['A rule', 'B rule'], '', '"a rule"')
+    expect(m.items).toEqual(['B rule'])
+    expect(m.retired).toEqual(['A rule'])
+    expect(m.unmatched).toEqual([])
+  })
+  test('a retirement that names nothing is reported and drops nothing', () => {
+    const m = mergeStanding(['A rule'], '', 'zzz')
+    expect(m.items).toEqual(['A rule'])
+    expect(m.unmatched).toEqual(['zzz'])
+  })
+  test('an item added and retired in the same call is simply not kept', () => {
+    expect(mergeStanding([], 'x', 'x').items).toEqual([])
+  })
+  test('the cap warns and never drops', () => {
+    const many = Array.from({ length: STANDING_MAX_ITEMS + 1 }, (_, i) => `rule ${i}`)
+    const m = mergeStanding(many, '', '')
+    expect(m.items.length).toBe(STANDING_MAX_ITEMS + 1)
+    expect(m.warning).toContain('40')
+    const big = mergeStanding(['x'.repeat(STANDING_MAX_BYTES + 1)], '', '')
+    expect(big.warning).not.toBeNull()
+    expect(mergeStanding(['a'], '', '').warning).toBeNull()
+  })
+})
+
+describe('standing orders in the handover', () => {
+  const snap = { session: 's1', at: 't', cwd: '/r', branch: 'main', dirty: [], edited: [], contextPct: 1 }
+  const f = { goal: 'G', state: 'S', decisions: 'D', next_step: 'N', open_questions: '', failed_attempts: '', standing: '- A rule\n- B rule', standing_retire: 'Old rule', session_name: 'n' }
+  test('rendered right after the goal; retirements in their own section', () => {
+    const md = renderHandover(f, snap)
+    expect(md.indexOf('## Goal')).toBeLessThan(md.indexOf('## Standing orders'))
+    expect(md.indexOf('## Standing orders')).toBeLessThan(md.indexOf('## State'))
+    expect(md).toContain('## Standing orders retired')
+    expect(md).toContain('Old rule')
+  })
+  test('the tool schema takes new items only and names the retire list', () => {
+    expect(INPUT_SCHEMA.properties.standing?.description).toContain('NEW')
+    expect(INPUT_SCHEMA.properties.standing_retire?.description).toContain('retire')
+    expect(INPUT_SCHEMA.required).not.toContain('standing')
+    expect(instructionText('request')).toContain('new standing orders')
   })
 })

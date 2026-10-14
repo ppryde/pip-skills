@@ -1145,3 +1145,40 @@ test('a clear attempt that errors is announced and leaves the handover offered, 
   expect(w.commands).not.toContain('clear')
   expect(w.state.get('context-vigil-mod.pending')).toMatchObject({ path: expect.any(String) })
 })
+
+// WF-302: standing orders are carried across the chain by the mod; the model adds and retires.
+async function handOver(w: World, $: Engine, extra: Record<string, unknown>, next: string) {
+  await $.command.run(vho)
+  await w.clock.settle()
+  const r = await $.tool.call(call(extra) as never)
+  await w.clock.settle()
+  w.sessionId.value = next
+  await $.classic.SessionStart({ source: 'clear', transcript_path: `/t/${next}.jsonl` } as never)
+  return String((r as { result?: unknown }).result)
+}
+
+test('standing orders are carried forward across the chain, retired only by name', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await handOver(w, $, { standing: '- Never cd into worktrees\n- PR bodies end with the link' }, 's2')
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s1-1.md')).toContain('## Standing orders\n\n- Never cd into worktrees\n- PR bodies end with the link')
+  // The second handover supplies nothing: the mod copies the first one's list.
+  const r2 = await handOver(w, $, { standing: 'Bump versions', standing_retire: '"never cd into worktrees"\nnot a rule' }, 's3')
+  const md2 = w.files.get('/cfg/context-vigil-mod/handovers/s2-1.md') ?? ''
+  expect(md2).toContain('- PR bodies end with the link\n- Bump versions')
+  expect(md2).not.toContain('- Never cd into worktrees\n')
+  expect(md2).toContain('- retired: Never cd into worktrees')
+  expect(md2).toContain('- not found, nothing retired: not a rule')
+  expect(r2).toContain('Retired standing orders: Never cd into worktrees')
+  expect(r2).toContain('No standing order matched')
+  await handOver(w, $, {}, 's4')
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s3-1.md')).toContain('- PR bodies end with the link\n- Bump versions')
+  expect(w.store.has('standing:s1')).toBe(false)
+})
+
+test('a handover with no standing orders at all renders no such section', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await handOver(w, $, {}, 's2')
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s1-1.md')).not.toContain('Standing orders')
+})
