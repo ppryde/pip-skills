@@ -109,9 +109,9 @@ Terminal only. Shown from the threshold crossing until you choose or a handover 
 - A handover still pending when a session restarts is offered at session start with a `/clear` notice. Parked handovers older than 14 days are pruned.
 - With no config dir to be found (`CLAUDE_CONFIG_DIR`, `HOME`, `USERPROFILE` and `HOMEDRIVE`+`HOMEPATH` all unset), nothing is written anywhere and a handover is refused with a notice naming those variables.
 
-## 🌅 Last light
+## Last light
 
-`/vigil-setup last-light` (the setup step's header carries 🌅). When nothing has come from you since the agent's last turn, the agent is idle, the 1 h prompt cache is about to lapse (5 min lead) and context is at or past the last-light threshold, the mod **writes the handover only; it never clears**.
+`/vigil-setup last-light` (the setup step's header is "🌅 Lastlight"). When nothing has come from you since the agent's last turn, the agent is idle, the 1 h prompt cache is about to lapse (5 min lead) and context is at or past the last-light threshold, the mod **writes the handover only; it never clears**.
 
 It only works with a 1-hour cache: just before it would fire, the mod reads the latest cache write from the transcript's last 64 KB and does not fire for a 5-minute cache, or when it finds nothing, so it never warms a cold one. Separately, for information only: after the session's first cache-writing response the mod reads the cache type once; for a 5-minute cache it shows a "Last light is off for this session" line above the prompt until your next message (the threshold bar takes precedence). A model switch's `cache_ttl` updates it, announcing when last light is back on. It fires at most once until a human prompt re-arms it. When you return after the cache has expired, your next prompt is held and the mod asks: resume from the handover (cheap) or carry on (pays the cold cache). Your message is re-sent either way.
 
