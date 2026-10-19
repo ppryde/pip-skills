@@ -31,7 +31,13 @@ Reckoning works through nine steps on every invocation:
 /tribunal:reckoning
 ```
 
-Fetches all unresolved comments on the current branch's open PR, runs the full nine-step workflow.
+Fetches all unresolved comments on the current branch's open PR, runs the full workflow.
+
+Two cost guards apply in this mode. A one-call pre-check (Step 0) compares the PR's newest review
+or comment and head SHA against `~/.local/state/reckoning/<owner>-<repo>-<pr>.json`; if nothing has
+changed since the last run it replies with the stored summary and stops. Otherwise the fetching and
+validation run in a Sonnet subagent that hands back a compact summary, so comment bodies never
+enter the main session. Approval and the resolve question stay in the main session.
 
 ### PR progress report
 
