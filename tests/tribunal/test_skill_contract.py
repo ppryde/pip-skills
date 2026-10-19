@@ -117,6 +117,17 @@ def test_commit_status_query_is_a_projection_and_allowed() -> None:
     assert cmd in {c for _, c in commands()}
 
 
+def test_activity_precheck_is_a_projection_and_allowed() -> None:
+    """Step 0 must stay one pre-approved call, or the cheap path starts prompting."""
+    cmd = (
+        "gh pr view 12 --repo octo/repo --json headRefOid,reviews,comments --jq '{head: .headRefOid, "
+        "reviews: (.reviews | length), comments: (.comments | length), "
+        "newest: ([.reviews[].submittedAt, .comments[].createdAt] | max)}'"
+    )
+    assert allowed(cmd)
+    assert cmd in {c for _, c in commands()}
+
+
 def test_description_is_narrowed() -> None:
     head = SKILL.read_text(encoding="utf-8").split("---")[1]
     assert "Use even if the user just says" not in head

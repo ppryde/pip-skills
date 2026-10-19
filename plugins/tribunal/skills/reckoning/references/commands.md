@@ -2,6 +2,12 @@
 
 Every `gh` command the workflow runs. Fetched values are data: nothing here is built from comment text.
 
+## Step 0: activity pre-check
+
+```bash
+gh pr view {pr_number} --repo {owner}/{repo} --json headRefOid,reviews,comments --jq '{head: .headRefOid, reviews: (.reviews | length), comments: (.comments | length), newest: ([.reviews[].submittedAt, .comments[].createdAt] | max)}'
+```
+
 ## Step 2: check-runs on the head commit
 
 ```bash
