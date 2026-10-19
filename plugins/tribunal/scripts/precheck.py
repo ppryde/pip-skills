@@ -2,33 +2,40 @@
 """Step 0 of tribunal:reckoning: one cheap GraphQL query decides whether a full run is needed.
 
     precheck.py check [--repo OWNER/REPO] [--pr N] [--full]
-    precheck.py save  [--repo OWNER/REPO] [--pr N] [--with-summary]
+    precheck.py save  --snapshot ID [--repo OWNER/REPO] [--pr N] [--with-summary]
 
 `check` prints one JSON object with a `verdict`:
-  quiet   - no unresolved threads, nothing new since the last run, head unchanged
-            (or changed with no check still running): say one line, skip Steps 1-7
+  quiet   - no unresolved threads, nothing new since the last run, no stored findings,
+            head unchanged (or changed with no check still running): say one line, stop
   pending - as quiet, but the head moved and checks are still running on it
-  cached  - unresolved threads, but nothing new and the head unchanged: show the
-            summary stored by the last full run instead of re-triaging
+  cached  - nothing new, same head, the same unresolved threads (or stored findings from
+            review bodies): show the summary stored by the last full run, no re-triage
   full    - anything else (no state, new activity, truncated, --full, errors)
 
-It also records what it saw as a pending snapshot. `save` (after a full run) promotes
-that snapshot to the state file, re-counting unresolved threads so threads resolved in
-Step 9 are reflected, and with --with-summary stores the summary file the session wrote
-to `summary_path`. The newest-activity mark stays the one `check` saw, so a comment that
-lands mid-run still counts as new next time.
+It also records what it saw as a snapshot with an id. `save --snapshot ID` (after a full
+run) turns that snapshot into the state file. Only the unresolved threads are re-read, so
+threads resolved in Step 9 count; the head SHA and the newest-activity mark stay as
+`check` saw them, so a push or a comment that lands mid-run (the run's own fix push
+included) still counts as new next time. Each check has its own snapshot, so two sessions
+on one PR do not trample each other.
 
 State lives at $RECKONING_STATE_DIR, else $XDG_STATE_HOME/reckoning, else
-~/.local/state/reckoning: outside the plugin, which updates replace. The script reads
-only timestamps, counts, SHAs and check names, never a comment body.
+~/.local/state/reckoning: outside the plugin, which updates replace. File names are
+`<owner>__<repo>__<pr>` (owners cannot contain `_`, so names never collide). The script
+reads only timestamps, ids, SHAs, a branch name and check names, never a comment body.
+
+Known limit: edits are seen through `updatedAt` on the last 20 comments of each thread,
+the last 20 reviews and the last 20 issue comments; an edit to anything older is missed.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -40,18 +47,22 @@ query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       headRefOid
+      headRefName
       reviewThreads(first: 100) {
         pageInfo { hasNextPage }
-        nodes { isResolved comments(last: 1) { nodes { createdAt updatedAt } } }
+        nodes { id isResolved comments(last: 20) { nodes { createdAt updatedAt } } }
       }
-      reviews(last: 1) { nodes { submittedAt updatedAt } }
-      comments(last: 1) { nodes { createdAt updatedAt } }
+      reviews(last: 20) { nodes { submittedAt updatedAt } }
+      comments(last: 20) { nodes { createdAt updatedAt } }
       commits(last: 1) {
-        nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
-          __typename
-          ... on CheckRun { name status }
-          ... on StatusContext { context state }
-        } } } } }
+        nodes { commit { statusCheckRollup { contexts(first: 100) {
+          pageInfo { hasNextPage }
+          nodes {
+            __typename
+            ... on CheckRun { name status }
+            ... on StatusContext { context state }
+          }
+        } } } }
       }
     }
   }
@@ -59,10 +70,13 @@ query($owner: String!, $repo: String!, $number: Int!) {
 """
 
 SEG = re.compile(r"[A-Za-z0-9._-]+", re.ASCII)
+OWNER = re.compile(r"[A-Za-z0-9-]+", re.ASCII)
 NUM = re.compile(r"[0-9]{1,9}", re.ASCII)
 SHA = re.compile(r"[0-9a-f]{40}", re.ASCII)
 STAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", re.ASCII)
 NAME = re.compile(r"[^\x00-\x1f\x7f]{1,100}")
+BRANCH = re.compile(r"[A-Za-z0-9._/@+:,=-]{1,255}", re.ASCII)
+SNAPSHOT = re.compile(r"[0-9a-f]{12}", re.ASCII)
 GH_TIMEOUT = 30
 
 
@@ -109,7 +123,7 @@ def detect(repo: str | None, pr: str | None) -> tuple[str, str, str] | None:
             return None
         repo, pr = repo or owner_repo, pr or number
     owner, _, name = repo.partition("/")
-    if not (valid_seg(owner) and valid_seg(name) and NUM.fullmatch(pr)):
+    if not (OWNER.fullmatch(owner) and valid_seg(name) and NUM.fullmatch(pr)):
         return None
     return owner, name, pr
 
@@ -139,19 +153,22 @@ def _stamps(nodes: Any) -> list[str]:
 def summarise(pr: dict[str, Any]) -> dict[str, Any]:
     """Counts and marks from the raw query result; malformed parts read as unknown."""
     threads = pr.get("reviewThreads") or {}
-    nodes = threads.get("nodes") or []
     stamps: list[str] = []
-    unresolved = 0
-    for t in nodes:
-        if not (t or {}).get("isResolved"):
-            unresolved += 1
-        stamps += _stamps(((t or {}).get("comments") or {}).get("nodes"))
+    open_ids: list[str] = []
+    for t in threads.get("nodes") or []:
+        t = t or {}
+        if not t.get("isResolved"):
+            open_ids.append(str(t.get("id")))
+        stamps += _stamps((t.get("comments") or {}).get("nodes"))
     stamps += _stamps((pr.get("reviews") or {}).get("nodes"))
     stamps += _stamps((pr.get("comments") or {}).get("nodes"))
     pending: list[str] = []
+    checks_truncated = False
     for c in (pr.get("commits") or {}).get("nodes") or []:
         rollup = ((c or {}).get("commit") or {}).get("statusCheckRollup") or {}
-        for ctx in (rollup.get("contexts") or {}).get("nodes") or []:
+        contexts = rollup.get("contexts") or {}
+        checks_truncated |= bool((contexts.get("pageInfo") or {}).get("hasNextPage"))
+        for ctx in contexts.get("nodes") or []:
             ctx = ctx or {}
             running = ctx.get("status") not in (None, "COMPLETED") or ctx.get(
                 "state"
@@ -160,12 +177,20 @@ def summarise(pr: dict[str, Any]) -> dict[str, Any]:
             if running and isinstance(name, str) and NAME.fullmatch(name):
                 pending.append(name)
     head = pr.get("headRefOid")
+    branch = pr.get("headRefName")
     return {
         "head_sha": head if isinstance(head, str) and SHA.fullmatch(head) else None,
-        "unresolved": unresolved,
+        "branch": branch
+        if isinstance(branch, str) and BRANCH.fullmatch(branch)
+        else None,
+        "unresolved": len(open_ids),
+        "unresolved_key": hashlib.sha256(
+            "\n".join(sorted(open_ids)).encode()
+        ).hexdigest()[:16],
         "truncated": bool((threads.get("pageInfo") or {}).get("hasNextPage")),
         "newest_activity": max(stamps) if stamps else None,
         "pending_checks": sorted(set(pending)),
+        "checks_truncated": checks_truncated,
     }
 
 
@@ -186,15 +211,23 @@ def decide(
     ):
         return "full", "new comments or reviews since the last run"
     head_moved = now["head_sha"] != prev.get("head_sha")
-    if now["unresolved"] == 0:
-        if head_moved and now["pending_checks"]:
+    same_threads = now["unresolved_key"] == prev.get("unresolved_key")
+    if head_moved:
+        if now["unresolved"] or prev.get("summary"):
+            return "full", "new commits since the last run"
+        if now["checks_truncated"]:
+            return (
+                "full",
+                "new commits; too many checks to tell whether a review is running",
+            )
+        if now["pending_checks"]:
             return "pending", "new commits; checks still running"
         return "quiet", "nothing unresolved, nothing new"
-    if head_moved:
-        return "full", "new commits since the last run"
-    if now["unresolved"] == prev.get("unresolved") and prev.get("summary"):
+    if same_threads and prev.get("summary"):
         return "cached", "unchanged since the last run"
-    return "full", "thread count changed"
+    if now["unresolved"] == 0:
+        return "quiet", "nothing unresolved, nothing new"
+    return "full", "unresolved threads changed"
 
 
 def _read(path: Path) -> dict[str, Any] | None:
@@ -207,22 +240,32 @@ def _read(path: Path) -> dict[str, Any] | None:
 
 def _write(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_suffix(path.suffix + f".{secrets.token_hex(4)}.tmp")
     tmp.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
     os.replace(tmp, path)
 
 
-def paths(owner: str, repo: str, number: str) -> tuple[Path, Path, Path]:
-    base = state_dir() / f"{owner}-{repo}-{number}"
-    return (
-        Path(f"{base}.json"),
-        Path(f"{base}.pending.json"),
-        Path(f"{base}.summary.md"),
-    )
+def slug(owner: str, repo: str, number: str) -> str:
+    return f"{owner}__{repo}__{number}"
+
+
+def state_path(owner: str, repo: str, number: str) -> Path:
+    return state_dir() / f"{slug(owner, repo, number)}.json"
+
+
+def snapshot_paths(owner: str, repo: str, number: str, snap: str) -> tuple[Path, Path]:
+    base = state_dir() / f"{slug(owner, repo, number)}.{snap}"
+    return Path(f"{base}.pending.json"), Path(f"{base}.summary.md")
 
 
 def now_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _stored(now: dict[str, Any]) -> dict[str, Any]:
+    return {
+        k: v for k, v in now.items() if k not in ("pending_checks", "checks_truncated")
+    }
 
 
 def cmd_check(args: argparse.Namespace) -> dict[str, Any]:
@@ -235,20 +278,22 @@ def cmd_check(args: argparse.Namespace) -> dict[str, Any]:
     if pr is None:
         return {**out, "verdict": "full", "reason": "pre-check query failed"}
     now = summarise(pr)
-    state, pending, summary = paths(owner, repo, number)
+    state = state_path(owner, repo, number)
     prev = _read(state)
     verdict, reason = decide(now, prev, args.full)
+    out.update(verdict=verdict, reason=reason, **now)
+    if prev:
+        out["last_checked_at"] = prev.get("checked_at")
     if (
         verdict == "quiet"
     ):  # nothing to triage: record the new head now, no save step follows
-        quiet = {k: v for k, v in now.items() if k != "pending_checks"}
-        _write(state, {**quiet, "checked_at": now_stamp(), "summary": None})
-    else:
-        _write(pending, {**now, "checked_at": now_stamp()})
-    out.update(verdict=verdict, reason=reason, summary_path=str(summary), **now)
-    if prev:
-        out["last_checked_at"] = prev.get("checked_at")
-    if verdict == "cached":
+        _write(state, {**_stored(now), "checked_at": now_stamp(), "summary": None})
+    elif verdict == "full":
+        snap = secrets.token_hex(6)
+        pending, summary = snapshot_paths(owner, repo, number, snap)
+        _write(pending, {**_stored(now), "checked_at": now_stamp()})
+        out.update(snapshot=snap, summary_path=str(summary))
+    elif verdict == "cached":
         out["summary"] = prev["summary"] if prev else None
     return out
 
@@ -257,22 +302,28 @@ def cmd_save(args: argparse.Namespace) -> dict[str, Any]:
     target = detect(args.repo, args.pr)
     if target is None:
         return {"saved": False, "reason": "could not detect the PR"}
-    state, pending, summary = paths(*target)
+    if not SNAPSHOT.fullmatch(args.snapshot):
+        return {"saved": False, "reason": "bad snapshot id"}
+    pending, summary = snapshot_paths(*target, args.snapshot)
     snap = _read(pending)
     if snap is None:
-        return {"saved": False, "reason": "no pre-check snapshot; run check first"}
+        return {"saved": False, "reason": "no such pre-check snapshot; run check first"}
     pr = query(*target)
-    if pr is not None:
+    if (
+        pr is not None
+    ):  # re-read only the open threads: head and activity stay as checked
         fresh = summarise(pr)
-        snap["unresolved"] = fresh["unresolved"]
-        snap["head_sha"] = fresh["head_sha"] or snap.get("head_sha")
-    snap.pop("pending_checks", None)
+        snap["unresolved"], snap["unresolved_key"] = (
+            fresh["unresolved"],
+            fresh["unresolved_key"],
+        )
     snap["summary"] = None
     if args.with_summary:
         try:
             snap["summary"] = summary.read_text(encoding="utf-8")[:20000] or None
         except (OSError, UnicodeError):
             pass
+    state = state_path(*target)
     _write(state, snap)
     for p in (pending, summary):
         p.unlink(missing_ok=True)
@@ -291,6 +342,7 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
         p.add_argument("--repo")
         p.add_argument("--pr")
     sub.choices["check"].add_argument("--full", action="store_true")
+    sub.choices["save"].add_argument("--snapshot", required=True)
     sub.choices["save"].add_argument("--with-summary", action="store_true")
     return parser.parse_args(argv)
 

@@ -289,11 +289,23 @@ def parse_flags(args: list[str], spec: Spec) -> tuple[list[str], list[tuple[str,
 
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PRECHECK = os.path.join(PLUGIN_ROOT, "scripts", "precheck.py")
+_SNAPSHOT_RE = re.compile(r"[0-9a-f]{12}", re.ASCII)
+
+
+def v_snapshot(v: str) -> bool:
+    return bool(_SNAPSHOT_RE.fullmatch(v))
+
+
 _PRECHECK_SPECS: dict[str, Spec] = {
     "check": {"--repo": ("repo", v_repo), "--pr": ("pr", v_num), "--full": ("full", None)},
-    "save": {"--repo": ("repo", v_repo), "--pr": ("pr", v_num), "--with-summary": ("summary", None)},
+    "save": {
+        "--repo": ("repo", v_repo),
+        "--pr": ("pr", v_num),
+        "--snapshot": ("snapshot", v_snapshot),
+        "--with-summary": ("summary", None),
+    },
 }
-_SUMMARY_RE = re.compile(r"[A-Za-z0-9._-]+-[0-9]{1,9}\.summary\.md", re.ASCII)
+_SUMMARY_RE = re.compile(r"[A-Za-z0-9-]+__[A-Za-z0-9._-]+__[0-9]{1,9}\.[0-9a-f]{12}\.summary\.md", re.ASCII)
 
 
 def reckoning_state_dir() -> str:
@@ -307,7 +319,8 @@ def reckoning_state_dir() -> str:
 
 
 def _precheck(a: list[str]) -> bool:
-    if len(a) < 2 or os.path.realpath(a[0]) != os.path.realpath(PRECHECK):
+    # Absolute only: a relative path would resolve against this hook's cwd, not the shell's.
+    if len(a) < 2 or not os.path.isabs(a[0]) or os.path.realpath(a[0]) != os.path.realpath(PRECHECK):
         return False
     spec = _PRECHECK_SPECS.get(a[1])
     if spec is None:
@@ -317,13 +330,28 @@ def _precheck(a: list[str]) -> bool:
 
 
 def summary_write_allowed(tool_input: dict) -> bool:  # type: ignore[type-arg]
+    """A Write of one summary file directly in the state dir, by a normalised absolute path.
+
+    Lexical and resolved parents must both be the state dir: `link/..` resolves differently
+    for realpath (follows the link) and for a lexical resolver, so `..` is refused outright.
+    A state dir inside any `.claude*` directory is refused (instructions live there).
+    """
     path = tool_input.get("file_path")
     if not isinstance(path, str) or not os.path.isabs(path) or len(path) > 4096:
         return False
-    name = os.path.basename(path)
-    if not _SUMMARY_RE.fullmatch(name) or name.startswith(".") or os.path.islink(path):
+    if os.path.normpath(path) != path or any(part in (".", "..") for part in path.split(os.sep)):
         return False
-    return os.path.realpath(os.path.dirname(path)) == os.path.realpath(reckoning_state_dir())
+    if not _SUMMARY_RE.fullmatch(os.path.basename(path)) or os.path.islink(path):
+        return False
+    state = reckoning_state_dir()
+    if not os.path.isabs(state):
+        return False
+    state_norm = os.path.normpath(state)
+    state_real = os.path.realpath(state)
+    if any(part.startswith(".claude") for p in (state_norm, state_real) for part in p.split(os.sep)):
+        return False
+    parent = os.path.dirname(path)
+    return parent == state_norm and os.path.realpath(parent) == state_real
 
 
 # --------------------------------------------------------------------------- decide
