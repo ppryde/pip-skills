@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: pre-approve the exact `gh` commands tribunal:reckoning runs.
+"""PreToolUse hook: pre-approve the exact commands tribunal:reckoning runs.
+
+Besides `gh`, it approves the Step 0 pre-check script (`python3 <plugin>/scripts/precheck.py
+check|save`, only at this plugin's own path) and a Write of a summary file straight into the
+reckoning state directory (the one place the pre-check reads it from).
 
 Policy (fail closed): the hook only ever prints an "allow" decision. For anything
 it does not positively recognise it prints nothing and exits 0, which leaves the
@@ -16,8 +20,9 @@ How a command is judged:
   3. GraphQL documents are compared token-by-token with the two canonical documents
      (the thread query in queries/threads.graphql, and the resolve mutation).
 
-The module never executes anything and does no I/O other than stdin/stdout and one
-read-only load of queries/threads.graphql from its own directory.
+The module never executes anything and does no I/O other than stdin/stdout, one
+read-only load of queries/threads.graphql from its own directory, and path resolution
+(realpath) for the pre-check script and the summary file.
 """
 from __future__ import annotations
 
@@ -280,6 +285,47 @@ def parse_flags(args: list[str], spec: Spec) -> tuple[list[str], list[tuple[str,
     return pos, flags
 
 
+# --------------------------------------------------------------------------- pre-check
+
+PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PRECHECK = os.path.join(PLUGIN_ROOT, "scripts", "precheck.py")
+_PRECHECK_SPECS: dict[str, Spec] = {
+    "check": {"--repo": ("repo", v_repo), "--pr": ("pr", v_num), "--full": ("full", None)},
+    "save": {"--repo": ("repo", v_repo), "--pr": ("pr", v_num), "--with-summary": ("summary", None)},
+}
+_SUMMARY_RE = re.compile(r"[A-Za-z0-9._-]+-[0-9]{1,9}\.summary\.md", re.ASCII)
+
+
+def reckoning_state_dir() -> str:
+    """Mirror of scripts/precheck.py state_dir() (a test pins the two together)."""
+    explicit = os.environ.get("RECKONING_STATE_DIR")
+    if explicit:
+        return explicit
+    xdg = os.environ.get("XDG_STATE_HOME")
+    base = xdg if xdg else os.path.join(os.path.expanduser("~"), ".local", "state")
+    return os.path.join(base, "reckoning")
+
+
+def _precheck(a: list[str]) -> bool:
+    if len(a) < 2 or os.path.realpath(a[0]) != os.path.realpath(PRECHECK):
+        return False
+    spec = _PRECHECK_SPECS.get(a[1])
+    if spec is None:
+        return False
+    parsed = parse_flags(a[2:], spec)
+    return parsed is not None and not parsed[0]
+
+
+def summary_write_allowed(tool_input: dict) -> bool:  # type: ignore[type-arg]
+    path = tool_input.get("file_path")
+    if not isinstance(path, str) or not os.path.isabs(path) or len(path) > 4096:
+        return False
+    name = os.path.basename(path)
+    if not _SUMMARY_RE.fullmatch(name) or name.startswith(".") or os.path.islink(path):
+        return False
+    return os.path.realpath(os.path.dirname(path)) == os.path.realpath(reckoning_state_dir())
+
+
 # --------------------------------------------------------------------------- decide
 
 
@@ -329,6 +375,8 @@ def _graphql(rest: list[str], threads: list[str] | None) -> bool:
 
 def decide(argv: list[str], threads_tokens: object = _UNSET) -> bool:
     """True only for an exact, read-only gh command shape from the allowlist."""
+    if len(argv) >= 2 and argv[0] == "python3":
+        return _precheck(argv[1:])
     if len(argv) < 2 or argv[0] != "gh":
         return False
     a = argv[1:]
@@ -373,10 +421,14 @@ def decide(argv: list[str], threads_tokens: object = _UNSET) -> bool:
 
 
 def evaluate(payload: object) -> bool:
-    if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
+    if not isinstance(payload, dict):
         return False
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
+        return False
+    if payload.get("tool_name") == "Write":
+        return summary_write_allowed(tool_input)
+    if payload.get("tool_name") != "Bash":
         return False
     command = tool_input.get("command")
     if not isinstance(command, str) or len(command) > MAX_COMMAND:

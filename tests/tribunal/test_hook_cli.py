@@ -159,7 +159,7 @@ def test_exception_inside_decide_fails_closed(tmp_path: Path) -> None:
 def _hook_command() -> str:
     cfg = json.loads((HOOKS / "hooks.json").read_text(encoding="utf-8"))
     entry = cfg["hooks"]["PreToolUse"][0]
-    assert entry["matcher"] == "Bash"
+    assert entry["matcher"] == "Bash|Write"
     assert len(entry["hooks"]) == 1
     hook = entry["hooks"][0]
     assert hook["type"] == "command" and hook["timeout"] == 5

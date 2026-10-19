@@ -39,7 +39,7 @@ Do **not**:
 - Resolve comments where the fix confidence was Medium or lower without explicitly noting this
 - Batch-resolve all comments — only the specific ones the user approved and that were successfully applied
 
-When resolving, use the thread `id` values already fetched in Step 3d and the `resolveReviewThread` GraphQL mutation:
+When resolving, use the thread `id` values from the Step 3d query (the fix subagent re-runs it: the triage subagent's ids do not reach the main session) and the `resolveReviewThread` GraphQL mutation:
 Command: `references/commands.md`, section "Step 9: resolve a thread".
 
 Do **not** use `minimizeComment` — that hides comments behind a fold (moderation action), which is not the same as resolving a review thread.

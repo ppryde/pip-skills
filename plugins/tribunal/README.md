@@ -7,10 +7,11 @@ PR comment review, categorisation, prioritisation, and resolution. Pull every co
 
 ### Reckoning (`/tribunal:reckoning`)
 
-Reckoning works through nine steps on every invocation:
+Reckoning starts with a cheap pre-check, then works through nine steps. Steps 1–7 run in a Sonnet subagent that hands back a compressed summary (at most ~1,500 tokens), so the comment payload never fills your main session; approved fixes and thread resolution go to a second Sonnet subagent. Each subagent's token usage is reported with the summary.
 
 | Step | What happens |
 |------|-------------|
+| **0. Pre-check** | One GraphQL query compared with the last run stored in `~/.local/state/reckoning/`. Nothing unresolved and nothing new: one line, done. Unresolved threads but nothing new and no new commits: the stored summary, no re-triage. A progress report always runs in full |
 | **1. Gather** | Auto-detects repo and PR number from your current branch |
 | **2. Check** | Verifies any bot reviews have finished running before fetching |
 | **3. Fetch** | Pulls all comments via three GitHub APIs (inline, issue-level, review submissions) + GraphQL for thread resolution status |
