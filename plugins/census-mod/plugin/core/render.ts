@@ -29,6 +29,8 @@ export type RenderInput = {
   /** The context window's size in tokens, when known (the Clean preset shows used/size). */
   ctxWindow?: number | null
   costUsd: number | null
+  /** The subagents' share of costUsd (already clamped to it); null or absent when none ran. */
+  subagentUsd?: number | null
   durationMs: number | null
   modelName: string | null
   git: Pick<GitState, 'branch' | 'uncommitted' | 'ahead' | 'hasUpstream'> | null
@@ -119,11 +121,17 @@ export function parseBudget(raw: string | undefined): number | null {
 
 const budget = (env: RenderEnv): number => parseBudget(env.CLAUDE_COST_BUDGET) ?? DEFAULT_BUDGET
 
+/** ` (🕵️ $1.20)`: the subagents' share, beside a total that already includes it. */
+function subagentRuns(i: RenderInput): Run[] {
+  const sub = i.subagentUsd
+  return sub === null || sub === undefined || sub <= 0 ? [] : [sp, { t: `(🕵️ $${sub.toFixed(2)})`, tone: 'grey' }]
+}
+
 function segCost(i: RenderInput): Line[] {
   if (i.costUsd === null) return []
   const b = budget(i.env)
   const pct = b <= 0 ? 0 : Math.max(0, roundHalfEven((i.costUsd / b) * 100))
-  const out: Line[] = [[grey('💸'), sp, ...pacBar(Math.min(pct, 100), BAR_WIDTH, '•', '$'), sp, { t: `$${i.costUsd.toFixed(2)}`, tone: levelTone(pct) }]]
+  const out: Line[] = [[grey('💸'), sp, ...pacBar(Math.min(pct, 100), BAR_WIDTH, '•', '$'), sp, { t: `$${i.costUsd.toFixed(2)}`, tone: levelTone(pct) }, ...subagentRuns(i)]]
   if (i.durationMs !== null && i.durationMs > 0) {
     const burn = i.costUsd / (i.durationMs / 3_600_000)
     const bi = roundHalfEven(burn)
@@ -241,7 +249,7 @@ function segClean(i: RenderInput): Line[] {
     // The engine reports a percentage and the window, not a token count: used is their product.
     parts.push([{ t: `🧠 ${size ? `${fmtTokens((i.ctxPct / 100) * size)}/${fmtTokens(size)} ` : ''}` }, { t: `${shown}%`, tone: levelTone(shown) }])
   }
-  if (i.costUsd !== null) parts.push([{ t: `💵 $${i.costUsd.toFixed(2)}` }])
+  if (i.costUsd !== null) parts.push([{ t: `💵 $${i.costUsd.toFixed(2)}` }, ...subagentRuns(i)])
   for (const w of [cleanWindow(i, 'five_hour', '🕔', '5h', 5 * 3600), cleanWindow(i, 'seven_day', '🗓️', '7d', 7 * 86400)]) if (w) parts.push(w)
   return cleanLine(parts)
 }

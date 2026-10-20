@@ -50,6 +50,8 @@ export type Snap = {
   ctxPct: number | null
   ctxWindow: number | null
   costUsd: number | null
+  /** What the subagents have cost (within costUsd), priced from their transcripts; null when none ran. */
+  subagentUsd: number | null
   /** `$.session.usage().startedAt`, ms. */
   startedAt: number | null
   rateLimits: RateLimit[]

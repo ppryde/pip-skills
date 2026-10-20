@@ -244,3 +244,9 @@ test('parseBudget rejects overflow, so a huge CLAUDE_COST_BUDGET falls back inst
   expect(parseBudget('9'.repeat(400))).toBeNull()
   expect(parseBudget('12.5')).toBe(12.5)
 })
+
+test('the cost segment shows the subagents\' share beside the total, which already includes it', async () => {
+  expect(text({ ...FULL, subagentUsd: 1.2 }).split('\n')[0]).toContain('💸 ••ᗧ$$$$$$$ $3.10 (🕵️ $1.20) │ 🐌 $1.72/hr')
+  expect(text({ ...CLEAN, subagentUsd: 0.4 })).toBe('🤖 Opus 5.5 | 🧠 85k/200k 42% | 💵 $1.37 (🕵️ $0.40) | 🕔 5h 38% 0.8x | 🗓️ 7d 12% 0.7x')
+  for (const none of [null, 0, undefined]) expect(text({ ...FULL, subagentUsd: none })).toBe(text(FULL))
+})

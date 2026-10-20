@@ -22,4 +22,6 @@ done
 # scripts) fails tests/census/test_census_mod_bundle.py until this runs again, and census-mod's own version is then
 # bumped with it (CLAUDE.md "Mod layout")
 sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$here/../census/.claude-plugin/plugin.json" | head -1 > "$dest/BUNDLED_FROM"
-echo "census-mod bundle synced: ${FILES[*]}"
+# the 🕵️ subagent cost is priced at chronicle's list prices: census-mod carries its own generated copy of the table
+python3 "$here/../../tools/build_census_rates.py"
+echo "census-mod bundle synced: ${FILES[*]} + core/rates.ts"

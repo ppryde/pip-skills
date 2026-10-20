@@ -8,7 +8,7 @@ const USAGE = { input_tokens: 2, output_tokens: 100, cache_read_input_tokens: 90
 
 const snap = (over: Partial<Snap> = {}): Snap => ({
   sessionId: 's1', transcriptPath: '/cfg/projects/-repo/s1.jsonl', cwd: '/repo', worktreePath: null, version: '2.1.289',
-  model: modelOf('claude-opus-5-5[1m]'), sessionName: 'census mod', ctxPct: 9, ctxWindow: 1_000_000, costUsd: 0.9, startedAt: T0 - 600_000,
+  model: modelOf('claude-opus-5-5[1m]'), sessionName: 'census mod', ctxPct: 9, ctxWindow: 1_000_000, costUsd: 0.9, subagentUsd: null, startedAt: T0 - 600_000,
   rateLimits: [
     { kind: 'five_hour', percentUsed: 3.5, resetsAt: '2026-10-09T22:00:00.000Z' },
     { kind: 'seven_day', percentUsed: 22, resetsAt: '2026-10-14T10:00:00Z' },

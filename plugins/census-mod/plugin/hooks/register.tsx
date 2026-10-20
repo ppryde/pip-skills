@@ -14,6 +14,8 @@ import { buildPayload, modelOf, rateLimitsOf } from '../core/payload'
 import type { Event } from '../core/payload'
 import { TITLE_ARGV, TITLE_TAIL_CMD, findProc, lastTitle } from '../core/registry'
 import { TONE_COLOR, draw, fit } from '../core/render'
+import { subagentDir, subagentShown, sumSubagents } from '../core/subagents'
+import type { SubagentCache } from '../core/subagents'
 import { BACKUP_FILE, backupBlocks, budgetFrom, hasCostBar, CLEAN_PRESETS, isShowMe, styleFrom, placementFrom, replaceFrom, L, NO_DETECTION, PRESETS, Q, SETUP_KEY, commandIsCensus, continueAnyway, enabledCensusPlugins, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom, removeStatusLine, restoreStatusLine, scriptCandidates, settingsTmp, statusLineCommand, writerActive, writersFrom, is } from '../core/setup'
 import type { Detection, Effective, Saved, Style } from '../core/setup'
 import type { Line, RenderEnv, RenderInput } from '../core/render'
@@ -58,6 +60,10 @@ let saidNoGh = false
 const repoByDir = new Map<string, string | null>() // working dir -> owner/name of origin (null = none), asked once per dir
 
 const TICK_MS = 30_000
+const SUBAGENT_MIN_MS = 5_000 // a session.measure storm reads the subagent transcripts at most this often
+const subCache: SubagentCache = new Map() // subagent transcript path -> its size and cost when last read
+let subAt: number | null = null
+let subRunning = false
 
 async function nowMs($: EngineInterface): Promise<number> {
   return $.clock.now()
@@ -84,7 +90,7 @@ async function loadEnv($: EngineInterface): Promise<Env> {
 function fresh(id: string, cwd: string): Snap {
   return {
     sessionId: id, transcriptPath: null, cwd, worktreePath: null, version: null, model: null, sessionName: null,
-    ctxPct: null, ctxWindow: null, costUsd: null, startedAt: null, rateLimits: [],
+    ctxPct: null, ctxWindow: null, costUsd: null, subagentUsd: null, startedAt: null, rateLimits: [],
     counters: EMPTY_COUNTERS, ttl: DEFAULT_TTL, git: null, pr: null, proc: null,
   }
 }
@@ -106,6 +112,34 @@ async function refreshEngine($: EngineInterface) {
   }
   const model = await $.session.model().catch(() => null)
   if (model) snap.model = modelOf(model)
+  await refreshSubagents($, true)
+}
+
+/**
+ * The subagents' cost from their transcripts: only files that grew are re-read. Throttled unless `force`
+ * (a turn's write); applied to the snapshot it was asked for. Repaints when the figure moved.
+ */
+async function refreshSubagents($: EngineInterface, force = false) {
+  const s = snap
+  const dir = subagentDir(s?.transcriptPath ?? null)
+  if (!s || !dir || subRunning) return
+  const now = await nowMs($)
+  if (!force && subAt !== null && now - subAt < SUBAGENT_MIN_MS) return
+  subAt = now
+  subRunning = true
+  try {
+    const entries = await $.fs.list(dir).catch(() => [])
+    const read = (path: string) => Promise.resolve($.fs.read(path)).then(t => (typeof t === 'string' ? t : null), () => null)
+    const usd = await sumSubagents(dir, entries, subCache, read)
+    if (usd !== s.subagentUsd) {
+      s.subagentUsd = usd
+      if (s === snap) repaint($)
+    }
+  } catch {
+    // the 🕵️ figure is a nicety: keep the last one
+  } finally {
+    subRunning = false
+  }
 }
 
 const limitsFingerprint = (l: RateLimit[]): string => l.map(x => `${x.kind}:${x.percentUsed}:${x.resetsAt ?? ''}`).sort().join('|')
@@ -562,6 +596,7 @@ function armTimers($: EngineInterface) {
   // Countdowns only: redraws, never records.
   tickTimer = $.clock.every(TICK_MS, () => {
     repaint($)
+    void refreshSubagents($).catch(() => undefined)
     scheduleGh($, 'age')
     void pushPrToSnap($, false).catch(() => undefined) // a status-line command may have written a pr since
   })
@@ -603,6 +638,8 @@ async function bind($: EngineInterface, id: string, cwd: string, transcript: str
   if (!same) {
     const old = snap
     snap = fresh(id, cwd)
+    subCache.clear()
+    subAt = null
     limitsKey = ''
     lastGitAt = null // a new session's first git status is not held back by the old one's
     if (old && event !== 'session.start') {
@@ -1026,6 +1063,7 @@ async function statusLines($: EngineInterface): Promise<Line[]> {
     cache: { hitRatio: c.lastRatio, requests: c.requests, warm: isWarm(c, snap.ttl, now * 1000), expiresAt: expires === null ? null : expires / 1000, misses: 0 },
     limits: rateLimitsOf(snap.rateLimits),
     costUsd: snap.costUsd,
+    subagentUsd: subagentShown(snap.subagentUsd, snap.costUsd),
     durationMs: snap.startedAt === null ? null : now * 1000 - snap.startedAt,
     modelName: snap.model?.display_name ?? null,
     git: snap.git,
@@ -1131,7 +1169,9 @@ export const register: Register = on => {
       if (!snap) return
       snap.ctxPct = e.context.percent ?? null
       snap.ctxWindow = e.context.window ?? snap.ctxWindow
+      const before = snap.costUsd
       snap.costUsd = e.cost?.usd ?? snap.costUsd
+      if (snap.costUsd !== before) void refreshSubagents($).catch(() => undefined) // a subagent may be what spent it
       const rates = e.rateLimits as RateLimit[]
       const key = limitsFingerprint(rates)
       if (key !== limitsKey) {
