@@ -46,6 +46,7 @@ Answers from `/census-setup` are stored per account. An environment variable bea
 | Setting | Default | What it changes |
 |---|---|---|
 | Record (setup answer) | Yes if your status line does not already record | Records sessions into the census store. |
+| 🕵️ Subagent cost | shown when subagents ran | Beside the session total (which already includes it): `💸 [bar] $3.10 (🕵️ $1.20)`. Priced from the session's subagent transcripts at chronicle's list prices (`core/rates.ts`, generated from chronicle's table), so it is an estimate, capped at the total. |
 | 💸 Budget (setup answer) | `$20` | Main-session cost budget the 💸 bar fills to. Asked only when the effective segments include `cost` (the Pac-Man layouts do; the Clean layouts do not, unless `CENSUS_STATUSLINE_SEGMENTS` adds it). Options: `$10`, `$20` (recommended), `$50`, `$100` or any amount. |
 | Draw (setup answer) | above the input | Draws the status line: `above`, `below`, or off. |
 | 🎨 Style (`style`) | `pacman` | `pacman` (the bars) or `clean` (plain text, ` | ` separators). A missing value means `pacman`. |

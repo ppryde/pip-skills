@@ -179,3 +179,42 @@ test('CENSUS_MOD_PLACEMENT outranks the answer; nothing is drawn below before a 
   expect(await bandLines(band)).toEqual([])
   await band.unmount()
 })
+
+test('the band prices the session\'s subagent transcripts into the 🕵️ figure, and picks up a new one on the tick', async ($, on) => {
+  const dir = '/cfg/projects/-repo/s1/subagents'
+  const sonnet = (id: string) => JSON.stringify({ type: 'assistant', message: { id, model: 'claude-sonnet-5-5', usage: { input_tokens: 50_000, output_tokens: 10_000 } } })
+  const w = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' }, files: { [`${dir}/agent-a.jsonl`]: [sonnet('m1'), sonnet('m1')].join('\n') } })
+  w.dirs.set(dir, ['agent-a.jsonl', 'agent-a.meta.json'])
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await $.turn.complete(turn(USAGE))
+  await w.clock.advance(0)
+  await w.clock.advance(2 * SEC)
+  const ui = await $.ui.mount(BAND())
+  expect((await bandLines(ui))[0]).toContain('$0.90 (🕵️ $0.20) │')
+
+  await ui.unmount()
+
+  w.files.set(`${dir}/agent-b.jsonl`, sonnet('m9'))
+  w.dirs.set(dir, ['agent-a.jsonl', 'agent-b.jsonl'])
+  const reads = () => w.lookups.filter(l => l.endsWith('.jsonl') && l.includes('/subagents/'))
+  const before = { reads: reads().length, invalidations: w.invalidations.count }
+  await w.clock.advance(30 * SEC)
+  await w.clock.advance(0)
+  expect(reads().slice(before.reads)).toEqual([`${dir}/agent-b.jsonl`]) // agent-a is unchanged: not read again
+  expect(w.invalidations.count).toBeGreaterThan(before.invalidations)
+  const again = await $.ui.mount(BAND())
+  expect((await bandLines(again))[0]).toContain('$0.90 (🕵️ $0.40) │')
+  await again.unmount()
+})
+
+test('no subagents, no 🕵️', async ($, on) => {
+  const w = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' } })
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await $.turn.complete(turn(USAGE))
+  await w.clock.advance(2 * SEC)
+  const ui = await $.ui.mount(BAND())
+  expect((await bandLines(ui)).join('\n')).not.toContain('🕵️')
+  await ui.unmount()
+})

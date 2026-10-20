@@ -52,11 +52,17 @@ def test_the_sync_script_makes_the_bundle_identical(tmp_path):
     shutil.copy(MOD / "sync-bundle.sh", work / "census-mod" / "sync-bundle.sh")
     (work / "census-mod" / "plugin" / "scripts").mkdir(parents=True)
     (work / "census-mod" / "plugin" / "scripts" / "stale.py").write_text("old")
+    (work / "chronicle" / "scripts").mkdir(parents=True)  # the price table the generator reads
+    shutil.copy(REPO / "plugins" / "chronicle" / "scripts" / "pricing.py", work / "chronicle" / "scripts" / "pricing.py")
+    (tmp_path / "repo" / "tools").mkdir()
+    shutil.copy(REPO / "tools" / "build_census_rates.py", tmp_path / "repo" / "tools" / "build_census_rates.py")
     subprocess.run(["bash", str(work / "census-mod" / "sync-bundle.sh")], check=True, capture_output=True)
     got = sorted(p.name for p in (work / "census-mod" / "plugin" / "scripts").iterdir())
     assert got == sorted([*FILES, "BUNDLED_FROM"])  # and the stale file was removed
     for f in FILES:
         assert (work / "census-mod" / "plugin" / "scripts" / f).read_bytes() == (SOURCE / f).read_bytes()
+    rates = work / "census-mod" / "plugin" / "core" / "rates.ts"
+    assert rates.read_bytes() == (PLUGIN / "core" / "rates.ts").read_bytes()
 
 
 @pytest.fixture
@@ -142,3 +148,11 @@ def test_census_mod_never_mentions_the_census_plugin_as_a_dependency():
     for gone in ("findSibling", "siblingCli", "pointerFiles", "CENSUS_CLI", "command -v census", "WHICH_ARGV", "MIN_CENSUS", "ancestors("):
         hits = [f.name for f, text in code.items() if gone in text]
         assert not hits, f"{gone} is still in {hits}"
+
+
+def test_the_price_table_matches_chronicle():
+    """census-mod's 🕵️ subagent cost is priced from its own generated copy of chronicle's rates."""
+    tool = REPO / "tools" / "build_census_rates.py"
+    proc = subprocess.run([sys.executable, str(tool), "--check"], capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+    assert "build_census_rates.py" in (MOD / "sync-bundle.sh").read_text(encoding="utf-8")
