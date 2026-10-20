@@ -48,4 +48,4 @@ Result: PASS 2026-10-04, with two DEFECTS found and fixed on fix/cvm-auto-guards
 
 ## 12. Managed install (no classic hooks), added 2026-10-20
 On the work account (organization-managed; `classic.*` never reaches the mod): `claude plugin validate` lists no blocked hook. Run 1 (`/vho` to the resume), 10 (a named session keeps its name) and a manual `/clear` with a handover pending; then `/resume` into another session with a parked handover (it is offered, not resumed). The event log shows `resume` under the new session id, and no `session-id-unmoved`.
-Result: NOT RUN.
+Result: 2026-10-20, work account, 0.7.0, Haiku: PASS for 1 (`/vho` -> handover saved -> clear -> `resume`, `rename`, `resume.sent` under the new id, no `session-id-unmoved`; the model carried on from the handover) and for `/resume` back into the old session (answered from its own conversation, nothing sent into it). Not yet run: the manual `/clear` with a handover pending, and `/resume` into a session with a parked handover.
