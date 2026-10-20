@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import { NAME } from '../plugin/core/name'
-import { START, human, turn, world } from './world'
+import { START, human, turn, world, endInto } from './world'
 import { V } from '../plugin/core/voice'
 
 const MIN = 60_000
@@ -31,7 +31,7 @@ test('a resume after the idle window counts as the person here: no arm off the o
   await $.prompt.submit(human('go'))
   await w.clock.advance(31 * MIN)
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'resume' } as never)
+  await endInto($, w, 'resume')
   await $.turn.complete(turn())
   expect(w.state.get('context-vigil-mod.mode')).toBe('attended')
   expect([...w.files.values()].join('')).not.toContain('"kind":"arm"')
@@ -106,7 +106,7 @@ test('standing down survives a clear: no second notice, still no nudge', async (
   const w = world(on, { store: { settings: { bar: false } }, files: { '/cfg/settings.json': JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"/s/context-vigil/scripts/context-vigil" hook stop' }] }] } }) } })
   await $.session.start(START)
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await $.session.measure({ context: { window: 1_000_000, percent: 40 }, rateLimits: [], changed: ['context'] as never })
   expect(w.notices.filter(n => n.includes('standing down')).length).toBe(1)
   expect(w.notices.some(n => n.includes('Context at'))).toBe(false)
@@ -121,22 +121,16 @@ test('a fresh session start resets module caches: a stale git timer neither bloc
   expect(w.runs.count).toBe(2)
 })
 
-test('classic.SessionStart returns watch paths for .git', async ($, on) => {
-  world(on)
-  await $.session.start(START)
-  const r = await $.classic.SessionStart({ source: 'startup' } as never)
-  expect(r.watchPaths).toEqual(['/repo/.git/HEAD', '/repo/.git/index'])
-})
-
-test('classic.SessionStart in a worktree watches that worktree\'s git dir; no git dir, no watch', async ($, on) => {
+// No file events reach the mod (PROBES §16): git is re-read after every turn instead, coalesced.
+test('git is re-read after each turn, one refresh for a burst of turns', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
-  w.git.dir = '/repo/.git/worktrees/w2'
-  const r = await $.classic.SessionStart({ source: 'startup' } as never)
-  expect(r.watchPaths).toEqual(['/repo/.git/worktrees/w2/HEAD', '/repo/.git/worktrees/w2/index'])
-  w.git.dir = null
-  const none = await $.classic.SessionStart({ source: 'startup' } as never)
-  expect(none.watchPaths ?? []).toEqual([])
+  await w.clock.advance(1500)
+  expect(w.runs.count).toBe(2)          // branch + status, from the start
+  await $.turn.complete(turn('a'))
+  await $.turn.complete(turn('b'))
+  await w.clock.advance(1500)
+  expect(w.runs.count).toBe(4)          // one more refresh, not two
 })
 
 test('a human prompt racing an agent step is not erased: lastHumanAt survives and the mode ends attended', async ($, on) => {
@@ -198,9 +192,36 @@ test('R1-13: a /compact starts the nudge ladder over', async ($, on) => {
   const m = (percent: number) => ({ context: { window: 1_000_000, percent }, rateLimits: [], changed: ['context'] as never })
   await $.session.measure(m(45))
   expect(w.notices.filter(n => n.includes('Context at 45%'))).toHaveLength(1)
-  await $.classic.SessionStart({ source: 'compact' } as never)
+  // No compaction event reaches the mod (PROBES §16): the fill falling a whole step is the compaction.
+  await $.session.measure(m(12))
   await $.session.measure(m(36))
   expect(w.notices.filter(n => n.includes('Context at 36%'))).toHaveLength(1)
+  expect([...w.files.values()].join('')).toContain('"kind":"compacted"')
+})
+
+test('R1-13: a reading with no fill between does not hide a compaction (M3)', async ($, on) => {
+  const w = world(on, { store: { settings: { bar: false } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  const m = (percent: number | undefined) => ({ context: { window: 1_000_000, percent }, rateLimits: [], changed: ['context'] as never }) as never
+  await $.session.measure(m(45))
+  await $.session.measure(m(undefined))
+  await $.session.measure(m(12))
+  await $.session.measure(m(36))
+  expect(w.notices.filter(n => n.includes('Context at 36%'))).toHaveLength(1)
+})
+
+test('R1-13: a dip smaller than a step, or a new window, does not start the ladder over', async ($, on) => {
+  const w = world(on, { store: { settings: { bar: false } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  const m = (percent: number, window = 1_000_000) => ({ context: { window, percent }, rateLimits: [], changed: ['context'] as never })
+  await $.session.measure(m(45))
+  await $.session.measure(m(42))          // under a step (5) back: a cleared tool result, not a compaction
+  await $.session.measure(m(9, 200_000))  // a switch to another window: another size, not a compaction
+  await $.session.measure(m(44))
+  expect(w.notices.filter(n => n.includes('Context at'))).toHaveLength(1)
+  expect([...w.files.values()].join('')).not.toContain('"kind":"compacted"')
 })
 
 test('R1-17: parked handovers older than two weeks are pruned at session start; fresh ones stay', async ($, on) => {

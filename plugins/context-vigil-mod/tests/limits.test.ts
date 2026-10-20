@@ -1,28 +1,10 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { HOP_MS, earlyStopDue, formatHHMM, latchCleared, latchFromMeasure, latchFromStopFailure, nextHop } from '../plugin/core/limits'
+import { HOP_MS, earlyStopDue, formatHHMM, latchCleared, latchFromError, latchFromMeasure, nextHop } from '../plugin/core/limits'
 
 const T = Date.UTC(2026, 9, 4, 12)
 const iso = (ms: number) => new Date(ms).toISOString()
 
 describe('latch', () => {
-  test('a rate_limit StopFailure latches on the fullest window', () => {
-    const l = latchFromStopFailure('rate_limit', [
-      { kind: 'five_hour', percentUsed: 100, resetsAt: iso(T + 3600_000) },
-      { kind: 'seven_day', percentUsed: 60, resetsAt: iso(T + 86400_000) },
-    ], T)
-    expect(l).toEqual({ kind: 'five_hour', resetsAtMs: T + 3600_000 })
-  })
-  test('other errors never latch', () => expect(latchFromStopFailure('overloaded', [], T)).toBe(null))
-  test('rate_limit with no window known latches for an hour', () => {
-    expect(latchFromStopFailure('rate_limit', [], T)).toEqual({ kind: 'unknown', resetsAtMs: T + 3600_000 })
-  })
-  test('equally full windows latch on the later reset', () => {
-    const l = latchFromStopFailure('rate_limit', [
-      { kind: 'five_hour', percentUsed: 100, resetsAt: iso(T + 3600_000) },
-      { kind: 'seven_day', percentUsed: 100, resetsAt: iso(T + 86400_000) },
-    ], T)
-    expect(l).toEqual({ kind: 'seven_day', resetsAtMs: T + 86400_000 })
-  })
   test('a measure at or past 100% latches', () => {
     expect(latchFromMeasure([{ kind: 'seven_day', percentUsed: 100, resetsAt: iso(T + 5) }], T)).toEqual({ kind: 'seven_day', resetsAtMs: T + 5 })
     expect(latchFromMeasure([{ kind: 'seven_day', percentUsed: 99.9, resetsAt: iso(T + 5) }], T)).toBe(null)
@@ -74,4 +56,17 @@ test('nextHop waits in ≤ 1 h hops and hits 0 at the resume time', () => {
 test('formatHHMM is local hours and minutes', () => {
   expect(formatHHMM(new Date(2026, 9, 4, 14, 5).getTime())).toBe('14:05')
   expect(formatHHMM(new Date(2026, 9, 4, 9, 0).getTime())).toBe('09:00')
+})
+
+describe('latchFromError', () => {
+  test('a full window latches to its own reset', () => {
+    expect(latchFromError([{ kind: 'seven_day', percentUsed: 100, resetsAt: iso(T + 5) }], T)).toEqual({ kind: 'seven_day', resetsAtMs: T + 5 })
+  })
+  test('a window at 90% or more: a short unknown latch', () => {
+    expect(latchFromError([{ kind: 'five_hour', percentUsed: 92, resetsAt: iso(T + 3600_000) }], T)).toEqual({ kind: 'unknown', resetsAtMs: T + 300_000 })
+  })
+  test('every window under 90%, or none known: no latch', () => {
+    expect(latchFromError([{ kind: 'five_hour', percentUsed: 89 }], T)).toBe(null)
+    expect(latchFromError([], T)).toBe(null)
+  })
 })

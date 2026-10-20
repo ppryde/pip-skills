@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { START, classicStart, turn, USAGE, BAND, bandLines, world } from './world'
+import { START, switchTo, turn, USAGE, BAND, bandLines, world } from './world'
 import type { World } from './world'
 
 const SEC = 1000
@@ -473,8 +473,7 @@ test('a /clear while a dialog is open drops that setup: its late answer is not a
   await w.clock.advance(0)
   await $.command.run({ command: 'census-setup', args: '', origin: { kind: 'composer' } } as never)
   await w.clock.advance(0)
-  w.sessionId.value = 's2'
-  await $.classic.SessionStart(classicStart('clear', 's2'))
+  await switchTo($, w, 's2')
   release()
   for (let i = 0; i < 6; i++) await w.clock.advance(0)
 

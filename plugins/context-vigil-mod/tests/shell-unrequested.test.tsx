@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import { V } from '../plugin/core/voice'
-import { START, human, turn, world, type World } from './world'
+import { START, human, turn, world, type World, endInto } from './world'
 
 const MIN = 60_000
 const TOOL = 'mcp__context-vigil-mod__vigil_handover'
@@ -29,10 +29,9 @@ async function instructionFails($: Engine, w: World) {
 async function clearsAndResumesFrom($: Engine, w: World, file: string) {
   expect(clears(w)).toBe(1)
   w.sessionId.value = 's2'
-  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
-  expect(ss.additionalContext?.join('\n')).toContain('## Goal')
+  await endInto($, w, 'clear')
   await w.clock.advance(500)
-  expect(w.submits.at(-1)?.text).toContain(`Resume from the handover injected above (saved at ${file})`)
+  expect(w.submits.at(-1)?.text).toContain(`(saved at ${file})`)
 }
 
 // Root cause: the person's request was the one-shot `awaiting` slot. Once an earlier save spent it,
@@ -138,7 +137,8 @@ test('told the handover failed (the instruction submit refused): the request is 
   expect(w.asks.map(q => q.question)).toEqual([ASK])
 })
 
-test('the request lapses after 30 minutes with no clear', async ($, on) => {
+// 31 simulated minutes of the draft guard's 2 s recheck (~930 rounds): ~4.5 s of real work, marginal at the 5 s default.
+test('the request lapses after 30 minutes with no clear', { timeoutMs: 15_000 }, async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await $.command.run(cmd('vho'))
@@ -237,7 +237,7 @@ test('an answer about a handover that is gone (a clear in between) changes nothi
   await $.tool.call(call() as never)
   await w.clock.settle()
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await $.tool.call(call('h2') as never)           // the new session's own volunteer, with the old dialog still open
   await w.clock.settle()
   expect(w.notices).toContain(V.handoverUnrequested('/cfg/context-vigil-mod/handovers/s2-1.md'))

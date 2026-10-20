@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { EMPTY_COUNTERS, TAIL_CMD, addTurn, compacted, expiresAtMs, isWarm, parseWrites, ratio, sessionRatio, ttlFromWrites, withTtl } from '../plugin/core/cache'
+import { EMPTY_COUNTERS, TAIL_CMD, addTurn, compacted, compactionDrop, expiresAtMs, isWarm, parseWrites, ratio, sessionRatio, ttlFromWrites, withTtl } from '../plugin/core/cache'
 import { COALESCE_MS, bundledCli, delayFor, endTimeoutMs, ingestArgv, ingestEnv } from '../plugin/core/census'
 import { GIT_DIR_ARGV, GIT_STATUS_ARGV, parseStatus, touchesGit, watchPaths, worktreeOf } from '../plugin/core/git'
 import { BACKOFF_MS, ghKey, ghArgv, parsePrList, shouldRefresh, touchesPr } from '../plugin/core/gh'
@@ -177,3 +177,12 @@ test('registry entries that are not objects are skipped, not fatal', async () =>
   expect(findProc(files, 's1')).toEqual({ pid: 9, procStart: 'p' })
 })
 
+
+test('a compaction is a sharp fall in the context fill: at least 25 points and under half of what it was', () => {
+  expect(compactionDrop(80, 12)).toBe(true)
+  expect(compactionDrop(95, 60)).toBe(false) // a fall, but over half is left: not a compaction
+  expect(compactionDrop(30, 20)).toBe(false) // under 25 points
+  expect(compactionDrop(60, 59)).toBe(false)
+  expect(compactionDrop(null, 5)).toBe(false) // no earlier figure
+  expect(compactionDrop(80, null)).toBe(false)
+})

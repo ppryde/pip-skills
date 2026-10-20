@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { START, USAGE, classicStart, turn, world } from './world'
+import { START, USAGE, switchTo, turn, world } from './world'
 
 const SEC = 1000
 const MIN = 60 * SEC
@@ -34,10 +34,10 @@ test('a -p run records nothing', async ($, on) => {
   expect(w.ingests).toHaveLength(0)
 })
 
-test('classic SessionStart on startup after session.start is the same session: one ingest, not two', async ($, on) => {
+test('a repeated session.start (a reload) is the same session: one ingest, not two', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
-  await $.classic.SessionStart(classicStart('startup'))
+  await $.session.start(START)
   await w.clock.advance(0)
 
   expect(w.ingests).toHaveLength(1)
@@ -48,9 +48,7 @@ test('a /clear ends the old session and registers the new one under its new id',
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} as never })
-  w.sessionId.value = 's2'
-  await $.classic.SessionStart(classicStart('clear', 's2'))
+  await switchTo($, w, 's2')
   await w.clock.advance(2 * SEC)
 
   const last = w.ingests.at(-1)?.payload as { session_id: string; census_mod: { event: string } }
@@ -59,16 +57,84 @@ test('a /clear ends the old session and registers the new one under its new id',
   expect(last).toMatchObject({ session_id: 's2', census_mod: { event: 'session.clear' } })
 })
 
-test('every classic start source registers: resume and fork are new sessions too', async ($, on) => {
+test('a /resume rebinds the same way: session.end(resume), then the id moves', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
-  for (const [i, source] of (['resume', 'fork'] as const).entries()) {
-    w.sessionId.value = `r${i}`
-    await $.classic.SessionStart(classicStart(source, `r${i}`))
-    await w.clock.advance(2 * SEC)
-    expect(w.ingests.at(-1)?.payload).toMatchObject({ session_id: `r${i}`, census_mod: { event: `session.${source}` } })
-  }
+  await switchTo($, w, 'r0', 'resume')
+  await w.clock.advance(2 * SEC)
+
+  expect(w.ingests.find(i => i.payload.census_mod.ended !== undefined)?.payload).toMatchObject({ session_id: 's1', census_mod: { ended: 'resume' } })
+  expect(w.ingests.at(-1)?.payload).toMatchObject({ session_id: 'r0', census_mod: { event: 'session.resume' }, transcript_path: '/cfg/projects/-repo/r0.jsonl' })
+})
+
+test('a slow id change is waited for: the poll rebinds when the id arrives, not before', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await $.session.end({ reason: 'resume', sessionId: 's1', resume: {} as never })
+  await w.clock.advance(600) // the id has not moved yet
+  expect(w.ingests.filter(i => i.payload.session_id === 'r0')).toHaveLength(0)
+  w.sessionId.value = 'r0'
+  await w.clock.advance(100)
+  await w.clock.advance(2 * SEC)
+
+  expect(w.ingests.filter(i => i.payload.session_id === 'r0')).toHaveLength(1)
+  expect(w.ingests.at(-1)?.payload).toMatchObject({ session_id: 'r0', census_mod: { event: 'session.resume' } })
+})
+
+test('an id that never moves is given up on after a few seconds, logged, with nothing recorded against the old session', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} as never })
+  const count = w.ingests.length
+  await w.clock.advance(6 * SEC)
+  await $.turn.complete(turn(USAGE))
+  await w.clock.advance(10 * SEC)
+
+  expect(w.logs.some(l => /id did not change/.test(l))).toBe(true)
+  expect(w.ingests).toHaveLength(count) // the end was written; the ended session gets no more records
+})
+
+test('the drift guard: a turn.start under an id the mod has not bound rebinds (a fork, or an end that was missed), once', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  w.sessionId.value = 'f1'
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.turn.start({ text: 'again', turnId: 't2' })
+  await w.clock.advance(2 * SEC)
+
+  expect(w.ingests.filter(i => i.payload.session_id === 'f1')).toHaveLength(1)
+  expect(w.ingests.at(-1)?.payload).toMatchObject({ session_id: 'f1', census_mod: { event: 'session.resume' } })
+  expect(w.ingests.filter(i => i.payload.census_mod.ended !== undefined)).toHaveLength(1)
+})
+
+test('session.end plus the drift guard handle one transition once, whoever gets there first', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} as never })
+  w.sessionId.value = 's2'
+  await $.turn.start({ text: 'hi', turnId: 't1' }) // the drift guard gets there before the poll
+  await w.clock.advance(2 * SEC)
+
+  expect(w.ingests.filter(i => i.payload.session_id === 's2')).toHaveLength(1)
+  expect(w.ingests.filter(i => i.payload.census_mod.ended !== undefined)).toHaveLength(1)
+})
+
+test('managed install: no classic.* event is ever delivered and the whole clear -> turn loop still records', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await switchTo($, w, 's2')
+  await $.turn.start({ text: 'next', turnId: 't1' })
+  await $.turn.complete(turn(USAGE))
+  await w.clock.advance(3 * SEC)
+
+  expect(w.ingests.at(-1)?.payload).toMatchObject({ session_id: 's2', census_mod: { event: 'turn.complete' }, prompt_cache: { requests: 1 } })
+  expect(w.ingests.filter(i => i.payload.session_id === 's1' && i.payload.census_mod.event !== 'session.start' && i.payload.census_mod.ended === undefined)).toEqual([])
 })
 
 test('a main-thread turn records its counters; subagent turns and turns with no usage do not', async ($, on) => {
@@ -150,16 +216,30 @@ test('without a 1h write in the tail the ttl is 5 minutes, and cools sooner', as
   expect(w.ingests.at(-1)?.payload).toMatchObject({ census_mod: { event: 'cache.cold' }, prompt_cache: { warm: false, ttl: '5m' } })
 })
 
-test('a compaction cold-starts the cache at once', async ($, on) => {
+test('a compaction (read off a sharp fall in the context fill) cold-starts the cache at once', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
   await $.turn.complete(turn(USAGE))
   await w.clock.advance(2 * SEC)
-  await $.classic.PostCompact({ trigger: 'auto', compact_summary: 's' } as never)
+  await $.session.measure({ context: { window: 1_000_000, percent: 80 }, rateLimits: [], changed: ['context'] as never })
+  await $.session.measure({ context: { window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] as never }) // 80 -> 10
   await w.clock.advance(2 * SEC)
 
   expect(w.ingests.at(-1)?.payload).toMatchObject({ census_mod: { event: 'compact' }, prompt_cache: { warm: false } })
+})
+
+test('an ordinary move of the fill, or a fall right after a /clear, is not a compaction', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await $.session.measure({ context: { window: 1_000_000, percent: 60 }, rateLimits: [], changed: ['context'] as never })
+  await $.session.measure({ context: { window: 1_000_000, percent: 45 }, rateLimits: [], changed: ['context'] as never })
+  await switchTo($, w, 's2')
+  await $.session.measure({ context: { window: 1_000_000, percent: 2 }, rateLimits: [], changed: ['context'] as never })
+  await w.clock.advance(5 * SEC)
+
+  expect(w.ingests.some(i => i.payload.census_mod.event === 'compact')).toBe(false)
 })
 
 test('counters live in $.store: written each turn, and picked up again after a reload or a restart', async ($, on) => {
@@ -181,7 +261,6 @@ test('the session name comes from the last custom-title row of the transcript', 
   const w = world(on)
   w.titles.set('/cfg/projects/-repo/s1.jsonl', '{"type":"custom-title","customTitle":"census mod","sessionId":"s1"}\n')
   await $.session.start(START)
-  await $.classic.SessionStart(classicStart('startup'))
   await w.clock.advance(0)
 
   expect((w.ingests.at(-1)?.payload as any).session_name).toBe('census mod')
@@ -204,18 +283,24 @@ test('a rate-limit change records with census windows (epoch seconds); an unchan
   expect(w.ingests).toHaveLength(2)
 })
 
-test('a model switch and a cwd change record', async ($, on) => {
+test('a model switch is seen on the next measurement or turn.complete; a cwd change on the next turn.complete', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
   w.model.value = 'claude-sonnet-5-5'
-  await $.classic.PostModelSwitch({ from_model: 'claude-opus-5-5', to_model: 'claude-sonnet-5-5' } as never)
+  await $.session.measure({ context: { window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] as never })
   await w.clock.advance(2 * SEC)
   expect(w.ingests.at(-1)?.payload).toMatchObject({ census_mod: { event: 'model' }, model: { display_name: 'Sonnet 5.5' } })
+  const count = w.ingests.length
+  await $.session.measure({ context: { window: 1_000_000, percent: 11 }, rateLimits: [], changed: ['context'] as never })
+  await w.clock.advance(5 * SEC)
+  expect(w.ingests).toHaveLength(count) // the same model again is no switch
 
-  await $.classic.CwdChanged({ old_cwd: '/repo', new_cwd: '/repo/sub' } as never)
+  w.cwd.value = '/repo/sub'
+  await $.turn.complete(turn(USAGE))
   await w.clock.advance(2 * SEC)
-  expect(w.ingests.at(-1)?.payload).toMatchObject({ census_mod: { event: 'cwd' }, cwd: '/repo/sub' })
+  // the turn's own record follows in the same coalesced write, so it names the event; the state it carries is the new cwd
+  expect(w.ingests.at(-1)?.payload).toMatchObject({ cwd: '/repo/sub' })
 })
 
 test('a second session.start (a hot reload) is the same session: one set of timers, not two', async ($, on) => {
@@ -264,30 +349,28 @@ test('a process the registry does not know yet is looked for on every later writ
   expect(w.registryLists.count).toBe(lists) // and once found it is not looked for again
 })
 
-test('a /clear, resume or fork writes the old session\'s end itself, once, even if session.end never came', async ($, on) => {
+test('a rebind without a session.end (a fork, a missed end) writes the old session\'s end itself, once, even if session.end never came', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
   w.sessionId.value = 's2'
-  await $.classic.SessionStart(classicStart('clear', 's2'))
+  await $.turn.start({ text: 'x', turnId: 't1' }) // no session.end came: the drift guard finds the new id
   await w.clock.advance(0)
   const ends = w.ingests.filter(i => i.payload.census_mod.ended !== undefined)
   expect(ends).toHaveLength(1)
-  expect(ends[0]?.payload).toMatchObject({ session_id: 's1', census_mod: { event: 'session.end', ended: 'clear' } })
+  expect(ends[0]?.payload).toMatchObject({ session_id: 's1', census_mod: { event: 'session.end', ended: 'resume' } })
 
   w.sessionId.value = 's3'
-  await $.classic.SessionStart(classicStart('fork', 's3'))
+  await $.turn.start({ text: 'y', turnId: 't2' })
   await w.clock.advance(0)
-  expect(w.ingests.filter(i => i.payload.census_mod.ended === 'fork')[0]?.payload.session_id).toBe('s2')
+  expect(w.ingests.filter(i => i.payload.census_mod.ended === 'resume')[1]?.payload.session_id).toBe('s2')
 })
 
 test('...but not twice when session.end already closed it', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} as never })
-  w.sessionId.value = 's2'
-  await $.classic.SessionStart(classicStart('clear', 's2'))
+  await switchTo($, w, 's2')
   await w.clock.advance(5 * SEC)
 
   expect(w.ingests.filter(i => i.payload.session_id === 's1' && i.payload.census_mod.ended !== undefined)).toHaveLength(1)
@@ -336,11 +419,9 @@ test('a turn\'s deferred transcript reads belong to that session: a /clear in be
   const w = world(on)
   w.titles.set('/cfg/projects/-repo/s1.jsonl', '{"type":"custom-title","customTitle":"old name","sessionId":"s1"}\n')
   await $.session.start(START)
-  await $.classic.SessionStart(classicStart('startup'))
   await w.clock.advance(0)
   await $.turn.complete(turn(USAGE)) // its reads are queued, not yet run
-  w.sessionId.value = 's2'
-  await $.classic.SessionStart(classicStart('clear', 's2'))
+  await switchTo($, w, 's2')
   for (let i = 0; i < 3; i++) await w.clock.advance(0)
   await w.clock.advance(3 * SEC)
 
@@ -354,7 +435,6 @@ test('the title is read whole once, then only from the transcript tail each turn
   const w = world(on)
   const path = '/cfg/projects/-repo/s1.jsonl'
   await $.session.start(START)
-  await $.classic.SessionStart(classicStart('startup'))
   await w.clock.advance(0)
   const wholeReads = () => w.runs.filter(r => r.argv[0] === 'grep' && r.argv.includes(path)).length
   expect(wholeReads()).toBe(1)
@@ -386,10 +466,88 @@ test('a /clear within those 3 seconds moves the offer to the new session: asked 
   w.store.delete('census-mod:setup')
   await $.session.start(START)
   await w.clock.advance(0)
-  w.sessionId.value = 's2'
-  await $.classic.SessionStart(classicStart('clear', 's2'))
+  await switchTo($, w, 's2')
   await w.clock.advance(5 * SEC)
   for (let i = 0; i < 6; i++) await w.clock.advance(0)
 
   expect(w.asks.filter(a => a.header === '🧭 Setup')).toHaveLength(1)
+})
+
+// ---- review fixes ----------------------------------------------------------------------------------------
+
+test('a subagent turn (its own cwd) never moves the session: no cwd event, no git re-read, no model flip', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const count = w.ingests.length
+  w.cwd.value = '/wt/sub' // inside a worktree-isolated subagent's hook, $.session.cwd() is its directory
+  w.model.value = 'claude-haiku-5-5'
+  await $.turn.start({ text: 'x', turnId: 't1', agentId: 'sub' } as never)
+  await $.turn.complete(turn(USAGE, { agentId: 'sub' }))
+  await w.clock.advance(10 * SEC)
+
+  expect(w.ingests).toHaveLength(count)
+  expect(w.runs.filter(r => r.argv.includes('status') && r.cwd === '/wt/sub')).toEqual([])
+})
+
+test('the poll retries while the drift guard is mid-change, and the session ends up bound once', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  let release: () => void = () => undefined
+  w.revGate.value = new Promise<void>(res => { release = res })
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} as never })
+  w.sessionId.value = 's2'
+  const guard = $.turn.start({ text: 'x', turnId: 't1' }) // the guard starts its change and waits on the git dir
+  await w.clock.advance(300) // the poll fires meanwhile and finds the guard busy
+  release()
+  await guard
+  await w.clock.advance(3 * SEC)
+  await $.turn.complete(turn(USAGE))
+  await w.clock.advance(3 * SEC)
+
+  expect(w.ingests.filter(i => i.payload.census_mod.ended !== undefined)).toHaveLength(1)
+  expect(w.ingests.at(-1)?.payload).toMatchObject({ session_id: 's2', census_mod: { event: 'turn.complete' } })
+})
+
+test('the transcript sits under the start directory even after the cwd moved; the live one only when nothing is there', async ($, on) => {
+  const w = world(on, { files: { '/cfg/projects/-repo/s2.jsonl': '' } })
+  await $.session.start(START)
+  await w.clock.advance(0)
+  w.cwd.value = '/repo/sub'
+  await switchTo($, w, 's2')
+  await w.clock.advance(2 * SEC)
+  expect(w.ingests.at(-1)?.payload).toMatchObject({ session_id: 's2', transcript_path: '/cfg/projects/-repo/s2.jsonl' })
+
+  w.files.set('/cfg/projects/-repo-sub/s3.jsonl', '')
+  await switchTo($, w, 's3')
+  await w.clock.advance(2 * SEC)
+  expect(w.ingests.at(-1)?.payload).toMatchObject({ session_id: 's3', transcript_path: '/cfg/projects/-repo-sub/s3.jsonl' })
+})
+
+test('a change of context window is not a compaction (200k -> 1M reads 80% -> 16%)', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await $.session.measure({ context: { window: 200_000, percent: 80 }, rateLimits: [], changed: ['context'] as never })
+  await $.session.measure({ context: { window: 1_000_000, percent: 16 }, rateLimits: [], changed: ['context'] as never })
+  await w.clock.advance(5 * SEC)
+
+  expect(w.ingests.some(i => i.payload.census_mod.event === 'compact')).toBe(false)
+})
+
+test('a clear the drift guard catches first is still recorded as a clear; a guard with no end seen says resume', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} as never })
+  w.sessionId.value = 's2'
+  await $.turn.start({ text: 'x', turnId: 't1' })
+  await w.clock.advance(2 * SEC)
+  expect(w.ingests.filter(i => i.payload.session_id === 's2').at(-1)?.payload.census_mod.event).toBe('session.clear')
+
+  w.sessionId.value = 's3'
+  await $.turn.start({ text: 'y', turnId: 't2' })
+  await w.clock.advance(2 * SEC)
+  expect(w.ingests.filter(i => i.payload.session_id === 's3').at(-1)?.payload.census_mod.event).toBe('session.resume')
 })

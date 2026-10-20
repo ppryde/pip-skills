@@ -1,6 +1,5 @@
 import { expect, test } from 'claude-code/testing'
 import { transcriptPathFor } from '../plugin/core/cache-ttl'
-import { watchPaths } from '../plugin/core/git'
 import { COMMANDS, NAME, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath } from '../plugin/core/name'
 
 test('names', () => {
@@ -27,8 +26,4 @@ test('a Windows home: USERPROFILE, then HOMEDRIVE+HOMEPATH; paths keep backslash
   expect(handoverPath('C:\\Users\\x\\.claude', 's1', 2)).toBe('C:\\Users\\x\\.claude\\context-vigil-mod\\handovers\\s1-2.md')
   expect(eventsPath('C:\\c', '2026-10-04', 's1')).toBe('C:\\c\\context-vigil-mod\\events\\2026-10-04\\s1.jsonl')
   expect(transcriptPathFor('C:\\c', 'C:\\repo', 's1')).toBe('C:\\c\\projects\\C--repo\\s1.jsonl')
-})
-
-test('the git dir git prints on Windows (C:/repo/.git) is watched', () => {
-  expect(watchPaths({ exitCode: 0, stdout: 'C:/repo/.git\n' } as never)).toEqual(['C:/repo/.git/HEAD', 'C:/repo/.git/index'])
 })

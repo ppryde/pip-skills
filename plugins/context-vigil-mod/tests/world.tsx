@@ -1,5 +1,6 @@
 import { mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
+import type { Engine } from 'claude-code/testing'
 
 export type AskSeen = { question: string; header: string; multiSelect: boolean; options: string[]; descriptions: string[] }
 
@@ -13,6 +14,8 @@ export type World = {
   registered: { tools: string[]; commands: string[] }
   draft: { value: string }
   sessionId: { value: string }
+  liveId: { value: string }            // the id the mod last saw a conversation under: session.start's, then each endInto's
+  cwd: { value: string }               // $.session.cwd(): moves with EnterWorktree or a cd
   contextPct: { value: number | undefined }
   model: { value: string | null }      // $.session.model(); null makes it reject
   rateLimits: { value: { kind: string; percentUsed: number; resetsAt?: string }[] }
@@ -30,7 +33,8 @@ export type World = {
   renames: string[]                    // args of every rename command run
   shell: { value: boolean }            // whether `sh` runs (it does not on Windows)
   titles: Map<string, string>          // transcript path → its last custom title; a rename sets the current one's
-  transcript: { value: string | null } // the current session's transcript, from classic.SessionStart
+  transcriptOf: (id: string) => string // where a session's transcript is: <config>/projects/-repo/<id>.jsonl
+  wipe: () => void                     // what a /clear or /resume does to $.state (PROBES §9, §16)
   grepFails: { value: boolean }        // makes the custom-title read exit 2
   greps: string[][]                    // argv of every custom-title read
   store: Map<string, unknown>          // $.store by key — per account, NOT wiped by a clear
@@ -48,15 +52,17 @@ export type World = {
 }
 
 export function world(on: On, opts: { now?: number; store?: Record<string, unknown>; files?: Record<string, string>; env?: Record<string, string> } = {}): World {
+  const env = opts.env ?? { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' }
+  const configDir = env.CLAUDE_CONFIG_DIR ?? `${env.HOME ?? ''}/.claude`
   const w: World = {
     clock: mock.clock(on, { now: opts.now ?? 1_000_000 }),
     files: new Map(Object.entries(opts.files ?? {})),
     submits: [], commands: [], notices: [], logs: [],
     registered: { tools: [], commands: [] },
-    draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined }, model: { value: 'claude-opus-5-5[1m]' },
+    draft: { value: '' }, sessionId: { value: 's1' }, liveId: { value: 's1' }, cwd: { value: '/repo' }, contextPct: { value: undefined }, model: { value: 'claude-opus-5-5[1m]' },
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '', dir: '/repo/.git' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, renameRefusedAt: new Set(), submitRefused: { value: false }, submitFails: { count: 0 }, eventsWriteRefused: { value: false }, renames: [],
-    shell: { value: true }, titles: new Map(), transcript: { value: null }, grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
+    shell: { value: true }, titles: new Map(), transcriptOf: id => `${configDir}/projects/-repo/${id}.jsonl`, wipe: () => {}, grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
     handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, askHold: { held: false, waiting: [] }, asks: [], askReply: { value: null }, promptReadFails: { count: 0 }, onStoreSet: { value: null }, storeGetRefused: { value: false }, fsRead: { gate: null, error: null },
   }
   // $.store, per account: in memory, survives a clear, and open to the test (another process's writes).
@@ -65,7 +71,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('store.set', async (_$, e) => { await w.onStoreSet.value?.(e.key); w.store.set(e.key, e.value); return { value: undefined } })
   on('store.delete', (_$, e) => { w.store.delete(e.key); return { value: undefined } })
   on('store.keys', () => ({ value: [...w.store.keys()] }))
-  mock.env(on, opts.env ?? { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
+  mock.env(on, env)
   on('prompt.fill', (_$, e) => { w.draft.value = (e as { text: string }).text; return { isFilled: true } as never })
   on('fs.read', async (_$, e) => {
     await w.fsRead.gate
@@ -113,6 +119,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   })
   const stateKey = (e: { plugin: string; key: string; id?: string }) => `${e.plugin}.${e.key}${e.id === undefined ? '' : `#${e.id}`}`
   const versions = new Map<string, number>()
+  w.wipe = () => { w.state.clear(); versions.clear() }
   on('state.get', (_$, e) => { const k = stateKey(e as never); return { value: { value: w.state.get(k) as never, version: versions.get(k) ?? 0 } } })
   on('state.set', (_$, e) => {
     const k = stateKey(e as never)
@@ -124,7 +131,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     return { value: { isSet: true as const, version } }
   })
   on('session.id', () => ({ value: w.sessionId.value }))
-  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.cwd', () => ({ value: w.cwd.value }))
   on('session.model', () => (w.model.value === null ? { deny: 'no model' } : { value: w.model.value }))
   on('session.repo', () => ({ value: { root: '/repo', remote: null, internal: false, name: 'repo', id: 'r' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000, percent: w.contextPct.value }, rateLimits: w.rateLimits.value } }))
@@ -140,7 +147,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     if (e.command === 'rename') {
       const name = String((e as { args?: string }).args ?? '')
       w.renames.push(name)
-      if (w.transcript.value !== null) w.titles.set(w.transcript.value, name)   // /rename names the current session (PROBES §15)
+      w.titles.set(w.transcriptOf(w.sessionId.value), name)   // /rename names the current session (PROBES §15)
     }
     if (e.command === 'clear' && w.clearHold.held) await new Promise<void>(res => { w.clearHold.release = () => { w.clearHold.held = false; res() } })
     return {}
@@ -151,27 +158,11 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('ui.log', (_$, e) => { w.logs.push(e.text); return { value: undefined } })
   on('ui.status', () => ({ value: undefined }))
   on('ui.render', ($, e) => { const { Box } = $.ui.resolve(e); return <Box /> })
-  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('session.start', (_$, e) => { w.liveId.value = w.sessionId.value; return { cwd: e.cwd } })
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('turn.start', (_$, e) => e as never)
   on('turn.complete', (_$, e) => ({ text: e.answer }))
-  // PROBES §9: a /clear wipes $.state (every key back to version 0) before any hook sees the new
-  // session. The world sits beneath the mod, which calls next() before it reads, so this lands first.
-  on('classic.SessionStart', (_$, e) => {
-    const { source, transcript_path: tp } = e as { source?: string; transcript_path?: string }
-    if (source === 'clear') { w.state.clear(); versions.clear() }
-    // PROBES §8/§15: /clear carries the outgoing session's name into the new transcript.
-    if (tp !== undefined) {
-      const carried = source === 'clear' && w.transcript.value !== null ? w.titles.get(w.transcript.value) : undefined
-      if (carried !== undefined) w.titles.set(tp, carried)
-      w.transcript.value = tp
-    }
-    return {}
-  })
-  on('classic.FileChanged', () => ({}))
-  on('classic.StopFailure', () => ({}))
-  on('classic.PostModelSwitch', () => ({}))
-  on('classic.PreModelSwitch', () => ({}))
   // AskUserQuestion — and $.ui.ask, which is not an op event but runs as this tool call.
   // Result shape { questions, answers: { [question]: label } } per the claude-code-tools typings.
   // A test that passes `answers` on the input gets them echoed; otherwise every question
@@ -211,3 +202,27 @@ export const turn = (id = 't') => ({ answer: 'a', durationMs: 1, isAborted: fals
 // A turn that reports usage, as the engine does: cacheCreation > 0 means a response wrote to the cache.
 export const usageTurn = (cacheCreation: number, id = 't') => ({ ...turn(id), usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 50, cache_creation_input_tokens: cacheCreation, model: 'm' } })
 export const human = (text: string, kind: 'composer' | 'bridge' = 'composer') => ({ text, wait: false, origin: { kind } as never })
+
+// PROBES §16: a /clear or a /resume as the mod sees it where no classic hook reaches it. session.end
+// fires under the old id with $.state intact; then the engine answers the new id with $.state wiped,
+// and a /clear has carried the old name into the new transcript (§8). `to` defaults to w.sessionId
+// (a test that set it first); `lagMs`: how long the engine still answers the old id after the end
+// (the mod polls for it); `unmoved`, or a `to` that is the old id: the id never moves (the mod gives
+// up after its wait).
+export async function endInto($: Engine, w: World, reason: 'clear' | 'resume', opts: { to?: string; lagMs?: number; unmoved?: boolean } = {}) {
+  const from = w.liveId.value
+  const to = opts.unmoved ? from : opts.to ?? w.sessionId.value
+  const unmoved = to === from
+  w.sessionId.value = from
+  await $.session.end({ reason, sessionId: from, resume: { id: from } })
+  if (opts.lagMs) await w.clock.advance(opts.lagMs)
+  w.wipe()
+  if (reason === 'clear') {
+    const carried = w.titles.get(w.transcriptOf(from))
+    if (carried !== undefined) w.titles.set(w.transcriptOf(to), carried)
+  }
+  w.sessionId.value = to
+  w.liveId.value = to
+  // The poll runs every 50 ms: the next one after the move finds the new id; an unmoved one waits it out.
+  await w.clock.advance(unmoved ? 5050 : opts.lagMs ? 50 : 0)
+}

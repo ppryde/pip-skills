@@ -1,10 +1,10 @@
 import type { EngineInterface, Register, Timer } from 'claude-code'
-import { COUNTER_KEEP_MS, EMPTY_COUNTERS, STORE_PREFIX, TAIL_CMD, addTurn, compacted, counterKey, DEFAULT_TTL, expiresAtMs, isWarm, parseWrites, ttlFromWrites, ttlMs, withTtl } from '../core/cache'
+import { COUNTER_KEEP_MS, EMPTY_COUNTERS, STORE_PREFIX, TAIL_CMD, addTurn, compacted, compactionDrop, counterKey, DEFAULT_TTL, expiresAtMs, isWarm, parseWrites, ttlFromWrites, ttlMs, withTtl } from '../core/cache'
 import { INGEST_TIMEOUT_MS, bundledCli, censusDir, delayFor, endTimeoutMs, ingestArgv, ingestEnv } from '../core/census'
 import type { CensusEnv } from '../core/census'
 import { GH_TIMEOUT_MS, ghArgv, ghKey, parsePrList, shouldRefresh, touchesPr } from '../core/gh'
 import type { GhEntry, Why } from '../core/gh'
-import { COALESCE_MS as GIT_COALESCE_MS, GIT_DIR_ARGV, GIT_STATUS_ARGV, parseStatus, touchesGit, watchPaths, worktreeOf } from '../core/git'
+import { COALESCE_MS as GIT_COALESCE_MS, GIT_DIR_ARGV, GIT_STATUS_ARGV, parseStatus, touchesGit, worktreeOf } from '../core/git'
 import { homeOf, joinPath } from '../core/home'
 import { HINT_CONFIRM_MS, applyPatch, gitOperationOf, hasDraftFlag, hintPrNumber, markStale, patchFor, payloadPrOf, prKey, prPrefix, repoOf, toPr } from '../core/prstate'
 import type { PrRecord } from '../core/prstate'
@@ -23,7 +23,8 @@ import type { Counters, RateLimit, Snap } from '../core/types'
 //
 // State is module variables plus $.store (counters, gh cache): a hot reload loses the variables, and
 // session.start (which re-fires on a reload) rebuilds them. Nothing is kept in $.state, so a /clear
-// has nothing to wipe and classic.SessionStart(clear) simply binds the new session.
+// has nothing to wipe. No classic.* hook is used (an organisation-managed install never delivers them):
+// a /clear or resume is followed from session.end (poll for the new id), and turn.start catches the rest.
 
 type Env = CensusEnv & RenderEnv & { USERPROFILE?: string; CENSUS_MOD_PLACEMENT?: string; CENSUS_MOD_PR_HINT?: string }
 
@@ -274,6 +275,7 @@ async function ingest($: EngineInterface, event: Event, endedReason?: string, ti
 /** Ask for an ingest. At most one per COALESCE_MS; the one that runs carries the latest state. */
 function record($: EngineInterface, event: Event) {
   if (!interactive || !snap) return
+  if (ended.has(snap.sessionId)) return // a session that has ended gets no more records, whatever fires before the rebind
   pending = event
   if (ingestTimer) return
   void (async () => {
@@ -596,6 +598,19 @@ function closeOld($: EngineInterface, old: Snap | null, why: string) {
   $.clock.after(0, () => void ingest($, 'session.end', why, INGEST_TIMEOUT_MS, old).catch(() => undefined))
 }
 
+/**
+ * Claude Code files a transcript under the directory the session STARTED in, and the live cwd can move
+ * (EnterWorktree, /cd): so the start directory first, the live one only when no file is there.
+ */
+async function transcriptFor($: EngineInterface, root: string, id: string, liveCwd: string): Promise<string> {
+  const live = transcriptPathFor(root, liveCwd, id)
+  if (!startCwd || startCwd === liveCwd) return live
+  const started = transcriptPathFor(root, startCwd, id)
+  if (await $.fs.exists(started).catch(() => false)) return started
+  if (await $.fs.exists(live).catch(() => false)) return live
+  return started
+}
+
 /** (Re)bind the live state to a session. Idempotent: a reload or a repeated start finds it bound. */
 async function bind($: EngineInterface, id: string, cwd: string, transcript: string | null, event: Event, gitDir?: { exitCode: number; stdout: string }) {
   const same = snap?.sessionId === id
@@ -616,7 +631,7 @@ async function bind($: EngineInterface, id: string, cwd: string, transcript: str
   }
   if (!snap) return
   const root = configRoot(env)
-  snap.transcriptPath = transcript ?? snap.transcriptPath ?? (root ? transcriptPathFor(root, snap.cwd, id) : null)
+  snap.transcriptPath = transcript ?? snap.transcriptPath ?? (root ? await transcriptFor($, root, id, snap.cwd) : null)
   await refreshEngine($)
   await locateProc($)
   hydrate($, gitDir)
@@ -625,6 +640,97 @@ async function bind($: EngineInterface, id: string, cwd: string, transcript: str
   scheduleGit($)
   record($, event)
   void pruneCounters($, id, await nowMs($))
+}
+
+// ---- following the conversation ----------------------------------------------------------
+
+const ID_POLL_MS = 50
+const ID_GIVE_UP_MS = 5000
+let startCwd: string | null = null // the directory the process started in (session.start's cwd)
+let endSeen: { from: string; reason: 'clear' | 'resume' } | null = null // the last clear/resume session.end, for the event a rebind records
+let changing = false // a rebind or a cwd move is in flight
+
+/**
+ * Bind to the id the engine reports now, if it is not the one bound. Idempotent: the bound id IS the
+ * transition's key, so the session.end poll and the turn.start drift guard cannot both handle one change,
+ * and `changing` stops two callers racing through the awaits.
+ */
+async function adoptSession($: EngineInterface, event: Event): Promise<'moved' | 'same' | 'busy'> {
+  if (!interactive || !snap) return 'same'
+  if (changing) return 'busy'
+  changing = true
+  try {
+    const id = await $.session.id()
+    if (!snap || id === snap.sessionId) return 'same'
+    // The end's own reason wins over the guess a drift guard makes (a clear it caught is still a clear).
+    if (endSeen && endSeen.from === snap.sessionId) event = `session.${endSeen.reason}`
+    endSeen = null
+    const cwd = await $.session.cwd().catch(() => snap?.cwd ?? '')
+    const gitDir = await readGitDir($, cwd)
+    await bind($, id, cwd, null, event, gitDir)
+    return 'moved'
+  } finally {
+    changing = false
+  }
+}
+
+/** After a session.end that is a /clear or a resume: wait (bounded) for the id to move, then bind. Never blocks the end. */
+function followTo($: EngineInterface, from: string, event: Event) {
+  $.clock.after(0, () => {
+    void (async () => {
+      const deadline = (await nowMs($)) + ID_GIVE_UP_MS
+      while (snap?.sessionId === from) {
+        const id = await $.session.id().catch(() => from)
+        if (id !== from) {
+          // The drift guard is mid-change: try again rather than leave the ended id bound for good.
+          if ((await adoptSession($, event)) !== 'busy') return
+        } else if ((await nowMs($)) >= deadline) {
+          $.ui.log(`census-mod: the session id did not change after ${event.replace('session.', '')} within ${ID_GIVE_UP_MS / 1000} s; still on ${from}`)
+          return
+        }
+        await new Promise<void>(done => $.clock.after(ID_POLL_MS, done))
+      }
+    })().catch(() => undefined)
+  })
+}
+
+/** The drift guard and the cwd check, cheap enough for every turn: a new id (a fork, a missed end) rebinds; a moved cwd re-reads git. */
+async function checkMoved($: EngineInterface, withCwd: boolean) {
+  if (!interactive || !snap || changing) return
+  if ((await adoptSession($, 'session.resume')) === 'moved') return
+  if (!withCwd) return // the id is the session's; a cwd read is the calling loop's, so only a main-loop turn.complete asks
+  if (!snap || changing) return
+  const cwd = await $.session.cwd().catch(() => null)
+  if (!cwd || !snap || cwd === snap.cwd) return
+  snap.cwd = cwd
+  snap.worktreePath = worktreeOf(await readGitDir($, cwd))
+  lastGitAt = null
+  scheduleGit($)
+  repaint($)
+  record($, 'cwd')
+}
+
+/** The model the engine reports, against the one drawn: a change records. (No event names a switch here.) */
+async function checkModel($: EngineInterface) {
+  if (!interactive || !snap) return
+  const raw = await $.session.model().catch(() => null)
+  if (!raw || !snap) return
+  const model = modelOf(raw)
+  if (snap.model?.id === model.id) return
+  snap.model = model
+  repaint($)
+  record($, 'model')
+}
+
+/** A compaction rewrites the prefix: the next request writes the cache afresh. */
+async function onCompacted($: EngineInterface) {
+  if (!snap) return
+  snap.counters = compacted(snap.counters, await nowMs($))
+  await saveCounters($)
+  coldTimer?.cancel()
+  coldTimer = null
+  repaint($)
+  record($, 'compact')
 }
 
 async function isInteractive($: EngineInterface): Promise<boolean> {
@@ -1064,6 +1170,7 @@ export const register: Register = on => {
     const r = await next(e)
     interactive = e.isInteractive
     if (!interactive) return r
+    startCwd = e.cwd
     await quietly(async () => {
       await $.command.register({ name: 'census-setup', description: 'Guided census-mod setup: record, draw, style, layout, cost budget, gh. `style` or `budget` asks only that question; `off` stops it.', argumentHint: '[off|style|budget]' }).catch(() => undefined)
       await $.command.register({ name: 'pr-refresh', description: "Ask gh once for this branch's open PR (number, review state) and record it." }).catch(() => undefined)
@@ -1074,31 +1181,25 @@ export const register: Register = on => {
     return r
   })
 
-  // Every source: startup, resume, clear (a new session id), compact, fork.
-  on('classic.SessionStart', async ($, e, next) => {
+  // $.session.cwd() and the model inside a hook are the hook's own loop's: only the main loop speaks for the session.
+  const isSubagent = (e: object): boolean => (e as { agentId?: string }).agentId !== undefined
+
+  on('turn.start', async ($, e, next) => {
     const r = await next(e)
-    let watch: string[] = []
-    await quietly(async () => {
-      if (!(await isInteractive($))) return
-      interactive = true
-      if (Object.keys(rawEnv).length === 0) {
-        rawEnv = await loadEnv($)
-        env = { ...rawEnv }
-      }
-      // watchPaths are this hook's answer, so this one git call is awaited; bind reuses it.
-      const gitDir = await readGitDir($, e.cwd)
-      watch = watchPaths(gitDir)
-      if (e.source !== 'compact') {
-        const event: Event = e.source === 'startup' ? 'session.start' : (`session.${e.source}` as Event)
-        await bind($, e.session_id, e.cwd, e.transcript_path || null, event, gitDir)
-      } else if (snap && e.transcript_path) snap.transcriptPath = e.transcript_path
-    })
-    return watch.length ? { ...r, watchPaths: [...(r.watchPaths ?? []), ...watch] } : r
+    if (isSubagent(e)) return r
+    await quietly(() => checkMoved($, false).then(() => undefined))
+    return r
   })
 
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
-    if (!interactive || !snap || e.agentId !== undefined || !e.usage) return r
+    if (isSubagent(e)) return r
+    await quietly(async () => {
+      await checkMoved($, true)
+      await checkModel($)
+      if (interactive && snap) scheduleGit($) // no file events here: a finished turn is when git can have moved
+    })
+    if (!interactive || !snap || !e.usage) return r
     const usage = e.usage
     await quietly(async () => {
       if (!snap) return
@@ -1126,9 +1227,11 @@ export const register: Register = on => {
 
   on('session.measure', async ($, e, next) => {
     const r = await next(e)
-    if (!interactive || !snap) return r
+    if (!interactive || !snap || ended.has(snap.sessionId)) return r
     await quietly(async () => {
       if (!snap) return
+      const was = snap.ctxPct
+      const wasWindow = snap.ctxWindow
       snap.ctxPct = e.context.percent ?? null
       snap.ctxWindow = e.context.window ?? snap.ctxWindow
       snap.costUsd = e.cost?.usd ?? snap.costUsd
@@ -1140,62 +1243,11 @@ export const register: Register = on => {
         record($, 'rate-limit')
       }
       repaint($)
+      // Only once the id is confirmed unmoved: a fall that is really a new session's fill is not a compaction.
+      if (wasWindow === snap.ctxWindow && compactionDrop(was, snap.ctxPct) && (await $.session.id()) === snap.sessionId) await onCompacted($)
+      await checkModel($)
     })
     return r
-  })
-
-  on('classic.PostModelSwitch', async ($, e, next) => {
-    const r = await next(e)
-    if (!interactive || !snap) return r
-    await quietly(async () => {
-      if (!snap) return
-      if (e.to_model) snap.model = modelOf(e.to_model)
-      const label = (e as unknown as { cache_ttl?: unknown }).cache_ttl
-      if (label === '1h' || label === '5m') {
-        snap.ttl = label
-        snap.counters = withTtl(snap.counters, label)
-        armCold($)
-      }
-      repaint($)
-      record($, 'model')
-    })
-    return r
-  })
-
-  on('classic.CwdChanged', async ($, e, next) => {
-    const r = await next(e)
-    if (!interactive || !snap) return r
-    await quietly(async () => {
-      if (!snap) return
-      snap.cwd = e.new_cwd
-      snap.worktreePath = worktreeOf(await readGitDir($, e.new_cwd))
-      lastGitAt = null
-      scheduleGit($)
-      repaint($)
-      record($, 'cwd')
-    })
-    return r
-  })
-
-  // A compaction rewrites the prefix: the next request writes the cache afresh.
-  on('classic.PostCompact', async ($, e, next) => {
-    const r = await next(e)
-    if (!interactive || !snap) return r
-    await quietly(async () => {
-      if (!snap) return
-      snap.counters = compacted(snap.counters, await nowMs($))
-      await saveCounters($)
-      coldTimer?.cancel()
-      coldTimer = null
-      repaint($)
-      record($, 'compact')
-    })
-    return r
-  })
-
-  on('classic.FileChanged', async ($, e, next) => {
-    scheduleGit($)
-    return next(e)
   })
 
   // After the tool ran: its effect is what can have moved git or the PR.
@@ -1256,7 +1308,11 @@ export const register: Register = on => {
         }
       }
     })
-    return next(e)
+    const r = await next(e)
+    if ((e.reason === 'clear' || e.reason === 'resume') && interactive && snap && snap.sessionId === e.sessionId) endSeen = { from: e.sessionId, reason: e.reason }
+    // A /clear or a resume: the process goes on under a new id some moments after this; follow it off the end's budget.
+    if ((e.reason === 'clear' || e.reason === 'resume') && interactive && snap && snap.sessionId === e.sessionId) followTo($, e.sessionId, `session.${e.reason}`)
+    return r
   })
 
   // Above the input: the band. Ours first, whatever other mods draw beneath it after.

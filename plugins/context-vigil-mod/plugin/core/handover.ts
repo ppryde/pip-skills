@@ -15,6 +15,14 @@ export function grownEnough(pct: number, baseline: number | null, step: number):
   return baseline !== null && pct - baseline >= step
 }
 
+// No compaction event reaches a mod (PROBES §16), so it is read off the fill: within one conversation
+// the context only grows, and on the same window nothing but a compaction (auto or /compact) takes a
+// whole ladder step back off it. A smaller dip (a cleared tool result) leaves the due step where it was.
+// A different window is a model switch, not a compaction: its percent is of another size.
+export function compacted(prev: { pct: number | null; window: number | null }, pct: number | null, window: number | null, step: number): boolean {
+  return prev.pct !== null && pct !== null && prev.window === window && prev.pct - pct >= step
+}
+
 // The turn that wrote a handover ends just after the tool call; a turn ending later than this
 // means the conversation moved on and the handover is stale.
 export const REUSE_SLACK_MS = 60_000
@@ -159,12 +167,15 @@ export function sentSection(sent: readonly string[] | undefined): string {
     sent.map(t => t.split('\n').map(l => `> ${l}`).join('\n')).join('\n\n')
 }
 
+// Nothing is injected into the new session (PROBES §16: no SessionStart reaches a mod an organization
+// does not list): the handover rides in the prompt text itself, never as a file to read, since a read
+// outside the project can stop on a permission prompt with nobody there to answer it.
 export function resumeText(path: string): string {
-  return `[context-vigil-mod] Resume from the handover injected above (saved at ${path}). Start with its next step.`
+  return `[context-vigil-mod] Resume from the handover below (saved at ${path}). Start with its next step.`
 }
 
-export function injectText(markdown: string): string {
-  return `[context-vigil-mod] Handover from before the clear:\n\n${markdown}`
+export function handoverText(markdown: string, path: string): string {
+  return `[context-vigil-mod] The handover from before the clear (saved at ${path}):\n\n${markdown}`
 }
 
 // After a limit early stop there was no clear: the conversation is still here.

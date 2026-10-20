@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { START, human, turn, usageTurn, world, type World } from './world'
+import { START, human, turn, usageTurn, world, type World, endInto } from './world'
 import { V } from '../plugin/core/voice'
 
 const MIN = 60_000
@@ -37,7 +37,7 @@ test('loop guard: without a human prompt it never fires again; a human prompt re
   await $.turn.complete(turn())
   await w.clock.advance(55 * MIN)
   await $.tool.call(write)
-  await $.classic.SessionStart({ source: 'clear' } as never)   // pending consumed, still no human prompt
+  await endInto($, w, 'clear')   // pending consumed, still no human prompt
   await $.session.measure(measure(30))
   await $.turn.complete(turn('ll'))                              // its own turn refreshed the cache
   await w.clock.advance(60 * MIN)
@@ -90,11 +90,11 @@ test('on return after expiry the prompt is held and the choice asked; resume car
   await w.clock.settle()
   expect(w.commands).toContain('clear')
   w.sessionId.value = 's2'
-  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   expect(w.state.get(PENDING)).toBeUndefined()                   // $.state wiped by the clear
-  expect(ss.additionalContext?.join('\n')).toContain('## Goal')  // the handover still crossed it
   await w.clock.advance(500)
-  expect(w.submits.at(-1)?.text).toBe('morning!')
+  expect(w.submits.at(-1)?.text.startsWith('morning!')).toBe(true)
+  expect(w.submits.at(-1)?.text).toContain('handover from before the clear (saved at /cfg/context-vigil-mod/handovers/s1-1.md)')   // the handover still crossed it
   // The held prompt was the person's return: last light stays armed across the wipe.
   await $.session.measure(measure(30))
   await $.turn.complete(turn('morning'))
@@ -244,12 +244,11 @@ test('a fire that other conditions block does not touch the transcript', async (
 test('the transcript is read from the path the session reported', async ($, on) => {
   const w = world(on, LL)
   await $.session.start(START)
-  await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/s1.jsonl' } as never)
   await $.prompt.submit(human('hi'))
   await $.session.measure(measure(30))
   await $.turn.complete(turn())
   await w.clock.advance(55 * MIN)
-  expect(w.tails.at(-1)?.at(-1)).toBe('/t/s1.jsonl')
+  expect(w.tails.at(-1)?.at(-1)).toBe('/cfg/projects/-repo/s1.jsonl')
 })
 
 test('without a reported path the transcript is found by the project folder convention', async ($, on) => {
@@ -293,7 +292,7 @@ test('a rejected follow-up after a resume clear keeps the held message visible',
   await $.prompt.submit(human('morning!'))
   await w.clock.settle()
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   w.submitRefused.value = true
   await w.clock.advance(16_000)   // 0.5 s and four retries: about 15.5 s before it gives up
   expect(w.notices.some(n => n.includes("Couldn't resume") && n.includes('morning!') && n.includes('/handovers/s1-1.md'))).toBe(true)
@@ -324,6 +323,15 @@ async function infoShown($: any) {
   const found = (await ui.find(INFO)) !== undefined
   await ui.unmount()
   return found
+}
+// No model-switch event reaches the mod (PROBES §16): a switch is a main response from another model,
+// and the one that writes the cache is read for its lifetime.
+let switches = 0
+async function switchTo($: any, w: World, ttl: '1h' | '5m', cacheCreation = 5) {
+  w.cacheWrites.value = ttl === '1h' ? { h1: 100, m5: 0 } : { h1: 0, m5: 100 }
+  const t = usageTurn(cacheCreation, `sw${++switches}`)
+  await $.turn.complete({ ...t, usage: { ...t.usage, model: `model-${switches}` } })
+  await w.clock.settle()
 }
 async function first5m($: any, w: World) {
   w.cacheWrites.value = { h1: 0, m5: 100 }
@@ -409,8 +417,8 @@ test('R1-20: the next human prompt hides the line; a plugin prompt does not; a l
   expect(await infoShown($)).toBe(true)
   await $.prompt.submit(human('hello'))
   expect(await infoShown($)).toBe(false)
-  await $.classic.PostModelSwitch({ cache_ttl: '1h' } as never)
-  await $.classic.PostModelSwitch({ cache_ttl: '5m' } as never)
+  await switchTo($, w, '1h')
+  await switchTo($, w, '5m')
   expect(await infoShown($)).toBe(true)
 })
 
@@ -429,7 +437,7 @@ test('the threshold bar wins while both apply; the info line returns after it', 
 test('a switch to a 1-hour cache hides the line and says last light is back on', async ($, on) => {
   const w = world(on, LL)
   await first5m($, w)
-  await $.classic.PostModelSwitch({ cache_ttl: '1h' } as never)
+  await switchTo($, w, '1h')
   expect(w.state.get(TTL)).toBe('1h')
   expect(await infoShown($)).toBe(false)
   expect(w.notices).toContain('🌅 Last light is back on — 1-hour prompt cache')
@@ -439,24 +447,33 @@ test('a switch to a 1-hour cache hides the line and says last light is back on',
 test('a switch to a 5-minute cache shows the line; no notice for 1h learnt from unknown', async ($, on) => {
   const w = world(on, LL)
   await $.session.start(START)
-  await $.classic.PostModelSwitch({ cache_ttl: '1h' } as never)
+  await switchTo($, w, '1h')
   expect(w.notices.some(n => n.includes('back on'))).toBe(false)
-  await $.classic.PostModelSwitch({ cache_ttl: '5m' } as never)
+  await switchTo($, w, '5m')
   expect(await infoShown($)).toBe(true)
   expect(eventLog(w)).toContain('"source":"switch"')
 })
 
-test('PreModelSwitch is ignored', async ($, on) => {
+test('a switch whose first response writes no cache is read at the next one that does', async ($, on) => {
   const w = world(on, LL)
   await $.session.start(START)
-  await $.classic.PreModelSwitch({ cache_ttl: '5m' } as never)
-  expect(w.state.get(TTL) ?? 'unknown').toBe('unknown')
+  await $.turn.complete(usageTurn(5))
+  await w.clock.settle()
+  expect(w.tails.length).toBe(1)
+  await switchTo($, w, '5m', 0)          // another model answered from the cache: nothing to learn
+  expect(w.tails.length).toBe(1)
+  const t = usageTurn(5, 'after')
+  await $.turn.complete({ ...t, usage: { ...t.usage, model: `model-${switches}` } })
+  await w.clock.settle()
+  expect(w.tails.length).toBe(2)
+  expect(w.state.get(TTL)).toBe('5m')
+  expect(eventLog(w)).toContain('"source":"switch"')
 })
 
 test('a /clear resets the type to unknown and reads again on the new session', async ($, on) => {
   const w = world(on, LL)
   await first5m($, w)
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   expect(w.state.get(TTL) ?? 'unknown').toBe('unknown')
   expect(await infoShown($)).toBe(false)
   w.cacheWrites.value = { h1: 10, m5: 0 }
@@ -560,7 +577,7 @@ test('R1-19: a second prompt while the return question is open joins the first; 
   await w.clock.settle()
   expect(w.state.get(PENDING)).not.toBe(null)   // the Resume answer was not undone by a second ask
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await w.clock.advance(500)
   const sent = w.submits.at(-1)?.text ?? ''
   expect(sent).toContain('one')
@@ -598,7 +615,7 @@ test('an in-process /resume holds the first prompt for a stored last-light hando
   const w = world(on, { ...LL, now, store: { ...LL.store, 'pending:s2': storedLastLight(now, 8 * HOUR) } })
   await $.session.start(START)
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'resume' } as never)
+  await endInto($, w, 'resume')
   w.askAnswer.value = V.lastLightCarryOn
   const r = await $.prompt.submit(human('morning'))
   expect((r as { drop?: string }).drop).toBe(V.heldForLastLight)
@@ -623,7 +640,7 @@ test('a reload while the ask is open re-opens it; whichever answer acts first se
   expect(w.submits.filter(s => s.text === 'one').length).toBe(1)
 })
 
-test('a /clear while the return question is open still sends the held text after the injected handover (R3-02)', async ($, on) => {
+test('a /clear while the return question is open still sends the held text, with the handover named (R3-02)', async ($, on) => {
   const w = world(on, LL)
   await heldReturn($, w, V.lastLightCarryOn)
   w.askHold.held = true
@@ -631,13 +648,14 @@ test('a /clear while the return question is open still sends the held text after
   await w.clock.advance(1)
   expect(w.askHold.waiting.length).toBe(1)
   w.sessionId.value = 's2'
-  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
-  expect(ss.additionalContext?.join('\n')).toContain('## Goal')
+  await endInto($, w, 'clear')
   await w.clock.advance(500)
-  expect(w.submits.filter(s => s.text === 'one').length).toBe(1)
+  const sent = (w: World) => w.submits.filter(s => s.text.startsWith('one'))
+  expect(sent(w).length).toBe(1)
+  expect(sent(w)[0]?.text).toContain('handover from before the clear')
   w.askHold.waiting[0]?.(V.lastLightCarryOn)                  // the dialog outlives the clear: inert, nothing twice
   await w.clock.settle()
-  expect(w.submits.filter(s => s.text === 'one').length).toBe(1)
+  expect(sent(w).length).toBe(1)
 })
 
 test('a second held message while a Resume is already queued rides the clear with the first (R3-02)', async ($, on) => {
@@ -653,7 +671,7 @@ test('a second held message while a Resume is already queued rides the clear wit
   w.clearHold.release()
   await w.clock.settle()
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await w.clock.advance(500)
   const sent = w.submits.at(-1)?.text ?? ''
   expect(sent).toContain('one')
@@ -667,7 +685,7 @@ test('a /resume while the return question is open never submits the held text in
   await $.prompt.submit(human('one'))
   await w.clock.advance(1)
   w.sessionId.value = 's9'
-  await $.classic.SessionStart({ source: 'resume' } as never)
+  await endInto($, w, 'resume')
   await w.clock.settle()
   expect(w.notices.some(n => n.includes('held message was not sent') && n.includes('one'))).toBe(true)
   w.askHold.waiting[0]?.(V.lastLightCarryOn)

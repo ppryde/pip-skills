@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { FIELD_NAMES, STANDING_MAX_BYTES, STANDING_MAX_ITEMS, fresh, mergeStanding, INPUT_SCHEMA, cleanName, injectText, instructionText, limitResumeText, nextThreshold, grownEnough, parseFields, renderHandover, resumeText, reusable } from '../plugin/core/handover'
+import { FIELD_NAMES, STANDING_MAX_BYTES, STANDING_MAX_ITEMS, fresh, mergeStanding, INPUT_SCHEMA, cleanName, compacted, instructionText, limitResumeText, nextThreshold, grownEnough, handoverText, parseFields, renderHandover, resumeText, reusable } from '../plugin/core/handover'
 
 const S = { nudgeAt: 35, step: 5 }
 
@@ -106,8 +106,9 @@ describe('renderHandover', () => {
 test('texts name the tool and the file', () => {
   expect(instructionText('threshold')).toContain('mcp__context-vigil-mod__vigil_handover')
   expect(instructionText('last_light')).toContain('Do not clear')
-  expect(resumeText('/cfg/x.md')).toContain('/cfg/x.md')
-  expect(injectText('# H')).toContain('# H')
+  expect(resumeText('/cfg/x.md')).toContain('Resume from the handover below (saved at /cfg/x.md)')
+  expect(resumeText('/cfg/x.md')).not.toContain('injected above')   // nothing is injected any more (PROBES §16)
+  expect(handoverText('# H', '/cfg/x.md')).toContain('(saved at /cfg/x.md):\n\n# H')
   const after = limitResumeText('/cfg/x.md')
   expect(after).toContain('/cfg/x.md')
   expect(after).toContain('limit has reset')
@@ -206,4 +207,21 @@ test('instructionText: threshold and request wait for a stopping point; last_lig
     expect(instructionText(r)).toContain('tool now')
     expect(instructionText(r)).not.toContain('stopping point')
   }
+})
+
+describe('compacted', () => {
+  const W = 1_000_000
+  test('a whole step back off the fill on the same window is a compaction', () => {
+    expect(compacted({ pct: 62, window: W }, 12, W, 10)).toBe(true)
+    expect(compacted({ pct: 40, window: W }, 30, W, 10)).toBe(true)
+  })
+  test('growth, a small dip and the first reading are not', () => {
+    expect(compacted({ pct: 40, window: W }, 45, W, 10)).toBe(false)
+    expect(compacted({ pct: 40, window: W }, 33, W, 10)).toBe(false)
+    expect(compacted({ pct: null, window: null }, 12, W, 10)).toBe(false)
+    expect(compacted({ pct: 40, window: W }, null, W, 10)).toBe(false)
+  })
+  test('a new window is a model switch, not a compaction', () => {
+    expect(compacted({ pct: 60, window: 200_000 }, 12, W, 10)).toBe(false)
+  })
 })

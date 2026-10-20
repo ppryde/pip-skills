@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { HINT, START, world, GH_ON } from './world'
+import { HINT, START, USAGE, turn, world, GH_ON } from './world'
 import type { World } from './world'
 
 // WF-269 round 2: /census-mod:pr-refresh, the status-line command's pr, and the prompt-hint confirmation.
@@ -193,7 +193,7 @@ test('after a checkout to a branch with no PR, the old branch\'s status-line wor
   expect(w.ingests.at(-1)?.payload.pr).toMatchObject({ number: 42 })
 
   w.git.status = '# branch.oid abc\n# branch.head other\n'
-  await $.classic.FileChanged({ file_path: '/repo/.git/HEAD', event: 'change' } as never)
+  await $.turn.complete(turn(USAGE))
   await w.clock.advance(5100)
   await w.clock.advance(31 * SEC) // a tick too: the file still names main
   expect(w.ingests.at(-1)?.payload.census_mod.git.branch).toBe('other')

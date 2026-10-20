@@ -85,6 +85,15 @@ export function isWarm(c: Counters, ttl: Ttl, now: number): boolean {
 /** A compaction rewrites the prefix: the next request writes the cache afresh. */
 export const compacted = (c: Counters, now: number): Counters => ({ ...c, cold: true, updatedAt: now })
 
+/**
+ * No compaction event reaches a mod on a managed install, so it is read off the context fill: a compaction
+ * folds most of the window into a summary (a fall to a fraction of what it was), while ordinary movement
+ * is a rise and a /clear rebinds (its fill starts again from the new session's own figure). A fall of 25
+ * points that also leaves under half is far past anything a turn does and well short of a missed one.
+ */
+export const compactionDrop = (prev: number | null, next: number | null): boolean =>
+  prev !== null && next !== null && prev - next >= 25 && next < prev / 2
+
 export const withTtl = (c: Counters, ttl: Ttl): Counters => ({ ...c, ttl })
 
 export const STORE_PREFIX = 'counters:'

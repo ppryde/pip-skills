@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import { START, human, turn, world, type World } from './world'
+import { START, human, turn, world, type World, endInto } from './world'
 
 const TOOL = 'mcp__context-vigil-mod__vigil_handover'
 const HOUR = 3_600_000
@@ -15,7 +15,7 @@ test('while latched nothing is submitted or cleared; at the lift the deferred ha
   w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.classic.StopFailure({ error: 'rate_limit' } as never)
+  await $.turn.complete({ ...turn('rate-limited'), reason: 'error' } as never)   // PROBES §16: the turn an API error ended
   expect(w.notices.some(n => n.startsWith('⏳ Usage limit reached — resumes'))).toBe(true)
   await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
   await w.clock.settle()
@@ -48,7 +48,7 @@ async function parkedOnLatch($: Engine, w: World, opts: { turnAfterWrite?: boole
   await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
   await w.clock.settle()
   w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]
-  await $.classic.StopFailure({ error: 'rate_limit' } as never)   // latched between instruction and write
+  await $.turn.complete({ ...turn('rate-limited'), reason: 'error' } as never)   // PROBES §16: the turn an API error ended   // latched between instruction and write
   await $.tool.call(write)
   await w.clock.settle()
   expect(w.commands).not.toContain('clear')
@@ -123,9 +123,9 @@ test('a latch set before a clear still holds after it: no handover, no limit res
   expect(asks(w)).toBe(1)
   await $.tool.call(write)
   w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + 10 * HOUR) }]
-  await $.classic.StopFailure({ error: 'rate_limit' } as never)
+  await $.turn.complete({ ...turn('rate-limited'), reason: 'error' } as never)   // PROBES §16: the turn an API error ended
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
   await w.clock.settle()
   expect(asks(w)).toBe(1)
@@ -143,7 +143,7 @@ test('an early stop fired before a clear does not fire again after it for the sa
   await w.clock.settle()
   await $.tool.call(write)
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 99, resetsAt }]))
   await w.clock.settle()
   expect(asks(w)).toBe(1)
@@ -154,7 +154,7 @@ test('a latch lifted by another session still drains this one: the deferred hand
   w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.classic.StopFailure({ error: 'rate_limit' } as never)
+  await $.turn.complete({ ...turn('rate-limited'), reason: 'error' } as never)   // PROBES §16: the turn an API error ended
   await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
   await w.clock.settle()
   expect(asks(w)).toBe(0)
@@ -196,7 +196,7 @@ test('the limit resume names the handover file even after a clear consumed it', 
   await w.clock.settle()
   await $.tool.call(write)
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await w.clock.advance(HOUR + 300_000)
   const resume = w.submits.find(s => s.text.includes('limit has reset'))
   expect(resume?.text).toContain('/cfg/context-vigil-mod/handovers/s1-1.md')
@@ -285,7 +285,7 @@ async function latchedVho($: Engine, w: ReturnType<typeof world>, origin: 'compo
   await $.session.start(START)
   await $.prompt.submit(human('hi', origin))
   w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]
-  await $.classic.StopFailure({ error: 'rate_limit' } as never)
+  await $.turn.complete({ ...turn('rate-limited'), reason: 'error' } as never)   // PROBES §16: the turn an API error ended
   await $.command.run(vho)
   await w.clock.settle()
   expect(w.store.get('latch')).toBeDefined()
@@ -454,7 +454,7 @@ test('an in-process /resume drops the old conversation\'s limit resume (R2-16)',
   await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 98, resetsAt: iso(1_000_000 + 3 * HOUR) }]))
   await w.clock.settle()
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'resume' } as never)
+  await endInto($, w, 'resume')
   await w.clock.advance(3 * HOUR + 600_000)
   expect(w.submits.some(s => s.text.includes('limit has reset'))).toBe(false)
   expect([...w.files.entries()].filter(([k]) => k.includes('/events/')).map(([, v]) => v).join('')).toContain('resume-dropped')
@@ -482,7 +482,7 @@ test('an early stop with a fresh /vho handover already on disk writes no second 
   expect(w.submits.find(s => s.text.includes('limit has reset'))?.text).toContain('/handovers/s1-1.md')
 })
 
-test('a skipped limit resume keeps its handover; a later manual /clear injects it and says there is no automatic resume (R2-17)', async ($, on) => {
+test('a skipped limit resume keeps its handover; a later manual /clear names it and says there is no automatic resume (R2-17)', async ($, on) => {
   const w = world(on, { now: 1_000_000 })
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
@@ -496,10 +496,9 @@ test('a skipped limit resume keeps its handover; a later manual /clear injects i
   expect(w.state.get('context-vigil-mod.pending')).toMatchObject({ path: expect.any(String) })    // still /clear-able, as the notice says
   const before = w.submits.length
   w.sessionId.value = 's2'
-  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await w.clock.advance(1000)
-  expect(ss.additionalContext?.join('\n')).toContain('## Goal')
-  expect(w.notices.some(n => n.includes('Handover injected') && n.includes('no automatic resume') && n.includes('s1-1.md'))).toBe(true)
+  expect(w.notices.some(n => n.includes('Handover saved at') && n.includes('no automatic resume') && n.includes('s1-1.md'))).toBe(true)
   expect(w.submits.length).toBe(before)                               // nothing sent over the new session
 })
 
@@ -514,7 +513,7 @@ test('limit events log which window they are about, not just the event kind (R2-
   expect(lines.find(l => l.kind === 'limit.latched')?.window).toBe('seven_day')
 })
 
-test('a prompt sent after a limit handover is saved is carried into a later manual /clear', async ($, on) => {
+test('a prompt sent after a limit handover is saved is shown on a later manual /clear, never dropped', async ($, on) => {
   const w = world(on, { now: 1_000_000 })
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
@@ -525,10 +524,10 @@ test('a prompt sent after a limit handover is saved is carried into a later manu
   await $.prompt.submit(human('one more thing'))
   await $.prompt.submit(human('/help'))
   w.sessionId.value = 's2'
-  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await w.clock.advance(1000)
-  const ctx = ss.additionalContext?.join('\n') ?? ''
-  expect(ctx).toContain('## Sent during handover')
-  expect(ctx).toContain('> one more thing')
-  expect(ctx).not.toContain('/help')
+  // A limit handover sends no resume to carry it (R2-17), and nothing is injected any more (PROBES §16): a notice.
+  const shown = w.notices.find(n => n.startsWith('📜 Not carried into the new session')) ?? ''
+  expect(shown).toContain('one more thing')
+  expect(shown).not.toContain('/help')
 })

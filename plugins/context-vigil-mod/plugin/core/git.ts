@@ -1,5 +1,4 @@
 import type { Git } from '../types'
-import { isAbsolute } from './home'
 
 // Two questions only: `ahead` was dropped while the status-line band is parked (pre-flight F30).
 export const GIT_ARGV = {
@@ -22,14 +21,4 @@ export function parseGit(branch: RunOut, status: RunOut): Git {
 const TOUCH = new Set(['Edit', 'Write', 'NotebookEdit', 'Bash'])
 export function touchesGit(tool: string): boolean {
   return TOUCH.has(tool)
-}
-
-// The session's own git dir: in a worktree `<root>/.git` is a file, so HEAD and index live elsewhere.
-export const GIT_DIR_ARGV = ['git', 'rev-parse', '--absolute-git-dir'] as const
-
-/** What to watch for a `git rev-parse --absolute-git-dir` answer; nothing when it failed. */
-export function watchPaths(gitDir: RunOut): string[] {
-  const dir = gitDir.exitCode === 0 ? gitDir.stdout.trim() : ''
-  // git prints forward slashes even on Windows (`C:/repo/.git`)
-  return isAbsolute(dir) ? [`${dir}/HEAD`, `${dir}/index`] : []
 }

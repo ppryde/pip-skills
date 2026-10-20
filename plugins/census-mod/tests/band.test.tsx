@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { BAND, HINT, START, USAGE, bandLines, classicStart, turn, world } from './world'
+import { BAND, HINT, START, USAGE, bandLines, turn, world } from './world'
 
 const SEC = 1000
 const MIN = 60 * SEC
@@ -103,7 +103,6 @@ test('the engine is asked to redraw when the figures move', async ($, on) => {
   await $.session.measure({ context: { window: 1_000_000, percent: 30 }, rateLimits: [], changed: ['context'] as never })
 
   expect(w.invalidations.count).toBeGreaterThan(before)
-  void classicStart
 })
 
 // ---- below the input -----------------------------------------------------------------------------------------
