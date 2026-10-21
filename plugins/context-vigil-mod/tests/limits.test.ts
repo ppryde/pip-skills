@@ -63,7 +63,7 @@ describe('latchFromError', () => {
     expect(latchFromError([{ kind: 'seven_day', percentUsed: 100, resetsAt: iso(T + 5) }], T)).toEqual({ kind: 'seven_day', resetsAtMs: T + 5 })
   })
   test('a window at 90% or more: a short unknown latch', () => {
-    expect(latchFromError([{ kind: 'five_hour', percentUsed: 92, resetsAt: iso(T + 3600_000) }], T)).toEqual({ kind: 'unknown', resetsAtMs: T + 300_000 })
+    expect(latchFromError([{ kind: 'five_hour', percentUsed: 90, resetsAt: iso(T + 3600_000) }], T)).toEqual({ kind: 'unknown', resetsAtMs: T + 300_000 })
   })
   test('every window under 90%, or none known: no latch', () => {
     expect(latchFromError([{ kind: 'five_hour', percentUsed: 89 }], T)).toBe(null)

@@ -32,6 +32,7 @@ async function clearsAndResumesFrom($: Engine, w: World, file: string) {
   await endInto($, w, 'clear')
   await w.clock.advance(500)
   expect(w.submits.at(-1)?.text).toContain(`(saved at ${file})`)
+  expect(w.submits.at(-1)?.text).toContain('## Goal')
 }
 
 // Root cause: the person's request was the one-shot `awaiting` slot. Once an earlier save spent it,

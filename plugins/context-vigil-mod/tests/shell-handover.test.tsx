@@ -243,7 +243,7 @@ test('a pending handover is keyed by its session: offered to its own session onl
   w.notices.length = 0
   await endInto($, w, 'clear')
   await w.clock.advance(500)
-  expect(w.notices.some(n => n.includes('s1-1.md'))).toBe(true)   // a day old: named, not resumed
+  expect(w.notices.some(n => n.includes('s1-1.md'))).toBe(true)   // stale: named, not resumed
   expect([...w.notices, ...w.submits.map(x => x.text)].some(t => t.includes('other-1.md'))).toBe(false)
   expect(w.store.has('pending:other')).toBe(true)
   w.sessionId.value = 'other'

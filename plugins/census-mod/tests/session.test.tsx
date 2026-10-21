@@ -303,6 +303,16 @@ test('a model switch is seen on the next measurement or turn.complete; a cwd cha
   expect(w.ingests.at(-1)?.payload).toMatchObject({ cwd: '/repo/sub' })
 })
 
+test('a /model switch is seen at the next turn.start, before that turn runs', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  w.model.value = 'claude-sonnet-5-5'
+  await $.turn.start({ text: 'x', turnId: 't1' } as never)
+  await w.clock.advance(2 * SEC)
+  expect(w.ingests.at(-1)?.payload).toMatchObject({ census_mod: { event: 'model' }, model: { display_name: 'Sonnet 5.5' } })
+})
+
 test('a second session.start (a hot reload) is the same session: one set of timers, not two', async ($, on) => {
   const w = world(on)
   await $.session.start(START)

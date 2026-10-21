@@ -115,12 +115,13 @@ const HOLD_ORIGINS = new Set(['task-notification', 'scheduled-trigger', 'peer', 
 let issuedClear: { path: string; apiAt: number } | null = null
 // PROBES §16: no classic hook reaches a mod an organization does not list, so a /clear or a /resume is
 // seen as `session.end` (old id, $.state intact) and then, 100-600 ms on, a new id with $.state wiped.
-// `ended` is the end still waiting for its new id; `following` lets one change run at a time; `bound`
+// `ended` is the end still waiting for its new id; `following` is the change in flight (one at a time:
+// a second trigger awaits it, never runs on half-rebound state); `bound`
 // keeps the drift guard off until session.start has said which session this is.
 // `gaveUp`: the wait ran out and the clear was handled on the old id; a late move still owes the
 // successor its standing orders and stranded mark (the drift guard finishes it).
 let ended: { from: string; reason: 'clear' | 'resume'; gaveUp?: { pending: boolean } } | null = null
-let following = false
+let following: Promise<boolean> | null = null
 let bound = false
 // Every 50 ms for the first second (a /resume's id came ~600 ms on), then every 250 ms to the 5 s cap.
 const ID_POLL_MS = 50
@@ -1401,21 +1402,26 @@ async function awaitNewId($: EngineInterface, from: string, waited: number) {
 // nothing to do. A change no end announced (a fork, an end missed) is handled as a resume.
 // Resolves whether a clear found a handover to resume (M1 needs it for a late move).
 async function followConversation($: EngineInterface, unmoved = false): Promise<boolean> {
-  if (!bound || following) return false
-  following = true
+  if (!bound) return false
+  if (following) { await following.catch(() => false); return false }
+  following = rebind($, unmoved)
   try {
-    const id = await $.session.id().catch(() => session)
-    if (id === session && !unmoved) return false
-    const late = ended?.from === session ? ended.gaveUp : undefined
-    const kind = ended?.from === session ? ended.reason : 'resume'
-    ended = null
-    if (late) { await afterLateClear($, id, late.pending); return false }
-    if (kind === 'clear') return await afterClear($, id)
-    await afterResume($, id)
-    return false
+    return await following
   } finally {
-    following = false
+    following = null
   }
+}
+
+async function rebind($: EngineInterface, unmoved: boolean): Promise<boolean> {
+  const id = await $.session.id().catch(() => session)
+  if (id === session && !unmoved) return false
+  const late = ended?.from === session ? ended.gaveUp : undefined
+  const kind = ended?.from === session ? ended.reason : 'resume'
+  ended = null
+  if (late) { await afterLateClear($, id, late.pending); return false }
+  if (kind === 'clear') return await afterClear($, id)
+  await afterResume($, id)
+  return false
 }
 
 // M1: the id moved after the wait gave up on it. The clear was already handled (its resume may still
@@ -1605,9 +1611,10 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    // The drift guard, first, while an end waits for its new id: a prompt into a conversation the mod
-    // has not followed yet is that one's. With nothing ended it costs nothing here; turn.start checks every turn.
-    if (ended) await followConversation($)
+    // The drift guard, first, on every prompt: a prompt into a conversation the mod has not followed yet
+    // (an end still waiting for its new id, or a fork no end announced) is that one's, and must not take
+    // the old conversation's owed handover.
+    await followConversation($)
     // The person's own prompt wins over a resume still retrying; the handover it owed rides on it (C1).
     // A slash command's text is not rewritten (the typings: `command` set), so it neither takes the
     // handover nor cancels the resume: that still goes out after the command.

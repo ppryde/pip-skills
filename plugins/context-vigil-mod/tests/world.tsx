@@ -1,6 +1,7 @@
 import { mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
+import { configRootOf } from '../plugin/core/home'
 
 export type AskSeen = { question: string; header: string; multiSelect: boolean; options: string[]; descriptions: string[] }
 
@@ -53,7 +54,7 @@ export type World = {
 
 export function world(on: On, opts: { now?: number; store?: Record<string, unknown>; files?: Record<string, string>; env?: Record<string, string> } = {}): World {
   const env = opts.env ?? { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' }
-  const configDir = env.CLAUDE_CONFIG_DIR ?? `${env.HOME ?? ''}/.claude`
+  const configDir = configRootOf(env) ?? ''   // the plugin's own resolution, so a fixture lands where it looks
   const w: World = {
     clock: mock.clock(on, { now: opts.now ?? 1_000_000 }),
     files: new Map(Object.entries(opts.files ?? {})),

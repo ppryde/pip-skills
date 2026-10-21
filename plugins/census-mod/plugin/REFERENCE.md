@@ -110,7 +110,7 @@ last value). Liveness on Windows asks the OS (`OpenProcess`) and never `os.kill`
 | `session.start`; a `/clear` or resume (`session.end` with that reason, then a poll for the new id: 50 ms steps, given up after 5 s and logged); the drift guard on `turn.start`/`turn.complete` for a fork or a missed end (recorded as `session.resume`) | register the session; a `/clear`, resume or fork is a new session id and a new entry. No `classic.*` hook is used: an organisation-managed install never delivers them |
 | `turn.complete`, main thread only, with usage | cost, context, cache counters moved |
 | `session.measure`, when a rate-limit window's percentage or reset changed | limits for the dashboard |
-| a model change (`$.session.model()` read on `session.measure` and `turn.start`), a cwd change (`$.session.cwd()` read on `turn.start`/`turn.complete`), branch change, PR change | the fields readers show changed. A model switch changes the cache ttl label only when the next turn's transcript read finds it (no event carries it) |
+| a model change (`$.session.model()` read on `session.measure`, `turn.start` and `turn.complete`, main thread only), a cwd change (`$.session.cwd()` read on main-thread `turn.complete` and when rebinding a changed session id), branch change, PR change | the fields readers show changed. A model switch changes the cache ttl label only when the next turn's transcript read finds it (no event carries it) |
 | the cache-cold timer (last main turn plus the ttl), and a compaction (read off `session.measure`: the context fill falls by 25 points or more and to under half) | `prompt_cache.warm: false` |
 | `session.end` | `census_mod.ended: <reason>`, written at once inside the hook's budget |
 

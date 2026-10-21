@@ -267,6 +267,40 @@ test('the drift guard on prompt.submit handles a clear and the same prompt carri
   expect(w.submits.filter(s => s.text.includes('## Goal'))).toHaveLength(1)
 })
 
+test('the drift guard runs on every prompt: a fork no end announced never takes the old conversation\'s owed handover', async ($, on) => {
+  const w = world(on)
+  await handoverQueued($, w)
+  w.clearHold.release()
+  await w.clock.settle()
+  await endInto($, w, 'clear', { to: 's2' })         // s2's resume is owed, on its 500 ms timer
+  w.wipe()
+  w.sessionId.value = 's3'
+  w.liveId.value = 's3'
+  const r = await $.prompt.submit(human('a fork of s2'))   // no session.end, no turn.start yet
+  expect(JSON.stringify(r ?? null)).not.toContain('## Goal')
+  expect(w.submits.filter(x => x.text.startsWith('a fork of s2') && x.text.includes('## Goal'))).toHaveLength(0)
+})
+
+test('a second drift-guard trigger waits for the change in flight, never runs on half-rebound state', async ($, on) => {
+  const theirs = { session: 's2', path: '/cfg/context-vigil-mod/handovers/s2-1.md', name: 'N', reason: 'request', markdown: '# s2', resume: true, followUp: null, createdAt: 1_000_000 }
+  const w = world(on, { store: { 'pending:s2': theirs } })
+  await $.session.start(START)
+  let release = () => {}
+  w.fsRead.gate = new Promise<void>(r => { release = r })
+  w.wipe()
+  w.sessionId.value = 's2'
+  void $.turn.start({ text: '', turnId: 'fork' })    // the guard follows the fork: held mid-handler
+  await w.clock.settle()
+  let judged = false
+  const prompt = $.prompt.submit(human('hello')).then(() => { judged = true })
+  await w.clock.settle()
+  expect(judged).toBe(false)                         // waits for the rebind, not past it
+  w.fsRead.gate = null
+  release()
+  await prompt
+  expect(w.notices).toContain(V.pendingOffer(theirs.path))
+})
+
 // I4: the transcript is where the session started, not where its cwd moved to.
 test('a moved cwd: the transcript is still read from the cwd the session was bound in', async ($, on) => {
   const w = world(on)

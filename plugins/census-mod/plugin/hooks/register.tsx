@@ -1187,7 +1187,10 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     const r = await next(e)
     if (isSubagent(e)) return r
-    await quietly(() => checkMoved($, false).then(() => undefined))
+    await quietly(async () => {
+      await checkMoved($, false)
+      await checkModel($)   // a /model switch shows before the turn runs, not after it
+    })
     return r
   })
 

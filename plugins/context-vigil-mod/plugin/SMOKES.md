@@ -3,7 +3,7 @@
 Owner-run checklist (the controller may also drive a throwaway session via tmux for probes). Run in an account with the mod installed and `/vigil-setup` done. Fill each result line.
 
 ## 1. Requested handover (terminal)
-`/vho` -> instruction turn -> `vigil_handover` called -> file under `handovers/` -> `/clear` runs by itself -> resume prompt arrives naming the handover file, and the model reads it. (Before 2026-10-20 the handover was injected through `classic.SessionStart`; see PROBES §16.)
+`/vho` -> instruction turn -> `vigil_handover` called -> file under `handovers/` -> `/clear` runs by itself -> resume prompt arrives with the handover embedded in its text (the saved path named for reference only), and the model continues from its next step without reading the file. (Before 2026-10-20 the handover was injected through `classic.SessionStart`; see PROBES §16.)
 Result: PASS 2026-10-04 (controller, tmux, haiku). /vho -> handover.written (1805 B) -> clear unattended:false -> new session `resume` reason request; resume prompt arrived.
 
 ## 2. Draft guard
@@ -43,7 +43,7 @@ Result: PASS 2026-10-04. Unnamed session took the handover's session_name (`vigi
 Result: PASS 2026-10-04. `/rename smoke-ten-owner-name` then /vho: name kept after the clear (`rename kept:true`).
 
 ## 11. Auto handover crosses the clear (probe section 9 path)
-Auto mode armed, run an auto handover to the clear. After it: the resume prompt arrives in the new session and the model reads the handover file it names (pending state lives in `$.store`; `$.state` is wiped by `/clear`, which broke this pre-fix).
+Auto mode armed, run an auto handover to the clear. After it: the resume prompt arrives in the new session carrying the handover in its text, and the model continues from it (pending state lives in `$.store`; `$.state` is wiped by `/clear`, which broke this pre-fix).
 Result: PASS 2026-10-04, with two DEFECTS found and fixed on fix/cvm-auto-guards (a8404c9). Armed after 19 min away while working, threshold 25% mode auto -> handover -> unattended clear -> new session resumed. Defects: (a) a human prompt during an in-flight auto handover disarmed auto mode but the clear still ran unattended (spec: attended never clears); (b) thrash -- fresh session baseline ~24% sat under the 25% threshold, 3 unattended clears in ~3 min. Fixes: clear re-checks mode at clear time (`clear.skipped`); unattended handover needs one step of growth above the session's first reading (`guard.baseline`).
 
 ## 12. Managed install (no classic hooks), added 2026-10-20
