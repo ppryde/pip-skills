@@ -27,6 +27,7 @@ export type World = {
   surfaces: { value: string[] }
   toasts: string[]
   gitGate: { value: Promise<void> | null } // while set, `git status` waits on it
+  revGate: { value: Promise<void> | null } // while set, `git rev-parse` (the git dir read) waits on it
   registryLists: { count: number }        // reads of the session registry directory
   links: Map<string, string>            // symlink path -> target
   mvFails: { value: boolean }           // makes `mv` exit 1
@@ -67,7 +68,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     git: { status: '# branch.oid abc1234def\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +1 -0\n1 .M N... 100644 100644 100644 a b f.ts\n', dir: '/repo/.git\n/repo\n', exitCode: 0 },
     gh: { stdout: '[]', exitCode: 0, throws: false }, remote: { value: '' }, toolResult: { value: 'ok' },
     titles: new Map(), tail: { value: '"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":100}\n' },
-    logs: [], invalidations: { count: 0 }, lookups: [], surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, onWrite: { fn: null }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, bundle: { present: true }, pythons: { value: ['python3'] }, shell: { value: true },
+    logs: [], invalidations: { count: 0 }, lookups: [], surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], gitGate: { value: null }, revGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, onWrite: { fn: null }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, bundle: { present: true }, pythons: { value: ['python3'] }, shell: { value: true },
   }
   w.files.set(`${REGISTRY}/22695.json`, JSON.stringify({ pid: 22695, sessionId: 's1', procStart: 'Sun Oct  4 22:57:51 2026', version: '2.1.289' }))
   const real = (p: string): string => w.links.get(p) ?? p
@@ -88,7 +89,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     const path = winPath((e as { path: string }).path)
     if (path === REGISTRY) w.registryLists.count++
     const names = w.dirs.get(path)
-    return names ? { value: names.map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) as never } : { deny: 'ENOENT' }
+    return names ? { value: names.map(name => ({ name, kind: name.includes('.') ? 'file' as const : 'dir' as const, size: 1, mtimeMs: 0, isLink: false })) as never } : { deny: 'ENOENT' }
   })
   on('process.run', async (_$, e) => {
     const init = (e as unknown as { init?: { cwd?: string; stdin?: string; env?: Record<string, string>; timeoutMs?: number } }).init ?? {}
@@ -106,7 +107,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     if (cmd === 'sh' && e.argv[2] === 'exit 0') return { value: done(0) }
     if (cmd === 'git' && args.includes('status')) { await w.gitGate.value; return { value: done(w.git.exitCode, w.git.status) } }
     if (cmd === 'git' && args.includes('remote')) return { value: w.remote.value ? done(0, w.remote.value) : done(1) }
-    if (cmd === 'git' && args.includes('rev-parse')) return { value: done(w.git.exitCode, w.git.dir) }
+    if (cmd === 'git' && args.includes('rev-parse')) { await w.revGate.value; return { value: done(w.git.exitCode, w.git.dir) } }
     if (cmd === 'gh') {
       if (w.gh.throws) throw new Error('spawn gh ENOENT')
       return { value: done(w.gh.exitCode, w.gh.stdout) }
@@ -136,12 +137,8 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
-  on('classic.SessionStart', () => ({}))
-  on('classic.FileChanged', () => ({}))
-  on('classic.PostModelSwitch', () => ({}))
-  on('classic.CwdChanged', () => ({}))
-  on('classic.PostCompact', () => ({}))
   on('ui.toast', (_$, e) => { w.toasts.push(e.text); return { value: undefined } })
   on('fs.write', (_$, e) => { const got = w.onWrite.fn?.(winPath(e.path), e.text); w.files.set(real(winPath(e.path)), typeof got === 'string' ? got : e.text); return { value: undefined } })
   on('fs.stat', (_$, e) => { w.lookups.push(e.path); return { value: { kind: 'file' as const, size: 1, mtimeMs: 0, isLink: w.links.has(winPath(e.path)), realPath: real(winPath(e.path)) } as never } })
@@ -169,8 +166,12 @@ export const turn = (usage?: { input_tokens: number; output_tokens: number; cach
   ...(usage ? { usage: { ...usage, model: 'claude-opus-5-5' } } : {}), ...extra,
 })
 export const USAGE = { input_tokens: 2, output_tokens: 100, cache_read_input_tokens: 90, cache_creation_input_tokens: 8 }
-export const classicStart = (source: 'startup' | 'resume' | 'clear' | 'compact' | 'fork', session_id = 's1') =>
-  ({ session_id, transcript_path: `/cfg/projects/-repo/${session_id}.jsonl`, cwd: '/repo', hook_event_name: 'SessionStart' as const, source }) as never
+/** What the managed install sees of a /clear or a resume: session.end names the old id, then the id moves under the mod. */
+export async function switchTo($: { session: { end: (i: never) => Promise<unknown> } }, w: World, id: string, reason: 'clear' | 'resume' = 'clear') {
+  await $.session.end({ reason, sessionId: w.sessionId.value, resume: {} } as never)
+  w.sessionId.value = id
+  await w.clock.advance(0)
+}
 export const HINT = (props: Record<string, unknown> = {}, viewport?: { columns: number; rows: number }) =>
   ({ plugin: 'census-mod', surface: 'terminal' as const, component: 'PromptHint' as const, props: { isDraft: false, isWorking: false, hint: '? for shortcuts', ...props } as never, ...(viewport ? { viewport } : {}) }) as never
 export const BAND = (props: Record<string, unknown> = {}) =>

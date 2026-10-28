@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { BAND, START, USAGE, bandLines, classicStart, turn, world } from './world'
+import { BAND, START, USAGE, bandLines, turn, world } from './world'
 
 const ingestCount = (w: ReturnType<typeof world>) => w.ingests.length
 
@@ -53,7 +53,6 @@ test('no sh (Windows): the session title and the cache TTL are read from the tra
   } })
   w.shell.value = false
   await $.session.start(START)
-  await $.classic.SessionStart(classicStart('startup'))
   await w.clock.advance(0)
   await $.turn.complete(turn(USAGE))
   await w.clock.advance(2_000)
@@ -120,7 +119,6 @@ test('a pass through with the transcript read twice (title and TTL) reads the fi
   const w = world(on, { files: { '/cfg/projects/-repo/s1.jsonl': '{"type":"custom-title","customTitle":"x"}\n' } })
   w.shell.value = false
   await $.session.start(START)
-  await $.classic.SessionStart(classicStart('startup'))
   await w.clock.advance(0)
   await $.turn.complete(turn(USAGE))
   await w.clock.advance(1_000)

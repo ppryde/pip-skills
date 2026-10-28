@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import { START, human, turn, world } from './world'
+import { START, human, turn, world, endInto } from './world'
 import { V } from '../plugin/core/voice'
 
 const MIN = 60_000
@@ -57,7 +57,7 @@ test('a pause survives a /clear', async ($, on) => {
   await $.session.start(START)
   await $.command.run(cmd('vigil-pause'))
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await $.session.measure(measure(41))
   expect(await barShown($)).toBe(false)
   expect(await pausedLine($)).toBe(true)

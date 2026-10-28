@@ -9,15 +9,15 @@ import type { Stranded } from '../core/settings'
 import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
-import { COALESCE_MS, GIT_ARGV, GIT_DIR_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
-import { INPUT_SCHEMA, SENT_MAX, mergeStanding, sentSection, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, STOP_NOW, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
-import { HOME_VARS_CHECKED } from '../core/home'
+import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit } from '../core/git'
+import { INPUT_SCHEMA, SENT_MAX, mergeStanding, sentSection, TOOL_DESCRIPTION, compacted, fresh, grownEnough, handoverText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, STOP_NOW, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
+import { HOME_VARS_CHECKED, joinPath } from '../core/home'
 import { TITLE_CMD, archiveName, isArchived, lastTitle } from '../core/title'
 import { TAIL_CMD, type CacheTtl, cacheLinesFromText, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
 import { clearGate, needsRcHint } from '../core/surfaces'
 import { applyAnswers, extractAnswers, isStep, nextCard, questionFor } from '../core/setup'
-import { RESUME_DELAY_MS, earlyStopDue, formatHHMM, latchCleared, latchFromMeasure, latchFromStopFailure, nextHop } from '../core/limits'
+import { RESUME_DELAY_MS, earlyStopDue, formatHHMM, latchCleared, latchFromError, latchFromMeasure, nextHop } from '../core/limits'
 import { classicHooksInstalled } from '../core/interlock'
 import { messagesAfterHandover, renderTail } from '../core/tail'
 import { V } from '../core/voice'
@@ -39,7 +39,6 @@ const pendingA = atom({ plugin: 'context-vigil-mod', key: 'pending' } as const, 
 const pausedA = atom({ plugin: 'context-vigil-mod', key: 'paused' } as const, false)
 const draftWaitA = atom({ plugin: 'context-vigil-mod', key: 'draftWait' } as const, false)
 const countdownA = atom({ plugin: 'context-vigil-mod', key: 'countdownEndsAt' } as const, null)
-const transcriptA = atom({ plugin: 'context-vigil-mod', key: 'transcriptPath' } as const, null as string | null)
 // Information only (PROBES §11): what the session's cache is. The fire-time check stays the gate.
 const cacheTtlA = atom({ plugin: 'context-vigil-mod', key: 'cacheTtl' } as const, 'unknown' as CacheTtl)
 const ttlReadA = atom({ plugin: 'context-vigil-mod', key: 'ttlRead' } as const, false)
@@ -114,6 +113,30 @@ const HOLD_ORIGINS = new Set(['task-notification', 'scheduled-trigger', 'peer', 
 // The last API turn as the mod issued its own clear, for the handover it clears into: the engine queues
 // the clear behind the running turn, and turns that finish meanwhile must not make the handover stale.
 let issuedClear: { path: string; apiAt: number } | null = null
+// PROBES §16: no classic hook reaches a mod an organization does not list, so a /clear or a /resume is
+// seen as `session.end` (old id, $.state intact) and then, 100-600 ms on, a new id with $.state wiped.
+// `ended` is the end still waiting for its new id; `following` is the change in flight (one at a time:
+// a second trigger awaits it, never runs on half-rebound state); `bound`
+// keeps the drift guard off until session.start has said which session this is.
+// `gaveUp`: the wait ran out and the clear was handled on the old id; a late move still owes the
+// successor its standing orders and stranded mark (the drift guard finishes it).
+let ended: { from: string; reason: 'clear' | 'resume'; gaveUp?: { pending: boolean } } | null = null
+let following: Promise<boolean> | null = null
+let bound = false
+// Every 50 ms for the first second (a /resume's id came ~600 ms on), then every 250 ms to the 5 s cap.
+const ID_POLL_MS = 50
+const ID_POLL_SLOW_MS = 250
+const ID_FAST_FOR_MS = 1000
+const ID_WAIT_MS = 5000
+// A model switch writes a cache of its own (PROBES §11): the next response that writes one says which lifetime.
+let lastModel: string | null = null
+let ttlSwitched = false
+// The last context reading that had a fill: a compaction is judged against it, so a null reading in
+// between cannot hide one. Per conversation (resetCaches).
+let lastFill: { pct: number; window: number | null } | null = null
+// The handover a resume chain still owes the model: nothing is injected (PROBES §16), so when the
+// person's own prompt cancels the chain (their words win) it rides on that prompt instead, once.
+let owed: { gen: number; text: string; prompt: { text: string; asUser?: true }; path: string | null; held: string | null } | null = null
 let setupRun: { only: string | undefined; asked: StepId[] } | null = null
 let lastLightTimer: { cancel: () => void } | null = null
 let countdownTick: { cancel: () => void } | null = null
@@ -244,10 +267,26 @@ async function releaseHeld($: EngineInterface) {
     .catch(err => timerFailed($, 'held-release', err))
 }
 
-function resumeSoon($: EngineInterface, prompt: { text: string; asUser?: true }, path: string | null, held: string | null) {
-  void submitWithRetry($, prompt, 500)
-    .then(outcome => (outcome === 'failed' ? resumeFailed($, path, held) : undefined))
+// `owes`: what the person's prompt carries if it cancels this chain (C1); absent, nothing is owed.
+function resumeSoon($: EngineInterface, prompt: { text: string; asUser?: true }, path: string | null, held: string | null, owes?: string) {
+  const chain = submitWithRetry($, prompt, 500)
+  const gen = submitGen   // submitWithRetry took its generation before its first await
+  if (owes !== undefined) owed = { gen, text: owes, prompt, path, held }
+  void chain
+    .then(async outcome => {
+      const mine = owed?.gen === gen
+      if (mine) owed = null
+      // Cancelled by anything but the person's prompt (which takes `owed` first): never silently.
+      if (outcome === 'failed' || (outcome === 'cancelled' && mine)) await resumeFailed($, path, held)
+    })
     .catch(err => timerFailed($, 'resume-submit', err))
+}
+
+// The person's prompt cancels a resume still retrying: the handover it owed is handed to that prompt.
+function takeOwed(): NonNullable<typeof owed> | null {
+  const o = owed
+  owed = null
+  return o
 }
 
 // A resume or held-prompt submit that is refused: say so, with the handover and the held text.
@@ -417,6 +456,9 @@ function resetCaches() {
   ambiguityTold.clear()
   countdownTick?.cancel()
   countdownTick = null
+  lastModel = null
+  ttlSwitched = false
+  lastFill = null
 }
 
 async function savePhoneFacts($: EngineInterface) {
@@ -576,6 +618,8 @@ async function bindSession($: EngineInterface) {
   await loadOverrides($)
   await migrateModelThresholds($)
   lastApiMirror = await read($, lastApiA)
+  ended = null
+  bound = true
 }
 
 // Settings are an account fact other sessions write too: re-read before a decision that matters
@@ -1050,6 +1094,28 @@ async function transcriptTail($: EngineInterface, path: string): Promise<string[
   return null
 }
 
+// Where a session's transcript is: no event carries the path natively (PROBES §16), so it is derived,
+// from the cwd the session was bound in: the live one moves with EnterWorktree or a cd, the transcript
+// does not. The live cwd is tried only when no transcript is there. A resumed session can have started
+// somewhere else again (another worktree), so with neither there, any project folder holding `<id>.jsonl` is it.
+async function transcriptOf($: EngineInterface, id: string): Promise<string | null> {
+  if (!root) return null
+  const bound = transcriptPathFor(root, cwd, id)
+  const live = await $.session.cwd().catch(() => cwd)
+  const tries = live === cwd ? [bound] : [bound, transcriptPathFor(root, live, id)]
+  for (const p of tries) if (await $.fs.exists(p).catch(() => false)) return p
+  return (await transcriptElsewhere($, root, id)) ?? tries[tries.length - 1]!
+}
+
+// The one project folder holding `<id>.jsonl`, whatever directory it was named for; null when none does.
+async function transcriptElsewhere($: EngineInterface, root: string, id: string): Promise<string | null> {
+  const projects = joinPath(root, 'projects')
+  const dirs = ((await $.fs.list(projects).catch(() => [])) as { name: string; kind: string }[]).filter(d => d.kind !== 'file')
+  const paths = dirs.map(d => joinPath(projects, d.name, `${id}.jsonl`))
+  const found = await Promise.all(paths.map(p => $.fs.exists(p).catch(() => false)))
+  return paths[found.indexOf(true)] ?? null
+}
+
 // The transcript's last custom title: null = unnamed, undefined = could not tell.
 async function transcriptTitle($: EngineInterface, transcriptPath: string): Promise<string | null | undefined> {
   try {
@@ -1073,7 +1139,7 @@ async function transcriptTitle($: EngineInterface, transcriptPath: string): Prom
 // Returns the name it replaced, to put back if the clear fails; null when it renamed nothing.
 async function archiveOutgoing($: EngineInterface): Promise<string | null> {
   try {
-    const path = (await read($, transcriptA)) ?? (root ? transcriptPathFor(root, await $.session.cwd(), await $.session.id()) : null)
+    const path = await transcriptOf($, await $.session.id())
     const title = path === null ? undefined : await transcriptTitle($, path)
     if (title === undefined) {
       await log($, 'guard.wait', { reason: 'archive-unknown' })
@@ -1148,12 +1214,12 @@ async function unarchive($: EngineInterface, name: string) {
 // /clear carries the outgoing session's name into the new one (PROBES §8). After the mod's own
 // archive that is `Archive: <archived>`, and the new session gets `<archived>` back; any other
 // carried name (the person's, even one starting `Archive: `) is kept; an unnamed one takes the
-// handover's session_name. `carried` is the engine's session_title on the clear when it gives one
-// (§15: null = unnamed); absent, the old transcript is read.
+// handover's session_name. The carried name is the old transcript's last title: the engine's
+// session_title came only on classic.SessionStart (§15), which no longer reaches the mod (§16).
 // Never blocks the resume: a failed rename is a notice, not an error.
-// `successor` is the new session's id as the clear's SessionStart saw it (null: not known), for the stranded mark.
-async function renameSession($: EngineInterface, handoverName: string | undefined, archived: string | undefined, oldTranscript: string | undefined, carried: string | null | undefined, successor: string | null) {
-  const title = carried !== undefined ? carried : oldTranscript === undefined ? undefined : await transcriptTitle($, oldTranscript)
+// `successor` is the new session's id (null: it never moved), for the stranded mark.
+async function renameSession($: EngineInterface, handoverName: string | undefined, archived: string | undefined, oldTranscript: string | undefined, successor: string | null) {
+  const title = oldTranscript === undefined ? undefined : await transcriptTitle($, oldTranscript)
   if (title === undefined) return void (await log($, 'guard.wait', { reason: 'rename-unknown' }))
   if (title !== null && (archived === undefined || title !== archiveName(archived))) return void (await log($, 'rename', { kept: true }))
   const name = title === null ? handoverName?.trim() : archived
@@ -1187,7 +1253,7 @@ function scheduleLastLight($: EngineInterface, lastApiAt: number, now: number) {
 async function readTtl($: EngineInterface): Promise<CacheTtl> {
   let writes = null
   try {
-    const path = (await read($, transcriptA)) ?? (root ? transcriptPathFor(root, await $.session.cwd(), await $.session.id()) : null)
+    const path = await transcriptOf($, await $.session.id())
     if (!path) return ttlFromWrites(null)
     if (await hasShell($)) {
       const r = await $.process.run(['sh', '-c', TAIL_CMD, 'sh', path])
@@ -1220,8 +1286,8 @@ async function setCacheTtl($: EngineInterface, to: CacheTtl, source: 'response' 
 }
 
 // The session's first response that wrote to the cache: one detached tail read, never again.
-async function learnSessionTtl($: EngineInterface) {
-  await setCacheTtl($, await readTtl($), 'response')
+async function learnSessionTtl($: EngineInterface, source: 'response' | 'switch') {
+  await setCacheTtl($, await readTtl($), source)
 }
 
 async function maybeFireLastLight($: EngineInterface) {
@@ -1322,6 +1388,182 @@ async function askReturn($: EngineInterface) {
   submitSoon($, { text: held, asUser: true }, 0, undefined, () => { void resumeFailed($, pending?.path ?? null, held) })
 }
 
+// PROBES §16: the new id may come late (a /resume's ~600 ms on), so it is polled for, bounded. One that
+// never moves is logged and handled as the clear's old "slow start": the handover still resumes.
+async function awaitNewId($: EngineInterface, from: string, waited: number) {
+  if (ended?.from !== from || ended.gaveUp) return   // the drift guard got there first, or a newer end took over
+  const id = await $.session.id().catch(() => from)
+  const again = (ms: number) => $.clock.after(ms, () => { void awaitNewId($, from, waited + ms).catch(err => timerFailed($, 'session-change', err)) })
+  // A handler already running (the drift guard's) would turn this one away: look again once it is done.
+  const step = waited < ID_FAST_FOR_MS ? ID_POLL_MS : ID_POLL_SLOW_MS
+  if (following) return void again(step)
+  if (id !== from) return followConversation($)
+  if (waited >= ID_WAIT_MS) {
+    const reason = ended.reason
+    // Logged after the handler: its cache reset must come before any line of the new conversation.
+    const pending = await followConversation($, true)
+    if (reason === 'clear') ended = { from, reason, gaveUp: { pending } }
+    return log($, 'guard.wait', { reason: 'session-id-unmoved', waitedMs: waited })
+  }
+  again(step)
+}
+
+// The one conversation-change handler, for both triggers: the end's poll and the drift guard. Keyed on
+// the bound session: the handler rebinds `session` first, so a second trigger for the same change finds
+// nothing to do. A change no end announced (a fork, an end missed) is handled as a resume.
+// Resolves whether a clear found a handover to resume (M1 needs it for a late move).
+async function followConversation($: EngineInterface, unmoved = false): Promise<boolean> {
+  if (!bound) return false
+  if (following) { await following.catch(() => false); return false }
+  following = rebind($, unmoved)
+  try {
+    return await following
+  } finally {
+    following = null
+  }
+}
+
+async function rebind($: EngineInterface, unmoved: boolean): Promise<boolean> {
+  const id = await $.session.id().catch(() => session)
+  if (id === session && !unmoved) return false
+  const late = ended?.from === session ? ended.gaveUp : undefined
+  const kind = ended?.from === session ? ended.reason : 'resume'
+  ended = null
+  if (late) { await afterLateClear($, id, late.pending); return false }
+  if (kind === 'clear') return await afterClear($, id)
+  await afterResume($, id)
+  return false
+}
+
+// M1: the id moved after the wait gave up on it. The clear was already handled (its resume may still
+// be retrying, and is left alone); what it could not do without a successor is done now.
+async function afterLateClear($: EngineInterface, after: string, hadPending: boolean) {
+  const before = session
+  session = after
+  await log($, 'guard.wait', { reason: 'session-id-late', from: before })
+  await moveStranded($, before, after)
+  if (hadPending) {
+    try {
+      const orders = await $.store.get(standingKey(before))
+      if (orders !== undefined && orders !== null) { await $.store.set(standingKey(after), orders); await $.store.delete(standingKey(before)) }
+    } catch (err) { await log($, 'guard.wait', { reason: 'standing-move-failed', error: String(err) }) }
+  }
+  scheduleGit($)
+  await resetSessionState($)
+  if (activity.lastHumanOrigin !== null) await savePhoneFacts($)
+}
+
+// R1-08: session.start fires once per process, so an in-process /resume or fork is a new session that
+// only the change announces. Rebind it; whatever it parked is offered, never the old session's.
+async function afterResume($: EngineInterface, after: string) {
+  session = after
+  owed = null   // a handover owed to the conversation that is gone
+  // A resume is the person acting now: the old conversation's idle time must not read as away. The
+  // phone facts come from the module copy: the wipe took $.state's.
+  const { lastHumanOrigin, lastBridgeAt } = activity
+  activity = { ...EMPTY_ACTIVITY, lastHumanOrigin, lastBridgeAt, lastHumanAt: await nowMs($) }
+  resetCaches()
+  // R2-16: process-wide jobs belong to the conversation that is gone.
+  if (resumeChain || limitResume) await log($, 'guard.wait', { reason: 'resume-dropped', cause: 'session-changed' })
+  resumeChain?.cancel()
+  resumeChain = null
+  limitResume = null
+  // R3-02: never submit into a different conversation; say what was not sent.
+  const heldAway = returnHeldMirror
+  returnHeldMirror = null
+  if (heldAway?.length) {
+    await notify($, V.heldNotSent(heldAway.join('\n\n')))
+    await log($, 'last_light.choice', { choice: 'dropped', viaResume: true })
+  }
+  await checkInterlock($)
+  scheduleGit($)
+  await resetSessionState($)
+  if (activity.lastHumanOrigin !== null) await savePhoneFacts($)   // the wipe took them; a later reload needs them
+  await update($, lastApiA, () => null)
+  lastApiMirror = null
+  const stored = ((await $.store.get(pendingKey(session))) as Pending | null | undefined) ?? null
+  await update($, pendingA, () => stored)
+  if (stored) await notify($, V.pendingOffer(stored.path))
+}
+
+// A /clear: the handover saved for it is resumed in the new session. `after` is the new id, or the old
+// one when it never moved.
+async function afterClear($: EngineInterface, after: string): Promise<boolean> {
+  // PROBES §9: $.state is already wiped here, so the handover comes from $.store, keyed by
+  // `session` — still the pre-clear id until it is rebound below.
+  const pending = ((await $.store.get(pendingKey(session))) as Pending | null | undefined) ?? null
+  if (pending) await $.store.delete(pendingKey(session))
+  const heldOnClear = returnHeldMirror?.length ? returnHeldMirror.join('\n\n') : null   // R3-02
+  returnHeldMirror = null
+  // A clear the mod issued for this handover is judged as of its issue, a manual /clear as of now (R1-10).
+  const apiBefore = issuedClear && pending && issuedClear.path === pending.path ? issuedClear.apiAt : lastApiMirror
+  issuedClear = null
+  lastApiMirror = null   // the new session has run no turn
+  const before = session
+  session = after
+  const successor = after !== before ? after : null
+  if (successor !== null) await moveStranded($, before, successor)
+  // The chain's standing orders follow the handover to the successor session.
+  if (pending && successor !== null) {
+    try {
+      const orders = await $.store.get(standingKey(before))
+      if (orders !== undefined && orders !== null) { await $.store.set(standingKey(successor), orders); await $.store.delete(standingKey(before)) }
+    } catch (err) { await log($, 'guard.wait', { reason: 'standing-move-failed', error: String(err) }) }
+  }
+  // An id that never moved leaves this clear's events in the old session's file. Say so rather than
+  // look like a log that went missing.
+  if (successor === null) {
+    try { await $.ui.log(`context-vigil-mod: session id not rebound ${ID_WAIT_MS / 1000} s after the clear (still ${session}); its events go to that session's log`) } catch { /* nowhere left to say it */ }
+  }
+  resetCaches()
+  scheduleGit($)
+  await resetSessionState($)
+  if (activity.lastHumanOrigin !== null) await savePhoneFacts($)   // the wipe took them; a later reload needs them
+  if (heldOnClear) await log($, 'last_light.choice', { choice: 'resume', viaClear: true })
+  owed = null
+  if (!pending) {
+    if (heldOnClear) resumeSoon($, { text: heldOnClear, asUser: true }, null, heldOnClear, heldOnClear)
+    return false
+  }
+  const follow = [pending.followUp, heldOnClear].filter(Boolean).join('\n\n') || null
+  // /rename starts from its own timer, before the resume submit, and never blocks it.
+  const oldTranscript = (await transcriptOf($, pending.session)) ?? undefined
+  $.clock.after(0, () => { void renameSession($, pending.name, pending.archived, oldTranscript, successor) })
+  // The person's own held text is always sent. The mod's resume prompt needs a fresh handover
+  // (no turn since it was written) and no latch (R1-10); otherwise a notice says why not.
+  let stale = false
+  let noResume = false
+  let carried = false   // a resume message went out with the sent prompts and the tail
+  const sentAll = [...(pending.sent ?? []), ...(pending.held ?? [])]
+  const sentBlock = sentSection(sentAll)
+  // What happened after the handover was written rides with it; up to the cap it keeps the handover fresh.
+  const msgs = oldTranscript === undefined ? null : await transcriptTail($, oldTranscript)
+  const tail = msgs === null ? null : renderTail(msgs)
+  const tailLog = tail === null ? 'unreadable' : tail.total === 0 ? 'none' : tail.over ? 'over' : tail.total
+  const tailFresh = tail === null || tail.total === 0 ? null : !tail.over
+  // Nothing is injected (PROBES §16): the message carries the handover itself, and the extras.
+  const handover = [handoverText(pending.markdown, pending.path), tail?.section ?? '', sentBlock].filter(Boolean).join('\n\n')
+  if (follow) { carried = true; const text = `${follow}\n\n${handover}`; resumeSoon($, { text, asUser: true }, pending.path, follow, text) }
+  else if (pending.resume) {
+    if (!(tailFresh ?? fresh(pending, apiBefore, await nowMs($)))) {
+      stale = true
+      await notify($, V.resumeStale(pending.path))
+    } else if (await readLatch($)) {
+      await notify($, V.resumeLatched(pending.path))
+      await log($, 'guard.wait', { reason: 'latched', deferred: 'resume' })
+    } else { carried = true; resumeSoon($, { text: `${resumeText(pending.path)}\n\n${handover}` }, pending.path, null, handover) }
+  } else {
+    // R2-17: a handover that carries no automatic resume (a limit or last-light one) is still
+    // named on a manual /clear; never silently.
+    await notify($, V.noResume(pending.path))
+    noResume = true
+  }
+  // No resume went out to carry them: the prompts sent during the handover are shown, never dropped.
+  if (!carried && sentAll.length) await notify($, V.sentNotCarried(sentAll.join('\n\n')))
+  await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null, tail: tailLog, ...(stale ? { stale: true } : {}), ...(noResume ? { noResume: true } : {}) })
+  return true
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const r = await next(e)
@@ -1366,146 +1608,32 @@ export const register: Register = on => {
     return r
   })
 
-  on('classic.SessionStart', async ($, e, next) => {
-    // A different conversation begins (a /clear, a /resume, a start): a resume still retrying belongs to the old one.
-    if (e.source !== 'compact') submitGen++
+  on('session.end', async ($, e, next) => {
+    if (e.reason !== 'clear' && e.reason !== 'resume') return next(e)
+    // A different conversation begins: a resume still retrying belongs to the old one.
+    submitGen++
+    owed = null   // the old conversation's: its resume is cancelled with it
+    ended = { from: e.sessionId, reason: e.reason }
     const r = await next(e)
-    const gitDir = await $.process
-      .run(GIT_DIR_ARGV, { cwd: await $.session.cwd() })
-      .then(x => ({ exitCode: x.exitCode, stdout: x.stdout }))
-      .catch(() => ({ exitCode: 1, stdout: '' }))
-    const watch = watchPaths(gitDir)
-    const out = watch.length ? { ...r, watchPaths: [...(r.watchPaths ?? []), ...watch] } : r
-    if (e.transcript_path) await update($, transcriptA, () => e.transcript_path ?? null)
-    if (e.source === 'resume' || e.source === 'fork') {
-      // R1-08: session.start fires once per process, so an in-process /resume or fork is a new
-      // session that only this event announces. Rebind it; whatever it parked is offered, never
-      // the old session's.
-      session = await $.session.id()
-      // A resume is the person acting now: the old conversation's idle time must not read as away.
-      activity = { ...EMPTY_ACTIVITY, ...(await read($, phoneA)), lastHumanAt: await nowMs($) }
-      resetCaches()
-      // R2-16: process-wide jobs belong to the conversation that is gone.
-      if (resumeChain || limitResume) await log($, 'guard.wait', { reason: 'resume-dropped', cause: 'session-changed' })
-      resumeChain?.cancel()
-      resumeChain = null
-      limitResume = null
-      // R3-02: never submit into a different conversation; say what was not sent.
-      const heldAway = returnHeldMirror
-      returnHeldMirror = null
-      if (heldAway?.length) {
-        await notify($, V.heldNotSent(heldAway.join('\n\n')))
-        await log($, 'last_light.choice', { choice: 'dropped', viaResume: true })
-      }
-      await checkInterlock($)
-      scheduleGit($)
-      await resetSessionState($)
-      await update($, lastApiA, () => null)
-      lastApiMirror = null
-      const stored = ((await $.store.get(pendingKey(session))) as Pending | null | undefined) ?? null
-      await update($, pendingA, () => stored)
-      if (stored) await notify($, V.pendingOffer(stored.path))
-      return out
-    }
-    if (e.source === 'compact') {
-      // R1-13: the context just shrank; the nudge ladder and its bar start over, nothing else does.
-      await update($, lastNudgedA, () => null)
-      await update($, baselineA, () => null)
-      await update($, barShownA, () => false)
-      await update($, barDismissedA, () => false)
-      return out
-    }
-    if (e.source !== 'clear') return out
-    // PROBES §9: $.state is already wiped here, so the handover comes from $.store, keyed by
-    // `session` — still the pre-clear id until it is rebound below.
-    const pending = ((await $.store.get(pendingKey(session))) as Pending | null | undefined) ?? null
-    if (pending) await $.store.delete(pendingKey(session))
-    const heldOnClear = returnHeldMirror?.length ? returnHeldMirror.join('\n\n') : null   // R3-02
-    returnHeldMirror = null
-    // A clear the mod issued for this handover is judged as of its issue, a manual /clear as of now (R1-10).
-    const apiBefore = issuedClear && pending && issuedClear.path === pending.path ? issuedClear.apiAt : lastApiMirror
-    issuedClear = null
-    lastApiMirror = null   // the new session has run no turn
-    const before = session
-    session = await $.session.id()
-    // The new session's id: its transcript's name as this event carries it (PROBES §15: `<new id>.jsonl`),
-    // else the engine's id once it has rebound; null while neither differs from the old one (a slow start).
-    const tpath = e.transcript_path ?? ''
-    const named = tpath.slice(Math.max(tpath.lastIndexOf('/'), tpath.lastIndexOf('\\')) + 1).replace(/\.jsonl$/, '')
-    const successor = named && named !== before ? named : session !== before ? session : null
-    if (successor !== null) await moveStranded($, before, successor)
-    // The chain's standing orders follow the handover to the successor session.
-    if (pending) {
-      try {
-        const to = successor ?? session
-        const orders = to === before ? undefined : await $.store.get(standingKey(before))   // a slow start: the id has not moved, nothing to move
-        if (orders !== undefined && orders !== null) { await $.store.set(standingKey(to), orders); await $.store.delete(standingKey(before)) }
-      } catch (err) { await log($, 'guard.wait', { reason: 'standing-move-failed', error: String(err) }) }
-    }
-    // A slow start can leave the engine still answering the old id: this clear's events then land in the
-    // old session's file. Say so rather than look like a log that went missing.
-    if (session === before) {
-      try { await $.ui.log(`context-vigil-mod: session id not yet rebound after the clear (still ${session}); its events go to that session's log`) } catch { /* nowhere left to say it */ }
-    }
-    resetCaches()
-    scheduleGit($)
-    await resetSessionState($)
-    if (activity.lastHumanOrigin !== null) await savePhoneFacts($)   // the wipe took them; a later reload needs them
-    if (heldOnClear) await log($, 'last_light.choice', { choice: 'resume', viaClear: true })
-    if (!pending) {
-      if (heldOnClear) resumeSoon($, { text: heldOnClear, asUser: true }, null, heldOnClear)
-      return out
-    }
-    const follow = [pending.followUp, heldOnClear].filter(Boolean).join('\n\n') || null
-    // /rename starts from its own timer, before the resume submit, and never blocks it.
-    const tp = e.transcript_path
-    const oldTranscript = tp === undefined ? undefined : `${tp.slice(0, tp.lastIndexOf('/') + 1)}${pending.session}.jsonl`
-    const carried = typeof e.session_title === 'string' || e.session_title === null ? e.session_title : undefined
-    $.clock.after(0, () => { void renameSession($, pending.name, pending.archived, oldTranscript, carried, successor) })
-    // The person's own held text is always sent. The mod's resume prompt needs a fresh handover
-    // (no turn since it was written) and no latch (R1-10); otherwise a notice says why not.
-    let stale = false
-    let noResume = false
-    let sentCarried = false   // the resume message holds the prompts sent during the handover
-    const sentBlock = sentSection([...(pending.sent ?? []), ...(pending.held ?? [])])
-    // What happened after the handover was written rides with it; up to the cap it keeps the handover fresh.
-    const msgs = oldTranscript === undefined ? null : await transcriptTail($, oldTranscript)
-    const tail = msgs === null ? null : renderTail(msgs)
-    const tailLog = tail === null ? 'unreadable' : tail.total === 0 ? 'none' : tail.over ? 'over' : tail.total
-    const tailFresh = tail === null || tail.total === 0 ? null : !tail.over
-    if (follow) { sentCarried = sentBlock !== ''; resumeSoon($, { text: sentBlock ? `${follow}\n\n${sentBlock}` : follow, asUser: true }, pending.path, follow) }
-    else if (pending.resume) {
-      if (!(tailFresh ?? fresh(pending, apiBefore, await nowMs($)))) {
-        stale = true
-        await notify($, V.resumeStale(pending.path))
-      } else if (await readLatch($)) {
-        await notify($, V.resumeLatched(pending.path))
-        await log($, 'guard.wait', { reason: 'latched', deferred: 'resume' })
-      } else { sentCarried = sentBlock !== ''; resumeSoon($, { text: sentBlock ? `${resumeText(pending.path)}\n\n${sentBlock}` : resumeText(pending.path) }, pending.path, null) }
-    } else {
-      // R2-17: a handover that carries no automatic resume (a limit or last-light one) is still
-      // injected on a manual /clear; never silently.
-      await notify($, V.injectedNoResume(pending.path))
-      noResume = true
-    }
-    await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null, tail: tailLog, ...(stale ? { stale: true } : {}), ...(noResume ? { noResume: true } : {}) })
-    return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown) + (tail?.section ? `\n\n${tail.section}` : '') + (sentBlock && !sentCarried ? `\n\n${sentBlock}` : '')] }
-  })
-
-  on('classic.StopFailure', async ($, e, next) => {
-    const error = String((e as unknown as { error?: unknown }).error ?? '')
-    const usage = await $.session.usage().catch(() => null)
-    await setLatch($, latchFromStopFailure(error, usage?.rateLimits ?? [], await nowMs($)))
-    return next(e)
-  })
-
-  on('classic.FileChanged', async ($, e, next) => {
-    scheduleGit($)
-    return next(e)
+    // The new id comes after the end's short bound: it is polled for from a timer, never awaited here.
+    const from = e.sessionId
+    $.clock.after(0, () => { void awaitNewId($, from, 0).catch(err => timerFailed($, 'session-change', err)) })
+    return r
   })
 
   on('prompt.submit', async ($, e, next) => {
-    if (classifyOrigin(e.origin.kind) === 'human') submitGen++   // the person's own prompt wins over a resume still retrying
+    // The drift guard, first, on every prompt: a prompt into a conversation the mod has not followed yet
+    // (an end still waiting for its new id, or a fork no end announced) is that one's, and must not take
+    // the old conversation's owed handover.
+    await followConversation($)
+    // The person's own prompt wins over a resume still retrying; the handover it owed rides on it (C1).
+    // A slash command's text is not rewritten (the typings: `command` set), so it neither takes the
+    // handover nor cancels the resume: that still goes out after the command.
+    const yields = classifyOrigin(e.origin.kind) === 'human' && e.command === undefined
+    const owing = yields ? takeOwed() : null
+    if (yields) submitGen++
+    // A prompt that is dropped carries nothing: the owed resume goes out again on its own.
+    const giveBack = () => { if (owing) resumeSoon($, owing.prompt, owing.path, owing.held, owing.text) }
     const now = await nowMs($)
     if (rearm(lastLightArmed, e.origin.kind)) lastLightArmed = true
     const pending = await read($, pendingA)
@@ -1519,6 +1647,7 @@ export const register: Register = on => {
       await update($, returnHeldA, h => { open = h !== null; after = [...(h ?? []), e.text]; return after })
       returnHeldMirror = after
       if (!open) $.clock.after(0, () => { void askReturn($) })
+      giveBack()
       return { drop: V.heldForLastLight }
     }
     await observe($, { kind: 'prompt', origin: e.origin.kind, at: await nowMs($) })
@@ -1545,9 +1674,14 @@ export const register: Register = on => {
       await update($, handoverMentionedA, () => !request && mentionsHandover(e.text))
       if (request) {
         $.clock.after(0, () => { void giveConsent($).then(() => startHandover($, 'request', true)).catch(err => timerFailed($, 'handover-request', err)) })
+        giveBack()
         return { drop: V.handoverRequested }
       }
       await recordSent($, e.text)
+    }
+    if (owing) {
+      await log($, 'resume.sent', { via: 'prompt' })
+      return next({ ...e, text: `${e.text}\n\n${owing.text}` })
     }
     return next(e)
   })
@@ -1563,6 +1697,8 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
+    // The drift guard: a change no session.end announced (a fork), or one whose new id came late.
+    if (e.agentId === undefined) await followConversation($)
     scheduleGit($)
     // The instruction's own turn is the only one whose end counts as an attempt (R1-02).
     await update($, awaitingA, a => (a && a.turnId === undefined && e.text === instructionText(a.reason) ? { ...a, turnId: e.turnId } : a))
@@ -1580,7 +1716,15 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const now = await nowMs($)
+    // No StopFailure reaches the mod (PROBES §16) and a turn's end names no error kind: a main turn an
+    // API error ended near a limit is latched as one, briefly (latchFromError).
+    if (e.agentId === undefined && e.reason === 'error') {
+      const usage = await $.session.usage().catch(() => null)
+      await setLatch($, latchFromError((usage?.rateLimits ?? []) as RateLimit[], now))
+    }
     await observe($, { kind: 'agent-step', at: now })
+    // No file events reach the mod (PROBES §16): git is re-read after every turn, coalesced.
+    scheduleGit($)
     // A subagent writes its own (5-minute) cache: only the main loop's turn moves the main cache's
     // clock (R1-14, PROBES §11).
     if (e.agentId === undefined) {
@@ -1588,9 +1732,18 @@ export const register: Register = on => {
       lastApiMirror = now
       scheduleLastLight($, now, now)
     }
-    if (e.agentId === undefined && (e.usage?.cache_creation_input_tokens ?? 0) > 0 && !(await read($, ttlReadA))) {
+    // No model-switch event reaches the mod (PROBES §16): a response from another model than the last
+    // one is the switch, and the next main response that writes the cache is read again.
+    const answered = e.agentId === undefined ? e.usage?.model : undefined
+    if (answered) {
+      if (lastModel !== null && answered !== lastModel) ttlSwitched = true
+      lastModel = answered
+    }
+    if (e.agentId === undefined && (e.usage?.cache_creation_input_tokens ?? 0) > 0 && (ttlSwitched || !(await read($, ttlReadA)))) {
+      const source = ttlSwitched ? 'switch' : 'response'
+      ttlSwitched = false
       await update($, ttlReadA, () => true)
-      $.clock.after(0, () => { void learnSessionTtl($) })
+      $.clock.after(0, () => { void learnSessionTtl($, source) })
     }
     const awaitingNow = await read($, awaitingA)
     // A subagent's turn, or a main turn that began before the instruction, is not the attempt.
@@ -1627,17 +1780,12 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Only the Post event: Pre is ambiguous (the cache left or the one entered).
-  on('classic.PostModelSwitch', async ($, e, next) => {
-    const label = (e as unknown as { cache_ttl?: unknown }).cache_ttl
-    if (label === '1h' || label === '5m') await setCacheTtl($, label, 'switch')
-    return next(e)
-  })
-
   on('session.measure', async ($, e, next) => {
     await reloadSettings($)
     const pct = e.context.percent ?? null
     const prevPct = await read($, contextA)
+    const prevFill = lastFill
+    if (pct !== null) lastFill = { pct, window: e.context.window }
     await update($, contextA, () => pct)
     await update($, windowA, () => e.context.window)
     const model = await $.session.model().catch(() => null)
@@ -1645,6 +1793,15 @@ export const register: Register = on => {
     await loadOverrides($)
     const levels = await thresholds($)
     await tellAmbiguity($, levels)
+    // R1-13: the context just shrank (a compaction, read off the fill: no compaction event reaches the
+    // mod, PROBES §16); the nudge ladder and its bar start over, nothing else does.
+    if (compacted(prevFill ?? { pct: null, window: null }, pct, e.context.window, levels.values.step)) {
+      await update($, lastNudgedA, () => null)
+      await update($, baselineA, () => null)
+      await update($, barShownA, () => false)
+      await update($, barDismissedA, () => false)
+      await log($, 'compacted', { from: prevPct, to: pct })
+    }
     if (pct !== null && (await read($, baselineA)) === null) await update($, baselineA, () => pct)
     const limits = e.rateLimits as RateLimit[]
     await setLatch($, latchFromMeasure(limits, await nowMs($)))

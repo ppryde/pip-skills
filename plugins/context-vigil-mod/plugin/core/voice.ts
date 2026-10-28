@@ -40,9 +40,10 @@ export const V = {
   unrequestedGone: '📜 That handover is no longer the latest one — nothing was cleared',
   deferredDropped: '⏳ The handover that waited on the usage limit was not run — /vho when you want one',
   handoverInterrupted: '📜 Handover interrupted — nothing was cleared; /vho when you want one',
-  resumeStale: (path: string) => `📜 Handover injected (${path}) — it was written before later turns, so no automatic resume; say where to pick up`,
-  injectedNoResume: (path: string) => `📜 Handover injected (${path}) — it asks for no automatic resume, so say where to pick up`,
-  resumeLatched: (path: string) => `⏳ Handover injected (${path}) — the usage limit is in force, so the resume prompt was not sent; ask to resume when it lifts`,
+  resumeStale: (path: string) => `📜 Handover saved at ${path} — it was written before later turns, so no automatic resume; ask me to read it and say where to pick up`,
+  noResume: (path: string) => `📜 Handover saved at ${path} — it asks for no automatic resume; ask me to read it and say where to pick up`,
+  resumeLatched: (path: string) => `⏳ Handover saved at ${path} — the usage limit is in force, so the resume prompt was not sent; ask to resume from it when it lifts`,
+  sentNotCarried: (sent: string) => `📜 Not carried into the new session (no resume was sent): ${sent}`,
   handoverInProgress: '📜 A handover is already in progress — one at a time',
   resumeSkipped: (path: string | null) =>
     `⏳ The limit has reset — you are back, so no resume was sent; ${path ? `the handover is at ${path}` : 'no handover was written'}`,

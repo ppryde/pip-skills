@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import { V } from '../plugin/core/voice'
-import { START, human, turn, world } from './world'
+import { START, human, turn, world, endInto } from './world'
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -23,9 +23,9 @@ test('"do a handover" runs the handover as /vho: dropped with a line, instructio
   await w.clock.settle()
   expect(w.commands).toContain('clear')
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await w.clock.advance(500)
-  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover below')
 })
 
 test('the request is observed as a human act', async ($, on) => {
@@ -80,7 +80,7 @@ test('while the usage limit is latched the request waits and says so', async ($,
   w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.classic.StopFailure({ error: 'rate_limit' } as never)
+  await $.turn.complete({ ...turn('rate-limited'), reason: 'error' } as never)   // PROBES §16: the turn an API error ended
   await $.prompt.submit(human('do a handover'))
   await w.clock.settle()
   expect(asks(w)).toBe(0)
@@ -120,9 +120,9 @@ test('the model calls the tool after the person mentioned a handover: it clears 
   await w.clock.settle()
   expect(w.commands).toContain('clear')
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await w.clock.advance(500)
-  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover below')
 })
 
 test('a later message that does not mention it ends the permission: the call is volunteered, saved, never cleared', async ($, on) => {

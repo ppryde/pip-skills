@@ -107,11 +107,11 @@ last value). Liveness on Windows asks the OS (`OpenProcess`) and never `os.kill`
 
 | Event | Why |
 |---|---|
-| `session.start`; classic `SessionStart` for `startup`, `resume`, `clear` and `fork` (`compact` only refreshes the transcript path; the cache goes cold on `PostCompact`) | register the session; a `/clear`, resume or fork is a new session id and a new entry |
+| `session.start`; a `/clear` or resume (`session.end` with that reason, then a poll for the new id: 50 ms steps, given up after 5 s and logged); the drift guard on `turn.start`/`turn.complete` for a fork or a missed end (recorded as `session.resume`) | register the session; a `/clear`, resume or fork is a new session id and a new entry. No `classic.*` hook is used: an organisation-managed install never delivers them |
 | `turn.complete`, main thread only, with usage | cost, context, cache counters moved |
 | `session.measure`, when a rate-limit window's percentage or reset changed | limits for the dashboard |
-| `PostModelSwitch`, `CwdChanged`, branch change, PR change | the fields readers show changed |
-| the cache-cold timer (last main turn plus the ttl), and `PostCompact` | `prompt_cache.warm: false` |
+| a model change (`$.session.model()` read on `session.measure`, `turn.start` and `turn.complete`, main thread only), a cwd change (`$.session.cwd()` read on main-thread `turn.complete` and when rebinding a changed session id), branch change, PR change | the fields readers show changed. A model switch changes the cache ttl label only when the next turn's transcript read finds it (no event carries it) |
+| the cache-cold timer (last main turn plus the ttl), and a compaction (read off `session.measure`: the context fill falls by 25 points or more and to under half) | `prompt_cache.warm: false` |
 | `session.end` | `census_mod.ended: <reason>`, written at once inside the hook's budget |
 
 Writes are coalesced: at most one ingest per 2 s; the one that runs carries the latest
@@ -128,8 +128,8 @@ measurable from a mod and is left out.
 ## git, gh and PR events
 
 - git: exactly `git --no-optional-locks status --porcelain=2 --branch -uno`, run at the
-  start and after an Edit/Write/NotebookEdit/Bash call, a `.git/HEAD` or index change
-  (watched through classic `SessionStart`'s `watchPaths`, resolved for worktrees), or a
+  start and after an Edit/Write/NotebookEdit/Bash call, every finished main turn (there
+  are no file events on a managed install, so a HEAD or index change is found then), or a
   cwd change; at most one every 5 seconds. Detached and unborn HEAD follow census's rules.
 - gh (only when the PR answer is Yes, or once per `/census-mod:pr-refresh`): exactly `gh pr list --head <branch> --state open --limit 1 --json
   number,url,reviewDecision`, in the session's directory, 5 s timeout. Run on a branch

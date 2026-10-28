@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import { START, human, turn, world } from './world'
+import { START, human, turn, world, endInto } from './world'
 import type { World } from './world'
 
 const MIN = 60_000
@@ -100,7 +100,7 @@ test('0.1.3 store overrides move into overrides.json once, and leave the store',
   expect(told).toHaveLength(1)
   expect(told[0]).toContain('window=1M → nudge 50%')
   expect(told[0]).toContain('not carried over: 5-5] (no equivalent)')
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   expect(w.notices.filter(n => n.includes('old /vsetup models moved to'))).toHaveLength(1)
 })
 
@@ -475,7 +475,7 @@ test('the phone facts cross a clear and a reload after it', async ($, on) => {
   await $.session.start(START)
   await $.prompt.submit(human('go', 'bridge'))
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   expect(w.state.get('context-vigil-mod.phoneFacts')).toMatchObject({ lastHumanOrigin: 'bridge' })
   await $.session.start(START)            // a reload in the new session
   await autoHandoverAfter($, w)
@@ -525,9 +525,10 @@ test('a held notification goes back to the live session when the countdown is ca
   expect(w.state.get('context-vigil-mod.pending')).not.toHaveProperty('held')
   w.submits.length = 0
   w.sessionId.value = 's2'
-  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await w.clock.advance(500)
-  expect(ss.additionalContext?.join('\n')).not.toContain('agent finished')
+  expect(w.submits.some(s => s.text.includes('agent finished'))).toBe(false)
+  expect(w.notices.some(n => n.includes('agent finished'))).toBe(false)
 })
 
 test('a held notification goes back to the live session when the clear is rejected', async ($, on) => {
@@ -585,7 +586,7 @@ test('Clear and resume now: the clear goes despite the draft, which is sent as t
   expect(w.commands).toContain('clear')
   expect(w.draft.value).toBe('')
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await w.clock.advance(500)
   expect(w.submits.at(-1)?.text).toContain('half a sen')
 })
@@ -627,7 +628,7 @@ test('Clear and resume now on an auto (unattended) handover clears: the choice m
   await w.clock.advance(100)
   expect(w.commands).toContain('clear')
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   await w.clock.advance(500)
   expect(w.submits.at(-1)?.text).toContain('half a sen')
 })

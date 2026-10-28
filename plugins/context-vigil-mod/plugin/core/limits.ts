@@ -6,23 +6,12 @@ const resetMs = (l: RateLimit): number | null => {
   return Number.isFinite(ms) ? ms : null
 }
 
-export function latchFromStopFailure(error: string, limits: RateLimit[], now: number): Latch {
-  if (error !== 'rate_limit') return null
-  // Equally full windows: the later reset, or latchCleared lifts it while the other is still full.
-  const known = limits
-    .filter(l => resetMs(l) !== null)
-    .sort((a, b) => b.percentUsed - a.percentUsed || (resetMs(b) as number) - (resetMs(a) as number))
-  const top = known[0]
-  if (!top) return { kind: 'unknown', resetsAtMs: now + UNKNOWN_LATCH_MS }
-  return { kind: top.kind, resetsAtMs: resetMs(top) as number }
-}
-
 const UNKNOWN_LATCH_MS = 3_600_000
 
 export function latchFromMeasure(limits: RateLimit[], now: number): Latch {
   const full = limits.filter(l => l.percentUsed >= 100)
   const timed = full.filter(l => resetMs(l) !== null)
-  // A full window with no reset time still latches, as a stop failure without one does.
+  // A full window with no reset time still latches, for an hour.
   if (!timed.length) return full.length ? { kind: 'unknown', resetsAtMs: now + UNKNOWN_LATCH_MS } : null
   const last = timed.reduce((a, b) => ((resetMs(a) as number) >= (resetMs(b) as number) ? a : b))
   return { kind: last.kind, resetsAtMs: resetMs(last) as number }
@@ -52,6 +41,17 @@ export function earlyStopDue(
 }
 
 export const RESUME_DELAY_MS = 300_000
+
+// A main turn an API error ended names no error kind (PROBES §16). Near a limit it is likely a 429:
+// latch for RESUME_DELAY_MS, the margin the mod already gives a reset, so unattended handovers and
+// resumes stop submitting into it. Short, because it is a guess: a real limit reads 100% at the next
+// measure and latches to its own reset; a burst refusal under the limit clears within minutes.
+export const ERROR_LATCH_PCT = 90
+export function latchFromError(limits: RateLimit[], now: number): Latch {
+  const full = latchFromMeasure(limits, now)
+  if (full) return full
+  return limits.some(l => l.percentUsed >= ERROR_LATCH_PCT) ? { kind: 'unknown', resetsAtMs: now + RESUME_DELAY_MS } : null
+}
 export const HOP_MS = 3_600_000
 
 export function nextHop(now: number, resumeAt: number): number {

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import { STEPS, TELL } from '../plugin/core/setup'
-import { START, human, world, type AskSeen } from './world'
+import { START, human, world, type AskSeen, endInto } from './world'
 
 const MIN = 60_000
 const TOOL = 'mcp__context-vigil-mod__vigil_handover'
@@ -225,7 +225,7 @@ test('a clear landing while an answer is saved stops setup: nothing is asked int
     if (key !== 'settings') return
     w.onStoreSet.value = null
     w.sessionId.value = 's2'
-    await $.classic.SessionStart({ source: 'clear' } as never)
+    await endInto($, w, 'clear')
   }
   await $.session.start(START)
   await $.command.run(setup())
@@ -243,7 +243,7 @@ test('a dialog still open across a clear is inert when it is answered', async ($
   await w.clock.settle()
   expect(w.asks).toHaveLength(1)
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await endInto($, w, 'clear')
   w.askHold.waiting[0]?.('50%')
   await w.clock.settle()
   expect(w.store.get('settings')).toBeUndefined()

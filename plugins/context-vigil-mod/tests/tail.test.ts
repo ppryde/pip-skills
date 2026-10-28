@@ -23,7 +23,7 @@ test('messagesAfterHandover: the LAST handover call wins; none found is null', (
 test('messagesAfterHandover: skips tool results, thinking, meta, sidechain, the mod\'s own turns and cut lines', () => {
   const result = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'BIG' }] } })
   const t = lines('{"type":"user","mess', handover, result, asst({ type: 'thinking', thinking: 'secret' }), user('meta', { isMeta: true }), user('side', { isSidechain: true }),
-    user('[context-vigil-mod] Resume from the handover'), JSON.stringify({ type: 'system', content: 'sys' }), asst(use(TOOL_FULL, { goal: 'again' })), user('real'))
+    user('[context-vigil-mod] Resume from the handover below'), JSON.stringify({ type: 'system', content: 'sys' }), asst(use(TOOL_FULL, { goal: 'again' })), user('real'))
   expect(messagesAfterHandover(t, TOOL_FULL)).toEqual(['User: real'])
 })
 

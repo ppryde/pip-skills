@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { START, classicStart, world, GH_ON } from './world'
+import { START, USAGE, switchTo, turn, world, GH_ON } from './world'
 import type { World } from './world'
 
 const SEC = 1000
@@ -33,8 +33,8 @@ test('git is re-asked after an Edit, Write or Bash call, a HEAD/index change and
     () => $.tool.call(call('Edit', { file_path: '/repo/a' })),
     () => $.tool.call(call('Write', { file_path: '/repo/a' })),
     () => $.tool.call(call('Bash', { command: 'ls' })),
-    () => $.classic.FileChanged({ file_path: '/repo/.git/HEAD', event: 'change' } as never),
-    () => $.classic.CwdChanged({ old_cwd: '/repo', new_cwd: '/repo/sub' } as never),
+    () => $.turn.complete(turn(USAGE)), // no file event reaches a managed install: a turn refreshes git
+    async () => { w.cwd.value = '/repo/sub'; await $.turn.complete(turn(USAGE)) },
   ].entries()) {
     await trigger()
     await w.clock.advance(5100)
@@ -56,13 +56,10 @@ test('git runs coalesce to one every 5 seconds', async ($, on) => {
   expect(gitStatusRuns(w)).toHaveLength(base + 1)
 })
 
-test('HEAD and the index are watched through classic SessionStart (git dir resolved for worktrees)', async ($, on) => {
+test('the worktree is read from the git dir and recorded (no classic hook, so no watchPaths)', async ($, on) => {
   const w = world(on)
   w.git.dir = '/repo/.git/worktrees/w\n/wt\n'
   await $.session.start(START)
-  const r = (await $.classic.SessionStart(classicStart('startup'))) as { watchPaths?: string[] }
-
-  expect(r.watchPaths).toEqual(['/repo/.git/worktrees/w/HEAD', '/repo/.git/worktrees/w/index'])
   await w.clock.advance(0)
   expect(w.ingests.at(-1)?.payload.worktree).toEqual({ path: '/wt' })
 })
@@ -101,7 +98,7 @@ test('gh runs after a Bash git push or gh pr, not after any other command, and o
   expect(ghRuns(w)).toHaveLength(base + 2)
 
   w.git.status = '# branch.oid abc\n# branch.head other\n'
-  await $.classic.FileChanged({ file_path: '/repo/.git/HEAD', event: 'change' } as never)
+  await $.turn.complete(turn(USAGE))
   await w.clock.advance(5100)
   await w.clock.advance(2 * SEC)
   expect(ghRuns(w)).toHaveLength(base + 3)
@@ -195,8 +192,7 @@ test('the PR is cached per repo and branch in $.store, and a fresh bind of the s
   expect(ghRuns(w)).toHaveLength(1)
   expect([...w.store.keys()]).toContain('gh:["/repo","main"]')
 
-  w.sessionId.value = 's2' // a /clear: a new bind, same repo and branch
-  await $.classic.SessionStart(classicStart('clear', 's2'))
+  await switchTo($, w, 's2')
   await w.clock.advance(5 * SEC)
   await w.clock.advance(2 * SEC)
 

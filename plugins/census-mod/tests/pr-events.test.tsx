@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { START, classicStart, world, GH_ON } from './world'
+import { START, switchTo, world, GH_ON } from './world'
 import type { World } from './world'
 
 const SEC = 1000
@@ -132,8 +132,7 @@ test('a fresh bind of the branch reads the record back with no gh call', async (
   expect(ghRuns(w)).toHaveLength(0)
   expect(w.ingests.at(-1)?.payload.pr).toMatchObject({ number: 7, review_state: 'approved' })
 
-  w.sessionId.value = 's2'
-  await $.classic.SessionStart(classicStart('clear', 's2'))
+  await switchTo($, w, 's2')
   await w.clock.advance(6 * SEC)
   expect(w.ingests.filter(i => i.payload.session_id === 's2').at(-1)?.payload.pr).toMatchObject({ number: 7 })
 })
