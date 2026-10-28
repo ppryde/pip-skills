@@ -600,15 +600,24 @@ function closeOld($: EngineInterface, old: Snap | null, why: string) {
 
 /**
  * Claude Code files a transcript under the directory the session STARTED in, and the live cwd can move
- * (EnterWorktree, /cd): so the start directory first, the live one only when no file is there.
+ * (EnterWorktree, /cd): so the start directory first, the live one only when no file is there. A resumed
+ * session can have started somewhere else again (another worktree), so with neither there, any project
+ * folder holding `<id>.jsonl` is it; with none, a new session's file is not written yet.
  */
 async function transcriptFor($: EngineInterface, root: string, id: string, liveCwd: string): Promise<string> {
   const live = transcriptPathFor(root, liveCwd, id)
-  if (!startCwd || startCwd === liveCwd) return live
-  const started = transcriptPathFor(root, startCwd, id)
-  if (await $.fs.exists(started).catch(() => false)) return started
-  if (await $.fs.exists(live).catch(() => false)) return live
-  return started
+  const started = startCwd && startCwd !== liveCwd ? transcriptPathFor(root, startCwd, id) : null
+  for (const p of started ? [started, live] : [live]) if (await $.fs.exists(p).catch(() => false)) return p
+  return (await transcriptElsewhere($, root, id)) ?? started ?? live
+}
+
+/** The one project folder holding `<id>.jsonl`, whatever directory it was named for; null when none does. */
+async function transcriptElsewhere($: EngineInterface, root: string, id: string): Promise<string | null> {
+  const projects = joinPath(root, 'projects')
+  const dirs = ((await $.fs.list(projects).catch(() => [])) as { name: string; kind: string }[]).filter(d => d.kind !== 'file')
+  const paths = dirs.map(d => joinPath(projects, d.name, `${id}.jsonl`))
+  const found = await Promise.all(paths.map(p => $.fs.exists(p).catch(() => false)))
+  return paths[found.indexOf(true)] ?? null
 }
 
 /** (Re)bind the live state to a session. Idempotent: a reload or a repeated start finds it bound. */

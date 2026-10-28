@@ -87,6 +87,12 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     return { value: undefined }
   })
   on('fs.exists', (_$, e) => ({ value: w.files.has((e as { path: string }).path) }))
+  on('fs.list', (_$, e) => {   // a folder is whatever the files' paths put under it
+    const dir = `${(e as { path: string }).path.replace(/\/$/, '')}/`
+    const kids = new Map<string, 'file' | 'dir'>()
+    for (const p of w.files.keys()) if (p.startsWith(dir)) { const [name, ...rest] = p.slice(dir.length).split('/'); kids.set(name!, rest.length ? 'dir' : 'file') }
+    return kids.size ? { value: [...kids].map(([name, kind]) => ({ name, kind, size: 1, mtimeMs: 0, isLink: false })) as never } : { deny: 'ENOENT' }
+  })
   on('process.run', (_$, e) => {
     if (e.argv[0] === 'sh' && e.argv[2] === 'exit 0') { w.runs.count++; if (!w.shell.value) throw new Error('spawn sh ENOENT'); return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } }
     if (e.argv[0] === 'sh' && !w.shell.value) throw new Error('spawn sh ENOENT')

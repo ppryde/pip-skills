@@ -535,6 +535,20 @@ test('the transcript sits under the start directory even after the cwd moved; th
   expect(w.ingests.at(-1)?.payload).toMatchObject({ session_id: 's3', transcript_path: '/cfg/projects/-repo-sub/s3.jsonl' })
 })
 
+test('a session resumed from another directory: its transcript is found in whichever project folder holds it', async ($, on) => {
+  const w = world(on, { files: { '/cfg/projects/-repo-wt/r0.jsonl': '' } })
+  w.dirs.set('/cfg/projects', ['-other', '-repo', '-repo-wt'])
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await switchTo($, w, 'r0')
+  await w.clock.advance(2 * SEC)
+  expect(w.ingests.at(-1)?.payload).toMatchObject({ session_id: 'r0', transcript_path: '/cfg/projects/-repo-wt/r0.jsonl' })
+
+  await switchTo($, w, 'n1')   // nowhere yet (a new session): the start directory's path, as before
+  await w.clock.advance(2 * SEC)
+  expect(w.ingests.at(-1)?.payload).toMatchObject({ session_id: 'n1', transcript_path: '/cfg/projects/-repo/n1.jsonl' })
+})
+
 test('a change of context window is not a compaction (200k -> 1M reads 80% -> 16%)', async ($, on) => {
   const w = world(on)
   await $.session.start(START)

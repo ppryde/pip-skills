@@ -330,3 +330,18 @@ test('a moved cwd with no transcript where it started: the live cwd is tried', a
   expect(w.greps.at(0)?.at(-1)).toBe(live)
   expect(w.renames[0]).toBe('Archive: My work')
 })
+
+test('a session resumed from another directory: its transcript is found in whichever project folder holds it', async ($, on) => {
+  const w = world(on)
+  const elsewhere = '/cfg/projects/-repo--claude-worktrees-y/s1.jsonl'
+  w.files.set('/cfg/projects/-other/x.jsonl', '{}\n')
+  w.files.set(elsewhere, '{}\n')
+  w.titles.set(elsewhere, 'My work')
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(w.greps.at(0)?.at(-1)).toBe(elsewhere)
+  expect(w.renames[0]).toBe('Archive: My work')
+})

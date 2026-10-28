@@ -11,7 +11,7 @@ import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit } from '../core/git'
 import { INPUT_SCHEMA, SENT_MAX, mergeStanding, sentSection, TOOL_DESCRIPTION, compacted, fresh, grownEnough, handoverText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, STOP_NOW, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
-import { HOME_VARS_CHECKED } from '../core/home'
+import { HOME_VARS_CHECKED, joinPath } from '../core/home'
 import { TITLE_CMD, archiveName, isArchived, lastTitle } from '../core/title'
 import { TAIL_CMD, type CacheTtl, cacheLinesFromText, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
@@ -1096,13 +1096,24 @@ async function transcriptTail($: EngineInterface, path: string): Promise<string[
 
 // Where a session's transcript is: no event carries the path natively (PROBES §16), so it is derived,
 // from the cwd the session was bound in: the live one moves with EnterWorktree or a cd, the transcript
-// does not. The live cwd is tried only when no transcript is there.
+// does not. The live cwd is tried only when no transcript is there. A resumed session can have started
+// somewhere else again (another worktree), so with neither there, any project folder holding `<id>.jsonl` is it.
 async function transcriptOf($: EngineInterface, id: string): Promise<string | null> {
   if (!root) return null
   const bound = transcriptPathFor(root, cwd, id)
   const live = await $.session.cwd().catch(() => cwd)
-  if (live === cwd || (await $.fs.exists(bound).catch(() => false))) return bound
-  return transcriptPathFor(root, live, id)
+  const tries = live === cwd ? [bound] : [bound, transcriptPathFor(root, live, id)]
+  for (const p of tries) if (await $.fs.exists(p).catch(() => false)) return p
+  return (await transcriptElsewhere($, root, id)) ?? tries[tries.length - 1]!
+}
+
+// The one project folder holding `<id>.jsonl`, whatever directory it was named for; null when none does.
+async function transcriptElsewhere($: EngineInterface, root: string, id: string): Promise<string | null> {
+  const projects = joinPath(root, 'projects')
+  const dirs = ((await $.fs.list(projects).catch(() => [])) as { name: string; kind: string }[]).filter(d => d.kind !== 'file')
+  const paths = dirs.map(d => joinPath(projects, d.name, `${id}.jsonl`))
+  const found = await Promise.all(paths.map(p => $.fs.exists(p).catch(() => false)))
+  return paths[found.indexOf(true)] ?? null
 }
 
 // The transcript's last custom title: null = unnamed, undefined = could not tell.

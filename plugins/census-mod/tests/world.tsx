@@ -89,7 +89,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     const path = winPath((e as { path: string }).path)
     if (path === REGISTRY) w.registryLists.count++
     const names = w.dirs.get(path)
-    return names ? { value: names.map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) as never } : { deny: 'ENOENT' }
+    return names ? { value: names.map(name => ({ name, kind: name.includes('.') ? 'file' as const : 'dir' as const, size: 1, mtimeMs: 0, isLink: false })) as never } : { deny: 'ENOENT' }
   })
   on('process.run', async (_$, e) => {
     const init = (e as unknown as { init?: { cwd?: string; stdin?: string; env?: Record<string, string>; timeoutMs?: number } }).init ?? {}
