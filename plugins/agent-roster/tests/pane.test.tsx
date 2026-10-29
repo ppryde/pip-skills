@@ -605,3 +605,36 @@ test('the band is redrawn when the waiting count changes, and only then', async 
   await bridgeText($)
   expect(seen.invalidated).toBe(after1 + 1)
 })
+
+test('the pane shows each session memory, its tree summed, and the total in the header', async ($, on) => {
+  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home' : undefined }))
+  on('session.id', () => ({ value: 'self' }))
+  on('fs.list', ($, e) => ({
+    value:
+      e.path === SESSIONS_DIR
+        ? Object.keys(REGISTRY).map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false }))
+        : [],
+  }))
+  on('fs.read', ($, e) => ({ value: JSON.stringify(REGISTRY[e.path.slice(SESSIONS_DIR.length + 1)]) }))
+  on('fs.exists', () => ({ value: false }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('ui.status', () => ({ value: undefined }))
+  // 101 runs an MCP server (150); 103 is not in ps, so it has no figure.
+  const rss = '101 1 409600\n150 101 204800\n102 1 1048576\n'
+  on('process.run', ($, e) => ({
+    value: {
+      exitCode: e.argv[0] === 'git' ? 1 : 0,
+      stdout:
+        e.argv[0] === 'ps' && e.argv.includes('pid=,ppid=,rss=') ? rss : e.argv[0] === 'ps' ? '101 /bin/claude\n102 /bin/claude\n103 /bin/claude\n' : '',
+      stderr: '',
+    } as never,
+  }))
+
+  await $.command.run({ command: 'roster', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  const ui = await $.ui.mount({ plugin: 'agent-roster', surface: 'terminal', component: 'Pane', requestId: 'agent-roster', props: PANE_PROPS })
+
+  expect(await ui.find({ type: 'Text', text: /^600M$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^1.0G$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1\.6G RAM/ })).toBeDefined()
+  await ui.unmount()
+})

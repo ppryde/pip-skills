@@ -32,6 +32,10 @@ import {
   transcriptFacts,
   vscodeUri,
   windowFolderFor,
+  formatMemory,
+  memProcsIn,
+  totalMemory,
+  treeMemory,
 } from '../plugin/hooks/register'
 
 const DAY = 86_400_000
@@ -525,4 +529,36 @@ test('a registry record belongs to a live process only if their start times agre
   expect(startMatches(undefined, 30_000, now)).toBe(false)
   expect(startMatches('yesterday', 30_000, now)).toBe(false)
   expect(startMatches(now, null, now)).toBe(false)
+})
+
+test('memory: ps rows parse, a tree sums its children and stops at another listed session', async () => {
+  // 100 is a session with an MCP server (110) and a shell (120) whose child (121) is a nested session.
+  const procs = memProcsIn(' 100 1 400000\n 110 100 50000\n 120 100 2000\n 121 120 300000\n junk line\n')
+  expect(procs.get(110)).toEqual({ ppid: 100, rssKb: 50000 })
+  expect(procs.size).toBe(4)
+  const memory = treeMemory(procs, [100, 121, 999])
+  expect(memory.get(100)).toBe(452000)
+  expect(memory.get(121)).toBe(300000)
+  // Not in ps: no figure rather than a zero.
+  expect(memory.has(999)).toBe(false)
+})
+
+test('memory reads as M under a GiB and G above, and totals only the rows that have it', async () => {
+  expect(formatMemory(300)).toBe('1M')
+  expect(formatMemory(512 * 1024)).toBe('512M')
+  expect(formatMemory(1.5 * 1024 * 1024)).toBe('1.5G')
+  expect(totalMemory([{ ...base, pid: 1, status: 'idle', lastActive: 0 }])).toBeUndefined()
+  expect(
+    totalMemory([
+      { ...base, pid: 1, status: 'idle', lastActive: 0, memoryKb: 1024 },
+      { ...base, pid: 2, status: 'idle', lastActive: 0 },
+      { ...base, pid: 3, status: 'idle', lastActive: 0, memoryKb: 2048 },
+    ]),
+  ).toBe(3072)
+})
+
+test('the summary carries each session memory and the total', async () => {
+  const text = summary([{ ...base, pid: 1, tmux: 'cc-x', status: 'busy', lastActive: 0, memoryKb: 600 * 1024 }], 60_000)
+  expect(text.split('\n')[0]).toBe('0 need you · 1 working · 0 idle · 600M RAM')
+  expect(text).toContain('cc-x · r · 1m · 600M')
 })

@@ -27,6 +27,8 @@ export type SessionRow = {
   prompt?: string
   /** Epoch ms of that prompt. */
   promptAt?: number
+  /** Resident memory in KiB of its process and the ones under it (MCP servers, shells), another row's tree left out. */
+  memoryKb?: number
 }
 
 declare module 'claude-code' {

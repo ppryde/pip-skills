@@ -294,7 +294,8 @@ const nameOf = (r: SessionRow) => r.tmux ?? `pid ${r.pid}`
 /** The roster as plain text for Remote Control: sections, one or two lines a session. */
 export function summary(rows: SessionRow[], now: number, warnings: string[] = []): string {
   const { waiting, busy, recent, older } = grouped(rows, now)
-  const lines = [headline(rows)]
+  const total = totalMemory(rows)
+  const lines = [`${headline(rows)}${total !== undefined ? ` · ${formatMemory(total)} RAM` : ''}`]
   let budget = SUMMARY_ROWS
   const section = (heading: string, list: SessionRow[]) => {
     if (list.length === 0 || budget <= 0) return
@@ -302,7 +303,8 @@ export function summary(rows: SessionRow[], now: number, warnings: string[] = []
     for (const r of list.slice(0, budget)) {
       const why = r.status === 'waiting' && r.waitingFor ? ` · ${r.waitingFor}` : r.note ? ` · ${r.note}` : ''
       const account = r.account ? ` · ${r.account}` : ''
-      lines.push(`• ${label(r)} — ${nameOf(r)} · ${r.repo} · ${ago(r.lastActive, now)}${why}${account}`)
+      const memory = r.memoryKb !== undefined ? ` · ${formatMemory(r.memoryKb)}` : ''
+      lines.push(`• ${label(r)} — ${nameOf(r)} · ${r.repo} · ${ago(r.lastActive, now)}${memory}${why}${account}`)
       if (r.prompt) lines.push(`   you${r.promptAt ? ` ${ago(r.promptAt, now)}` : ''}: ${r.prompt}`)
     }
     budget -= list.length
@@ -499,7 +501,68 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
     tmuxNames: new Set(live.flatMap(f => (f.row.tmux ? [f.row.tmux] : []))),
   }, dirs.map(d => d.dir))
 
-  return { rows: [...registered, ...strays], warnings }
+  return { rows: await withMemory($, [...registered, ...strays]), warnings }
+}
+
+export type MemProc = { ppid: number; rssKb: number }
+
+/** From `ps -ax -o pid=,ppid=,rss=`: every process's parent and resident memory (KiB). */
+export function memProcsIn(psOutput: string): Map<number, MemProc> {
+  const procs = new Map<number, MemProc>()
+  for (const line of psOutput.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/.exec(line)
+    if (m) procs.set(Number(m[1]), { ppid: Number(m[2]), rssKb: Number(m[3]) })
+  }
+
+  return procs
+}
+
+/**
+ * Each pid's resident memory with everything under it (MCP servers, shells it runs), in KiB. A tree stops at
+ * another listed pid, so a session started from inside another is counted once, as itself. A pid not in `ps`
+ * has no entry.
+ */
+export function treeMemory(procs: ReadonlyMap<number, MemProc>, pids: readonly number[]): Map<number, number> {
+  const children = new Map<number, number[]>()
+  for (const [pid, p] of procs) children.set(p.ppid, [...(children.get(p.ppid) ?? []), pid])
+  const listed = new Set(pids)
+  const out = new Map<number, number>()
+  for (const root of listed) {
+    const self = procs.get(root)
+    if (!self) continue
+    let total = self.rssKb
+    const queue = (children.get(root) ?? []).filter(c => !listed.has(c))
+    for (let seen = 0; queue.length > 0 && seen < 2000; seen++) {
+      const pid = queue.shift() as number
+      total += procs.get(pid)?.rssKb ?? 0
+      queue.push(...(children.get(pid) ?? []).filter(c => !listed.has(c)))
+    }
+    out.set(root, total)
+  }
+
+  return out
+}
+
+/** KiB as a short size: `312M`, `1.4G`. */
+export function formatMemory(kb: number): string {
+  return kb < 1024 * 1024 ? `${Math.max(1, Math.round(kb / 1024))}M` : `${(kb / (1024 * 1024)).toFixed(1)}G`
+}
+
+/** The rows' summed memory, or undefined when none has one. */
+export function totalMemory(rows: readonly SessionRow[]): number | undefined {
+  const known = rows.flatMap(r => (r.memoryKb === undefined ? [] : [r.memoryKb]))
+
+  return known.length ? known.reduce((a, b) => a + b, 0) : undefined
+}
+
+/** The rows with their memory from one `ps`; unchanged on Windows or when `ps` fails. */
+async function withMemory($: EngineInterface, rows: SessionRow[]): Promise<SessionRow[]> {
+  if (rows.length === 0 || (await onWindows($))) return rows
+  const ps = await $.process.run(['ps', '-ax', '-o', 'pid=,ppid=,rss=']).catch(() => undefined)
+  if (ps?.exitCode !== 0) return rows
+  const memory = treeMemory(memProcsIn(ps.stdout), rows.map(r => r.pid))
+
+  return rows.map(r => (memory.has(r.pid) ? { ...r, memoryKb: memory.get(r.pid) } : r))
 }
 
 // What tmux reports per pane, tab-separated, for the unregistered-session sweep.
@@ -1503,6 +1566,10 @@ export const register: Register = on => {
         .filter(Boolean)
         .join(' · ')
 
+    // Resident memory of the session and what runs under it, beside its age.
+    const memory = (r: SessionRow) => r.memoryKb !== undefined && <Text dimColor>{formatMemory(r.memoryKb)}</Text>
+    const total = totalMemory(rows)
+
     // A session that needs you or is working: a card, its border the status.
     const card = (r: SessionRow) => (
       <Box
@@ -1518,6 +1585,7 @@ export const register: Register = on => {
               {label(r)}
             </Text>
           </Box>
+          {memory(r)}
           <Text dimColor>{ago(r.lastActive, checkedAt)}</Text>
           {controls(r)}
         </Box>
@@ -1548,6 +1616,7 @@ export const register: Register = on => {
             {r.note ? ` · ${r.note}` : ''}
           </Text>
         </Box>
+        {memory(r)}
         <Text dimColor>{ago(r.lastActive, checkedAt)}</Text>
         {controls(r)}
       </Box>
@@ -1596,6 +1665,7 @@ export const register: Register = on => {
           {all.waiting.length > 0 && pill(`? ${all.waiting.length} NEED YOU`, 'red', 'white')}
           {all.busy.length > 0 && pill(`● ${all.busy.length} WORKING`, 'green')}
           <Text dimColor>○ {all.recent.length + all.older.length} idle</Text>
+          {total !== undefined && <Text dimColor>· {formatMemory(total)} RAM</Text>}
           <Box flexGrow={1} />
           <Text dimColor>updated {ago(checkedAt, Date.now())} ago</Text>
           <Button key="refresh" hotkey="r" dimColor onPress={() => void refreshNow($)}>
