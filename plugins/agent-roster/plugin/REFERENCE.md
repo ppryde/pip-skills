@@ -15,6 +15,16 @@ in three sections:
   says it is old.
 - **Idle**: one quiet line each; `$` marks a session sitting in a shell. Idle
   for over a day folds behind **show N idle for over a day**.
+- **Recently closed**: sessions seen live in the last day that have since
+  ended, the latest first (eight at most, within the tab in view), each with a
+  **resume** button; see [Resuming a closed session](#resuming-a-closed-session).
+
+Every card and line shows the session's memory beside its age (`600M`,
+`1.4G`): the resident memory (RSS) of its Claude process and every process
+under it, so MCP servers and shells it runs count, from one
+`ps -ax -o pid=,ppid=,rss=` per scan. A session started from inside another
+counts once, as itself, not in its parent too. The header adds the total
+(`· 4.2G RAM`), and the Remote Control text carries both. Windows rows show none.
 
 Above the sections, one tab per repo (worktrees under their repo), **All**
 first, each with its counts beside it: red `?2` waiting on you, green `●1`
@@ -105,6 +115,26 @@ with the one the command or pane runs in (by pane or by name), when no tmux
 server shows its pid, or when it runs outside tmux. The session the command or
 pane runs in is always refused.
 
+
+## Resuming a closed session
+
+The roster remembers every registered session it sees live, in this account's
+mod store (`roster:seen`, a day's worth, at most 50; every session running the
+mod merges into it, written when the set changes or once a minute). A session
+is closed when neither its id nor its pid is live any more: one that ran
+`/clear` or a handover keeps its pid under a new id, so it is not listed. One
+row per pid, its latest id. Only sessions that ended while some roster was
+running are known: nothing is read back from transcripts.
+
+**resume** (or `/roster resume <tmux-name|session-id>`, at least four
+characters of the id) opens a new Terminal.app window running
+`cd '<its folder>' && claude --resume <id>` through your login shell, so a
+`claude` wrapper (tmux and all) applies. Another account's session names its
+config dir (`CLAUDE_CONFIG_DIR='…'`); this account's names one only when this
+session was given `CLAUDE_CONFIG_DIR`. It refuses when the folder is gone, or
+holds a quote, backslash or newline the line cannot carry, and then says the
+command to run by hand. A resumed session leaves the list at once. On Windows it
+only says the command.
 
 ## Several accounts: `/roster setup`
 

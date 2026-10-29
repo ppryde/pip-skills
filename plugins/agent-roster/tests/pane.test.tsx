@@ -638,3 +638,57 @@ test('the pane shows each session memory, its tree summed, and the total in the 
   expect(await ui.find({ type: 'Text', text: /1\.6G RAM/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('a session that ends moves to Recently closed, and resume reopens it in its folder and leaves the list', async ($, on) => {
+  const id = '0b5c7e2a-1111-2222-3333-444455556666'
+  const registry: Record<string, object> = {
+    '101.json': { pid: 101, sessionId: id, cwd: '/r/pip-skills', tmux: 'cc-gone:@0.%0', status: 'idle', updatedAt: Date.now() },
+    '102.json': { pid: 102, sessionId: 'b-before-clear', cwd: '/r/pip-skills', tmux: 'cc-b:@1.%1', status: 'idle', updatedAt: Date.now() },
+  }
+  const store = new Map<string, unknown>()
+  const ran: string[][] = []
+  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home' : undefined }))
+  on('session.id', () => ({ value: 'self' }))
+  on('store.get', ($, e) => ({ value: store.get(e.key) as never }))
+  on('store.set', ($, e) => {
+    store.set(e.key, e.value)
+    return { value: undefined }
+  })
+  on('fs.list', ($, e) => ({
+    value: e.path === SESSIONS_DIR ? Object.keys(registry).map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) : [],
+  }))
+  on('fs.read', ($, e) => ({ value: JSON.stringify(registry[e.path.slice(SESSIONS_DIR.length + 1)]) }))
+  on('fs.exists', ($, e) => ({ value: e.path === '/r/pip-skills' }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('process.run', ($, e) => {
+    ran.push([...e.argv])
+    const pids = Object.keys(registry).map(n => n.replace('.json', ''))
+    return {
+      value: {
+        exitCode: e.argv[0] === 'git' ? 1 : 0,
+        stdout: e.argv[0] === 'ps' && e.argv.includes('pid=,comm=') ? pids.map(p => `${p} /bin/claude`).join('\n') + '\n' : '',
+        stderr: '',
+      } as never,
+    }
+  })
+  const run = (args = '') => $.command.run({ command: 'roster', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+
+  await run()
+  // 101 ends; 102 runs /clear: same pid, a new id.
+  delete registry['101.json']
+  registry['102.json'] = { ...registry['102.json'], sessionId: 'b-after-clear' }
+  await run()
+  const ui = await $.ui.mount({ plugin: 'agent-roster', surface: 'terminal', component: 'Pane', requestId: 'agent-roster', props: PANE_PROPS })
+
+  expect(await ui.find({ type: 'Text', text: /Recently closed/ })).toBeDefined()
+  expect(await ui.find({ key: `resume-${id}` })).toBeDefined()
+  expect(await ui.find({ key: 'resume-b-before-clear' })).toBeUndefined()
+
+  await ui.press({ key: `resume-${id}` })
+  const osa = ran.find(a => a[0] === 'osascript')
+  expect(osa).toContain(`do script "cd '/r/pip-skills' && claude --resume ${id}"`)
+  expect(await ui.find({ key: `resume-${id}` })).toBeUndefined()
+  await ui.unmount()
+})

@@ -36,6 +36,10 @@ import {
   memProcsIn,
   totalMemory,
   treeMemory,
+  closedOf,
+  matchClosed,
+  resumeCommand,
+  trackSeen,
 } from '../plugin/hooks/register'
 
 const DAY = 86_400_000
@@ -561,4 +565,45 @@ test('the summary carries each session memory and the total', async () => {
   const text = summary([{ ...base, pid: 1, tmux: 'cc-x', status: 'busy', lastActive: 0, memoryKb: 600 * 1024 }], 60_000)
   expect(text.split('\n')[0]).toBe('0 need you · 1 working · 0 idle · 600M RAM')
   expect(text).toContain('cc-x · r · 1m · 600M')
+})
+
+const seen = (sessionId: string, pid: number, lastSeen: number, extra: object = {}) => ({
+  pid, sessionId, cwd: '/r/pip-skills', repo: 'pip-skills', configDir: '/home/.claude', lastSeen, ...extra,
+})
+
+test('seen sessions: live records win, a day is kept, the latest first', async () => {
+  const now = 2 * DAY
+  const kept = trackSeen([seen('old', 1, now - DAY - 1), seen('a', 2, now - 1000, { title: 'before' })], [seen('a', 2, now, { title: 'after' }), seen('b', 3, now)], now)
+  expect(kept.map(s => s.sessionId)).toEqual(['a', 'b'])
+  expect(kept[0]!.title).toBe('after')
+})
+
+test('closed: neither id nor pid live; a pid live under a new id ran /clear and has not ended; one row per pid', async () => {
+  const all = [seen('gone', 10, 500), seen('cleared', 20, 400), seen('gone-old-id', 10, 300), seen('live', 30, 600)]
+  const closed = closedOf(all, new Set(['live', 'new-after-clear']), new Set([20, 30]))
+  expect(closed.map(c => c.sessionId)).toEqual(['gone'])
+})
+
+test('resume runs in the session folder, naming the config dir only when asked, and refuses what it cannot quote', async () => {
+  const id = '0b5c7e2a-1111-2222-3333-444455556666'
+  expect(resumeCommand({ sessionId: id, cwd: '/r/my repo' })).toBe(`cd '/r/my repo' && claude --resume ${id}`)
+  expect(resumeCommand({ sessionId: id, cwd: '/r/x' }, '/home/.claude-personal')).toBe(
+    `cd '/r/x' && CLAUDE_CONFIG_DIR='/home/.claude-personal' claude --resume ${id}`,
+  )
+  expect(resumeCommand({ sessionId: id, cwd: "/r/it's" })).toBeUndefined()
+  expect(resumeCommand({ sessionId: id, cwd: '/r/a"b' })).toBeUndefined()
+  expect(resumeCommand({ sessionId: 'x; rm -rf ~', cwd: '/r/x' })).toBeUndefined()
+})
+
+test('a resume target is a tmux name or at least four characters of a session id', async () => {
+  const closed = [seen('abcd1234', 1, 0, { tmux: 'cc-a' }), seen('abcd9999', 2, 0)]
+  expect(matchClosed(closed, 'cc-a').map(c => c.pid)).toEqual([1])
+  expect(matchClosed(closed, 'abcd')).toHaveLength(2)
+  expect(matchClosed(closed, 'abcd9')).toHaveLength(1)
+  expect(matchClosed(closed, 'abc')).toHaveLength(0)
+})
+
+test('the summary names recently closed sessions and how to resume them', async () => {
+  const text = summary([], 0, [], [seen('abcd1234-x', 1, 0, { tmux: 'cc-a' }), seen('ef567890-y', 2, 0)])
+  expect(text).toContain('CLOSED, LAST 24H: cc-a, ef567890 (/roster resume <name>)')
 })

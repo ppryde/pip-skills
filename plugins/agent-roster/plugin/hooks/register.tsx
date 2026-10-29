@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { HOME_VARS_CHECKED, configRootOf, expandHome, homeOf, joinPath } from '../core/home'
 import type { HomeEnv } from '../core/home'
 import { isClaudeCommand, killArgv, onWindowsPath, procListArgv, procsInList } from '../core/windows'
-import type { SessionRow } from '../types'
+import type { ClosedRow, SessionRow } from '../types'
 
 const PANE = 'agent-roster'
 const TITLE = 'Agents'
@@ -292,7 +292,7 @@ const label = (r: SessionRow) => r.title ?? (r.worktree ? `${r.repo}/${r.worktre
 const nameOf = (r: SessionRow) => r.tmux ?? `pid ${r.pid}`
 
 /** The roster as plain text for Remote Control: sections, one or two lines a session. */
-export function summary(rows: SessionRow[], now: number, warnings: string[] = []): string {
+export function summary(rows: SessionRow[], now: number, warnings: string[] = [], closed: readonly ClosedRow[] = []): string {
   const { waiting, busy, recent, older } = grouped(rows, now)
   const total = totalMemory(rows)
   const lines = [`${headline(rows)}${total !== undefined ? ` · ${formatMemory(total)} RAM` : ''}`]
@@ -313,6 +313,10 @@ export function summary(rows: SessionRow[], now: number, warnings: string[] = []
   section('WORKING', busy)
   section('IDLE, LAST 24H', recent)
   if (older.length) lines.push('', `+ ${older.length} idle for over a day`)
+  if (closed.length) {
+    const names = closed.slice(0, 5).map(c => c.tmux ?? c.sessionId.slice(0, 8))
+    lines.push('', `CLOSED, LAST 24H: ${names.join(', ')}${closed.length > 5 ? ` +${closed.length - 5}` : ''} (/roster resume <name>)`)
+  }
   if (warnings.length) lines.push('', ...warnings.map(w => `! could not read ${w}`))
 
   return lines.join('\n')
@@ -428,7 +432,7 @@ export function newestPerPid<T extends { row: SessionRow }>(found: T[]): T[] {
   return found.filter(f => newest.get(f.row.pid) === f)
 }
 
-async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings: string[] }> {
+async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings: string[]; seen: ClosedRow[] }> {
   const dirs = resolveConfigDirs(
     // ROSTER_CONFIG_DIRS outranks what `/roster setup` saved.
     (await $.env.get('ROSTER_CONFIG_DIRS'))?.trim() || joinDirs(await storedDirs($)) || undefined,
@@ -501,7 +505,129 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
     tmuxNames: new Set(live.flatMap(f => (f.row.tmux ? [f.row.tmux] : []))),
   }, dirs.map(d => d.dir))
 
-  return { rows: await withMemory($, [...registered, ...strays]), warnings }
+  const now = Date.now()
+  const seen = registered.flatMap((row, i) => (row.sessionId ? [seenOf(row, live[i]!.configDir, now)] : []))
+
+  return { rows: await withMemory($, [...registered, ...strays]), warnings, seen }
+}
+
+// --- Recently closed: sessions this roster saw live that have since ended ----------------------------------
+
+const SEEN_KEY = 'roster:seen'
+const CLOSED_MS = 24 * 3600_000
+const SEEN_MAX = 50
+const SEEN_WRITE_MS = 60_000
+const CLOSED_SHOWN = 8
+
+function seenOf(r: SessionRow, configDir: string, now: number): ClosedRow {
+  const { pid, sessionId, tmux, cwd, repo, worktree, branch, account, title, prompt } = r
+
+  return { pid, sessionId, tmux, cwd, repo, worktree, branch, account, title, prompt, configDir, lastSeen: now }
+}
+
+/** The remembered sessions with the live ones folded in (theirs is the newer record), a day's worth, the latest first. */
+export function trackSeen(stored: readonly ClosedRow[], live: readonly ClosedRow[], now: number): ClosedRow[] {
+  const byId = new Map<string, ClosedRow>()
+  for (const s of [...stored, ...live]) {
+    const held = byId.get(s.sessionId)
+    if (!held || s.lastSeen >= held.lastSeen) byId.set(s.sessionId, s)
+  }
+
+  return [...byId.values()]
+    .filter(s => now - s.lastSeen < CLOSED_MS)
+    .sort((a, b) => b.lastSeen - a.lastSeen)
+    .slice(0, SEEN_MAX)
+}
+
+/**
+ * The remembered sessions that have ended: neither their id nor their pid is live. A pid still live under another
+ * id ran `/clear` (or a handover) and has not ended. One row per pid, its latest id; the latest first.
+ */
+export function closedOf(seen: readonly ClosedRow[], liveIds: ReadonlySet<string>, livePids: ReadonlySet<number>): ClosedRow[] {
+  const perPid = new Map<number, ClosedRow>()
+  for (const s of seen) {
+    if (liveIds.has(s.sessionId) || livePids.has(s.pid)) continue
+    const held = perPid.get(s.pid)
+    if (!held || s.lastSeen > held.lastSeen) perPid.set(s.pid, s)
+  }
+
+  return [...perPid.values()].sort((a, b) => b.lastSeen - a.lastSeen)
+}
+
+function storedSeen(value: unknown): ClosedRow[] {
+  if (!Array.isArray(value)) return []
+
+  return value.filter(
+    (s): s is ClosedRow =>
+      typeof s === 'object' && s !== null && typeof s.sessionId === 'string' && typeof s.pid === 'number' &&
+      typeof s.cwd === 'string' && typeof s.configDir === 'string' && typeof s.lastSeen === 'number',
+  )
+}
+
+// What this roster last wrote: the ids, and when. Every session runs the mod, so a write is merged and throttled.
+let wroteIds = ''
+let wroteAt = 0
+
+/** The sessions seen in the last day that have ended, after folding this scan's live ones into the account's store. */
+async function recordSeen($: EngineInterface, live: readonly ClosedRow[], rows: readonly SessionRow[]): Promise<ClosedRow[]> {
+  const now = Date.now()
+  const merged = trackSeen(storedSeen(await $.store.get(SEEN_KEY).catch(() => undefined)), live, now)
+  const ids = merged.map(s => s.sessionId).sort().join(',')
+  if (ids !== wroteIds || now - wroteAt >= SEEN_WRITE_MS) {
+    await $.store.set(SEEN_KEY, merged).catch(() => undefined)
+    wroteIds = ids
+    wroteAt = now
+  }
+
+  return closedOf(merged, new Set(rows.map(r => r.sessionId).filter(Boolean)), new Set(rows.map(r => r.pid)))
+}
+
+/** Forgets a closed session, so a resumed one leaves the list at once. */
+async function forgetSeen($: EngineInterface, sessionId: string) {
+  const kept = storedSeen(await $.store.get(SEEN_KEY).catch(() => undefined)).filter(s => s.sessionId !== sessionId)
+  await $.store.set(SEEN_KEY, kept).catch(() => undefined)
+  wroteIds = ''
+  await update($, sessions, held => ({ ...held, closed: (held.closed ?? []).filter(c => c.sessionId !== sessionId) }))
+}
+
+const SAFE_SESSION_ID = /^[0-9A-Za-z-]{8,64}$/
+// What the shell's single quotes or the AppleScript string around them cannot carry.
+const UNQUOTABLE = /['"\\\n\r]/
+
+/** The shell line that resumes a session in its own folder; `configDir` when it must name the account. */
+export function resumeCommand(c: { sessionId: string; cwd: string }, configDir?: string): string | undefined {
+  if (!SAFE_SESSION_ID.test(c.sessionId) || UNQUOTABLE.test(c.cwd) || (configDir && UNQUOTABLE.test(configDir))) return undefined
+  const env = configDir ? `CLAUDE_CONFIG_DIR='${configDir}' ` : ''
+
+  return `cd '${c.cwd}' && ${env}claude --resume ${c.sessionId}`
+}
+
+/**
+ * Resumes a closed session in a new Terminal window, in its own folder, through the login shell (so a `claude`
+ * wrapper, tmux and all, applies). Another account's session names its config dir; this account's names it only
+ * when this session was given one.
+ */
+async function resumeSession($: EngineInterface, c: ClosedRow): Promise<string> {
+  const name = c.title ?? c.tmux ?? c.sessionId.slice(0, 8)
+  if (await onWindows($)) return `Resume ${name} by hand: claude --resume ${c.sessionId} (in ${c.cwd}).`
+  if (!(await $.fs.exists(c.cwd).catch(() => false))) return `Could not resume ${name}: ${c.cwd} is gone.`
+  const own = (await $.env.get('CLAUDE_CONFIG_DIR'))?.trim()
+  const command = resumeCommand(c, c.account ? c.configDir : own || undefined)
+  if (!command) return `Refused: ${name} has a folder or id the opener will not quote; run claude --resume ${c.sessionId} there.`
+  const run = await $.process.run(['osascript', '-e', 'tell application "Terminal"', '-e', `do script "${command}"`, '-e', 'activate', '-e', 'end tell'])
+  if (run.exitCode !== 0) return `Could not resume ${name}: ${run.stderr.trim() || `exit ${run.exitCode}`}`
+  await forgetSeen($, c.sessionId)
+
+  return `Resuming ${name} in a new Terminal window (${c.worktree ? `${c.repo}/${c.worktree}` : c.repo}).`
+}
+
+async function resumeFromPane($: EngineInterface, c: ClosedRow) {
+  $.ui.toast(await resumeSession($, c).catch(err => `Could not resume: ${String(err)}`))
+}
+
+/** The closed sessions a `/roster resume` argument names: a tmux name, or the start of a session id. */
+export function matchClosed(closed: readonly ClosedRow[], target: string): ClosedRow[] {
+  return closed.filter(c => c.tmux === target || (target.length >= 4 && c.sessionId.startsWith(target)))
 }
 
 export type MemProc = { ppid: number; rssKb: number }
@@ -823,17 +949,20 @@ function refresh($: EngineInterface): Promise<void> {
 async function rescan($: EngineInterface) {
   let rows: SessionRow[]
   let warnings: string[]
+  let live: ClosedRow[]
   try {
     const scanned = await scan($)
     rows = sorted(scanned.rows)
     warnings = scanned.warnings
+    live = scanned.seen
   } catch (err) {
     // Keep the last good roster on screen and say why it is stale.
     await update($, sessions, held => ({ ...held, error: String(err).slice(0, 200) }))
     return
   }
   const selfId = await $.session.id()
-  await update($, sessions, () => ({ rows, checkedAt: Date.now(), selfId, warnings }))
+  const closed = await recordSeen($, live, rows).catch(() => [])
+  await update($, sessions, () => ({ rows, checkedAt: Date.now(), selfId, warnings, closed }))
   await showWaiting($, rows.filter(r => r.status === 'waiting').length)
   await maybeOfferSetup($, rows)
 }
@@ -1248,7 +1377,7 @@ async function offerHelper($: EngineInterface) {
 }
 
 const USAGE =
-  'Usage: /roster, /roster open <tmux-name|pid>, /roster kill <tmux-name|pid>, /roster setup, or /roster setup-vscode'
+  'Usage: /roster, /roster open <tmux-name|pid>, /roster kill <tmux-name|pid>, /roster resume <tmux-name|session-id>, /roster setup, or /roster setup-vscode'
 
 const STATUS_COLOR: Record<string, string> = { waiting: 'red', busy: 'green' }
 
@@ -1462,6 +1591,14 @@ export const register: Register = on => {
 
       return { text: 'Roster setup: the question follows.' }
     }
+    const [, resumeTarget] = /^resume\s+(\S+)$/.exec(args) ?? []
+    if (resumeTarget) {
+      const matches = matchClosed((await read($, sessions)).closed ?? [], resumeTarget)
+      if (matches.length === 0) return { text: `No recently closed session named ${resumeTarget}.` }
+      if (matches.length > 1) return { text: `${resumeTarget} is ambiguous; resume by session id: ${matches.map(m => m.sessionId).join(', ')}` }
+
+      return { text: await resumeSession($, matches[0]!).catch(failed) }
+    }
     if (args) {
       const [, verb, target] = /^(kill|open)\s+(\S+)$/.exec(args) ?? []
       if (!verb || !target) return { text: USAGE }
@@ -1481,8 +1618,8 @@ export const register: Register = on => {
       return { text: message }
     }
     if (e.origin.kind === 'bridge') {
-      const { rows, checkedAt, warnings } = await read($, sessions)
-      return { text: summary(rows, checkedAt, warnings) }
+      const { rows, checkedAt, warnings, closed } = await read($, sessions)
+      return { text: summary(rows, checkedAt, warnings, closed) }
     }
     await openPane($)
 
@@ -1516,7 +1653,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    const { rows, checkedAt, selfId, error, warnings = [] } = await read($, sessions)
+    const { rows, checkedAt, selfId, error, warnings = [], closed = [] } = await read($, sessions)
     const pending = await read($, pendingKill)
     const isShowingOlder = await read($, showOlder)
     const tabs = repoTabs(rows)
@@ -1524,6 +1661,7 @@ export const register: Register = on => {
     const selected = await read($, repoTab)
     const tab = tabs.some(t => t.repo === selected) ? selected : null
     const visible = tab ? rows.filter(r => r.repo === tab) : rows
+    const closedVisible = (tab ? closed.filter(c => c.repo === tab) : closed).slice(0, CLOSED_SHOWN)
     const { waiting, busy, recent, older } = grouped(visible, checkedAt)
     const all = grouped(rows, checkedAt)
 
@@ -1622,6 +1760,22 @@ export const register: Register = on => {
       </Box>
     )
 
+    // A session that has ended: one quiet line, and resume brings it back in a new window.
+    const closedLine = (c: ClosedRow) => (
+      <Box key={`closed-${c.sessionId}`} flexDirection="row" gap={1} paddingX={1}>
+        <Box flexGrow={1}>
+          <Text dimColor wrap="truncate-end">
+            × <Text bold>{c.title ?? (c.worktree ? `${c.repo}/${c.worktree}` : c.repo)}</Text>{' '}
+            {[c.tmux, c.worktree ? `${c.repo}/${c.worktree}` : c.repo, c.branch, c.account].filter(Boolean).join(' · ')}
+          </Text>
+        </Box>
+        <Text dimColor>{ago(c.lastSeen, checkedAt)}</Text>
+        <Button key={`resume-${c.sessionId}`} onPress={() => void resumeFromPane($, c)}>
+          resume
+        </Button>
+      </Box>
+    )
+
     const heading = (text: string, count: number, color?: string) => (
       <Box marginTop={1}>
         <Text bold color={color}>
@@ -1701,6 +1855,8 @@ export const register: Register = on => {
             </Button>
           </Box>
         )}
+        {closedVisible.length > 0 && heading('Recently closed', closedVisible.length)}
+        {closedVisible.map(closedLine)}
       </Box>
     )
   })
