@@ -19,11 +19,13 @@ in three sections:
   ended, the latest first (eight at most, within the tab in view), each with a
   **resume** button; see [Resuming a closed session](#resuming-a-closed-session).
 
-Every card and line shows the session's memory beside its age (`600M`,
-`1.4G`): the resident memory (RSS) of its Claude process and every process
-under it, so MCP servers and shells it runs count, from one
-`ps -ax -o pid=,ppid=,rss=` per scan. A session started from inside another
-counts once, as itself, not in its parent too. The header adds the total
+Every live card and idle line shows the session's memory beside its age
+(`600M`, `1.4G`) when `ps` reports its pid; Recently closed rows show none.
+It is the resident memory (RSS) of its Claude process and every process under
+it, so MCP servers and shells it runs count, from one
+`ps -ax -o pid=,ppid=,rss=` per scan; a guard stops the walk after 2,000
+descendants, so a larger tree is undercounted. A session started from inside
+another counts once, as itself, not in its parent too. The header adds the total
 (`· 4.2G RAM`), and the Remote Control text carries both. Windows rows show none.
 
 Above the sections, one tab per repo (worktrees under their repo), **All**
@@ -121,9 +123,14 @@ pane runs in is always refused.
 The roster remembers every registered session it sees live, in this account's
 mod store (`roster:seen`, a day's worth, at most 50; every session running the
 mod merges into it, written when the set changes or once a minute). A session
-is closed when neither its id nor its pid is live any more: one that ran
-`/clear` or a handover keeps its pid under a new id, so it is not listed. One
-row per pid, its latest id. Only sessions that ended while some roster was
+is closed when neither its id nor its process is live any more: one that ran
+`/clear` or a handover keeps its pid under a new id, so it is not listed,
+while a new process that reused the pid (its registry start time differs) does
+not hide it. One row per pid, its latest id. A scan that could not read every
+registry (a dir unreadable, a file caught mid-write) calls nothing newly
+closed: the list from the scan before stands. Every session merges into the
+store and writes whenever its merge differs from what the store holds, so an
+entry another session's write lost comes back on the next poll. Only sessions that ended while some roster was
 running are known: nothing is read back from transcripts.
 
 **resume** (or `/roster resume <tmux-name|session-id>`, at least four

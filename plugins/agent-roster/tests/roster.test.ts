@@ -580,8 +580,17 @@ test('seen sessions: live records win, a day is kept, the latest first', async (
 
 test('closed: neither id nor pid live; a pid live under a new id ran /clear and has not ended; one row per pid', async () => {
   const all = [seen('gone', 10, 500), seen('cleared', 20, 400), seen('gone-old-id', 10, 300), seen('live', 30, 600)]
-  const closed = closedOf(all, new Set(['live', 'new-after-clear']), new Set([20, 30]))
+  const closed = closedOf(all, new Set(['live', 'new-after-clear']), new Map([[20, undefined], [30, undefined]]))
   expect(closed.map(c => c.sessionId)).toEqual(['gone'])
+})
+
+test('closed: a pid reused by a new process (another start time) does not hide the ended session', async () => {
+  const all = [seen('ended', 40, 500, { startedAt: 1000 }), seen('cleared', 50, 400, { startedAt: 2000 })]
+  // 40 now belongs to a process started later; 50 is the same process under a new id.
+  const closed = closedOf(all, new Set(), new Map([[40, 9000], [50, 2000]]))
+  expect(closed.map(c => c.sessionId)).toEqual(['ended'])
+  // Without a start time on either side the pid alone decides, as before.
+  expect(closedOf([seen('x', 60, 1)], new Set(), new Map([[60, 5]]))).toEqual([])
 })
 
 test('resume runs in the session folder, naming the config dir only when asked, and refuses what it cannot quote', async () => {

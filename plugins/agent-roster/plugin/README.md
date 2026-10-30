@@ -4,7 +4,7 @@
 
 `/roster` opens a live pane of every Claude Code session on this machine: its tmux name, repo and branch, status, memory and last prompt. You can open or kill a session from it, and resume one that closed in the last day.
 
-It is a mod, early access in Claude Code 2.1.287. It reads the session registry, session transcripts and tmux panes, and costs no model context; it acts on a session only when you press open or kill. Deep detail is in [REFERENCE.md](REFERENCE.md).
+It is a mod, early access in Claude Code 2.1.287. It reads the session registry, session transcripts and tmux panes, and costs no model context; it acts on a session only when you press open, kill or resume (resume starts a new Claude process that continues the closed conversation). Deep detail is in [REFERENCE.md](REFERENCE.md).
 
 ## Quick start
 
@@ -68,7 +68,7 @@ Set `ROSTER_CONFIG_DIRS` in each account's `settings.json`:
 - Each live Claude process writes `<config dir>/sessions/<pid>.json`. The mod reads these every 5 s and drops dead pids. Registered sessions are not scraped from tmux; tmux is only swept for panes that have not registered (next point).
 - The pane has **Needs you** (red), **Working** (green) and **Idle** sections. Idle for over a day folds away.
 - One tab per repo sits above the sections, with counts. Worktrees group under their repo.
-- Each row shows its memory: the resident memory of the session's process and everything under it (MCP servers, shells), from one `ps` per scan. The header shows the total. Not on Windows.
+- Each live row shows its memory when `ps` reports it: the resident memory of the session's process and everything under it (MCP servers, shells), from one `ps` per scan. The header shows the total. Not on Windows, and not on closed rows.
 - **Recently closed** lists sessions the roster saw live in the last day that have since ended. **resume** runs `claude --resume <id>` in a new Terminal.app window, in the session's folder, through your login shell.
 - Titles and prompts come from each session's transcript. Branches come from `git branch --show-current`, cached for a minute.
 - A session at a startup prompt has not registered, so the mod finds it from the tmux panes and shows it under Needs you.

@@ -432,7 +432,7 @@ export function newestPerPid<T extends { row: SessionRow }>(found: T[]): T[] {
   return found.filter(f => newest.get(f.row.pid) === f)
 }
 
-async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings: string[]; seen: ClosedRow[] }> {
+async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings: string[]; seen: ClosedRow[]; partial: boolean }> {
   const dirs = resolveConfigDirs(
     // ROSTER_CONFIG_DIRS outranks what `/roster setup` saved.
     (await $.env.get('ROSTER_CONFIG_DIRS'))?.trim() || joinDirs(await storedDirs($)) || undefined,
@@ -442,6 +442,8 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
   const found: { row: SessionRow; configDir: string }[] = []
   const warnings: string[] = []
   const unlisted = new Set<string>()
+  // A registry file caught mid-write: its session is live but missing from this scan.
+  let isPartial = false
   for (const { dir: configDir, tag } of dirs) {
     const name = tag ?? 'own dir'
     let entries: Awaited<ReturnType<typeof listRegistry>>
@@ -472,6 +474,7 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
         if (row) found.push({ row: tag ? { ...row, account: tag } : row, configDir })
       } catch {
         // A file caught mid-write; the next poll reads it whole.
+        isPartial = true
       }
     }
   }
@@ -508,7 +511,8 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
   const now = Date.now()
   const seen = registered.flatMap((row, i) => (row.sessionId ? [seenOf(row, live[i]!.configDir, now)] : []))
 
-  return { rows: await withMemory($, [...registered, ...strays]), warnings, seen }
+  // A dir that could not be read hides its live sessions too: either way, nothing may be called closed this scan.
+  return { rows: await withMemory($, [...registered, ...strays]), warnings, seen, partial: isPartial || warnings.length > 0 }
 }
 
 // --- Recently closed: sessions this roster saw live that have since ended ----------------------------------
@@ -520,9 +524,9 @@ const SEEN_WRITE_MS = 60_000
 const CLOSED_SHOWN = 8
 
 function seenOf(r: SessionRow, configDir: string, now: number): ClosedRow {
-  const { pid, sessionId, tmux, cwd, repo, worktree, branch, account, title, prompt } = r
+  const { pid, sessionId, tmux, cwd, repo, worktree, branch, account, title, prompt, startedAt } = r
 
-  return { pid, sessionId, tmux, cwd, repo, worktree, branch, account, title, prompt, configDir, lastSeen: now }
+  return { pid, sessionId, tmux, cwd, repo, worktree, branch, account, title, prompt, startedAt, configDir, lastSeen: now }
 }
 
 /** The remembered sessions with the live ones folded in (theirs is the newer record), a day's worth, the latest first. */
@@ -540,13 +544,25 @@ export function trackSeen(stored: readonly ClosedRow[], live: readonly ClosedRow
 }
 
 /**
- * The remembered sessions that have ended: neither their id nor their pid is live. A pid still live under another
- * id ran `/clear` (or a handover) and has not ended. One row per pid, its latest id; the latest first.
+ * The remembered sessions that have ended: neither their id nor their process is live. A pid still live under
+ * another id ran `/clear` (or a handover) and has not ended, unless both start times are known and differ: then a
+ * new process reused the pid. `livePids` maps each live pid to its registry start time. One row per pid, its latest
+ * id; the latest first.
  */
-export function closedOf(seen: readonly ClosedRow[], liveIds: ReadonlySet<string>, livePids: ReadonlySet<number>): ClosedRow[] {
+export function closedOf(
+  seen: readonly ClosedRow[],
+  liveIds: ReadonlySet<string>,
+  livePids: ReadonlyMap<number, number | undefined>,
+): ClosedRow[] {
+  const sameProcess = (s: ClosedRow) => {
+    if (!livePids.has(s.pid)) return false
+    const started = livePids.get(s.pid)
+
+    return s.startedAt === undefined || started === undefined || started === s.startedAt
+  }
   const perPid = new Map<number, ClosedRow>()
   for (const s of seen) {
-    if (liveIds.has(s.sessionId) || livePids.has(s.pid)) continue
+    if (liveIds.has(s.sessionId) || sameProcess(s)) continue
     const held = perPid.get(s.pid)
     if (!held || s.lastSeen > held.lastSeen) perPid.set(s.pid, s)
   }
@@ -564,29 +580,40 @@ function storedSeen(value: unknown): ClosedRow[] {
   )
 }
 
-// What this roster last wrote: the ids, and when. Every session runs the mod, so a write is merged and throttled.
-let wroteIds = ''
+const idsOf = (list: readonly ClosedRow[]) => list.map(s => s.sessionId).sort().join(',')
+
+// When this roster last wrote. Every session runs the mod, so a write is merged and throttled.
 let wroteAt = 0
 
-/** The sessions seen in the last day that have ended, after folding this scan's live ones into the account's store. */
-async function recordSeen($: EngineInterface, live: readonly ClosedRow[], rows: readonly SessionRow[]): Promise<ClosedRow[]> {
+/**
+ * Folds this scan's live sessions into the account's store and says which have ended. Written whenever the merge
+ * differs from what the store holds now (so an entry another session's write lost comes back next poll), else
+ * once a minute. A `partial` scan missed live sessions, so it calls none closed: the `previous` list stands, less
+ * any now live.
+ */
+async function recordSeen(
+  $: EngineInterface,
+  live: readonly ClosedRow[],
+  rows: readonly SessionRow[],
+  scan: { partial: boolean; previous: readonly ClosedRow[] },
+): Promise<ClosedRow[]> {
   const now = Date.now()
-  const merged = trackSeen(storedSeen(await $.store.get(SEEN_KEY).catch(() => undefined)), live, now)
-  const ids = merged.map(s => s.sessionId).sort().join(',')
-  if (ids !== wroteIds || now - wroteAt >= SEEN_WRITE_MS) {
+  const stored = storedSeen(await $.store.get(SEEN_KEY).catch(() => undefined))
+  const merged = trackSeen(stored, live, now)
+  if (idsOf(merged) !== idsOf(stored) || now - wroteAt >= SEEN_WRITE_MS) {
     await $.store.set(SEEN_KEY, merged).catch(() => undefined)
-    wroteIds = ids
     wroteAt = now
   }
+  const liveIds = new Set(rows.map(r => r.sessionId).filter(Boolean))
+  if (scan.partial) return scan.previous.filter(c => !liveIds.has(c.sessionId))
 
-  return closedOf(merged, new Set(rows.map(r => r.sessionId).filter(Boolean)), new Set(rows.map(r => r.pid)))
+  return closedOf(merged, liveIds, new Map(rows.map(r => [r.pid, r.startedAt] as const)))
 }
 
 /** Forgets a closed session, so a resumed one leaves the list at once. */
 async function forgetSeen($: EngineInterface, sessionId: string) {
   const kept = storedSeen(await $.store.get(SEEN_KEY).catch(() => undefined)).filter(s => s.sessionId !== sessionId)
   await $.store.set(SEEN_KEY, kept).catch(() => undefined)
-  wroteIds = ''
   await update($, sessions, held => ({ ...held, closed: (held.closed ?? []).filter(c => c.sessionId !== sessionId) }))
 }
 
@@ -950,18 +977,21 @@ async function rescan($: EngineInterface) {
   let rows: SessionRow[]
   let warnings: string[]
   let live: ClosedRow[]
+  let isPartial: boolean
   try {
     const scanned = await scan($)
     rows = sorted(scanned.rows)
     warnings = scanned.warnings
     live = scanned.seen
+    isPartial = scanned.partial
   } catch (err) {
     // Keep the last good roster on screen and say why it is stale.
     await update($, sessions, held => ({ ...held, error: String(err).slice(0, 200) }))
     return
   }
   const selfId = await $.session.id()
-  const closed = await recordSeen($, live, rows).catch(() => [])
+  const previous = (await read($, sessions)).closed ?? []
+  const closed = await recordSeen($, live, rows, { partial: isPartial, previous }).catch(() => previous)
   await update($, sessions, () => ({ rows, checkedAt: Date.now(), selfId, warnings, closed }))
   await showWaiting($, rows.filter(r => r.status === 'waiting').length)
   await maybeOfferSetup($, rows)

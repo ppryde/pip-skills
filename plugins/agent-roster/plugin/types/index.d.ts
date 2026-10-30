@@ -32,7 +32,10 @@ export type SessionRow = {
 }
 
 /** A session the roster saw live and has since ended, as last seen: what resume needs. */
-export type ClosedRow = Pick<SessionRow, 'pid' | 'sessionId' | 'tmux' | 'cwd' | 'repo' | 'worktree' | 'branch' | 'account' | 'title' | 'prompt'> & {
+export type ClosedRow = Pick<
+  SessionRow,
+  'pid' | 'sessionId' | 'tmux' | 'cwd' | 'repo' | 'worktree' | 'branch' | 'account' | 'title' | 'prompt' | 'startedAt'
+> & {
   /** The config dir its registry entry was read from: where `--resume` finds its transcript. */
   configDir: string
   /** Epoch ms of the last scan that saw it live: about when it ended. */

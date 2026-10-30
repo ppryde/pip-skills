@@ -692,3 +692,68 @@ test('a session that ends moves to Recently closed, and resume reopens it in its
   expect(await ui.find({ key: `resume-${id}` })).toBeUndefined()
   await ui.unmount()
 })
+
+// One registered session, then a second scan whose registry file is caught mid-write.
+function closingWorld(on: On) {
+  const id = '0b5c7e2a-1111-2222-3333-444455556666'
+  const w = {
+    id,
+    text: JSON.stringify({ pid: 101, sessionId: id, cwd: '/r/pip-skills', tmux: 'cc-a:@0.%0', status: 'idle', updatedAt: Date.now(), startedAt: 1000 }),
+    files: ['101.json'],
+    store: new Map<string, unknown>(),
+  }
+  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home' : undefined }))
+  on('session.id', () => ({ value: 'self' }))
+  on('store.get', ($, e) => ({ value: w.store.get(e.key) as never }))
+  on('store.set', ($, e) => {
+    w.store.set(e.key, e.value)
+    return { value: undefined }
+  })
+  on('fs.list', ($, e) => ({
+    value: e.path === SESSIONS_DIR ? w.files.map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) : [],
+  }))
+  on('fs.read', () => ({ value: w.text }))
+  on('fs.exists', () => ({ value: false }))
+  on('ui.status', () => ({ value: undefined }))
+  on('process.run', ($, e) => ({
+    value: { exitCode: e.argv[0] === 'git' ? 1 : 0, stdout: e.argv[0] === 'ps' && e.argv.includes('pid=,comm=') ? '101 /bin/claude\n' : '', stderr: '' } as never,
+  }))
+
+  return w
+}
+
+const scanNow = ($: Engine) =>
+  $.command.run({ command: 'roster', args: 'nope', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+
+const hasResume = async ($: Engine, id: string) => {
+  const ui = await $.ui.mount({ plugin: 'agent-roster', surface: 'terminal', component: 'Pane', requestId: 'agent-roster', props: PANE_PROPS })
+  const found = (await ui.find({ key: `resume-${id}` })) !== undefined
+  await ui.unmount()
+
+  return found
+}
+
+test('a registry file caught mid-write calls nothing closed', async ($, on) => {
+  const w = closingWorld(on)
+  const whole = w.text
+  await scanNow($)
+  w.text = '{"pid": 101, "sessi'
+  await scanNow($)
+  expect(await hasResume($, w.id)).toBe(false)
+  // Read whole again: still live, still not closed; then gone: closed.
+  w.text = whole
+  await scanNow($)
+  expect(await hasResume($, w.id)).toBe(false)
+  w.files = []
+  await scanNow($)
+  expect(await hasResume($, w.id)).toBe(true)
+})
+
+test('an entry another session overwrote comes back on the next scan, not a minute later', async ($, on) => {
+  const w = closingWorld(on)
+  await scanNow($)
+  // Another session's merge, from before this one wrote, replaced the list without it.
+  w.store.set('roster:seen', [])
+  await scanNow($)
+  expect((w.store.get('roster:seen') as { sessionId: string }[]).map(s => s.sessionId)).toEqual([w.id])
+})
