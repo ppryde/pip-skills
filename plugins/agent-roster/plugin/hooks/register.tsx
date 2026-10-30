@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { HOME_VARS_CHECKED, configRootOf, expandHome, homeOf, joinPath } from '../core/home'
 import type { HomeEnv } from '../core/home'
 import { isClaudeCommand, killArgv, onWindowsPath, procListArgv, procsInList } from '../core/windows'
-import type { SessionRow } from '../types'
+import type { ClosedRow, SessionRow } from '../types'
 
 const PANE = 'agent-roster'
 const TITLE = 'Agents'
@@ -292,9 +292,10 @@ const label = (r: SessionRow) => r.title ?? (r.worktree ? `${r.repo}/${r.worktre
 const nameOf = (r: SessionRow) => r.tmux ?? `pid ${r.pid}`
 
 /** The roster as plain text for Remote Control: sections, one or two lines a session. */
-export function summary(rows: SessionRow[], now: number, warnings: string[] = []): string {
+export function summary(rows: SessionRow[], now: number, warnings: string[] = [], closed: readonly ClosedRow[] = []): string {
   const { waiting, busy, recent, older } = grouped(rows, now)
-  const lines = [headline(rows)]
+  const total = totalMemory(rows)
+  const lines = [`${headline(rows)}${total !== undefined ? ` · ${formatMemory(total)} RAM` : ''}`]
   let budget = SUMMARY_ROWS
   const section = (heading: string, list: SessionRow[]) => {
     if (list.length === 0 || budget <= 0) return
@@ -302,7 +303,8 @@ export function summary(rows: SessionRow[], now: number, warnings: string[] = []
     for (const r of list.slice(0, budget)) {
       const why = r.status === 'waiting' && r.waitingFor ? ` · ${r.waitingFor}` : r.note ? ` · ${r.note}` : ''
       const account = r.account ? ` · ${r.account}` : ''
-      lines.push(`• ${label(r)} — ${nameOf(r)} · ${r.repo} · ${ago(r.lastActive, now)}${why}${account}`)
+      const memory = r.memoryKb !== undefined ? ` · ${formatMemory(r.memoryKb)}` : ''
+      lines.push(`• ${label(r)} — ${nameOf(r)} · ${r.repo} · ${ago(r.lastActive, now)}${memory}${why}${account}`)
       if (r.prompt) lines.push(`   you${r.promptAt ? ` ${ago(r.promptAt, now)}` : ''}: ${r.prompt}`)
     }
     budget -= list.length
@@ -311,6 +313,10 @@ export function summary(rows: SessionRow[], now: number, warnings: string[] = []
   section('WORKING', busy)
   section('IDLE, LAST 24H', recent)
   if (older.length) lines.push('', `+ ${older.length} idle for over a day`)
+  if (closed.length) {
+    const names = closed.slice(0, 5).map(c => c.tmux ?? c.sessionId.slice(0, 8))
+    lines.push('', `CLOSED, LAST 24H: ${names.join(', ')}${closed.length > 5 ? ` +${closed.length - 5}` : ''} (/roster resume <name>)`)
+  }
   if (warnings.length) lines.push('', ...warnings.map(w => `! could not read ${w}`))
 
   return lines.join('\n')
@@ -426,7 +432,7 @@ export function newestPerPid<T extends { row: SessionRow }>(found: T[]): T[] {
   return found.filter(f => newest.get(f.row.pid) === f)
 }
 
-async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings: string[] }> {
+async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings: string[]; seen: ClosedRow[]; partial: boolean }> {
   const dirs = resolveConfigDirs(
     // ROSTER_CONFIG_DIRS outranks what `/roster setup` saved.
     (await $.env.get('ROSTER_CONFIG_DIRS'))?.trim() || joinDirs(await storedDirs($)) || undefined,
@@ -436,6 +442,8 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
   const found: { row: SessionRow; configDir: string }[] = []
   const warnings: string[] = []
   const unlisted = new Set<string>()
+  // A registry file caught mid-write: its session is live but missing from this scan.
+  let isPartial = false
   for (const { dir: configDir, tag } of dirs) {
     const name = tag ?? 'own dir'
     let entries: Awaited<ReturnType<typeof listRegistry>>
@@ -466,6 +474,7 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
         if (row) found.push({ row: tag ? { ...row, account: tag } : row, configDir })
       } catch {
         // A file caught mid-write; the next poll reads it whole.
+        isPartial = true
       }
     }
   }
@@ -499,7 +508,214 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
     tmuxNames: new Set(live.flatMap(f => (f.row.tmux ? [f.row.tmux] : []))),
   }, dirs.map(d => d.dir))
 
-  return { rows: [...registered, ...strays], warnings }
+  const now = Date.now()
+  const seen = registered.flatMap((row, i) => (row.sessionId ? [seenOf(row, live[i]!.configDir, now)] : []))
+
+  // A dir that could not be read hides its live sessions too: either way, nothing may be called closed this scan.
+  return { rows: await withMemory($, [...registered, ...strays]), warnings, seen, partial: isPartial || warnings.length > 0 }
+}
+
+// --- Recently closed: sessions this roster saw live that have since ended ----------------------------------
+
+const SEEN_KEY = 'roster:seen'
+const CLOSED_MS = 24 * 3600_000
+const SEEN_MAX = 50
+const SEEN_WRITE_MS = 60_000
+const CLOSED_SHOWN = 8
+
+function seenOf(r: SessionRow, configDir: string, now: number): ClosedRow {
+  const { pid, sessionId, tmux, cwd, repo, worktree, branch, account, title, prompt, startedAt } = r
+
+  return { pid, sessionId, tmux, cwd, repo, worktree, branch, account, title, prompt, startedAt, configDir, lastSeen: now }
+}
+
+/** The remembered sessions with the live ones folded in (theirs is the newer record), a day's worth, the latest first. */
+export function trackSeen(stored: readonly ClosedRow[], live: readonly ClosedRow[], now: number): ClosedRow[] {
+  const byId = new Map<string, ClosedRow>()
+  for (const s of [...stored, ...live]) {
+    const held = byId.get(s.sessionId)
+    if (!held || s.lastSeen >= held.lastSeen) byId.set(s.sessionId, s)
+  }
+
+  return [...byId.values()]
+    .filter(s => now - s.lastSeen < CLOSED_MS)
+    .sort((a, b) => b.lastSeen - a.lastSeen)
+    .slice(0, SEEN_MAX)
+}
+
+/**
+ * The remembered sessions that have ended: neither their id nor their process is live. A pid still live under
+ * another id ran `/clear` (or a handover) and has not ended, unless both start times are known and differ: then a
+ * new process reused the pid. `livePids` maps each live pid to its registry start time. One row per pid, its latest
+ * id; the latest first.
+ */
+export function closedOf(
+  seen: readonly ClosedRow[],
+  liveIds: ReadonlySet<string>,
+  livePids: ReadonlyMap<number, number | undefined>,
+): ClosedRow[] {
+  const sameProcess = (s: ClosedRow) => {
+    if (!livePids.has(s.pid)) return false
+    const started = livePids.get(s.pid)
+
+    return s.startedAt === undefined || started === undefined || started === s.startedAt
+  }
+  const perPid = new Map<number, ClosedRow>()
+  for (const s of seen) {
+    if (liveIds.has(s.sessionId) || sameProcess(s)) continue
+    const held = perPid.get(s.pid)
+    if (!held || s.lastSeen > held.lastSeen) perPid.set(s.pid, s)
+  }
+
+  return [...perPid.values()].sort((a, b) => b.lastSeen - a.lastSeen)
+}
+
+function storedSeen(value: unknown): ClosedRow[] {
+  if (!Array.isArray(value)) return []
+
+  return value.filter(
+    (s): s is ClosedRow =>
+      typeof s === 'object' && s !== null && typeof s.sessionId === 'string' && typeof s.pid === 'number' &&
+      typeof s.cwd === 'string' && typeof s.configDir === 'string' && typeof s.lastSeen === 'number',
+  )
+}
+
+const idsOf = (list: readonly ClosedRow[]) => list.map(s => s.sessionId).sort().join(',')
+
+// When this roster last wrote. Every session runs the mod, so a write is merged and throttled.
+let wroteAt = 0
+
+/**
+ * Folds this scan's live sessions into the account's store and says which have ended. Written whenever the merge
+ * differs from what the store holds now (so an entry another session's write lost comes back next poll), else
+ * once a minute. A `partial` scan missed live sessions, so it calls none closed: the `previous` list stands, less
+ * any now live.
+ */
+async function recordSeen(
+  $: EngineInterface,
+  live: readonly ClosedRow[],
+  rows: readonly SessionRow[],
+  scan: { partial: boolean; previous: readonly ClosedRow[] },
+): Promise<ClosedRow[]> {
+  const now = Date.now()
+  const stored = storedSeen(await $.store.get(SEEN_KEY).catch(() => undefined))
+  const merged = trackSeen(stored, live, now)
+  if (idsOf(merged) !== idsOf(stored) || now - wroteAt >= SEEN_WRITE_MS) {
+    await $.store.set(SEEN_KEY, merged).catch(() => undefined)
+    wroteAt = now
+  }
+  const liveIds = new Set(rows.map(r => r.sessionId).filter(Boolean))
+  if (scan.partial) return scan.previous.filter(c => !liveIds.has(c.sessionId))
+
+  return closedOf(merged, liveIds, new Map(rows.map(r => [r.pid, r.startedAt] as const)))
+}
+
+/** Forgets a closed session, so a resumed one leaves the list at once. */
+async function forgetSeen($: EngineInterface, sessionId: string) {
+  const kept = storedSeen(await $.store.get(SEEN_KEY).catch(() => undefined)).filter(s => s.sessionId !== sessionId)
+  await $.store.set(SEEN_KEY, kept).catch(() => undefined)
+  await update($, sessions, held => ({ ...held, closed: (held.closed ?? []).filter(c => c.sessionId !== sessionId) }))
+}
+
+const SAFE_SESSION_ID = /^[0-9A-Za-z-]{8,64}$/
+// What the shell's single quotes or the AppleScript string around them cannot carry.
+const UNQUOTABLE = /['"\\\n\r]/
+
+/** The shell line that resumes a session in its own folder; `configDir` when it must name the account. */
+export function resumeCommand(c: { sessionId: string; cwd: string }, configDir?: string): string | undefined {
+  if (!SAFE_SESSION_ID.test(c.sessionId) || UNQUOTABLE.test(c.cwd) || (configDir && UNQUOTABLE.test(configDir))) return undefined
+  const env = configDir ? `CLAUDE_CONFIG_DIR='${configDir}' ` : ''
+
+  return `cd '${c.cwd}' && ${env}claude --resume ${c.sessionId}`
+}
+
+/**
+ * Resumes a closed session in a new Terminal window, in its own folder, through the login shell (so a `claude`
+ * wrapper, tmux and all, applies). Another account's session names its config dir; this account's names it only
+ * when this session was given one.
+ */
+async function resumeSession($: EngineInterface, c: ClosedRow): Promise<string> {
+  const name = c.title ?? c.tmux ?? c.sessionId.slice(0, 8)
+  if (await onWindows($)) return `Resume ${name} by hand: claude --resume ${c.sessionId} (in ${c.cwd}).`
+  if (!(await $.fs.exists(c.cwd).catch(() => false))) return `Could not resume ${name}: ${c.cwd} is gone.`
+  const own = (await $.env.get('CLAUDE_CONFIG_DIR'))?.trim()
+  const command = resumeCommand(c, c.account ? c.configDir : own || undefined)
+  if (!command) return `Refused: ${name} has a folder or id the opener will not quote; run claude --resume ${c.sessionId} there.`
+  const run = await $.process.run(['osascript', '-e', 'tell application "Terminal"', '-e', `do script "${command}"`, '-e', 'activate', '-e', 'end tell'])
+  if (run.exitCode !== 0) return `Could not resume ${name}: ${run.stderr.trim() || `exit ${run.exitCode}`}`
+  await forgetSeen($, c.sessionId)
+
+  return `Resuming ${name} in a new Terminal window (${c.worktree ? `${c.repo}/${c.worktree}` : c.repo}).`
+}
+
+async function resumeFromPane($: EngineInterface, c: ClosedRow) {
+  $.ui.toast(await resumeSession($, c).catch(err => `Could not resume: ${String(err)}`))
+}
+
+/** The closed sessions a `/roster resume` argument names: a tmux name, or the start of a session id. */
+export function matchClosed(closed: readonly ClosedRow[], target: string): ClosedRow[] {
+  return closed.filter(c => c.tmux === target || (target.length >= 4 && c.sessionId.startsWith(target)))
+}
+
+export type MemProc = { ppid: number; rssKb: number }
+
+/** From `ps -ax -o pid=,ppid=,rss=`: every process's parent and resident memory (KiB). */
+export function memProcsIn(psOutput: string): Map<number, MemProc> {
+  const procs = new Map<number, MemProc>()
+  for (const line of psOutput.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/.exec(line)
+    if (m) procs.set(Number(m[1]), { ppid: Number(m[2]), rssKb: Number(m[3]) })
+  }
+
+  return procs
+}
+
+/**
+ * Each pid's resident memory with everything under it (MCP servers, shells it runs), in KiB. A tree stops at
+ * another listed pid, so a session started from inside another is counted once, as itself. A pid not in `ps`
+ * has no entry.
+ */
+export function treeMemory(procs: ReadonlyMap<number, MemProc>, pids: readonly number[]): Map<number, number> {
+  const children = new Map<number, number[]>()
+  for (const [pid, p] of procs) children.set(p.ppid, [...(children.get(p.ppid) ?? []), pid])
+  const listed = new Set(pids)
+  const out = new Map<number, number>()
+  for (const root of listed) {
+    const self = procs.get(root)
+    if (!self) continue
+    let total = self.rssKb
+    const queue = (children.get(root) ?? []).filter(c => !listed.has(c))
+    for (let seen = 0; queue.length > 0 && seen < 2000; seen++) {
+      const pid = queue.shift() as number
+      total += procs.get(pid)?.rssKb ?? 0
+      queue.push(...(children.get(pid) ?? []).filter(c => !listed.has(c)))
+    }
+    out.set(root, total)
+  }
+
+  return out
+}
+
+/** KiB as a short size: `312M`, `1.4G`. */
+export function formatMemory(kb: number): string {
+  return kb < 1024 * 1024 ? `${Math.max(1, Math.round(kb / 1024))}M` : `${(kb / (1024 * 1024)).toFixed(1)}G`
+}
+
+/** The rows' summed memory, or undefined when none has one. */
+export function totalMemory(rows: readonly SessionRow[]): number | undefined {
+  const known = rows.flatMap(r => (r.memoryKb === undefined ? [] : [r.memoryKb]))
+
+  return known.length ? known.reduce((a, b) => a + b, 0) : undefined
+}
+
+/** The rows with their memory from one `ps`; unchanged on Windows or when `ps` fails. */
+async function withMemory($: EngineInterface, rows: SessionRow[]): Promise<SessionRow[]> {
+  if (rows.length === 0 || (await onWindows($))) return rows
+  const ps = await $.process.run(['ps', '-ax', '-o', 'pid=,ppid=,rss=']).catch(() => undefined)
+  if (ps?.exitCode !== 0) return rows
+  const memory = treeMemory(memProcsIn(ps.stdout), rows.map(r => r.pid))
+
+  return rows.map(r => (memory.has(r.pid) ? { ...r, memoryKb: memory.get(r.pid) } : r))
 }
 
 // What tmux reports per pane, tab-separated, for the unregistered-session sweep.
@@ -760,17 +976,23 @@ function refresh($: EngineInterface): Promise<void> {
 async function rescan($: EngineInterface) {
   let rows: SessionRow[]
   let warnings: string[]
+  let live: ClosedRow[]
+  let isPartial: boolean
   try {
     const scanned = await scan($)
     rows = sorted(scanned.rows)
     warnings = scanned.warnings
+    live = scanned.seen
+    isPartial = scanned.partial
   } catch (err) {
     // Keep the last good roster on screen and say why it is stale.
     await update($, sessions, held => ({ ...held, error: String(err).slice(0, 200) }))
     return
   }
   const selfId = await $.session.id()
-  await update($, sessions, () => ({ rows, checkedAt: Date.now(), selfId, warnings }))
+  const previous = (await read($, sessions)).closed ?? []
+  const closed = await recordSeen($, live, rows, { partial: isPartial, previous }).catch(() => previous)
+  await update($, sessions, () => ({ rows, checkedAt: Date.now(), selfId, warnings, closed }))
   await showWaiting($, rows.filter(r => r.status === 'waiting').length)
   await maybeOfferSetup($, rows)
 }
@@ -1185,7 +1407,7 @@ async function offerHelper($: EngineInterface) {
 }
 
 const USAGE =
-  'Usage: /roster, /roster open <tmux-name|pid>, /roster kill <tmux-name|pid>, /roster setup, or /roster setup-vscode'
+  'Usage: /roster, /roster open <tmux-name|pid>, /roster kill <tmux-name|pid>, /roster resume <tmux-name|session-id>, /roster setup, or /roster setup-vscode'
 
 const STATUS_COLOR: Record<string, string> = { waiting: 'red', busy: 'green' }
 
@@ -1399,6 +1621,14 @@ export const register: Register = on => {
 
       return { text: 'Roster setup: the question follows.' }
     }
+    const [, resumeTarget] = /^resume\s+(\S+)$/.exec(args) ?? []
+    if (resumeTarget) {
+      const matches = matchClosed((await read($, sessions)).closed ?? [], resumeTarget)
+      if (matches.length === 0) return { text: `No recently closed session named ${resumeTarget}.` }
+      if (matches.length > 1) return { text: `${resumeTarget} is ambiguous; resume by session id: ${matches.map(m => m.sessionId).join(', ')}` }
+
+      return { text: await resumeSession($, matches[0]!).catch(failed) }
+    }
     if (args) {
       const [, verb, target] = /^(kill|open)\s+(\S+)$/.exec(args) ?? []
       if (!verb || !target) return { text: USAGE }
@@ -1418,8 +1648,8 @@ export const register: Register = on => {
       return { text: message }
     }
     if (e.origin.kind === 'bridge') {
-      const { rows, checkedAt, warnings } = await read($, sessions)
-      return { text: summary(rows, checkedAt, warnings) }
+      const { rows, checkedAt, warnings, closed } = await read($, sessions)
+      return { text: summary(rows, checkedAt, warnings, closed) }
     }
     await openPane($)
 
@@ -1453,7 +1683,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    const { rows, checkedAt, selfId, error, warnings = [] } = await read($, sessions)
+    const { rows, checkedAt, selfId, error, warnings = [], closed = [] } = await read($, sessions)
     const pending = await read($, pendingKill)
     const isShowingOlder = await read($, showOlder)
     const tabs = repoTabs(rows)
@@ -1461,6 +1691,7 @@ export const register: Register = on => {
     const selected = await read($, repoTab)
     const tab = tabs.some(t => t.repo === selected) ? selected : null
     const visible = tab ? rows.filter(r => r.repo === tab) : rows
+    const closedVisible = (tab ? closed.filter(c => c.repo === tab) : closed).slice(0, CLOSED_SHOWN)
     const { waiting, busy, recent, older } = grouped(visible, checkedAt)
     const all = grouped(rows, checkedAt)
 
@@ -1503,6 +1734,10 @@ export const register: Register = on => {
         .filter(Boolean)
         .join(' · ')
 
+    // Resident memory of the session and what runs under it, beside its age.
+    const memory = (r: SessionRow) => r.memoryKb !== undefined && <Text dimColor>{formatMemory(r.memoryKb)}</Text>
+    const total = totalMemory(rows)
+
     // A session that needs you or is working: a card, its border the status.
     const card = (r: SessionRow) => (
       <Box
@@ -1518,6 +1753,7 @@ export const register: Register = on => {
               {label(r)}
             </Text>
           </Box>
+          {memory(r)}
           <Text dimColor>{ago(r.lastActive, checkedAt)}</Text>
           {controls(r)}
         </Box>
@@ -1548,8 +1784,25 @@ export const register: Register = on => {
             {r.note ? ` · ${r.note}` : ''}
           </Text>
         </Box>
+        {memory(r)}
         <Text dimColor>{ago(r.lastActive, checkedAt)}</Text>
         {controls(r)}
+      </Box>
+    )
+
+    // A session that has ended: one quiet line, and resume brings it back in a new window.
+    const closedLine = (c: ClosedRow) => (
+      <Box key={`closed-${c.sessionId}`} flexDirection="row" gap={1} paddingX={1}>
+        <Box flexGrow={1}>
+          <Text dimColor wrap="truncate-end">
+            × <Text bold>{c.title ?? (c.worktree ? `${c.repo}/${c.worktree}` : c.repo)}</Text>{' '}
+            {[c.tmux, c.worktree ? `${c.repo}/${c.worktree}` : c.repo, c.branch, c.account].filter(Boolean).join(' · ')}
+          </Text>
+        </Box>
+        <Text dimColor>{ago(c.lastSeen, checkedAt)}</Text>
+        <Button key={`resume-${c.sessionId}`} onPress={() => void resumeFromPane($, c)}>
+          resume
+        </Button>
       </Box>
     )
 
@@ -1596,6 +1849,7 @@ export const register: Register = on => {
           {all.waiting.length > 0 && pill(`? ${all.waiting.length} NEED YOU`, 'red', 'white')}
           {all.busy.length > 0 && pill(`● ${all.busy.length} WORKING`, 'green')}
           <Text dimColor>○ {all.recent.length + all.older.length} idle</Text>
+          {total !== undefined && <Text dimColor>· {formatMemory(total)} RAM</Text>}
           <Box flexGrow={1} />
           <Text dimColor>updated {ago(checkedAt, Date.now())} ago</Text>
           <Button key="refresh" hotkey="r" dimColor onPress={() => void refreshNow($)}>
@@ -1631,6 +1885,8 @@ export const register: Register = on => {
             </Button>
           </Box>
         )}
+        {closedVisible.length > 0 && heading('Recently closed', closedVisible.length)}
+        {closedVisible.map(closedLine)}
       </Box>
     )
   })

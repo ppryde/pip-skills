@@ -2,9 +2,9 @@
 
 > **Beta.** Works day to day, but expect rough edges and changes between versions.
 
-`/roster` opens a live pane of every Claude Code session on this machine: its tmux name, repo and branch, status and last prompt. You can open or kill a session from it.
+`/roster` opens a live pane of every Claude Code session on this machine: its tmux name, repo and branch, status, memory and last prompt. You can open or kill a session from it, and resume one that closed in the last day.
 
-It is a mod, early access in Claude Code 2.1.287. It reads the session registry, session transcripts and tmux panes, and costs no model context; it acts on a session only when you press open or kill. Deep detail is in [REFERENCE.md](REFERENCE.md).
+It is a mod, early access in Claude Code 2.1.287. It reads the session registry, session transcripts and tmux panes, and costs no model context; it acts on a session only when you press open, kill or resume (resume starts a new Claude process that continues the closed conversation). Deep detail is in [REFERENCE.md](REFERENCE.md).
 
 ## Quick start
 
@@ -38,12 +38,14 @@ It is a mod, early access in Claude Code 2.1.287. It reads the session registry,
 | `/roster` | Opens the pane. Over Remote Control it replies with the roster as text (top 15 sessions). | `/roster` |
 | `/roster open <tmux-name\|pid>` | Opens that session in VS Code (tab) or Terminal.app. Needs tmux and macOS. | `/roster open cc-ledger-2` |
 | `/roster kill <tmux-name\|pid>` | Ends that session. Refuses the session you are in. | `/roster kill 48213` |
+| `/roster resume <tmux-name\|session-id>` | Resumes a recently closed session in a new Terminal.app window, in its folder. macOS. | `/roster resume cc-ledger-2` |
 | `/roster setup` | Pick other Claude accounts to list. One dialog. | `/roster setup` |
 | `/roster setup-vscode` | Installs the VS Code helper extension. | `/roster setup-vscode` |
 | `r` | In the pane: rescan now. | press `r` |
 | `1` to `9` | In the pane: jump to a repo tab (`1` is All). | press `2` |
 | `Tab`, `Enter` | In the pane: move to a button, press it. | |
 | `open`, `kill` buttons | On each row. Kill asks you to confirm. | |
+| `resume` button | On each Recently closed row. | |
 | `👥 N waiting · open roster` | Button above the prompt while a session waits on you. Click it, or focus it and press `Enter`. | |
 
 ## Settings
@@ -66,6 +68,8 @@ Set `ROSTER_CONFIG_DIRS` in each account's `settings.json`:
 - Each live Claude process writes `<config dir>/sessions/<pid>.json`. The mod reads these every 5 s and drops dead pids. Registered sessions are not scraped from tmux; tmux is only swept for panes that have not registered (next point).
 - The pane has **Needs you** (red), **Working** (green) and **Idle** sections. Idle for over a day folds away.
 - One tab per repo sits above the sections, with counts. Worktrees group under their repo.
+- Each live row shows its memory when `ps` reports it: the resident memory of the session's process and everything under it (MCP servers, shells), from one `ps` per scan. The header shows the total. Not on Windows, and not on closed rows.
+- **Recently closed** lists sessions the roster saw live in the last day that have since ended. **resume** runs `claude --resume <id>` in a new Terminal.app window, in the session's folder, through your login shell.
 - Titles and prompts come from each session's transcript. Branches come from `git branch --show-current`, cached for a minute.
 - A session at a startup prompt has not registered, so the mod finds it from the tmux panes and shows it under Needs you.
 - Open raises the VS Code window that shows the repo and attaches there. With no such window it opens a Terminal.app window.
